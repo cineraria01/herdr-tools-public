@@ -23,10 +23,17 @@ case $1 in
   exec) shift; in=0
     while [ "$1" != -- ]; do case $1 in -i) in=1 ;; --on) m=$2; shift ;; esac; shift; done; shift
     h=$HCT/m/$m
+    echo "$m" >> "$HCT/calls"   # 기계마다 hc 호출 수를 센다
     { [ -d "$h" ] && [ ! -e "$h/OFFLINE" ]; } || { echo "connect failed: $m" >&2; exit 1; }
     [ $in = 1 ] || exec < /dev/null
+    if [ $in = 1 ]; then   # 진짜 hc처럼 입력은 8MB까지만 받는다
+      cat > "$HCT/in.$$"
+      [ "$(wc -c < "$HCT/in.$$")" -le 8388608 ] || { rm -f "$HCT/in.$$"; echo '{"error":{"kind":"invalid_params","message":"at most 8 MB piped in"}}' >&2; exit 6; }
+      exec < "$HCT/in.$$" && rm -f "$HCT/in.$$"
+    fi
     if [ $in = 1 ] && [ "${HC_FAKE_CORRUPT-}" = "$m" ]; then head -c 3 | PATH="$h/.fakebin:$PATH" HOME=$h "$@"; exit; fi
-    PATH="$h/.fakebin:$PATH" HOME=$h exec "$@" ;;
+    # 출력도 8MB에서 자른다
+    PATH="$h/.fakebin:$PATH" HOME=$h "$@" | head -c 8388608; exit "${PIPESTATUS[0]}" ;;
   *) echo "fake hc: $*" >&2; exit 2 ;;
 esac
 EOF
@@ -265,7 +272,7 @@ t "--pull repo: 저장소 값을 맥과 기계에" '[ $rc = 0 ] && is "$MAC/.cla
 # 저장소에서 지운 파일은 맥에서 지우고(백업) 기계에는 둔다
 (cd "$T/lane" && git pull -q && git rm -q claude/docs/b.md && git commit -qm rm && git push -q origin main)
 run
-t "저장소에서 지움: 맥에서 지우고 기계는 둔다" '[ $rc = 0 ] && [ ! -e "$MAC/.claude/docs/b.md" ] && grep -rqx b1 "$MAC/.local/state/herdr-sync/bak" && [ -e "$W1/.claude/docs/b.md" ] && has "맥 깖 .claude/docs/b.md"'
+t "저장소에서 지움: 맥에서 지우고(맥 지움 줄) 기계는 둔다" '[ $rc = 0 ] && [ ! -e "$MAC/.claude/docs/b.md" ] && grep -rqx b1 "$MAC/.local/state/herdr-sync/bak" && [ -e "$W1/.claude/docs/b.md" ] && has "맥 지움 .claude/docs/b.md (저장소에서 지워짐)"'
 # 링크 자리에 폴더가 있으면 충돌, --take로 폴더를 백업 폴더로 옮기고 링크
 rm "$W1/.claude/skills/herdr-desktop" && mkdir "$W1/.claude/skills/herdr-desktop" && touch "$W1/.claude/skills/herdr-desktop/mine"
 run
@@ -332,6 +339,169 @@ rm -rf "$T/conf-np"
 cp -p "$T/bal.keep" "$MAC/.local/bin/herdr-balance"
 run
 t "개인 값을 뺀 뒤: 개인 저장소 파일은 모은다" '[ $rc = 0 ] && corigin show main:claude/docs/d.md | grep -Fq secret-word && ! origin log -p main | grep -Fq secret-word'
+
+# 15. 나무 줄: <폴더>/** = 그 아래 모든 층의 파일. 링크·숨김·__pycache__·node_modules·제외·50MB 넘음은 걷지 않는다
+git -C "$T/lane" pull -q
+cat >> "$T/lane/sync.list" << 'EOF'
+스킬나무 .agents/skills/**             skills/agents/          macos
+스킬나무 .claude/skills/**             skills/claude/          all
+제외     .agents/skills/app-managed    -                       -
+링크     .claude/skills-alias/beta@    .claude/skills/beta     all
+링크     .claude/skills-alias/gone@    .agents/skills/gone     all
+EOF
+git -C "$T/lane" commit -qam tree && git -C "$T/lane" push -q origin main
+git -C "$T/conf" pull -q   # herdr-sync가 처음에 하는 pull을 미리 (아래 heads 비교가 그것을 쓰기로 보지 않게)
+A=$MAC/.agents/skills C=$MAC/.claude/skills
+put "$A/alpha/SKILL.md" 'alpha 1\n'
+put "$A/alpha/scripts/run.sh" '#!/bin/sh\necho run\n' && chmod +x "$A/alpha/scripts/run.sh"
+put "$A/alpha/ref/deep/er/notes.md" 'deep 1\n'
+put "$A/alpha/한 글.md" 'space 1\n'
+put "$A/alpha/.hidden" 'h\n' && put "$A/alpha/.git/config" 'g\n' && put "$A/alpha/__pycache__/x.pyc" 'p\n' && put "$A/alpha/node_modules/m/index.js" 'n\n'
+ln -s SKILL.md "$A/alpha/link.md" && put "$MAC/elsewhere/in.md" 'e\n' && ln -s "$MAC/elsewhere" "$A/linked"
+put "$A/app-managed/SKILL.md" 'app mac\n'
+put "$A/gamma/SKILL.md" 'gamma 1\n'
+put "$A/big/ok.md" 'ok\n' && dd if=/dev/zero of="$A/big/huge.bin" bs=1 count=0 seek=7340033 2> /dev/null
+put "$C/beta/SKILL.md" 'beta 1\n' && put "$C/beta/sub/x.md" 'x\n'
+# w1: 손댄 파일(base 없음, 내용 다름), 내용은 같고 실행 권한만 다른 파일, 그 기계에만 있는 파일, 제외 경로, 링크로 된 폴더
+W1A=$W1/.agents/skills
+put "$W1A/alpha/SKILL.md" 'alpha w1\n'
+put "$W1A/alpha/scripts/run.sh" '#!/bin/sh\necho run\n'
+put "$W1A/w1only/SKILL.md" 'mine\n'
+put "$W1A/app-managed/SKILL.md" 'app w1\n'
+mkdir -p "$W1/elsewhere" && ln -s "$W1/elsewhere" "$W1A/gamma"
+before=$(snap) h0=$(heads)
+run --check
+t "나무 --check: 아무 데도 안 쓴다" '[ $rc = 1 ] && [ "$(snap)" = "$before" ] && [ "$(heads)" = "$h0" ] && has "저장소 다름:모음 .agents/skills/alpha/ref/deep/er/notes.md"'
+run
+skills() { git -C "$T/conf.git" -c core.quotePath=false ls-tree -r --name-only main skills/ | LC_ALL=C sort | tr '\n' ' '; }
+t "나무 모음: 하위 폴더 모든 층, 걷지 않는 것은 빼고, 따로 적은 줄과 겹치면 그 줄이 맡는다" '[ "$(skills)" = "skills/agents/alpha/SKILL.md skills/agents/alpha/ref/deep/er/notes.md skills/agents/alpha/scripts/run.sh skills/agents/alpha/한 글.md skills/agents/big/ok.md skills/agents/gamma/SKILL.md skills/claude/beta/SKILL.md skills/claude/beta/sub/x.md skills/herdr-desktop/SKILL.md " ]'
+t "나무 모음: 실행 권한" 'corigin ls-tree main skills/agents/alpha/scripts/run.sh | grep -q "^100755"'
+t "7MB 넘음: 건너뜀 한 줄, 아무 데도 안 감" 'has "건너뜀 .agents/skills/big/huge.bin (7MB 넘음)" && [ ! -e "$W1A/big/huge.bin" ] && is "$W1A/big/ok.md" "ok\n"'
+t "나무 씀: 새 파일, 여러 층, 빈칸·한글 이름" 'is "$W1A/alpha/ref/deep/er/notes.md" "deep 1\n" && is "$W1A/alpha/한 글.md" "space 1\n" && has "w1 씀 .agents/skills/alpha/한 글.md"'
+t "나무 씀: 실행 권한만 다르면 충돌이 아니라 씀" '[ -x "$W1A/alpha/scripts/run.sh" ] && ! has "충돌 w1 .agents/skills/alpha/scripts/run.sh (0줄 다름)" && has "w1 씀 .agents/skills/alpha/scripts/run.sh"'
+t "걷지 않음: 숨김·.git·__pycache__·node_modules·링크" '[ ! -e "$W1A/alpha/.hidden" ] && [ ! -e "$W1A/alpha/.git" ] && [ ! -e "$W1A/alpha/__pycache__" ] && [ ! -e "$W1A/alpha/node_modules" ] && [ ! -e "$W1A/alpha/link.md" ] && [ ! -e "$W1A/linked" ]'
+t "제외 줄: 그 아래는 안 걷고 기계에 있는 것도 그대로" 'is "$W1A/app-managed/SKILL.md" "app w1\n" && ! corigin cat-file -e main:skills/agents/app-managed/SKILL.md 2> /dev/null'
+t "그 기계에만 있는 파일: 그대로, 표에도 안 셈" 'is "$W1A/w1only/SKILL.md" "mine\n" && ! printf "%s" "$out" | grep -Fq w1only'
+t "그 기계에서 손댄 파일: 충돌, 덮지 않음" 'has "충돌 w1 .agents/skills/alpha/SKILL.md (2줄 다름)" && is "$W1A/alpha/SKILL.md" "alpha w1\n" && printf "%s\n" "$out" | grep -qx "w1: 충돌 1건"'
+t "그 기계에서 링크인 폴더: 따라가지 않고 건너뜀" 'has "건너뜀 w1 .agents/skills/gamma (링크 — 따라가지 않음)" && [ ! -e "$W1/elsewhere/SKILL.md" ]'
+t "리눅스: all 나무만, dash로 씀" 'is "$LX/.claude/skills/beta/sub/x.md" "x\n" && [ ! -e "$LX/.agents/skills/alpha" ] && printf "%s\n" "$out" | grep -qx "lx: 같음"'
+t "링크: 가리킬 곳을 이번에 썼으면 같은 실행에서 만든다" '[ "$(readlink "$LX/.claude/skills-alias/beta")" = "$LX/.claude/skills/beta" ] && [ "$(readlink "$W1/.claude/skills-alias/beta")" = "$W1/.claude/skills/beta" ]'
+t "링크: 가리킬 곳이 없으면 만들지 않고 건너뜀" 'has "건너뜀 lx .claude/skills-alias/gone@ (가리킬 곳 없음)" && [ ! -L "$LX/.claude/skills-alias/gone" ] && [ ! -L "$W1/.claude/skills-alias/gone" ]'
+t "나무 base: 파일마다 남는다" 'grep -q "^.agents/skills/alpha/ref/deep/er/notes.md	" "$W1/.local/state/herdr-sync/base.tsv" && grep -q "^.agents/skills/alpha/ref/deep/er/notes.md	" "$MAC/.local/state/herdr-sync/repo-base.tsv"'
+run --check
+t "나무 --check: 남은 것은 그 충돌 하나" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -qx "w1: 충돌 1건" && printf "%s\n" "$out" | grep -qx "lx: 같음" && printf "%s\n" "$out" | grep -qx "맥: 같음"'
+
+# 15-2. 기계당 hc 호출 수는 나무 파일 수와 상관없다
+put "$C/few/a.md" 'a\n' && put "$C/few/b/c.md" 'c\n'
+rm -f "$T/calls"; run; few="$(grep -cx w1 "$T/calls") $(grep -cx lx "$T/calls")"
+for x in $(seq 40); do put "$C/many/d$((x % 4))/f$x.md" "f$x\n"; done
+rm -f "$T/calls"; run; many="$(grep -cx w1 "$T/calls") $(grep -cx lx "$T/calls")"
+t "hc 호출 수: 새 파일 2개 ($few)와 40개 ($many)가 같다" '[ "$few" = "$many" ] && is "$LX/.claude/skills/many/d1/f9.md" "f9\n"'
+put "$C/many/d0/f4.md" 'f4 바뀜\n'
+rm -f "$T/calls"; run; one="$(grep -cx w1 "$T/calls") $(grep -cx lx "$T/calls")"
+t "hc 호출 수: 바뀐 파일 하나도 같은 꼴 ($one)" '[ "$one" = "$many" ] && is "$W1/.claude/skills/many/d0/f4.md" "f4 바뀜\n"'
+
+# 15-3. --take: 파일 하나, <폴더>/**
+run --take 'w1:.nope/**'
+t "--take 없는 나무: 종료 1" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "없는 경로"'
+run --take w1:.agents/skills/alpha/SKILL.md
+t "--take 나무 파일 하나: 맥 값, 백업" '[ $rc = 0 ] && is "$W1A/alpha/SKILL.md" "alpha 1\n" && grep -rqx "alpha w1" "$W1/.local/state/herdr-sync/bak"'
+put "$W1A/alpha/ref/deep/er/notes.md" 'w1 deep\n' && put "$W1A/alpha/한 글.md" 'w1 space\n'
+run
+t "손댄 나무 파일 둘: 충돌 2건, 그대로" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -qx "w1: 충돌 2건" && is "$W1A/alpha/한 글.md" "w1 space\n"'
+run --take 'w1:.agents/skills/**'
+t "--take 기계:<폴더>/**: 그 나무 충돌 전부" '[ $rc = 0 ] && is "$W1A/alpha/ref/deep/er/notes.md" "deep 1\n" && is "$W1A/alpha/한 글.md" "space 1\n"'
+
+# 15-4. --pull: 파일 하나, <폴더>/**
+put "$W1A/alpha/SKILL.md" 'alpha from w1\n'
+run --pull w1:.agents/skills/alpha/SKILL.md
+t "--pull 나무 파일 하나: 맥·저장소로" '[ $rc = 0 ] && is "$A/alpha/SKILL.md" "alpha from w1\n" && [ "$(corigin show main:skills/agents/alpha/SKILL.md)" = "alpha from w1" ]'
+put "$W1A/alpha/ref/deep/er/notes.md" 'w1 deep 2\n' && put "$W1A/alpha/한 글.md" 'w1 space 2\n'
+run --pull 'w1:.agents/skills/**'
+t "--pull 기계:<폴더>/**: 그 나무 충돌 전부를 맥·저장소로" '[ $rc = 0 ] && is "$A/alpha/한 글.md" "w1 space 2\n" && [ "$(corigin show "main:skills/agents/alpha/ref/deep/er/notes.md")" = "w1 deep 2" ] && is "$W1A/w1only/SKILL.md" "mine\n"'
+
+# 15-5. 저장소만 바뀜(레인 착지) → 맥에 깖, 기계까지. 맥만 바뀜 → 저장소로. 실행 권한
+git -C "$T/lane" pull -q
+put "$T/lane/skills/agents/alpha/ref/deep/er/notes.md" 'lane deep\n' && put "$T/lane/skills/agents/alpha/new/from-lane.md" 'lane new\n'
+git -C "$T/lane" add -- skills && git -C "$T/lane" commit -qm lane-tree && git -C "$T/lane" push -q origin main
+run
+t "나무 깖: 바뀐 파일·새 폴더의 새 파일이 맥과 기계에" '[ $rc = 0 ] && is "$A/alpha/ref/deep/er/notes.md" "lane deep\n" && is "$A/alpha/new/from-lane.md" "lane new\n" && is "$W1A/alpha/new/from-lane.md" "lane new\n" && has "맥 깖 .agents/skills/alpha/new/from-lane.md"'
+chmod a-x "$A/alpha/scripts/run.sh" && put "$C/beta/SKILL.md" 'beta 2\n'
+run
+t "나무: 맥만 바뀐 내용과 실행 권한이 저장소·기계로" '[ $rc = 0 ] && corigin ls-tree main skills/agents/alpha/scripts/run.sh | grep -q "^100644" && [ ! -x "$W1A/alpha/scripts/run.sh" ] && [ "$(corigin show main:skills/claude/beta/SKILL.md)" = "beta 2" ] && is "$LX/.claude/skills/beta/SKILL.md" "beta 2\n"'
+rm "$A/gamma/SKILL.md"
+run
+t "나무: 맥에서 지운 파일은 저장소에서 지우고 기계는 둔다" '[ $rc = 0 ] && ! corigin cat-file -e main:skills/agents/gamma/SKILL.md 2> /dev/null'
+
+# 15-6. 깨진 전송: 나무 파일을 쓰지 않고 임시 폴더도 남기지 않는다
+put "$C/beta/SKILL.md" 'beta 3\n'
+out=$(HC_FAKE_CORRUPT=w1 "$SYNC" 2>&1); rc=$?
+t "나무 깨진 전송: w1은 그대로, lx는 씀" '[ $rc = 1 ] && is "$W1/.claude/skills/beta/SKILL.md" "beta 2\n" && is "$LX/.claude/skills/beta/SKILL.md" "beta 3\n"'
+t "나무 깨진 전송: 받는 쪽 임시 폴더 없음" '[ -z "$(find "$T/m" "$MAC" -path "*/herdr-sync/w.*")" ]'
+run
+t "깨진 뒤 다시: 맞춘다" '[ $rc = 0 ] && is "$W1/.claude/skills/beta/SKILL.md" "beta 3\n"'
+
+# 15-7. hc는 입력·출력을 8MB에서 자른다: 나무 쓰기·충돌 읽기·가져오기를 7MB 아래 묶음 여러 번으로 나눈다
+heavy() { awk -v id="$2" 'BEGIN { for (i = 0; i < 100000; i++) printf "%s line %07d xxxxxxxxxxxxxxxxxxxx\n", id, i }' > "$1"; }
+mkdir -p "$C/heavy" && for x in 1 2 3; do heavy "$C/heavy/h$x.md" "h$x"; done   # 3.4MB씩, 합 10MB
+rm -f "$T/calls"; run
+t "큰 묶음(10MB): 나눠 써서 w1·lx에 다 간다" '[ $rc = 0 ] && cmp -s "$C/heavy/h3.md" "$W1/.claude/skills/heavy/h3.md" && cmp -s "$C/heavy/h1.md" "$LX/.claude/skills/heavy/h1.md" && [ "$(grep -cx w1 "$T/calls")" -ge 4 ]'
+for x in 1 2 3; do echo "w1 덧붙임" >> "$W1/.claude/skills/heavy/h$x.md"; done
+run
+t "큰 충돌 내용 읽기도 나눈다: 줄 수가 맞다" '[ $rc = 1 ] && has "충돌 w1 .claude/skills/heavy/h1.md (1줄 다름)" && has "충돌 w1 .claude/skills/heavy/h3.md (1줄 다름)"'
+run --pull 'w1:.claude/skills/**'
+t "큰 --pull도 나눠 받는다" '[ $rc = 0 ] && cmp -s "$W1/.claude/skills/heavy/h3.md" "$C/heavy/h3.md" && tail -1 "$C/heavy/h2.md" | grep -qx "w1 덧붙임" && cmp -s "$C/heavy/h2.md" "$LX/.claude/skills/heavy/h2.md"'
+
+# 15-8. 줄을 옮겨도 맥 파일을 지우지 않는다 (repo-base에 저장소 경로를 함께 적는다)
+git -C "$T/lane" pull -q
+grep -v '^스킬     .agents/skills/herdr-desktop/SKILL.md' "$T/lane/sync.list" > "$T/sl" && cat "$T/sl" > "$T/lane/sync.list"
+git -C "$T/lane" commit -qam s1 && git -C "$T/lane" push -q origin main
+run
+t "S1 따로 적은 줄을 지움: 나무가 맡아 저장소로 모은다, 맥 파일 그대로" '[ $rc = 0 ] && is "$A/herdr-desktop/SKILL.md" "skill 1\n" && has "맥 모음 .agents/skills/herdr-desktop/SKILL.md" && [ "$(corigin show main:skills/agents/herdr-desktop/SKILL.md)" = "skill 1" ] && ! printf "%s" "$out" | grep -q "^맥 지움"'
+git -C "$T/lane" pull -q
+sed 's|skills/agents/  |skills/agents2/ |' "$T/lane/sync.list" > "$T/sl" && cat "$T/sl" > "$T/lane/sync.list"
+git -C "$T/lane" commit -qam s2 && git -C "$T/lane" push -q origin main
+run
+t "S2 나무의 저장소 폴더를 바꿈: 새 폴더로 모은다, 맥 파일 그대로" '[ $rc = 0 ] && is "$A/alpha/한 글.md" "w1 space 2\n" && [ -f "$A/alpha/new/from-lane.md" ] && [ "$(corigin show main:skills/agents2/alpha/SKILL.md)" = "alpha from w1" ] && ! printf "%s" "$out" | grep -q "^맥 지움"'
+
+# 15-9. 저장소 .gitignore에 걸리는 나무 파일은 맥·저장소·기계 모두에서 뺀다
+git -C "$T/lane" pull -q && printf '*.bak-*\n' > "$T/lane/.gitignore" && git -C "$T/lane" add .gitignore && git -C "$T/lane" commit -qm ign && git -C "$T/lane" push -q origin main
+put "$A/alpha/SKILL.md.bak-1" 'old\n'
+run
+t ".gitignore: 건너뜀 줄, 저장소 깨끗, 기계에 안 감" '[ $rc = 0 ] && has "건너뜀 .agents/skills/alpha/SKILL.md.bak-1 (저장소 .gitignore)" && [ -z "$(git -C "$T/conf" status --porcelain)" ] && [ ! -e "$W1A/alpha/SKILL.md.bak-1" ]'
+# 커밋이 실패하면 이번에 스테이징·쓴 것을 되돌리고, 「맥 모음」 줄을 찍지 않는다. 다음 실행은 막히지 않는다
+printf '#!/bin/sh\nexit 1\n' > "$T/conf/.git/hooks/pre-commit" && chmod +x "$T/conf/.git/hooks/pre-commit"
+put "$A/alpha/SKILL.md" 'alpha 2\n' && put "$A/zeta/new.md" 'zeta\n'
+run
+t "커밋 실패: 종료 1, 저장소 깨끗, 「맥 모음」 없음" '[ $rc = 1 ] && [ -z "$(git -C "$T/conf" status --porcelain)" ] && ! printf "%s" "$out" | grep -q "^맥 모음"'
+rm -f "$T/conf/.git/hooks/pre-commit"
+run
+t "커밋 실패 뒤 다시: 모은다" '[ $rc = 0 ] && [ "$(corigin show main:skills/agents2/zeta/new.md)" = zeta ] && is "$W1A/alpha/SKILL.md" "alpha 2\n"'
+
+# 15-10. 받는 쪽 W는 끝난 pid의 w.* 임시 폴더를 지운다
+mkdir -p "$W1/.local/state/herdr-sync/w.99999999/x" && put "$A/zeta/new.md" 'zeta 2\n'
+run
+t "묵은 w.* 임시 폴더를 지운다" '[ $rc = 0 ] && [ ! -e "$W1/.local/state/herdr-sync/w.99999999" ] && is "$W1A/zeta/new.md" "zeta 2\n"'
+
+# 15-11. 옛 꼴 repo-base(셋째 칸 없음)에서 줄을 옮긴 첫 실행: 저장소 쪽이 없다고 맥 파일을 지우지 않고 충돌로 멈춘다
+RB=$MAC/.local/state/herdr-sync/repo-base.tsv
+cut -f1,2 "$RB" > "$T/rb" && cat "$T/rb" > "$RB"
+git -C "$T/lane" pull -q
+sed 's|skills/agents2/ |skills/agents3/ |' "$T/lane/sync.list" > "$T/sl" && cat "$T/sl" > "$T/lane/sync.list"
+git -C "$T/lane" commit -qam legacy && git -C "$T/lane" push -q origin main
+run
+t "옛 꼴 base + 줄 옮김: 충돌로 멈추고 맥 파일 그대로" '[ $rc = 1 ] && is "$A/alpha/SKILL.md" "alpha 2\n" && has "충돌 저장소 .agents/skills/alpha/SKILL.md (저장소에 없음 — 옛 base라 지운 것인지 모른다)" && ! printf "%s" "$out" | grep -q "^맥 지움"'
+run --take 'repo:.agents/skills/**'
+t "옛 꼴 base 충돌: --take repo:<폴더>/**로 새 자리에 모은다" '[ $rc = 0 ] && [ "$(corigin show main:skills/agents3/alpha/SKILL.md)" = "alpha 2" ] && is "$A/alpha/SKILL.md" "alpha 2\n"'
+
+# 15-12. 모으기 실패 되돌리기는 이번에 쓴 경로만: 그 사이 남이 같은 저장소에 쓴 새 파일·고친 줄은 남는다
+printf '#!/bin/sh\necho other > other-agent.txt\necho "edit by other" >> private-patterns.txt\nexit 1\n' > "$T/conf/.git/hooks/pre-commit" && chmod +x "$T/conf/.git/hooks/pre-commit"
+put "$A/alpha/SKILL.md" 'alpha 3\n' && put "$A/eta/new.md" 'eta\n'
+run
+t "되돌리기 범위: 남의 새 파일·남의 줄은 남고, 이번에 쓴 것만 되돌린다" '[ $rc = 1 ] && [ -e "$T/conf/other-agent.txt" ] && grep -qx "edit by other" "$T/conf/private-patterns.txt" && [ "$(git -C "$T/conf" status --porcelain --untracked-files=all | sort | tr "\n" "|")" = " M private-patterns.txt|?? other-agent.txt|" ]'
+rm -f "$T/conf/.git/hooks/pre-commit" "$T/conf/other-agent.txt" && git -C "$T/conf" checkout -q -- private-patterns.txt
+run
+t "되돌린 뒤 다시: 모은다" '[ $rc = 0 ] && [ "$(corigin show main:skills/agents3/eta/new.md)" = eta ]'
 
 # 13. 잠금: 한 번에 하나
 lock=$MAC/.local/state/herdr-sync/lock

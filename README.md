@@ -33,8 +33,8 @@ herdr-sync --take <기계>:<경로>  # 충돌을 맥 값으로 덮는다 (그 �
 herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
 ```
 
-- 경로는 `sync.list`의 맥 경로(`~` 아래)다. 예: `.claude/docs/notes.md`, 지침 본문은 `.claude/CLAUDE.md#body`, Codex 공통 구역은 `.codex/AGENTS.md#codex-shared`, 링크는 `.claude/skills/my-skill@`, 설정 키는 `.model`, 설정 훅은 `hook:PreToolUse:cotenant-guard.sh`(herdr-settings-merge의 판정 이름).
-- `<기계>:*`는 그 기계의 충돌 전부다.
+- 경로는 `sync.list`의 맥 경로(`~` 아래)다. 예: `.claude/docs/notes.md`, 지침 본문은 `.claude/CLAUDE.md#body`, Codex 공통 구역은 `.codex/AGENTS.md#codex-shared`, 링크는 `.claude/skills/my-skill@`, 설정 키는 `.model`, 설정 훅은 `hook:PreToolUse:cotenant-guard.sh`(herdr-settings-merge의 판정 이름), 나무 안 파일은 `.agents/skills/my-skill/scripts/run.sh`.
+- `<기계>:*`는 그 기계의 충돌 전부, `<기계>:<폴더>/**`는 그 나무 줄의 그 기계 충돌 전부다(`repo:<폴더>/**`도 된다).
 - Codex 공통 구역과 설정 키는 `--pull`을 받지 않는다(구역은 맥 지침에서 다시 만들고, 설정은 맥 `settings.json`을 고친다). `--take`를 쓴다.
 - 저장소 위치: 범용 `HERDR_TOOLS_REPO`(기본 `~/Documents/app/herdr-tools`), 개인 `HERDR_TOOLS_CONFIG`(기본 `~/.config/herdr-tools`). 둘 다 git·main 브랜치·깨끗함이어야 한다. 개인 저장소(`sync.list`)가 없으면 종료 2, 아무것도 쓰지 않는다.
 - 대상 이름: `all`(모든 기계) · `macos`(uname이 Darwin) · `local`(맥만) · 기계 이름을 쉼표로. 옛 이름 `all9`·`mac7`·`mac-only`가 보이면 새 이름을 알리고 종료 2(옛 판은 그것을 기계 이름으로 읽어 아무 데도 안 깔고 「같음」으로 보였다).
@@ -42,6 +42,23 @@ herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 �
 - 다른 herdr-sync가 돌고 있으면 바로 끝난다(종료 75). 맥이 아닌 곳(`~/Applications/Herdr.app`·`/Applications/Herdr.app`이 없거나 `hc machine ls`에 기계가 없는 곳)에서는 종료 2.
 - 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다. 그 도구가 판정 줄 없이 실패하면 `다름 (도구문제:설정)`으로 보인다(충돌과 다르다).
 - 저장소에 커밋하지 않은 변경이 있으면 아무것도 하지 않고 멈춘다. 표식 없는 `~/.codex/AGENTS.md`는 충돌로 보이고, `--take`하면 codebase-memory-mcp 블록만 남기고 구역을 넣는다(백업).
+
+### 나무 줄: 폴더 통째로 (스킬 폴더 등)
+
+`sync.list`의 맥 경로를 `<폴더>/**`로 쓰면 그 폴더 아래 모든 층의 파일을 하나하나 파일 줄처럼 맞춘다(저장소 경로는 폴더). 예:
+
+```
+스킬   .agents/skills/**             skills/agents/   macos
+제외   .agents/skills/app-managed    -                -
+```
+
+- 걷지 않는 것: 심볼릭 링크(따라가지 않는다. 링크는 `@` 줄로), 이름이 `.`으로 시작하는 것(`.git`·`.DS_Store` 등), `__pycache__`, `node_modules`, `제외` 줄 아래(앱이 계정으로 맞추는 폴더 등. 지움과 달리 기계에 있는 것을 건드리지 않는다).
+- 따로 적은 줄이 맡은 경로는 나무가 맡지 않는다. 대상 기계에만 있는 파일은 건드리지 않는다.
+- 그 기계에서 손댄 파일은 충돌이다(덮지 않는다). 내용은 같고 실행 권한만 다르면 씀이다.
+- 7MB 넘는 파일은 `건너뜀 <경로> (7MB 넘음)`(hc exec 입출력 한도 8MB 아래로 묶어 보낸다), 저장소 `.gitignore`에 걸리는 파일은 `건너뜀 <경로> (저장소 .gitignore)`, 그 기계에서 링크인 폴더는 `건너뜀 <기계> <경로> (링크 — 따라가지 않음)`.
+- 기계마다 hc 호출은 조회 한 번, 그리고 쓰기·충돌 내용 읽기·`--pull` 받기가 7MB 아래 tar 묶음마다 한 번이다(파일 수가 아니라 바이트에 비례, 평소 한 번). 실측(가짜 기계 둘, 파일 2,000개·36MB): 첫 맞추기 약 15초, 다 맞은 뒤 `--check` 약 2.5초.
+- 줄을 옮겨도(따로 적은 줄을 지워 나무가 맡게 함, 나무의 저장소 폴더를 바꿈) 맥 파일을 지우지 않는다: repo-base에 저장소 경로를 함께 적어, 경로가 바뀌면 새 자리로 모은다.
+- 링크 줄은 가리킬 곳이 그 기계에 없으면 만들지 않고 `건너뜀 <기계> <경로> (가리킬 곳 없음)`. 가리킬 곳을 같은 실행에서 나무로 쓰면 그 뒤에 만든다.
 
 ### 충돌과 푸는 법
 
@@ -51,11 +68,12 @@ herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 �
 |---|---|
 | 맥 값과 같다 | 같음 |
 | base와 같다 (그 기계가 손대지 않음) | 맥 값으로 씀 |
+| 내용은 맥 값과 같고 실행 권한만 다르다 | 씀 (권한만 맞춘다) |
 | 그 밖 (그 기계에서 따로 고쳤거나, 처음이라 base가 없는데 다름) | 충돌: 쓰지 않고 `충돌 <기계> <경로> (n줄 다름)` |
 
 - 맥 값이 맞으면 `herdr-sync --take <기계>:<경로>`.
 - 그 기계 값이 맞으면 `herdr-sync --pull <기계>:<경로>`. 맥 실제 파일이 바뀌고, 저장소와 다른 기계에도 퍼진다.
-- 맥 ↔ 저장소도 같은 규칙이다(base는 맥 `~/.local/state/herdr-sync/repo-base.tsv`, 열쇠는 맥 경로). 둘 다 바뀌었으면 `충돌 저장소 <경로>`를 찍고 아무 데도 쓰지 않고 멈춘다. 맥 값을 남기려면 `--take repo:<경로>`, 저장소 값을 남기려면 `--pull repo:<경로>`.
+- 맥 ↔ 저장소도 같은 규칙이다(base는 맥 `~/.local/state/herdr-sync/repo-base.tsv`, 열쇠는 맥 경로, 셋째 칸은 저장소 경로 — 줄을 옮기면 base 없음으로 본다. 셋째 칸이 없는 옛 base에서 저장소 쪽이 없으면 맥 파일을 지우지 않고 충돌로 멈춘다). 저장소에서 지워진 것은 맥에서 백업으로 옮기고 `맥 지움 <경로> (저장소에서 지워짐)`. 모으다 실패하면 그 저장소에서 이번에 쓴 경로만 되돌리고 멈춘다. 둘 다 바뀌었으면 `충돌 저장소 <경로>`를 찍고 아무 데도 쓰지 않고 멈춘다. 맥 값을 남기려면 `--take repo:<경로>`, 저장소 값을 남기려면 `--pull repo:<경로>`.
 - push가 거절되면 멈추고, 다음 실행이 그 저장소의 「지난번 push 못 한 커밋」을 다시 보낸다.
 - 덮거나 지운 것은 그 기계의 `~/.local/state/herdr-sync/bak/<YYYYMMDD-HHMMSS>/<경로>`에 남는다.
 - 쓰기는 임시 파일에 쓰고 cksum을 맞춘 뒤 바꿔 넣는다. 실행 권한은 맥 값을 따른다.
