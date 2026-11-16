@@ -49,8 +49,9 @@ kid() { local k; for _ in 1 2 3 4 5 6 7 8 9 10; do k=$(pgrep -P "$(cat "$P/$1")"
 pid() { cat "$P/$1"; }
 
 W=$T/app.wt
-A=$W/a A2=$W/a2 B=$W/b C=$W/c E=$W/e K=$W/k H=$T/main.wt/h O=$T/agents/x
-mkdir -p "$A" "$A2" "$O" "$T/main" "$T/elsewhere"
+A=$W/a A2=$W/a2 B=$W/b C=$W/c E=$W/e K=$W/k H=$T/main.wt/h O=$T/agents/x S=$W/s
+mkdir -p "$A" "$A2" "$O" "$S" "$T/main" "$T/elsewhere" "$T/x y"
+ln -s /bin/sleep "$T/x y/herdr-core"     # 공백 든 실행 경로(맥 코어 꼴 …/Herdr Core.app/Contents/MacOS/herdr-core). 복사본은 서명에 죽는다
 ln -s "$T" "$T/link"
 for d in "$B" "$C" "$E" "$K" "$H"; do idle "$d"; done
 orphan a "$A" sleep 300                    # cwd로만 걸림, 작업 트리 있음 → 찍기만(보류)
@@ -61,8 +62,9 @@ orphan e "$T" "$E/bin/idle"                # 명령 줄, 작업 트리 있음, �
 orphan h "$T" "$H/bin/idle"                # 명령 줄, 본 저장소 $T/main을 터미널이 씀 → 보류, 작업 트리 지우면 끔
 orphan k "$T" "$K/bin/idle"                # 명령 줄, 작업 트리 지움, 자손이 live 터미널 프로세스 → 보류
 orphan o "$O" sleep 300                    # 작업 트리 밖(launchd 작업 흉내) → 남김
+orphan s "$S" "$T/x y/herdr-core" 300      # 공백 든 경로의 keep(herdr-core), cwd로만, 작업 트리 지움 → 남김(H56)
 kid b; kid c; kid k
-rm -rf "$A2" "$C" "$K"
+rm -rf "$A2" "$C" "$K" "$S"
 cat >"$T/ls.json" <<EOF
 {"terminals":[{"address":"t1","state":"live","cwd":"$T/link/app.wt/b"},{"address":"t2","state":"finished","cwd":"$A"},
  {"address":"t4","state":"live","cwd":"$T/main/sub"},{"address":"t5","state":"live","cwd":"$T/elsewhere"},
@@ -74,7 +76,7 @@ printf '{"address":"t5","pid":%s}\n' "$(cat "$P/k-kid")" >"$T/get-t5.json"
 has() { printf "%s" "$out" | grep -q "$1 pid $(pid "$2") "; }
 none() { ! printf "%s" "$out" | grep -Eq "(끌|끈) 고아: pid ($(pid b)|$(pid o)) "; }
 allalive() { for n in "$@"; do alive "$(pid "$n")" || return 1; done; }
-ALL="a a2 b c e h k o"
+ALL="a a2 b c e h k o s"
 
 cfg "sweep.orphan_kill on"
 sweep --dry-run --min-age 0
@@ -83,6 +85,7 @@ t "dry-run: cwd로만·작업 트리 있음은 보류" 'printf "%s" "$out" | gre
 t "dry-run: 본 저장소 터미널이 있으면 보류" 'printf "%s" "$out" | grep -q "보류 고아: pid $(pid h) .*본 저장소 터미널 있음"'
 t "dry-run: 자손에 live 터미널 프로세스가 있으면 보류" 'printf "%s" "$out" | grep -q "보류 고아: pid $(pid k) .*자손에 터미널"'
 t "dry-run: 링크 경로로 쓰는 터미널·작업 트리 밖은 목록에 없음" 'none && ! printf "%s" "$out" | grep -q "pid $(pid b) "'
+t "dry-run: 공백 든 실행 경로라도 keep(herdr-core)은 목록에 없음" '! printf "%s" "$out" | grep -q "pid $(pid s) "'
 
 sweep
 t "기본 최소 나이(10분): 막 생긴 고아는 안 끔" '[ $rc = 0 ] && allalive $ALL && ! printf "%s" "$out" | grep -q "고아: pid"'
@@ -114,7 +117,7 @@ sweep --min-age 0
 t "작업 트리 지움(cwd로만) a2: 끔" 'gone "$(pid a2)"'
 t "지워진 작업 트리 c: 끔, 자식 sleep도" 'gone "$(pid c)" && gone "$(cat "$P/c-kid")"'
 t "작업 트리 있고 쓰는 터미널 없음 e: 끔" 'gone "$(pid e)"'
-t "남김: cwd로만 a, 링크 경로 터미널 b, 본 저장소 h, 자손 터미널 k, 밖 o" 'allalive a b h k o'
+t "남김: cwd로만 a, 링크 경로 터미널 b, 본 저장소 h, 자손 터미널 k, 밖 o, 공백 경로 keep s" 'allalive a b h k o s'
 t "기록: pid·나이·명령 앞부분" 'grep -q "pid:$(pid e)	.*고아(쓰는 터미널 없음)	$E	-	나이 0분 /bin/bash /" "$LOG" && grep -q "pid:$(pid c)	.*작업 트리 지워짐" "$LOG"'
 
 rm -rf "$H"
@@ -150,7 +153,16 @@ t "정리됨: 레인 터미널만 events.tsv에 한 줄(8칸: 시각·기계·�
 t "정리됨: kill 전에 적음(그 사이 wait가 끝남을 봐도 뜻밖의 종료로 안 알리게)" 'grep -q "정리됨" "$T/ev-at-kill"'
 
 kill "$(cat "$P/b-kid")" "$(cat "$P/k-kid")" 2>/dev/null
-kill "$(pid a)" "$(pid b)" "$(pid k)" "$(pid o)" 2>/dev/null
+# H110: 정리됨을 못 쓰면(events.tsv 자리 못 만듦) 레인 터미널은 닫지 않는다 — 닫으면 hc-lane wait가 reason killed로 보고
+# 조용히 넘겨 뜻밖의 종료 알림이 사라진다. 레인 아닌 터미널은 그대로 닫는다
+rm -f "$T"/killed-* "$EVT"
+printf x >"$T/notdir"
+out=$(XDG_STATE_HOME=$T/notdir python3 "$SWEEP" --only-under "$T" --min-age 0 2>&1)
+t "정리됨 못 씀: 레인 터미널은 kill 안 함" '[ ! -e "$T/killed-t61" ] && printf "%s" "$out" | grep -q "실패(정리됨 못 씀): R3 t61"'
+t "정리됨 못 씀: 레인 아닌 터미널은 닫음" '[ -e "$T/killed-t62" ] && printf "%s" "$out" | grep -q "닫힘: R3 t62"'
+t "정리됨 못 씀: closed.log에 남김" 'grep -q "	t61	.*실패(정리됨 못 씀)" "$LOG"'
+
+kill "$(pid a)" "$(pid b)" "$(pid k)" "$(pid o)" "$(pid s)" 2>/dev/null
 t "이 시험의 고아 0" allgone
 
 echo "통과 $pass · 실패 $fail"

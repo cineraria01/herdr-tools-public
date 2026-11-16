@@ -16,13 +16,15 @@ R2 일 끝난 worker: 마지막 상태 변화(status_ms)로부터 30분 이상. 
    (a) cwd가 git 작업 트리이고 git cherry origin/main HEAD에 + 커밋이 있음(착지 전 레인, fetch 안 함)
    (b) 화면 마지막 줄들에 배경 실행 흔적(BUSY: "still running", 상태 줄 "· N shell(s)"·"· N monitor(s)")
    (c) 이 기계 hc-fill 대기열(${HC_FILL_DATA:-~/.local/share/hc-fill}/queue.tsv)에 같은 이름·주소의 받은편지 레인이
-       아직 「떠 있음」(up — 결과를 요청한 기계에 되돌려 주기 전). 되돌려 줌(sent)·손으로 넣은 줄은 보통 판정
+       아직 「떠 있음」(up — 결과를 요청한 기계에 되돌려 주기 전). 되돌려 줌(sent)·손으로 넣은 줄은 보통 판정.
+       대기열은 hc-fill이 도는 기계에만 있어 원격 레인 기계에는 이 보호가 없다. 그래도 잃는 것은 없다: 보고 파일은 터미널과
+       따로 남고, hc-fill은 터미널이 사라진(gone) 레인도 그 보고를 되돌려 준다
 R2·R3 공통 보호: cwd가 아직 있는 링크된 git 워크트리(그 폴더나 위 폴더의 .git이 파일)면 닫지 않는다.
    레인은 착지 뒤 hc-lane clean으로 워크트리를 지우니, 남아 있으면 일이 안 끝났다. git을 부르지 않는다.
 판정은 모두 fail-closed: 예외·시간 초과·읽기 실패·모르는 값은 「닫지 않음」이다.
 R3 오래 쉰 세션: status_ms로부터 6시간 이상
 닫는 터미널이 hc-lane 레인(라벨 hc-lane=1)이면 닫기 전에 hc-lane events.tsv에 「정리됨」 한 줄(hc-lane wait는 그 레인의
-앞 report가 착지·판정 그 턴이면 조용히, 아니면 「뜻밖의 종료(정리됨)」로 알린다).
+앞 report가 착지·판정 그 턴이면 조용히, 아니면 「뜻밖의 종료(정리됨)」로 알린다). 그 줄을 못 쓰면 닫지 않는다.
 다시 열기: closed.log의 cwd·sessionId로 cd <cwd> && claude --resume <sessionId>
 터미널의 argv·환경 변수는 출력하지도 기록하지도 않는다(자격증명이 섞여 있다).
 
@@ -214,9 +216,10 @@ def lane_event(t, why):
     """레인 터미널(라벨 hc-lane=1)이면 hc-lane events.tsv에 「정리됨」 한 줄(hc-lane report와 같은 8칸, turn은 닫을 때 것).
     hc-lane wait는 앞 report가 착지·판정 그 턴(turn+1 이하)이면 조용히, 아니면 「뜻밖의 종료(정리됨)」로 알리고, 뒤따른
     끝남은 다시 알리지 않는다. kill 전에 적는다(그 사이 wait가 끝남을 먼저 「뜻밖의 종료(finished)」로 보지 않게).
-    못 써도 닫기는 계속한다(알림 하나가 더 나는 쪽)."""
+    레인 아님·적음이면 True, 못 쓰면 False — 그때는 닫지 않는다: 닫으면 wait가 reason killed(parent 없음·살아 있음)를
+    지휘의 hc kill로 보고 조용히 넘겨 뜻밖의 종료 알림이 사라진다."""
     if (t.get("labels") or {}).get("hc-lane") != "1":
-        return
+        return True
     flat = lambda x: str(x).replace("\t", " ").replace("\r", " ").replace("\n", " ")
     d = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-lane")
     fields = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -227,13 +230,16 @@ def lane_event(t, why):
         with open(os.path.join(d, "events.tsv"), "a") as f:
             f.write("\t".join(flat(x) for x in fields) + "\n")
     except OSError:
-        pass
+        return False
+    return True
 
 
 def close(t, why):
     address = t["address"]
-    record(t, why, session_id(t.get("pid")))
-    lane_event(t, why)
+    record(t, why, session_id(t.get("pid")))  # 먼저: closed.log를 못 쓰면 정리됨도 안 남기고 멈춘다(감사 [낮음] 2)
+    if not lane_event(t, why):
+        record(t, why + " 실패(정리됨 못 씀)", "-")
+        return "실패(정리됨 못 씀)"
     try:
         hc("kill", address)
     except RuntimeError as err:
@@ -292,6 +298,20 @@ def processes(run=subprocess.run):
     return procs
 
 
+def exes(run=subprocess.run):
+    """{pid: argv[0]}(ps comm — 맥은 공백 든 경로도 그대로, 리눅스는 15자로 잘린 이름이라 "/" 든 것만 쓴다).
+    processes() 뒤 pid가 재사용되면 keep으로 잘못 걸려 한 바퀴 남을 수 있다(끄는 쪽은 kill_tree가 다시 확인)."""
+    out = run(["ps", "-x", "-o", "pid=,comm="], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+    if out.returncode:
+        raise RuntimeError("ps 실패")
+    res = {}
+    for line in out.stdout.splitlines():
+        f = line.strip().split(None, 1)
+        if len(f) == 2 and f[0].isdigit() and "/" in f[1]:
+            res[int(f[0])] = f[1]
+    return res
+
+
 def cwds(pids, run=subprocess.run):
     """{pid: cwd}. 못 읽은 pid는 빠진다(명령 줄로만 판정)."""
     if not pids:
@@ -336,13 +356,15 @@ def under(c, root):
     return c == root or c.startswith(root + "/")
 
 
-def orphans(procs, cwd_of, term_cwds, suffix, min_age, me=None, only=None, exists=exists, keep=()):
+def orphans(procs, cwd_of, term_cwds, suffix, min_age, me=None, only=None, exists=exists, keep=(), exe_of=None):
     """고아 후보 [(pid, 작업 트리, 나이 초, 명령, 까닭, 끔 여부)]. 그 작업 트리 아래를 쓰는 live 터미널이 있으면 빼고,
-    작업 트리가 있는데 본 저장소 아래를 쓰는 터미널이 있거나 cwd로만 걸린 것은 보류(끔 False). 경로는 실제 경로로 견준다."""
+    작업 트리가 있는데 본 저장소 아래를 쓰는 터미널이 있거나 cwd로만 걸린 것은 보류(끔 False). 경로는 실제 경로로 견준다.
+    keep은 실행 파일 이름: exe_of(ps comm)에 있으면 그 경로, 없으면 명령 첫 낱말(공백 든 경로는 잘린다)."""
     terms = [os.path.realpath(c) for c in term_cwds]
     found = []
     for pid, (ppid, age, cmd) in sorted(procs.items()):
-        if ppid != 1 or pid == me or age < min_age or os.path.basename((cmd.split() or [""])[0]) in keep:
+        exe = (exe_of or {}).get(pid) or (cmd.split() or [""])[0]
+        if ppid != 1 or pid == me or age < min_age or os.path.basename(exe) in keep:
             continue
         by_cmd = {r for r in (lane_root(x.split("=", 1)[-1], suffix) for x in cmd.split()) if r}
         roots = sorted(by_cmd | {r for r in [lane_root(cwd_of.get(pid), suffix)] if r})
@@ -437,7 +459,7 @@ def sweep_orphans(terms, dry, min_age, only=None):
     procs = processes()
     cwd_of = cwds([p for p, (pp, _, _) in procs.items() if pp == 1])
     found = orphans(procs, cwd_of, [t["cwd"] for t in live if isinstance(t.get("cwd"), str)], suffix, min_age,
-                    os.getpid(), only, keep=set(keep.split()))
+                    os.getpid(), only, keep=set(keep.split()), exe_of=exes())
     term_pids = set()
     if any(f[5] for f in found):  # 자손에 live 터미널 프로세스(코어·에이전트)가 있으면 끄지 않는다
         for t in local:
@@ -633,6 +655,20 @@ def self_test():
         (20, "/a/main.wt/m1", "보류: 본 저장소 터미널 있음", False)], got
     got = orphans(procs, cwd_of, [], sfx, 600, me=10, exists=lambda p: p in there)
     assert [g[0] for g in got if g[5]] == [12, 14, 18, 19, 20, 22] and [g[0] for g in got if not g[5]] == [11], got
+    # keep은 공백 든 실행 경로도 ps comm으로 본다(H56 — 맥 코어 …/Herdr Core.app/Contents/MacOS/herdr-core)
+    core = "/x/Herdr Core.app/Contents/MacOS/herdr-core"
+    sp = {23: (1, 3600, core + " server"), 24: (1, 3600, "/x/My Tool.app/Contents/MacOS/tool")}
+    got = orphans(sp, {23: "/a/app.wt/gone", 24: "/a/app.wt/gone"}, [], sfx, 600, exists=lambda p: False,
+                  keep={"herdr-core"}, exe_of={23: core, 24: "/x/My Tool.app/Contents/MacOS/tool"})
+    assert [g[0] for g in got] == [24], got
+    assert [g[0] for g in orphans(sp, {23: "/a/app.wt/gone"}, [], sfx, 600, exists=lambda p: False,
+                                  keep={"herdr-core"})] == [23]  # comm 없으면 첫 낱말(/x/Herdr)
+    assert exes(fake(out="  23 %s\n 7 herdr-core\n x y\n" % core)) == {23: core}  # "/" 없는 이름(리눅스 잘린 comm)은 버림
+    try:
+        exes(fake(rc=1))
+        raise AssertionError("ps 실패를 삼킴")
+    except RuntimeError:
+        pass
     assert tree([10], {10: (1, 0, ""), 11: (10, 0, ""), 12: (11, 0, ""), 13: (1, 0, "")}) == {10, 11, 12}
     assert conf("sweep.wt_suffix", ".wt", "/nonexistent/tool") == ".wt"
     with tempfile.TemporaryDirectory() as root:
