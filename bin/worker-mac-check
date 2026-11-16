@@ -13,6 +13,7 @@
 # 비밀은 찍지 않는다: 키체인 값·토큰·전체 argv를 읽거나 출력하지 않는다(gh는 계정 이름, 프록시는 상태 줄만).
 # TCC는 시스템 TCC.db를 sqlite3 -readonly로 조회만 한다(원격 로그인에 전체 디스크 접근이 없으면 「모름」).
 set -u
+BREW_DIR=${WORKER_MAC_BREW_DIR:-/opt/homebrew/bin}  # 시험이 바꾼다
 TOOLPATH='$HOME/.local/bin:$HOME/go/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 
 # 도구 판 읽기(원격·맥 같은 함수). go·wails3·git은 정한 꼴, 그 밖은 --version 첫 줄.
@@ -150,10 +151,18 @@ check_one() {
 
   # hc 터미널 문맥(코어가 띄운 프로그램) 점검
   if ! hc machine ls 2>/dev/null | grep -q "\"name\":\"$M\",[^}]*\"state\":\"connected\""; then
-    for i in "키체인(hc 문맥)" "문서 폴더(hc 문맥)" "gh 로그인" ${PX:+"$PX status"}; do line 모름 "$i" "hc 기계 $M 연결 안 됨"; done
+    for i in "키체인(hc 문맥)" "brew PATH(hc 문맥)" "문서 폴더(hc 문맥)" "gh 로그인" ${PX:+"$PX status"}; do line 모름 "$i" "hc 기계 $M 연결 안 됨"; done
   else
     kc=$(hcx 20 'security show-keychain-info "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; echo $?')
     case "$kc" in 0) line 통과 "키체인(hc 문맥)" "열림";; 36) line 실패 "키체인(hc 문맥)" "User interaction is not allowed (코어가 SSH 문맥)";; *) line 모름 "키체인(hc 문맥)" "rc ${kc:-시간 초과}";; esac
+    # hcx는 PATH를 덮으니 여기는 코어가 준 PATH 그대로 본다
+    hp=$(tmo 15 hc exec --on "$M" -- /bin/sh -c "[ -d '$BREW_DIR' ] || { echo -; exit 0; }; echo \"\$PATH\"" 2>/dev/null)
+    case ":$hp:" in
+      :-:) line 통과 "brew PATH(hc 문맥)" "해당 없음: $BREW_DIR 없음";;
+      ::) line 모름 "brew PATH(hc 문맥)" "15초 안 응답";;
+      *":$BREW_DIR:"*) line 통과 "brew PATH(hc 문맥)" "$BREW_DIR 있음";;
+      *) line 실패 "brew PATH(hc 문맥)" "$BREW_DIR 없음 — 코어가 로그인 환경 없이 떴다 (hc-core-relaunch $M)";;
+    esac
     dc=$(hcx 15 'ls "$HOME/Documents" >/dev/null 2>&1 && echo ok || echo no')
     case "$dc" in ok) line 통과 "문서 폴더(hc 문맥)" "~/Documents 읽힘";; no) line 실패 "문서 폴더(hc 문맥)" "읽기 거부 (TCC 파일 및 폴더 → herdr-core → 문서 폴더)";; *) line 실패 "문서 폴더(hc 문맥)" "15초 안 응답 — 그 맥 화면에 폴더 접근 질문이 떠 있을 수 있다";; esac
     gh=$(hcx 20 'gh auth status --hostname github.com 2>&1 | grep -m1 -E "Logged in to github.com|not logged|token .* invalid"')

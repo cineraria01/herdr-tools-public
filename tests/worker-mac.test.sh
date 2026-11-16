@@ -12,15 +12,19 @@ trap 'rm -rf "$T"' EXIT
 export T_LOG=$T/log RHOME=$T/rh HOME=$T/mac GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$T/bin" "$T_LOG" "$RHOME/.local/bin" "$HOME/.local/bin" "$RHOME/Library/Application Support/Google/Chrome"
 ln -s "$BIN/herdr-tools-config" "$T/bin/herdr-tools-config"
-export PATH="$T/bin:$PATH"
+ln -s "$BIN/worker-mac-check" "$T/bin/worker-mac-check"
+# brew 폴더 자리: 기본 PATH에 넣어 둔다(hc 터미널 PATH 점검이 통과하게)
+export WORKER_MAC_BREW_DIR=$T/brew
+mkdir -p "$T/brew" "$T/brew2"
+export PATH="$T/bin:$T/brew:$PATH"
 
-# 가짜 ssh: 옵션을 건너뛰고 기계 이름을 ssh.log에, 나머지 명령은 원격 HOME에서 sh -c로 돈다. SSH_FAKE_FAIL이면 연결 안 됨.
+# 가짜 ssh: 옵션을 건너뛰고 기계 이름을 ssh.log에, 나머지 명령은 원격 HOME에서(원격 가짜 명령 폴더를 PATH 앞에) sh -c로 돈다. SSH_FAKE_FAIL이면 연결 안 됨.
 cat >"$T/bin/ssh" <<'EOF'
 #!/bin/bash
 while [ $# -gt 0 ]; do case $1 in -o) shift 2 ;; -n|-t) shift ;; *) break ;; esac; done
 echo "$1" >>"$T_LOG/ssh.log"; shift
 [ -z "${SSH_FAKE_FAIL-}" ] || exit 255
-cd "$RHOME" && HOME=$RHOME exec /bin/sh -c "$*"
+cd "$RHOME" && HOME=$RHOME PATH=$RHOME/.local/bin:$PATH exec /bin/sh -c "$*"
 EOF
 # 가짜 hc(맥 쪽): machine ls는 w1 연결됨, exec는 -- 뒤 명령을 원격 HOME에서. 그 밖은 hc.log에.
 cat >"$T/bin/hc" <<'EOF'
@@ -35,7 +39,7 @@ chmod +x "$T/bin/ssh" "$T/bin/hc"
 # 원격 가짜 시스템 명령. Dock pid 123, 코어 pid 77, 둘 다 asid 5(코어 GUI 문맥).
 w() { printf '#!/bin/bash\n%s\n' "$2" >"$1"; chmod +x "$1"; }
 R=$RHOME/.local/bin
-w "$R/pgrep" 'case $1 in -x) echo 123 ;; *) echo 77 ;; esac'
+w "$R/pgrep" 'case "$1 ${2-}" in "-x "*) echo 123 ;; *connect*) ;; *) echo 77 ;; esac'
 w "$R/launchctl" 'case "$1 $2" in "print pid/"*) echo "asid = 5"; echo "name = dev.herdr.core.t" ;; "print gui/"*) echo "0 - com.t.herdr-core" ;; *) echo "$*" >>"$T_LOG/launchctl.log" ;; esac'
 w "$R/defaults" 'id -un'
 w "$R/pmset" 'echo " SleepDisabled 1"'
@@ -129,6 +133,27 @@ t "check: 빈 값(키 혼자)은 일부러 끈 것 → 줄 없음" '! has "설�
 newcfg; printf 'worker.tools git\n' >>"$T/conf/config"; newhome
 check w1
 t "check: 같은 키 두 번이면 종료 2, 접속 안 함" '[ $rc = 2 ] && [ ! -s "$T_LOG/ssh.log" ]'
+
+# ── hc 터미널 PATH에 brew ──
+newcfg; newhome
+check w1
+t "check: hc 터미널 PATH에 brew 폴더가 있으면 통과" 'has "통과	brew PATH(hc 문맥)	$T/brew 있음"'
+WORKER_MAC_BREW_DIR=$T/brew2 check w1
+t "check: brew 폴더가 있는데 hc 터미널 PATH에 없으면 실패" '[ $rc = 1 ] && has "실패	brew PATH(hc 문맥)	$T/brew2 없음" && has "hc-core-relaunch w1"'
+WORKER_MAC_BREW_DIR=$T/nobrew check w1
+t "check: brew 폴더가 없는 기계는 해당 없음" 'has "통과	brew PATH(hc 문맥)	해당 없음: $T/nobrew 없음"'
+
+# ── hc-core-relaunch ──
+# 원격에 남긴 core-restart.sh를 가짜 로그인 셸로 직접 돌려, 코어 재시작이 로그인 환경에서 --fresh로 가는지 본다.
+newcfg; newhome
+w "$R/herdr-core" 'echo "herdr-core $* PATH=$PATH" >>"$T_LOG/core.log"; echo "{\"live\":0}"'
+w "$T/loginsh" '[ "$1" = -lc ] || exit 9; export PATH="/login/brew:$PATH"; exec /bin/sh -c "$2"'
+bash "$BIN/hc-core-relaunch" w1 >"$T/out" 2>&1; rc=$?
+t "relaunch: 원격에 한 번짜리 launchd 작업을 올림" '[ $rc = 0 ] && grep -q "^bootstrap gui/" "$T_LOG/launchctl.log"'
+: >"$T_LOG/core.log"
+(cd "$RHOME" && HOME=$RHOME SHELL=$T/loginsh PATH="$R:/usr/bin:/bin" bash "$RHOME/.local/state/core-restart.sh") >"$T/out" 2>&1; rc=$?
+t "relaunch: 로그인 셸 환경으로 server restart --fresh" '[ $rc = 0 ] && grep -q "^herdr-core server restart --fresh PATH=/login/brew:" "$T_LOG/core.log"'
+w "$R/herdr-core" 'echo "{\"live\":0}"'
 
 # ── worker-mac-setup ──
 newcfg; newhome
