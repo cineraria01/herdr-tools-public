@@ -34,11 +34,14 @@ usage() {
                 --start-wait <초>(이 호출만) 또는 설정 lane.start_wait초(기본 60, 0이면 이 단계를 끔. status를 내지 않는
                 명령·CLI는 0으로) 안에 hc get status가 안 잡히면 화면 끝에서 막힘 낱말을 찾아
                 한 줄로 알리고 종료 5 시작 안 됨(원인 모름·신뢰 질문·끝남), 6 로그인·인증 막힘, 7 키체인 막힘(터미널은 남긴다)
-       hc-lane clean [--on <기계>] [--dry-run] --repo <저장소 경로> (--branch <브랜치> | --name <레인>)
+       hc-lane clean [--on <기계>] [--dry-run] [--archive] --repo <저장소 경로> (--branch <브랜치> | --name <레인>)
   clean         착지한 레인의 워크트리·브랜치를 지운다: fetch 뒤 브랜치(와 워크트리 HEAD)가 origin/<기본>에
                 들어갔는지 → 추적 변경·무시되지 않은 untracked가 없는지(등록이 지워지고 폴더만 남았으면 저장소
                 .gitignore로) 확인하고, 하나라도 걸리면 아무것도 지우지 않고 멈춘다(종료 1) → .claude/herdr-teardown.sh
                 (있으면, 실패해도 계속) → worktree remove → 남은 무시 파일 폴더 삭제 → branch -d
+                --archive(명시할 때만): 다른 곳에서 rebase돼 착지해 안 들어간 것으로 보이는 가지도, 작업 폴더가 깨끗하면 안 들어간
+                커밋을 원격 refs/archive/<가지>-<sha8>에 push해 보관한 뒤 같은 절차로 지운다(가지는 보관한 값일 때만 지움).
+                push가 하나라도 실패하면 아무것도 지우지 않는다. 되살리기: git fetch origin refs/archive/<가지>-<sha8>
        hc-lane fetch [--on <기계>] --repo <저장소 경로> [<참조…>]
   fetch         그 기계 저장소에서 git fetch origin [<참조…>]. --on이면 hc exec로, zsh·~/.zshrc가 있으면 그걸 읽은 셸에서
                 (맨 ssh·hc 코어 환경에는 git 자격 도우미 PATH가 없다). 종료 0 받음, 1 실패
@@ -107,6 +110,10 @@ usage() {
                 쉰 지 lane.wait_busy_max분(기본 30)이 넘으면 멈춤. blocked·error·끝남은 바로. hc-sweep이 적은 「정리됨」은 그
                 터미널의 바로 앞 report가 착지·판정이고 그 turn+1 안이거나 같은 turn의 쉼으로 이미 알렸으면 버리고, 아니면
                 「뜻밖의 종료(정리됨) …」 멈춤(틈에 닫혀 목록에서 사라져도).
+                --read·hc-fill 레인(레인 기록 lanes.tsv 넷째 칸 read·fill)은 「완료」도 착지·판정처럼 마지막 보고다.
+                지휘가 hc kill로 닫은 레인(hc ls reason killed — parent가 없거나 아직 살아 있을 때만. parent가 끝나 함께 끝난 것은
+                그대로 알림)의 끝남은 알리지 않는다. 쉬는 레인은 그 작업 트리 경로가 명령 줄에 든 프로세스가 살아 있어도 바쁨으로 본다.
+                커서·보냄 열쇠는 기계 이름을 뺀 꼴(주소는 끝의 t…)이라 hc 기계 이름을 바꿔도 본 사건이 다시 안 나온다(옛 꼴 줄도 읽음).
                 hc ls가 3바퀴 이어 실패하면 「hc ls 실패 n바퀴」 멈춤 한 줄로 끝낸다.
                 못 읽은 기계의 레인은 그 바퀴에 blocked·error만 그대로, 쉼·끝남은 「연결 안 됨 <기계> <날짜>」(하루 한 번). 원격은 바퀴마다 기계당 한 번(쉬는 레인 확인만 그 터미널에 hc get·read)
 준비·정리 훅: .claude/herdr-setup.sh(환경 LANE_*: LANE_REPO=메인 폴더, LANE_BASE=기본 브랜치), .claude/herdr-teardown.sh
@@ -236,16 +243,31 @@ evread() {
 # Claude Code Bash 도구 셸 꼴 「/bin/zsh -c source …/.claude/shell-snapshots/snapshot-zsh-….sh …」)가 든 것이 살아 있나.
 # 0 있음(배경 작업 중), 1 없음, 2 모름(ps 실패). MCP 서버처럼 늘 사는 자손은 그 꼴이 아니라 세지 않는다.
 # ps는 기계마다 바퀴에 한 번(이 기계는 ps, 원격은 hc exec --on 한 번) 받아 psc(「<기계><탭><ps 줄>」)에 둔다 — stopped 한 번이 한 바퀴
-procbusy() {
+# psget <주소>: 그 기계(pm)의 ps를 바퀴에 한 번 psc에 받아 둔다. 0 있음, 2 모름(ps 실패)
+psget() {
   case $1 in */*) pm=${1%%/*} ;; *) pm=. ;; esac
   case " $psbad " in *" $pm "*) return 2 ;; esac
-  case " $psok " in *" $pm "*) ;; *)
-    if [ "$pm" = . ]; then o_=$(capt 20 ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null)
-    else o_=$(hc exec --on "$pm" --timeout 60 -- ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null); fi
-    if [ $? != 0 ] || [ -z "$o_" ]; then psbad="$psbad $pm"; return 2; fi
-    psc=$psc$(printf '\n%s' "$o_" | sed "s|^|$pm$tab|")
-    psok="$psok $pm" ;;
-  esac
+  case " $psok " in *" $pm "*) return 0 ;; esac
+  if [ "$pm" = . ]; then o_=$(capt 20 ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null)
+  else o_=$(hc exec --on "$pm" --timeout 60 -- ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null); fi
+  if [ $? != 0 ] || [ -z "$o_" ]; then psbad="$psbad $pm"; return 2; fi
+  psc=$psc$(printf '\n%s' "$o_" | sed "s|^|$pm$tab|")
+  psok="$psok $pm"
+}
+# wtbusy <주소> <cwd>: 레인 작업 트리(<…>.wt/<레인>) 경로가 명령 줄에 든 프로세스가 그 기계에 살아 있나(sweep-rename 6 — 배경 검증을
+# 기다리며 차례만 끝낸 레인이 「멈춤 done」으로 왔다. 터미널 자손이 아니어도 센다). 작업 트리가 아니거나 ps를 모르면 1(아님)
+# ponytail: 명령 줄만 본다(cwd로만 도는 프로세스는 안 보임 — lsof는 바퀴마다 무겁다). 레인 자신의 명령 줄에 그 경로가 있으면
+#           lane.wait_busy_max분까지 멈춤이 늦는다
+wtbusy() {
+  case $2 in /*/?*.wt/?*) ;; *) return 1 ;; esac
+  psget "$1" || return 1
+  printf '%s\n' "$psc" | M=$pm C=${2%/} LC_ALL=C awk -F'\t' '$1 == ENVIRON["M"] { c = substr($0, length($1) + 2)
+      sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]*/, "", c); c = c " "
+      if (index(c, ENVIRON["C"] "/") || index(c, ENVIRON["C"] " ")) { f = 1; exit } }
+    END { exit !f }'
+}
+procbusy() {
+  psget "$1" || return 2
   printf '%s\n' "$psc" | M=$pm P=$2 W=$wprocs LC_ALL=C awk -F'\t' '
     $1 == ENVIRON["M"] { r = substr($0, length($1) + 2); n = split(r, f, " "); if (n < 2) next
       c = r; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]*/, "", c); par[f[1]] = f[2]; cmd[f[1]] = c }
@@ -258,16 +280,49 @@ procbusy() {
       }
       exit 1 }'
 }
+# pnorm <레인 주소> <parent>: 이 기계에서 물을 parent 주소(pq_ — palive가 machine_unknown일 때만 부름). parent는 그 레인 기계가 부르는 이름이다(3차 감사 [중간] N1):
+# 「<기계>/t…」의 앞부분이 hc machine ls에 없는 이름(= 이 기계 자신)이면 떼어 로컬로, 원격 레인의 접두 없는 parent는 그 레인 기계를 붙인다.
+# hc machine ls가 실패하면 그대로(못 풀면 살아 있지 않음 = 알림 쪽)
+pnorm() {
+  pq_=$2
+  case $pq_ in
+    */*) [ -n "${mls_-}" ] || if mj_=$(capt 20 hc machine ls --json </dev/null 2>/dev/null) && printf '%s' "$mj_" | grep -q '"machines"'
+         then mls_=" $(printf '%s\n' "$mj_" | jrec name state | cut -f1 | tr '\n' ' ') "; else mls_=fail; fi
+         [ "$mls_" = fail ] || case $mls_ in *" ${pq_%%/*} "*) ;; *) pq_=${pq_#*/} ;; esac ;;
+    *) case $1 in */*) pq_=${1%%/*}/$pq_ ;; esac ;;
+  esac
+}
+# plive <주소>: 그 터미널(레인의 parent)이 지금 살아 있나. 바퀴(stopped 한 번)마다 주소당 hc get 한 번(pl_에 「주소=0|1|3」).
+# 0 살아 있음, 3 그 주소의 기계를 모름(machine_unknown — 이 기계 자신의 이름이 붙은 주소), 1 그 밖(끝남·없음·모름)
+plive() {
+  case " $pl_ " in *" $1=0 "*) return 0 ;; *" $1=1 "*) return 1 ;; *" $1=3 "*) return 3 ;; esac
+  g_=$(capt 10 hc get "$1" --json </dev/null 2>&1)
+  if printf '%s\n' "$g_" | sed 's/"foreground" *: *{[^}]*}//; s/"status" *: *{[^}]*}//' | grep -q '"state" *: *"live"'; then pl_="$pl_ $1=0"; return 0
+  elif printf '%s\n' "$g_" | grep -q 'machine_unknown'; then pl_="$pl_ $1=3"; return 3; fi
+  pl_="$pl_ $1=1"; return 1
+}
+# palive <레인 주소> <parent>: parent를 그대로 먼저 묻고(들어온 연결의 상대는 machine ls에 없어도 그대로 풀린다 — 3차 감사 [낮음] L1),
+# machine_unknown일 때만 pnorm으로 앞부분을 떼고 다시 묻는다. 원격 레인의 접두 없는 parent는 그 레인 기계를 붙여 묻는다
+palive() {
+  case $2 in */*) ;; *) case $1 in */*) plive "${1%%/*}/$2"; return $? ;; esac ;; esac
+  plive "$2"; r_=$?
+  [ $r_ = 3 ] || return $r_
+  pnorm "$1" "$2"; [ "$pq_" != "$2" ] || return 1
+  plive "$pq_"
+}
 resting() {
   g_=$(capt 10 hc get "$1" --json </dev/null 2>/dev/null)
   sm=$(printf '%s\n' "$g_" | sed -n 's/.*"status_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
   [ -n "$sm" ] || return 0
-  r=$(grep -F -- "#rest$tab$2$tab" "$cur" 2>/dev/null | tail -n 1); r=${r##*"$tab"}
+  # 옛 꼴(기계 이름 든 주소) #rest 줄도 nk로 견준다(재감사 [낮음] 3)
+  r=$(LC_ALL=C K=$2 awk -F'\t' "$nkf"'$1 == "#rest" && NF >= 3 { k = $2; for (i = 3; i < NF; i++) k = k "\t" $i; if (nk(k) == ENVIRON["K"]) r = $NF } END { print r }' "$cur" 2>/dev/null)
   case $r in ''|*[!0-9]*) printf '#rest\t%s\t%s\n' "$2" "$sm" >>"$cur"; r=$sm ;; esac
   [ "$sm" -ge "$r" ] || r=$sm
   ag=$(($(date +%s) - r / 1000))
   [ $ag -ge $((wgrace * 60)) ] || return 1
   [ $ag -lt $((wbmax * 60)) ] || return 0
+  # 작업 트리 아래 배경 실행(터미널 자손이 아니어도)이 살아 있으면 바쁨(sweep-rename 6). lane.wait_procs가 빈 값이면 프로세스 판정과 함께 끔
+  [ -z "$wprocs" ] || ! wtbusy "$1" "${3-}" || return 1
   # 터미널 프로그램 pid로 프로세스 판정: 배경 셸이 있으면 바쁨. 없거나 모르면(pid 없음·1 이하·ps 실패) 화면 판정도 본다
   # (셸 없는 배경 작업 — 배경 Agent 등 — 은 화면 표시로만 보인다. 감사 [낮음] 4). 맨 위 "pid"는 foreground 뒤라 마지막 것을
   # 쓴다(맨 위가 null이면 foreground.pid — 터미널 프로그램 자신이거나 그 자손이라 Bash 셸은 여전히 그 아래다)
@@ -287,7 +342,8 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
   psc= psok= psbad=
   [ "$lsok" = 1 ] || { echo "hc-lane wait: hc ls 실패 — 이번 바퀴는 멈춘 레인을 못 봤다" >&2; echo '#hc-ls-fail'; return 0; }
   me=${HC_LANE_MACHINE:-$(hostname -s 2>/dev/null)}
-  printf '%s\n' "$tl" | jrec address name state status turn parent | while IFS=$tab read -r a nm s ss tn pa; do
+  km_=$(lkinds) pl_= mls_=
+  printf '%s\n' "$tl" | jrec address name state status turn parent reason cwd | while IFS=$tab read -r a nm s ss tn pa rs cw; do
     mine "$pa" || continue
     # uk=1: 이번 바퀴에 그 기계 events를 못 읽음(모름·hc machine ls 실패). blocked·error는 사건과 상관없이 알리고,
     # 사건이 있어야 하는 판정(쉼·끝남)은 「연결 안 됨 <기계> <날짜>」로 바꿔 레인마다 하루 한 번 알린다(다음 바퀴엔 다시 정상 판정)
@@ -308,10 +364,25 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
     # 끝남: 착지·판정 그 턴(report turn+1 이하. turn을 모르면 알림 — 놓치는 것보다 거짓 알림 한 번)이면 알리지 않고, 아니면(완료 — 착지 전 감사 기다림, 막힘,
     # 중간, report 없음, 착지·판정 뒤 이어 받은 일) 뜻밖의 종료. hc-sweep 정리 뒤면 그 정리됨 사건이 판정한다(아래 wait 거름).
     # lane.notify no면 hc가 지휘에 종료를 알리지 않으니 이것이 유일한 알림
-    if [ "$s" != live ]; then [ "$sw" = 1 ] || case $last in
-        착지|판정) case $lt$tn in *[!0-9]*|'') why="뜻밖의 종료($s)" ;; *) [ "$tn" -le $((lt + 1)) ] || why="뜻밖의 종료($s)" ;; esac ;;
+    # 마지막 보고: 착지·판정, --read·hc-fill 레인(레인 기록 넷째 칸 read·fill)은 완료도(sweep-rename 5). 지휘가 hc kill로 닫은 것
+    # (reason killed)은 일부러 닫은 것이라 알리지 않는다 — hc-sweep이 닫은 것은 정리됨 사건이 판정한다
+    fin=' 착지 판정 '
+    case $(printf '%s\n' "$km_" | A=${a##*/} N=$nm awk -F'\t' '$1 == ENVIRON["A"] && $2 == ENVIRON["N"] { k = $3 } END { print k }') in
+      read|fill) fin=' 착지 판정 완료 ' ;;
+    esac
+    # killed가 지휘의 hc kill인지: parent가 없거나(hc-fill 레인) 아직 살아 있을 때만. parent가 끝났거나 없어졌거나 모르면
+    # die_with_parent로 함께 끝난 것이라 알린다(재감사 [중간] M1 — 지휘 칸이 죽어 함께 killed된 구현 레인을 놓쳤다)
+    if [ "$s" != live ]; then [ "$sw" = 1 ] || case $fin in
+        *" $last "*) case $lt$tn in *[!0-9]*|'') why="뜻밖의 종료($s)" ;; *) [ "$tn" -le $((lt + 1)) ] || why="뜻밖의 종료($s)" ;; esac ;;
         *) why="뜻밖의 종료($s)" ;;
       esac
+      kq=0; [ -z "$why" ] || [ "$rs" != killed ] || case $pa in ''|-) kq=1 ;; *) ! palive "$a" "$pa" || kq=1 ;; esac
+      # 조용히 넘긴 killed는 커서(watch는 sent도)에 그 멈춤 열쇠로 적는다: 지휘가 끝난 뒤 다음 판정에서 parent가 죽어 다시 오지 않게(3차 [낮음] 1)
+      if [ $kq = 1 ]; then
+        k_="멈춤$tab${a##*/}$tab$(flat "$nm")$tab$why turn $tn"
+        inseen "$k_" "$cur" $wsf || { printf '%s\n' "$k_" >>"$cur"; [ -z "$wsf" ] || printf '%s\n' "$k_" >>"$wsf"; }
+        why=
+      fi
     else case $ss in
         blocked|error) why=$ss ;;
         done|idle) case $last in
@@ -324,9 +395,9 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
     case $uk$why in 1blocked|1error|0*) ;; *) why="연결 안 됨 $mn $(date -u +%Y-%m-%d)" ;; esac
     case $why in done|idle)
       # 이미 알린 쉼(열쇠는 evkey와 같은 꼴)은 다시 볼 것 없다 — 바퀴마다 원격 hc get·read를 부르지 않게
-      k_="멈춤$tab$a$tab$(flat "$nm")${tab}쉼 turn $tn"
-      ! grep -Fxq -- "$k_" "$cur" $wsf 2>/dev/null || continue
-      { [ "$wgrace" = 0 ] && [ -z "$wbusy$wprocs" ]; } || resting "$a" "$k_" || continue ;;
+      k_="멈춤$tab${a##*/}$tab$(flat "$nm")${tab}쉼 turn $tn"
+      ! inseen "$k_" "$cur" $wsf || continue
+      { [ "$wgrace" = 0 ] && [ -z "$wbusy$wprocs" ]; } || resting "$a" "$k_" "$cw" || continue ;;
     esac
     printf '%s\t%s\t%s\t%s\t멈춤\t-\t%s turn %s\n' "$(utc)" "$mn" "$a" "$(flat "$nm")" "$why" "$tn"
   done
@@ -335,6 +406,17 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
 # done·idle은 「쉼」으로 묶는다(같은 turn에서 done→idle로 바뀌어도 두 번 알리지 않게)
 # 사건 awk는 LC_ALL=C로 돈다: macOS awk는 UTF-8 로캘에서 문자열 비교가 strcoll이라 "착지" == "멈춤"이 참이었다
 # (같은 한 줄의 완료→착지가 삼켜지고 --state 한 상태 거름이 꺼짐 — wait-grace 레인에서 발견해 함께 고침)
+# nk <열쇠>: 기계 이름을 뺀 열쇠(sweep-rename 2 — hc 기계 이름을 바꾸면 원격 사건의 기계·주소 칸이 새 이름으로 읽혀 이미 본
+# 사건이 다시 쏟아졌다). 보통 줄은 기계 칸을 *로, 주소 칸은 끝의 t…만, 멈춤 열쇠는 주소 칸만. 옛 판이 적은 커서 줄(기계 이름이 든
+# 그대로)도 이것으로 읽어 같은 사건으로 본다. 이미 바꾼 열쇠에 다시 써도 그대로(#since·#rest 줄도 그대로)
+# ponytail: 다른 기계의 같은 t 주소·같은 레인 이름·같은 시각(초)·같은 내용 사건은 하나로 친다 — 레인 이름이 겹치면 기계 칸을 되살린다
+nkf='function nk(l,  f, n, i, o) { n = split(l, f, "\t")
+  if (f[1] == "멈춤" && n == 4) { sub(/^.*\//, "", f[2]); return "멈춤\t" f[2] "\t" f[3] "\t" f[4] }
+  if (n < 7 || f[1] ~ /^#/) return l
+  sub(/^.*\//, "", f[3]); o = f[1] "\t*"; for (i = 3; i <= n; i++) o = o "\t" f[i]; return o }
+'
+# inseen <열쇠> <커서 파일…>: 그 파일들에 같은 사건(nk로 견줌 — 옛 꼴 줄 포함)이 있으면 0
+inseen() { k__=$1; shift; LC_ALL=C K=$k__ awk "$nkf"'nk($0) == ENVIRON["K"] { f = 1; exit } END { exit !f }' "$@" 2>/dev/null; }
 evkey='function key(  w) { if ($5 != "멈춤") return $0; w = $7; sub(/^(done|idle) /, "쉼 ", w); return "멈춤\t" $3 "\t" $4 "\t" w }'
 # lrep <상태> <sha> <turn> [<열쇠>]: 레인(열쇠)의 마지막 report를 lst·ltn에. 착지 뒤 같은 sha의 완료가 같은 턴(같은 turn 값)에
 # 오면 착지 그대로 두고 turn만 그 완료의 것으로(레인 틀이 착지 뒤 같은 sha 완료를 한 번 더 적는 꼴 — 2026-11-16 실측 「뜻밖의 종료」).
@@ -479,18 +561,20 @@ ev_cmd() {
     # ponytail: 앞 report는 바퀴마다 보는 끝 500줄 안에서 찾는다 — 못 찾으면 알리는 쪽
     # 착지·판정 뒤라도 정리됨 turn이 그 report turn+1보다 뒤면(이어 받은 일) 또는 turn을 모르면 알린다. 같은 turn의 쉼으로 이미 알린 레인은 다시 안 알림.
     # parent 거름(PM: 「주소<탭>parent」 줄)은 찍을지에만 쓴다 — 마지막 report 추적은 모든 줄로
-    new=$(printf '%s\n' "$cand" | grep "$tab" | F=$cur SF=$wsf S=$since W=",$sts," PM=$pmap MY=$myp LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey$landed"'
-      BEGIN { fl = ""; while ((getline l < ENVIRON["F"]) > 0) { if (l ~ /^#since\t/) fl = substr(l, 8); else seen[l] = 1 }
-              if (ENVIRON["SF"] != "") while ((getline l < ENVIRON["SF"]) > 0) seen[l] = 1
+    new=$(printf '%s\n' "$cand" | grep "$tab" | KM=$(lkinds) F=$cur SF=$wsf S=$since W=",$sts," PM=$pmap MY=$myp LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey$nkf$landed"'
+      BEGIN { fl = ""; while ((getline l < ENVIRON["F"]) > 0) { if (l ~ /^#since\t/) fl = substr(l, 8); else seen[nk(l)] = 1 }
+              if (ENVIRON["SF"] != "") while ((getline l < ENVIRON["SF"]) > 0) seen[nk(l)] = 1
+              nk_ = split(ENVIRON["KM"], kl, "\n"); for (i = 1; i <= nk_; i++) { split(kl[i], kf, "\t"); if (kf[1] != "") kind[kf[1] SUBSEP kf[2]] = kf[3] }
               np = split(ENVIRON["PM"], pl, "\n"); for (i = 1; i <= np; i++) { split(pl[i], pf, "\t"); if (pf[1] != "") par[pf[1]] = pf[2] } }
       function num(x) { return x ~ /^[0-9]+$/ }
       { t2 = $3 SUBSEP $4 }
-      $5 == "정리됨" { if ((lst[t2] == "착지" || lst[t2] == "판정") && num($8) && num(ltn[t2]) && $8 + 0 <= ltn[t2] + 1) next
-        if (("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
+      $5 == "정리됨" { a3 = $3; sub(/^.*\//, "", a3)
+        if ((lst[t2] == "착지" || lst[t2] == "판정" || (lst[t2] == "완료" && kind[a3 SUBSEP $4] ~ /^(read|fill)$/)) && num($8) && num(ltn[t2]) && $8 + 0 <= ltn[t2] + 1) next
+        if (nk("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
         $5 = "멈춤"; $6 = "-"; $7 = "뜻밖의 종료(정리됨) " $7 }
       $5 != "멈춤" { lrep($5, $6, NF >= 8 ? $8 : "-", t2) }
       ENVIRON["MY"] != "" && ($3 in par) && par[$3] != "-" && par[$3] != ENVIRON["MY"] && substr(par[$3], length(par[$3]) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"] { next }
-      $1 >= ENVIRON["S"] && $1 >= fl && (ENVIRON["W"] == ",," || index(ENVIRON["W"], "," $5 ",")) && !(key() in seen) && !(key() in done) { done[key()] = 1; print }' |
+      $1 >= ENVIRON["S"] && $1 >= fl && (ENVIRON["W"] == ",," || index(ENVIRON["W"], "," $5 ",")) && !(nk(key()) in seen) && !(nk(key()) in done) { done[nk(key())] = 1; print }' |
       sort -s -t "$tab" -k1,1)
     if [ -n "$new" ] && emit "$new"; then [ $ec = watch ] || return 0; idle0=$(date +%s); fi
     [ $ec = watch ] || [ "$(date +%s)" -lt $end ] || { echo "hc-lane wait: ${to}분 동안 새 사건 없음" >&2; return 75; }
@@ -510,7 +594,7 @@ emit() {
       END { print "hc-lane: " o }' | LC_ALL=C tr -d '\000-\037\177')   # 제어 문자(ESC·Ctrl-C 등)는 지휘 입력에 넣지 않는다
     wsend "$m_" || return 1
   fi
-  k_=$(printf '%s\n' "$1" | LC_ALL=C awk -F'\t' "$evkey"'{ print key() }')
+  k_=$(printf '%s\n' "$1" | LC_ALL=C awk -F'\t' "$evkey$nkf"'{ print nk(key()) }')
   printf '%s\n' "$k_" >>"$cur" || die "$ec: 커서 파일을 쓰지 못했다"
   # 「보냄」 표시(<evdir>/sent)는 watch만 쓴다 — 사건 하나에 한 번, 주인 watch가 보냈으면 끝(4차 [중간] 1). 끌어오는 wait는
   # 자기 커서만: 남의 지휘 wait가 본 사건도 주인 watch는 보낸다(5차 [중간] 1 — wait가 sent에 적어 주인이 못 보냈다)
@@ -550,13 +634,15 @@ wfilter() {
 # wait로 받은 사건을 다시 보냈다). 옛 주인 = 레인 기록의 그 레인 지휘들과 지금 owner 가운데 이 watch가 아닌 것(seen 파일이 없으면 sent만).
 # 있으면 0 — 받은 것으로 치고 이 watch 커서에도 적어 다음 바퀴에 다시 거르지 않는다
 prevseen() {
-  k_=$(printf '%s\n' "$2" | LC_ALL=C awk -F'\t' "$evkey"'{ print key() }')
+  k_=$(printf '%s\n' "$2" | LC_ALL=C awk -F'\t' "$evkey$nkf"'{ print nk(key()) }')
   for p_ in $( { awk -F'\t' -v a="$1" '$1 == a { print $3 }' "$evdir/lanes.tsv" 2>/dev/null; echo "$3"; } | sed 's|.*/||' | sort -u); do
     [ "$p_" != - ] && [ "$p_" != "$w0_" ] || continue
-    if grep -Fxq -- "$k_" "$evdir/seen.$(ckey "$p_")" 2>/dev/null; then printf '%s\n' "$k_" >>"$cur"; return 0; fi
+    if inseen "$k_" "$evdir/seen.$(ckey "$p_")"; then printf '%s\n' "$k_" >>"$cur"; return 0; fi
   done
   return 1
 }
+# lkinds: 레인 기록에서 「주소(끝의 t…)<탭>레인<탭>종류」(넷째 칸 read·fill이 있는 줄만). 구현 레인 줄은 3칸 그대로
+lkinds() { awk -F'\t' 'NF >= 4 && ($4 == "read" || $4 == "fill") { a = $1; sub(/^.*\//, "", a); print a "\t" $2 "\t" $4 }' "$evdir/lanes.tsv" 2>/dev/null; }
 # owner <레인 주소>: 그 레인을 띄운 지휘 — 레인 기록(<evdir>/lanes.tsv, hc-lane이 띄울 때 적음)의 마지막 줄, 없으면 hc ls parent,
 # 없으면 -. <기계>/t… 꼴은 끝의 t…(watch·지휘 정보는 지휘 기계 것이다).
 # ponytail: 다른 기계 지휘의 parent가 이 기계 지휘와 같은 t 이름이면 섞인다 — 잦으면 기계 이름까지 맞춘다
@@ -668,7 +754,7 @@ case ${1-} in
   coord) coord_default; c_=$?; [ $c_ = 0 ] && { echo "$cad_"; exit 0; }; echo "hc-lane coord: 지휘 없음 — $cwhy" >&2; exit 1 ;;
 esac
 
-on= read=0 branch= dry=0 steps=0 name= repo= cmd=launch lbase= act= integ= minage= brief= swarg= rb=0
+on= read=0 archive=0 branch= dry=0 steps=0 name= repo= cmd=launch lbase= act= integ= minage= brief= swarg= rb=0
 case ${1-} in
   clean) cmd=clean; shift ;;
   fetch) cmd=fetch; shift ;;
@@ -691,6 +777,7 @@ while [ $# -gt 0 ]; do
     --integ=*) integ=${1#--integ=}; [ -n "$integ" ] || die "--integ= 뒤에 접두가 없다"; shift ;;
     --min-age) val "$@"; minage=$2; shift 2 ;;
     --remote-branches) rb=1; shift ;;
+    --archive) archive=1; shift ;;
     -h|--help) usage ;;
     --) shift; break ;;
     -*) die "알 수 없는 인자: $1" ;;
@@ -730,6 +817,7 @@ elif [ $cmd = guard ]; then
 else
   [ -n "$name" ] && [ -n "$repo" ] || usage
 fi
+[ $cmd = clean ] || [ $archive = 0 ] || die "--archive는 clean에서만 쓴다"
 [ $cmd = gc ] || { [ -z "$integ$minage" ] && [ $rb = 0 ]; } || die "--integ·--min-age·--remote-branches는 gc에서만 쓴다"
 case $name in *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) die "--name은 a-z 0-9 - _ 만 쓴다(hc 규칙): $name" ;; esac
 [ ${#name} -le 32 ] || die "--name은 32자까지: $name"
@@ -1044,11 +1132,20 @@ clean_cmd() {
     [ -n "$h" ] || stop "워크트리 HEAD를 읽지 못했다: $wt"
     set -- "$@" "$h"
   fi
+  arch= btip=
+  [ $br = 0 ] || btip=$(x git -C "$repo" rev-parse -q --verify "refs/heads/$branch^{commit}") || stop "브랜치를 읽지 못했다: $branch"
   for c in "$@"; do
     case $c in refs/heads/*) lab="브랜치 $branch" ;; *) lab="워크트리 HEAD $(printf %.12s "$c")" ;; esac
-    x git -C "$repo" merge-base --is-ancestor "$c" "$bref" ||
-      stop "$lab 이(가) $blab 에 들어가지 않았다(착지 전이거나 다른 커밋). 착지 절차의 hc-lane land부터 다시 한다" \
-        "$(x git -C "$repo" log --oneline -n 10 "$bref..$c")"
+    x git -C "$repo" merge-base --is-ancestor "$c" "$bref"; ia=$?
+    [ $ia != 0 ] || continue
+    if [ $ia = 1 ] && [ $archive = 1 ]; then   # 보관할 커밋(안 들어간 끝 커밋)으로 모은다 — 지우기 전 확인을 다 거친 뒤 push
+      [ $remote = 1 ] || stop "원격(origin)이 없어 --archive로 보관할 수 없다: $repo"
+      s_=$(x git -C "$repo" rev-parse -q --verify "$c^{commit}") || stop "커밋을 읽지 못했다: $lab"
+      case " $arch " in *" $s_ "*) ;; *) arch="$arch $s_" ;; esac
+      continue
+    fi
+    stop "$lab 이(가) $blab 에 들어가지 않았다(착지 전이거나 다른 커밋). 착지 절차의 hc-lane land부터 다시 한다(다른 곳에서 rebase돼 착지했으면 --archive)" \
+      "$(x git -C "$repo" log --oneline -n 10 "$bref..$c")"
   done
 
   # 2) 지울 폴더에 추적 변경·무시되지 않은 untracked가 없는지(status.showUntrackedFiles 설정과 무관하게 모두 본다)
@@ -1060,6 +1157,14 @@ clean_cmd() {
   elif [ $dir = 1 ]; then
     left_check "등록이 지워진"
   fi
+
+  # 2.5) --archive: 안 들어간 커밋을 원격 refs/archive/<가지>-<sha8>에 보관(sweep-rename 4). 하나라도 실패하면 아무것도 지우지 않는다
+  for s_ in $arch; do
+    ar=refs/archive/$branch-$(printf %.8s "$s_")
+    if [ $dry = 1 ]; then echo "[dry-run] git -C $(q "$repo") push origin $s_:$ar"; continue; fi
+    zx "$repo" git push -q origin "$s_:$ar" >&2 || stop "보관 push 실패: $ar ($s_)"
+    echo "보관 $ar ($s_) — 되살리기: git fetch origin $ar"
+  done
 
   # 3) teardown(있으면, 실패해도 계속 — herdr-teardown.sh의 약속) → worktree remove → 남은 무시 파일 폴더 → branch -d
   if [ $reg = 1 ] && [ $dir = 1 ] && x test -f "$wt/.claude/herdr-teardown.sh"; then
@@ -1091,7 +1196,9 @@ clean_cmd() {
   if [ $br = 1 ]; then
     if [ $dry = 1 ]; then echo "[dry-run] git -C $(q "$repo") branch -d $branch"
     else
-      x git -C "$repo" branch -q -d "$branch" >&2 || stop "git branch -d 실패: $branch"
+      if [ -n "$arch" ]; then   # 보관했으니 병합 여부 대신 보관한 값 그대로일 때만 지운다
+        x git -C "$repo" update-ref -d "refs/heads/$branch" "$btip" >&2 || stop "브랜치를 지우지 못했다(보관 뒤 값이 바뀌었나?): $branch"
+      else x git -C "$repo" branch -q -d "$branch" >&2 || stop "git branch -d 실패: $branch"; fi
       did="${did:+$did, }브랜치 삭제"
     fi
   fi
@@ -1441,7 +1548,9 @@ else
   # 레인 기록: 이 레인을 띄운 지휘(지휘 터미널에서 띄웠을 때만. hc-fill·터미널 밖·레인이 띄운 레인은 - — 사건은 coord_default로)
   lo_=-
   if [ -z "${HC_LANE_COORD-}" ] && [ -n "${HC_TERMINAL_ID-}" ] && coord_set "$HC_TERMINAL_ID" launch; then lo_=$HC_TERMINAL_ID; fi
-  [ -z "$addr" ] || { mkdir -p "$evdir" && printf '%s\t%s\t%s\n' "$addr" "$name" "$lo_" >>"$evdir/lanes.tsv"; } ||
+  # 넷째 칸 종류: read(--read)·fill(hc-fill이 HC_LANE_FILL=1로 띄움 — HC_LANE_COORD는 물려받을 수 있어 표시로 안 씀, 재감사 [낮음] 4). 이 둘은 「완료」가 마지막 보고다(wait의 끝남 판정). 구현 레인은 3칸
+  lk_=; if [ $read = 1 ]; then lk_=read; elif [ "${HC_LANE_FILL-}" = 1 ]; then lk_=fill; fi
+  [ -z "$addr" ] || { mkdir -p "$evdir" && printf '%s\t%s\t%s%s\n' "$addr" "$name" "$lo_" "${lk_:+$tab$lk_}" >>"$evdir/lanes.tsv"; } ||
     echo "hc-lane: 레인 기록을 쓰지 못했다: $evdir/lanes.tsv" >&2
   auto_watch
   if [ $read = 1 ]; then read_steps; else print_steps; fi

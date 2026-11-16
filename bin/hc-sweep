@@ -9,11 +9,14 @@ hc-sweep --self-test  가짜 기록으로 규칙 판정 확인(hc를 부르지 �
 닫지 않음: 이름에 loop, -proxy로 끝남, hc-lane 감시(이름 lane-watch-* 또는 라벨 hc-lane-watch=1 — 스스로 끝난다),
 ~/.claude-tasks/keep(한 줄에 이름·주소 하나),
 사람이 연 칸(parent 없는 where 라벨 칸, 또는 터미널 자체 프로그램이 셸 — kill하면 칸이 사라진다).
-where 라벨이 있어도 parent가 있으면 지휘가 띄운 worker다(herdr-balance가 붙이며 라벨을 단다).
-R1 안 쓴 세션: parent 없음, turn 0, 시작부터 줄곧 idle(status_ms-created_ms<60초), 만든 지 30분 이상
-R2 일 끝난 worker: parent 있음, 마지막 상태 변화(status_ms)로부터 30분 이상. 단 다음이면 닫지 않는다
+worker = parent가 있거나 라벨 hc-lane=1(hc-fill이 띄운 레인은 parent가 없다 — 2026-11-17 원격 레인이 몇 시간 남음).
+where 라벨이 있어도 worker면 닫을 수 있다(herdr-balance가 붙이며 라벨을 단다).
+R1 안 쓴 세션: worker 아님, turn 0, 시작부터 줄곧 idle(status_ms-created_ms<60초), 만든 지 30분 이상
+R2 일 끝난 worker: 마지막 상태 변화(status_ms)로부터 30분 이상. 단 다음이면 닫지 않는다
    (a) cwd가 git 작업 트리이고 git cherry origin/main HEAD에 + 커밋이 있음(착지 전 레인, fetch 안 함)
    (b) 화면 마지막 줄들에 배경 실행 흔적(BUSY: "still running", 상태 줄 "· N shell(s)"·"· N monitor(s)")
+   (c) 이 기계 hc-fill 대기열(${HC_FILL_DATA:-~/.local/share/hc-fill}/queue.tsv)에 같은 이름·주소의 받은편지 레인이
+       아직 「떠 있음」(up — 결과를 요청한 기계에 되돌려 주기 전). 되돌려 줌(sent)·손으로 넣은 줄은 보통 판정
 R2·R3 공통 보호: cwd가 아직 있는 링크된 git 워크트리(그 폴더나 위 폴더의 .git이 파일)면 닫지 않는다.
    레인은 착지 뒤 hc-lane clean으로 워크트리를 지우니, 남아 있으면 일이 안 끝났다. git을 부르지 않는다.
 판정은 모두 fail-closed: 예외·시간 초과·읽기 실패·모르는 값은 「닫지 않음」이다.
@@ -71,24 +74,30 @@ def is_shell_pane(argv):
             and all(a.startswith("-") and (a.startswith("--") or "c" not in a) for a in args))
 
 
+def is_worker(t):
+    """지휘가 띄운 worker(parent 있음) 또는 hc-lane 레인(라벨 hc-lane=1 — hc-fill 레인은 parent가 없다)."""
+    return bool(t.get("parent")) or (t.get("labels") or {}).get("hc-lane") == "1"
+
+
 def rule(t, now, keep):
     """닫을 규칙(R1·R2·R3) 또는 None."""
     status = t.get("status")
     name = t.get("name") or ""
+    worker = is_worker(t)
     if (t.get("state") != "live" or "/" in t["address"] or not isinstance(status, dict)
             or not status.get("app") or status.get("state") not in ("idle", "done")
             or "loop" in name or name.endswith("-proxy") or name in keep or t["address"] in keep
             or name.startswith("lane-watch-") or (t.get("labels") or {}).get("hc-lane-watch") == "1"
-            or ((t.get("where") or (t.get("labels") or {}).get("where")) and not t.get("parent"))
+            or ((t.get("where") or (t.get("labels") or {}).get("where")) and not worker)
             or t.get("shell")):
         return None
     created = t.get("created_ms") or now
     changed = t.get("status_ms") or now
-    if not t.get("parent") and t.get("turn") == 0 and changed - created < MIN and now - created >= 30 * MIN:
+    if not worker and t.get("turn") == 0 and changed - created < MIN and now - created >= 30 * MIN:
         return "R1"
     if t.get("worktree") is not False:  # 남은 워크트리이거나 모름
         return None
-    if (t.get("parent") and now - changed >= 30 * MIN and t.get("unlanded") is False
+    if (worker and now - changed >= 30 * MIN and t.get("unlanded") is False and t.get("fill") != "up"
             and isinstance(t.get("tail"), str) and not BUSY.search(t["tail"])):
         return "R2"
     if now - changed >= 6 * 60 * MIN:
@@ -119,6 +128,23 @@ def linked_worktree(cwd):
         if d == "/":
             return False
         d = os.path.dirname(d)
+
+
+def fill_state(name, address, path=None):
+    """hc-fill 대기열에서 이 이름·주소의 받은편지 레인 상태(up·sent 등). 줄이 없거나 되돌릴 곳(11째 칸)이 없으면 None.
+    파일이 있는데 못 읽으면 "up"(닫지 않는 쪽)."""
+    path = path or os.path.join(os.environ.get("HC_FILL_DATA") or os.path.expanduser("~/.local/share/hc-fill"), "queue.tsv")
+    try:
+        with open(path) as f:
+            rows = [line.rstrip("\n").split("\t") for line in f]
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError):
+        return "up"
+    for r in rows:
+        if len(r) >= 11 and r[0] == name and r[7] == address and r[10] not in ("", "-"):
+            return r[5]
+    return None
 
 
 def unlanded(cwd, run=subprocess.run):
@@ -503,7 +529,34 @@ def self_test():
         assert rule(x, now, keep) is None, missing
     assert rule(t(**dict(lane, tail=None)), now, keep) is None
     assert rule(t(turn=None), now, keep) is None  # turn 모름이면 R1 아님
+    # hc-fill이 띄운 레인: parent 없음 + 라벨 hc-lane=1(where 라벨이 붙어도) → worker로 R2 (2026-11-17 원격 레인이 몇 시간 남음)
+    fill = dict(parent=None, turn=5, status=done, status_ms=now - 31 * MIN, labels={"hc-lane": "1"})
+    assert rule(t(**fill), now, keep) == "R2"
+    assert rule(t(**dict(fill, labels={"hc-lane": "1", "where": "proj / Claude Code"})), now, keep) == "R2"
+    assert rule(t(**dict(fill, worktree=True)), now, keep) is None
+    assert rule(t(**dict(fill, unlanded=True)), now, keep) is None
+    assert rule(t(**dict(fill, tail="⎿ 1 monitor still running")), now, keep) is None
+    assert rule(t(**dict(fill, fill="up")), now, keep) is None  # hc-fill이 아직 결과를 안 되돌려 줌
+    assert rule(t(**dict(fill, fill="sent")), now, keep) == "R2"
+    assert rule(t(**dict(fill, turn=0, status_ms=now - 3 * h + 500)), now, keep) == "R2"  # 레인은 R1(안 쓴 세션) 아님
     import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        q = os.path.join(root, "queue.tsv")
+        assert fill_state("x", "t5", q) is None  # 대기열 없음
+        with open(q, "w") as f:
+            f.write("x\tp\t/b\t-\t-\tup\tm\tt5\t-\t2026\tmini:/in/done/x.md\n"
+                    "y\tp\t/b\t-\t-\tsent\tm\tt6\t-\t2026\tmini:/in/done/y.md\n"
+                    "z\tp\t/b\t-\t-\tup\tm\tt7\t-\t2026\t-\n"
+                    "o\tp\t/b\t-\t-\tup\tm\tt8\t-\t2026\n")
+        assert fill_state("x", "t5", q) == "up"
+        assert fill_state("x", "t9", q) is None  # 다른 주소(같은 이름의 옛 줄)
+        assert fill_state("y", "t6", q) == "sent"
+        assert fill_state("z", "t7", q) is None and fill_state("o", "t8", q) is None  # 되돌릴 곳 없는 줄(손으로 넣은 것)
+        os.chmod(q, 0)
+        try:
+            assert fill_state("x", "t5", q) == "up"  # 못 읽으면 닫지 않는 쪽
+        finally:
+            os.chmod(q, 0o644)
     with tempfile.TemporaryDirectory() as root:
         root = os.path.realpath(root)
         main, wt = os.path.join(root, "repo"), os.path.join(root, "repo.wt", "lane")
@@ -615,9 +668,10 @@ def main():
         except RuntimeError:
             continue
         t["worktree"] = linked_worktree(t.get("cwd"))
-        if t.get("parent") and not t["worktree"]:  # R2 보호에만 쓴다
+        if is_worker(t) and not t["worktree"]:  # R2 보호에만 쓴다
             t["unlanded"] = unlanded(t.get("cwd"))
             t["tail"] = screen_tail(t["address"])
+            t["fill"] = fill_state(t.get("name") or "", t["address"])
         why = rule(t, now, keep)
         if not why:
             continue

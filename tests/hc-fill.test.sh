@@ -40,6 +40,7 @@ if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord
 if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)
 on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
@@ -150,6 +151,7 @@ t "shared: 다음 바퀴에도 hc-fill 레인 2개가 살아 있으면 안 띄�
 t "here(local): --on 없이 띄우고 herdr-balance --main <설정 coord> --add" '! awk "/^---\$/ {b=\"\"} {b=b \"\\n\" \$0} END {print b}" "$T/lane.log" | grep -Fxq -- --on && grep -Fxq -- "--main t0 --add s4" "$T/balance.log"'
 t "here(local): 경로는 local 기계의 repo 줄" 'grep -Fxq /Users/me/src/app "$T/lane.log"'
 t "레인을 띄울 때 hc-lane coord가 확인한 지휘 주소(설정 coord가 아님)를 HC_LANE_COORD로 넘김(지휘의 watch가 없으면 hc-lane이 띄운다 — 감사 [중간] 1·2차 B)" '[ "$(sort -u "$T/coord.log")" = t8kk ] || { cat "$T/coord.log"; false; }'
+t "레인을 띄울 때 HC_LANE_FILL=1(hc-lane이 레인 기록에 fill — 완료가 마지막 보고, 재감사 [낮음] 4)" '[ "$(sort -u "$T/fill.log")" = 1 ] || { cat "$T/fill.log"; false; }'
 
 # 3b. 자리 세기: working·blocked는 늘 셈. done·idle은 작업 트리(<저장소>.wt/…)가 그 기계에 남은 쓰기 레인만 셈.
 #     읽기 전용(저장소 폴더 그대로)·작업 트리가 정리된 끝난 레인은 안 셈. all 칸 기계(shared)는 다 셈.
