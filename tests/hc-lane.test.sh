@@ -20,9 +20,11 @@ cat >"$T/bin/hc" <<'EOF'
 if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널로 답한다(report의 turn 칸)
   echo "$2" >>"$HCLOG.get"
   # $HC_FAKE_STATUS_AGE초 전에 status가 바뀐 쉬는 터미널(wait 유예 시험)
-  [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1}"; exit 0; }
+  # $HC_FAKE_PID가 있으면 그 터미널 프로그램 pid도(배경 작업 프로세스 판정 시험). 앞의 foreground pid는 다른 값
+  [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
   [ -z "${HC_FAKE_GET_SLEEP-}" ] || exec sleep "$HC_FAKE_GET_SLEEP"   # 응답 없는 코어(alarm이 이 프로세스를 끝내 고아가 안 남게 exec)
-  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
+  # $HC_FAKE_GET_NAME이면 맨 위 name도(앞의 foreground.name은 다른 값 — 진짜 hc 꼴)
+  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"},\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
   # 띄운 터미널(t9zz): 기본은 status가 잡힘. HC_FAKE_NOSTATUS=1 늘 null, =untilkeys 키를 받기 전까지 null, =finished 끝남
   case $2 in *t9zz)
     case ${HC_FAKE_NOSTATUS-} in
@@ -66,6 +68,14 @@ case $1 in
 esac
 EOF
 chmod +x "$T/bin/hc"
+# 가짜 ps: $HC_FAKE_PS 파일을 답하고(인자는 $HCLOG.ps), $HC_FAKE_PS_FAIL이면 실패. 둘 다 없으면 진짜 ps
+cat >"$T/bin/ps" <<'EOF'
+#!/bin/bash
+[ -z "${HC_FAKE_PS_FAIL-}" ] || exit 1
+[ -n "${HC_FAKE_PS-}" ] || exec /bin/ps "$@"
+echo "$*" >>"$HCLOG.ps"; cat "$HC_FAKE_PS"
+EOF
+chmod +x "$T/bin/ps"
 ln -s "$LANE" "$T/bin/hc-lane"   # 착지 절차의 hc-lane clean이 이 사본을 쓰게
 export PATH="$T/bin:$PATH" HCLOG="$T/hc.log" HC_LANE_POLL=0.1
 unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
@@ -794,6 +804,16 @@ git -C "$R" checkout -q main
 out=$(cd "$R" && HC_LANE=lane-h "$LANE" report 중간 2>"$T/err")
 t "report: \$HC_LANE이 가지 이름보다 앞" '[ "$(tail -n 1 "$EV" | cut -f4)" = lane-h ]'
 t "report: 기계 이름 기본은 hostname" '[ "$(tail -n 1 "$EV" | cut -f2)" = "$(hostname -s)" ]'
+# 작업 중 발견해 함께 고침(지휘 실측: 워커 기계 레인 t10 v5-lb → 「main 착지」): hc-lane clean으로 작업 트리를 지운 뒤 report하면
+# 지금 폴더 가지(main)가 레인 칸에 찍혔다. 레인 이름은 가지보다 hc 터미널 이름이 먼저, 기본 가지 이름은 레인으로 쓰지 않는다
+out=$(cd "$R" && HC_TERMINAL_ID=t10 HC_FAKE_GET_TURN=3 HC_FAKE_GET_NAME=v5-lb "$LANE" report 착지 abc1234 2>"$T/err"); rc=$?
+t "report: --name·\$HC_LANE 없으면 가지(main)보다 hc 터미널 이름" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f4)" = v5-lb ] || { tail -n 1 "$EV"; cat "$T/err"; false; }'
+git -C "$R" checkout -q -b lane-br2
+out=$(cd "$R" && HC_TERMINAL_ID=t10 HC_FAKE_GET_TURN=3 HC_FAKE_GET_NAME=v5-lb "$LANE" report 중간 2>"$T/err")
+t "report: hc 터미널 이름이 가지 이름보다 앞" '[ "$(tail -n 1 "$EV" | cut -f4)" = v5-lb ]'
+git -C "$R" checkout -q main
+out=$(cd "$R" && "$LANE" report 중간 2>"$T/err"); rc=$?
+t "report: 이름이 없고 가지가 기본 가지(main)면 레인 칸은 -" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f4)" = - ] || { tail -n 1 "$EV"; false; }'
 
 # 감사 반영 1·7: 긴 줄을 여럿이 함께 report해도 줄이 섞이지 않는다(줄 전체 1000바이트 안, 끝 반쪽 UTF-8 버림)
 : >"$EV"
@@ -810,6 +830,7 @@ t "report: 긴 이름·기계 칸도 잘려 8칸·1000바이트 안" '[ $rc = 0 
 MH=$T/mh; export HC_FAKE_MACH_HOME=$MH
 mkdir -p "$MH/m1/.local/state/hc-lane" "$MH/m2/.local/state/hc-lane"
 ev() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
+ev8() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }   # 여덟째 칸 turn
 ev 2026-11-16T02:00:00Z here t1 lane-l 중간 - 로컬 >>"$EV"
 { ev 2026-11-16T02:00:03Z host1 t7 lane-a 완료 aaaa1111 일; ev 2026-11-16T02:00:01Z host1 t8 lane-b 중간 - 둘; } >"$MH/m1/.local/state/hc-lane/events.tsv"
 ev 2026-11-16T02:00:02Z host2 t9 lane-c 착지 cccc2222 셋 >"$MH/m2/.local/state/hc-lane/events.tsv"
@@ -852,11 +873,11 @@ run wait --timeout 0
 t "wait: 그 사건도 다시 안 알림" '[ $rc = 75 ]'
 
 # 멈춤: report 없이 끝났거나 막힌 레인 터미널(hc-lane이 띄운 것 = 라벨 hc-lane=1)
-ev 2026-11-16T02:10:00Z here t43 lane-landed 착지 eeee5555 끝 >>"$EV"
+ev8 2026-11-16T02:10:00Z here t43 lane-landed 착지 eeee5555 끝 3 >>"$EV"
 run wait --timeout 0   # 위 착지 줄을 먼저 본다
-export HC_FAKE_LS='{"terminals":[{"address":"t40","name":"lane-dead","state":"finished"},{"address":"m1/t41","name":"lane-blk","state":"live","status":"blocked"},{"address":"t42","name":"lane-ok","state":"live","status":"working"},{"address":"t43","name":"lane-landed","state":"finished"}]}'
+export HC_FAKE_LS='{"terminals":[{"address":"t40","name":"lane-dead","state":"finished"},{"address":"m1/t41","name":"lane-blk","state":"live","status":"blocked"},{"address":"t42","name":"lane-ok","state":"live","status":"working"},{"address":"t43","name":"lane-landed","state":"finished","turn":4}]}'
 run wait --timeout 0
-t "wait 멈춤: --all 없으면 이 기계 레인만" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}t40${tab}lane-dead${tab}멈춤${tab}-${tab}finished" && ! printf "%s" "$out" | grep -Fq lane-blk || { printf "%s\n" "$out"; false; }'
+t "wait 멈춤: --all 없으면 이 기계 레인만" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}t40${tab}lane-dead${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" && ! printf "%s" "$out" | grep -Fq lane-blk || { printf "%s\n" "$out"; false; }'
 t "wait 멈춤: 일하는 레인·착지를 알린 레인은 아님" '! printf "%s" "$out" | grep -Fq lane-ok && ! printf "%s" "$out" | grep -Fq "lane-landed${tab}멈춤"'
 run wait --all --timeout 0
 t "wait 멈춤 --all: 다른 기계의 막힌 레인" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m1/t41${tab}lane-blk${tab}멈춤${tab}-${tab}blocked" && ! printf "%s" "$out" | grep -Fq lane-dead'
@@ -873,7 +894,7 @@ HC_FAKE_LS=$(lsI 3 1) run wait --timeout 0
 t "멈춤: report 없이 done으로 쉬는 레인(turn 포함)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}t50${tab}lane-idle${tab}멈춤${tab}-${tab}done turn 3" || { printf "%s\n" "$out"; false; }'
 t "멈춤: 마지막 사건이 중간뿐이면 idle도" 'printf "%s\n" "$out" | grep -Fq "${tab}t52${tab}lane-mid${tab}멈춤${tab}-${tab}idle"'
 t "멈춤: 완료를 알리고 쉬는 레인은 아님" '! printf "%s\n" "$out" | grep -Fq "lane-fin${tab}멈춤"'
-t "멈춤: 같은 주소의 옛 레인 착지는 새 레인을 면제하지 않음" 'printf "%s\n" "$out" | grep -Fq "${tab}t60${tab}new-lane${tab}멈춤${tab}-${tab}finished"'
+t "멈춤: 같은 주소의 옛 레인 착지는 새 레인을 면제하지 않음" 'printf "%s\n" "$out" | grep -Fq "${tab}t60${tab}new-lane${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
 HC_FAKE_LS=$(lsI 3 1) run wait --timeout 0
 t "멈춤: turn이 그대로면 다시 안 알림" '[ $rc = 75 ]'
 HC_FAKE_LS=$(lsI 4 5) run wait --timeout 0
@@ -900,9 +921,10 @@ t "report: 느린 hc get을 끊은 뒤 남은 프로세스 없음" '[ -z "$(pgre
 # 재감사 낮음 2: 이번 바퀴에 못 읽은 기계의 레인은 멈춤으로 보지 않는다(그 기계 사건을 모르니)
 mkdir -p "$T/mh2/m1"
 HC_FAKE_MACH_HOME=$T/mh2 HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"},{"name":"m3","state":"connected"},{"name":"m4","state":"disconnected"}]}' \
-  HC_FAKE_LS='{"terminals":[{"address":"m1/t91","name":"lane-r1","state":"live","status":"done","turn":2},{"address":"m3/t92","name":"lane-r3","state":"live","status":"done","turn":2},{"address":"m4/t93","name":"lane-r4","state":"finished"}]}' \
+  HC_FAKE_LS='{"terminals":[{"address":"m1/t91","name":"lane-r1","state":"live","status":"done","turn":2},{"address":"m3/t92","name":"lane-r3","state":"live","status":"done","turn":2},{"address":"m4/t93","name":"lane-r4","state":"finished"},{"address":"m3/t94","name":"lane-r5","state":"live","status":"blocked","turn":3}]}' \
   run wait --all --timeout 0
-t "멈춤: 읽은 기계 레인은 알리고, 모름 기계 레인은 건너뜀" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m1/t91${tab}lane-r1${tab}멈춤" && ! printf "%s\n" "$out" | grep -Fq lane-r3 && ! printf "%s\n" "$out" | grep -Fq lane-r4 || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "멈춤: 읽은 기계 레인은 알리고, 모름 기계 레인은 판정 대신 「연결 안 됨」(하루 한 번)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m1/t91${tab}lane-r1${tab}멈춤" && printf "%s\n" "$out" | grep -Fq "m3/t92${tab}lane-r3${tab}멈춤${tab}-${tab}연결 안 됨 m3" && printf "%s\n" "$out" | grep -Fq "m4/t93${tab}lane-r4${tab}멈춤${tab}-${tab}연결 안 됨 m4" && ! printf "%s\n" "$out" | grep -Eq "lane-r[34]${tab}멈춤${tab}-${tab}(done|뜻밖)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "멈춤: 모름 기계 레인이라도 blocked는 그대로 알림(감사 4차 [낮음] 1)" 'printf "%s\n" "$out" | grep -Fq "m3/t94${tab}lane-r5${tab}멈춤${tab}-${tab}blocked turn 3"'
 
 # 작업 중 발견해 함께 고침: macOS awk는 UTF-8 로캘에서 문자열 비교가 strcoll이라 "착지" == "멈춤"이 참이었다
 # — 같은 한 줄로 완료→착지를 알리면 착지가 삼켜지고, --state 한 상태 거름이 꺼졌다. 비교는 LC_ALL=C로 한다
@@ -972,6 +994,131 @@ t "설정: 표시 글자 목록과 분을 바꿀 수 있음" '[ $rc = 75 ]'
 conf 'lane.wait_grace 열'
 HC_FAKE_LS=$(lsG tg6 done 2) run wait --timeout 0
 t "설정: lane.wait_grace가 숫자가 아니면 오류" '[ $rc != 0 ] && [ $rc != 75 ] && grep -Fq lane.wait_grace "$T/err"'
+noconf
+
+# quiet-alerts 1: 배경 작업은 화면이 아니라 프로세스로 — 터미널 pid 아래 Claude Bash 도구 셸(명령 줄에 shell-snapshots)이 살아 있으면
+# 배경 작업 중. MCP 서버처럼 늘 사는 자손·남의 셸은 안 셈. ps가 실패하면 화면 판정, 30분 상한은 그대로
+PSF="$T/fakeps"
+snap='/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1.sh >/dev/null 2>&1 && eval '"'"'bash verify.sh'"'"''
+{ echo " 4000     1 node agent-runner.js"; echo " 4001  4000 claude --model x"; echo " 4002  4001 $snap"
+  echo " 4003  4001 node /x/mcp-server.js"; echo " 5001     1 $snap"; } >"$PSF"
+printf '%s\n' '✻ Churned for 3m · done 12:33 PM' '❯ ' >"$GS"   # 화면에는 배경 표시가 없다(화면 판정이면 멈춤)
+rm -f "$HCLOG.ps"
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$(lsG tp1 done 2) run wait --timeout 0
+t "프로세스: 터미널 pid 자손에 shell-snapshots 셸이 살아 있으면 화면 표시가 없어도 멈춤 아님" '[ $rc = 75 ] && grep -Fq -- "-A -o pid=,ppid=,command=" "$HCLOG.ps" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+{ echo " 4000     1 node agent-runner.js"; echo " 4001  4000 claude --model x"; echo " 4003  4001 node /x/mcp-server.js"
+  echo " 5001     1 $snap"; echo " 5002  4100 $snap"; } >"$PSF"
+printf '%s\n' '✻ Churned for 3m · done 12:33 PM · 2 shells still running' '❯ ' >"$GS"   # 화면은 배경 표시(옛 글자)
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$(lsG tp2 done 2) run wait --timeout 0
+t "프로세스 없음이어도 화면에 배경 표시가 있으면 멈춤 아님(셸 없는 배경 작업 — 감사 [낮음] 4)" '[ $rc = 75 ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+printf '%s\n' '✻ Churned for 3m · done 12:33 PM' '❯ ' >"$GS"
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$(lsG tp2b done 2) run wait --timeout 0
+t "프로세스: 자손이 MCP 서버 꼴뿐이고(남의 셸은 안 셈) 화면 표시도 없으면 유예 뒤 멈춤" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tp2b${tab}lane-g${tab}멈춤${tab}-${tab}done turn 2" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+printf '%s\n' '✻ Churned for 3m · done 12:33 PM · 2 shells still running' '❯ ' >"$GS"
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=300 HC_FAKE_LS=$(lsG tp3 done 2) run wait --timeout 0
+t "프로세스: 유예(10분) 안이면 자손이 없어도 멈춤 아님" '[ $rc = 75 ]'
+HC_FAKE_PS_FAIL=1 HC_FAKE_PID=4000 HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$(lsG tp4 done 2) run wait --timeout 0
+t "프로세스: ps가 실패하면 화면 판정(배경 표시 → 멈춤 아님)" '[ $rc = 75 ]'
+{ echo " 4000     1 node agent-runner.js"; echo " 4002  4000 $snap"; } >"$PSF"
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=1860 HC_FAKE_LS=$(lsG tp5 done 2) run wait --timeout 0
+t "프로세스 상한: 배경 셸이 살아 있어도 30분 넘게 쉬면 멈춤" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tp5${tab}lane-g${tab}멈춤" || { printf "%s\n" "$out"; false; }'
+rm -f "$HCLOG.exec" "$HCLOG.ps"
+HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"}]}' HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 \
+  HC_FAKE_LS='{"terminals":[{"address":"m1/tq1","name":"lane-q1","state":"live","status":"done","turn":2},{"address":"m1/tq2","name":"lane-q2","state":"live","status":"idle","turn":2}]}' \
+  run wait --all --timeout 0
+t "프로세스 원격: 기계당 hc exec --on 한 번(ps), 두 레인 다 배경 작업 중" '[ $rc = 75 ] && [ "$(grep -c . "$HCLOG.ps")" = 1 ] && [ "$(grep -Fxc ps "$HCLOG.exec")" = 1 ] || { printf "%s\n" "$out"; cat "$T/err" "$HCLOG.exec"; false; }'
+conf 'lane.wait_procs'
+printf '%s\n' '✻ Churned for 3m · done 12:33 PM' '❯ ' >"$GS"
+HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$(lsG tp6 done 2) run wait --timeout 0
+t "설정: lane.wait_procs 빈 값이면 프로세스 판정 끔(화면만)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tp6${tab}lane-g${tab}멈춤"'
+noconf
+
+# quiet-alerts 2·3(감사 반려 [높음] 1·2): 조용히 넘기는 것은 마지막 report가 착지·판정일 때의 끝남·정리됨뿐.
+# 그 밖(완료·막힘·중간·report 없음)의 끝남은 「뜻밖의 종료(<상태>)」, 정리됨(hc-sweep이 닫고 hc rm — 목록에서 사라짐)은 그 사건 자체를
+# 「뜻밖의 종료(정리됨)」 멈춤으로 알린다(wait가 안 돌던 틈에 닫혀도 다음 wait에서 나오게)
+ev 2026-11-16T03:00:00Z here tf1 lane-f1 완료 abcd1234 끝 >>"$EV"
+ev 2026-11-16T03:00:01Z here tf3 lane-f3 중간 - 반 >>"$EV"
+ev 2026-11-16T03:00:02Z here tf3 lane-f3 정리됨 - "hc-sweep R2" >>"$EV"
+ev8 2026-11-16T03:00:03Z here tf4 lane-f4 판정 - 감사 3 >>"$EV"
+ev8 2026-11-16T03:00:04Z here tf4 lane-f4 정리됨 - "hc-sweep R2" 4 >>"$EV"
+ev 2026-11-16T03:00:05Z here tf7 lane-f7 막힘 - 질문 >>"$EV"
+ev8 2026-11-16T03:00:06Z here tf8 lane-f8 착지 abcd1234 끝 2 >>"$EV"
+ev 2026-11-16T03:00:07Z here tf10 lane-f10 판정 - turn 모름 >>"$EV"
+ev 2026-11-16T03:00:08Z here tf11 lane-f11 착지 abcd1234 turn 모름 >>"$EV"
+ev 2026-11-16T03:00:09Z here tf11 lane-f11 정리됨 - "hc-sweep R2" >>"$EV"
+HC_FAKE_LS='{"terminals":[{"address":"tf1","name":"lane-f1","state":"finished"},{"address":"tf2","name":"lane-f2","state":"finished"},{"address":"tf3","name":"lane-f3","state":"finished"},{"address":"tf4","name":"lane-f4","state":"finished"},{"address":"tf7","name":"lane-f7","state":"finished"},{"address":"tf8","name":"lane-f8","state":"finished","turn":3},{"address":"tf10","name":"lane-f10","state":"finished","turn":3}]}' run wait --timeout 0
+t "끝남·정리됨: report turn을 모르면 착지·판정 뒤라도 알림(감사 3차 [낮음] 3)" 'printf "%s\n" "$out" | grep -Fq "${tab}tf10${tab}lane-f10${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" && printf "%s\n" "$out" | grep -Fq "${tab}tf11${tab}lane-f11${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨)" || { printf "%s\n" "$out"; false; }'
+t "끝남: report 없이 끝나면 「뜻밖의 종료」" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tf2${tab}lane-f2${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" || { printf "%s\n" "$out"; false; }'
+t "끝남: 완료(착지 전) 뒤 끝남은 알림(옛 판 회귀 — 감사 [높음] 1)" 'printf "%s\n" "$out" | grep -Fq "${tab}tf1${tab}lane-f1${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "끝남: 막힘 뒤 끝남도 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}tf7${tab}lane-f7${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "끝남: 착지·판정 뒤 끝남은 안 알림" '! printf "%s\n" "$out" | grep -Eq "lane-f[48]${tab}멈춤${tab}-${tab}뜻밖의 종료\(finished"'
+t "정리됨: 중간 뒤 정리됨은 「뜻밖의 종료(정리됨)」, 그 끝남은 두 번 안 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}tf3${tab}lane-f3${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨) hc-sweep R2" && ! printf "%s\n" "$out" | grep -Fq "lane-f3${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "정리됨: 판정 뒤 정리됨은 안 알림, 정리됨 줄 그대로는 안 찍음" '! printf "%s\n" "$out" | grep -Fq "lane-f4${tab}멈춤" && ! printf "%s\n" "$out" | grep -Fq "${tab}정리됨${tab}"'
+run events
+t "정리됨: hc-lane events에는 보임" 'printf "%s\n" "$out" | grep -Fq "lane-f3${tab}정리됨"'
+HC_FAKE_LS='{"terminals":[{"address":"tf5","name":"lane-f5","state":"live","status":"done","turn":3}]}' run wait --timeout 0
+# 감사 [높음] 2 재현 꼴: wait가 안 도는 사이에 report 없이 쉬던 레인을 hc-sweep이 닫고 지움(hc ls에 없음) → 다음 wait --state 멈춤에서 나옴
+ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tf9 lane-f9 중간 - 반 >>"$EV"
+ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tf9 lane-f9 정리됨 - "hc-sweep R2" >>"$EV"
+HC_FAKE_LS='{"terminals":[]}' run wait --state 멈춤 --timeout 0
+t "정리됨: 틈에 닫혀 목록에서 사라진 보고 없는 레인도 다음 wait에서 멈춤" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tf9${tab}lane-f9${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+HC_FAKE_LS='{"terminals":[]}' run wait --state 멈춤 --timeout 0
+t "정리됨: 같은 정리됨은 두 번 안 알림" '[ $rc = 75 ]'
+ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tf6 lane-f6 완료 abcd1234 끝 >>"$EV"
+ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tf6 lane-f6 정리됨 - "hc-sweep R2" >>"$EV"
+run wait --timeout 0
+HC_FAKE_LS='{"terminals":[{"address":"tf6","name":"lane-f6","state":"live","status":"done","turn":1}]}' run wait --timeout 0
+t "정리됨: 쉬는 레인은 정리됨 앞의 마지막 report(완료)로 판정(닫기 실패해도 거짓 멈춤 없음)" '[ $rc = 75 ] || { printf "%s\n" "$out"; false; }'
+# 재감사 [높음] 1: 착지·판정 뒤 이어 받은 일(turn이 오름)에서 끝나거나 정리되면 알린다 — 쉼 판정과 같은 turn 규칙(report turn+1 이하만 조용)
+nw=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{ ev8 "$nw" here ta1 lane-ta1 판정 - 감사 3; ev8 "$nw" here ta2 lane-ta2 판정 - 감사 3
+  ev8 "$nw" here tb1 lane-tb1 착지 abcd1234 끝 2; ev8 "$nw" here tb1 lane-tb1 정리됨 - "hc-sweep R2" 7
+  ev8 "$nw" here tb2 lane-tb2 판정 - 감사 3; ev8 "$nw" here tb2 lane-tb2 정리됨 - "hc-sweep R2" 4; } >>"$EV"
+HC_FAKE_LS='{"terminals":[]}' run wait --state 판정,착지 --timeout 0   # report 줄은 먼저 소비
+HC_FAKE_LS='{"terminals":[{"address":"ta1","name":"lane-ta1","state":"finished","turn":6},{"address":"ta2","name":"lane-ta2","state":"finished","turn":4}]}' \
+  run wait --state 멈춤 --timeout 0
+t "turn: 판정 뒤 turn이 오른(이어 받은 일) 끝남은 알림" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}ta1${tab}lane-ta1${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "turn: 착지 뒤 turn이 오른 정리됨은 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}tb1${tab}lane-tb1${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨)"'
+t "turn: 판정 그 턴(turn+1)의 끝남·정리됨은 조용" '! printf "%s\n" "$out" | grep -Eq "lane-t[ab]2${tab}멈춤"'
+# 재감사 [낮음] 2: 쉼(done turn n)으로 이미 알린 레인을 hc-sweep이 같은 turn에 닫으면 다시 알리지 않음
+HC_FAKE_LS='{"terminals":[{"address":"tc1","name":"lane-tc1","state":"live","status":"done","turn":5}]}' run wait --state 멈춤 --timeout 0
+t "쉼 알림 먼저(준비)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "lane-tc1${tab}멈춤${tab}-${tab}done turn 5"'
+ev8 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tc1 lane-tc1 정리됨 - "hc-sweep R2" 5 >>"$EV"
+HC_FAKE_LS='{"terminals":[]}' run wait --state 멈춤 --timeout 0
+t "정리됨: 같은 turn에 쉼으로 이미 알린 레인은 다시 안 알림" '[ $rc = 75 ] || { printf "%s\n" "$out"; false; }'
+# 지휘 요청(감사 3차 [높음] 1로 기본 꺼짐): wait는 기본으로 모든 레인 사건, --mine이면 레인의 hc parent가 이 지휘($HC_TERMINAL_ID —
+# 원격 레인은 <기계>/<t…>로 본다)인 사건만. parent를 모르면(hc ls에 없음) 보여 준다(fail-open).
+# 기본이 거르면 지휘가 바뀌거나(옛 parent는 죽은 터미널) wait를 다른 터미널에서 부를 때 사건이 다 가려진다
+nw=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{ ev8 "$nw" here tw1 lane-own 완료 abcd1234 내것 1; ev8 "$nw" m1 m1/tw2 lane-own2 완료 abcd1234 내것원격 1
+  ev8 "$nw" here tw3 lane-other 완료 abcd1234 남의것 1; ev8 "$nw" here tw4 lane-gone 완료 abcd1234 모름 1; } >>"$EV"
+lsP='{"terminals":[{"address":"tw1","name":"lane-own","parent":"tW","state":"live","status":"working","turn":1},{"address":"m1/tw2","name":"lane-own2","parent":"mac/tW","state":"live","status":"working","turn":1},{"address":"tw3","name":"lane-other","parent":"mac/tX","state":"live","status":"working","turn":1}]}'
+HC_TERMINAL_ID=tNEW HC_FAKE_LS=$lsP run wait --state 완료 --timeout 0
+t "parent 기본: 거르지 않음 — 다른(옛) 지휘가 parent인 레인 사건도 보임" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "lane-own${tab}완료" && printf "%s\n" "$out" | grep -Fq "lane-other${tab}완료" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+HC_TERMINAL_ID=tW HC_FAKE_LS=$lsP run wait --mine --state 완료 --timeout 0
+t "parent --mine: 내 레인(로컬·원격 꼴)과 parent 모르는 레인만, 남의 지휘 레인은 거름" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "lane-own${tab}완료" && printf "%s\n" "$out" | grep -Fq "lane-own2${tab}완료" && printf "%s\n" "$out" | grep -Fq "lane-gone${tab}완료" && ! printf "%s\n" "$out" | grep -Fq lane-other || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+run wait --everyone --timeout 0
+t "--everyone은 없음(기본이 전부)" '[ $rc = 1 ] && grep -Fq -- --everyone "$T/err"'
+# 감사 [낮음] 5: hc ls가 바퀴마다 실패하면 3바퀴째에 멈춤꼴 사건 한 줄로 끝낸다(배경 wait의 stderr는 끝나기 전엔 안 보인다)
+HC_LANE_WAIT_TICK=0 HC_FAKE_LS_FAIL=1 run wait --state 멈춤 --timeout 1
+t "hc ls 실패 3바퀴: 사건 한 줄로 알리고 종료 0" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "멈춤${tab}-${tab}hc ls 실패 3바퀴" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+
+# quiet-alerts 2: lane.notify no면 hc-lane이 띄우는 레인·감사(--read)에 hc run --no-notify
+rm -f "$HCLOG"
+run --name lane-n1 --repo "$R" -- true
+t "notify 기본(yes): --no-notify 없음" '[ $rc = 0 ] && has run && ! has --no-notify'
+conf 'lane.notify no'
+rm -f "$HCLOG"
+run --name lane-n2 --repo "$R" -- true
+t "notify no: 레인 hc run에 --no-notify" '[ $rc = 0 ] && has run && has --no-notify || { cat "$T/err"; false; }'
+rm -f "$HCLOG"
+run --read --name lane-n3 --repo "$R" -- true
+t "notify no: --read(감사)에도 --no-notify" '[ $rc = 0 ] && has --no-notify'
+run --dry-run --name lane-n4 --repo "$R" -- true
+t "notify no: --dry-run 줄에도 --no-notify" '[ $rc = 0 ] && printf "%s\n" "$out" | grep "hc run --bg" | grep -Fq -- --no-notify'
+conf 'lane.notify maybe'
+run --name lane-n5 --repo "$R" -- true
+t "notify: yes·no가 아니면 띄우기 전에 오류" '[ $rc != 0 ] && grep -Fq lane.notify "$T/err" && [ ! -e "$R.wt/lane-n5" ]'
 noconf
 
 # 감사 반영 3·6: 커서는 지휘(HC_TERMINAL_ID)마다 따로, 새 커서는 2시간 전부터

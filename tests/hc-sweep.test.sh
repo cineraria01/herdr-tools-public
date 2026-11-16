@@ -121,6 +121,34 @@ rm -rf "$H"
 sweep --min-age 0
 t "본 저장소 터미널이 있어도 작업 트리를 지우면 끔" 'gone "$(pid h)"'
 
+# quiet-alerts 3: 닫은 레인 터미널(라벨 hc-lane=1)은 닫기 전에 events.tsv에 「정리됨」 한 줄(hc-lane wait는 안 알리고 events에 보임)
+unset XDG_STATE_HOME HC_LANE_MACHINE
+old=$(( ($(date +%s) - 7 * 3600) * 1000 ))
+cat >"$T/ls.json" <<EOF
+{"terminals":[{"address":"t61","state":"live","status":"idle"},{"address":"t62","state":"live","status":"done"}]}
+EOF
+for a in t61 t62; do
+  lab='"labels":{"hc-lane":"1"},'; [ $a = t62 ] && lab=
+  printf '{"address":"%s","name":"lane-%s","state":"live","status":{"app":"claude-code","state":"idle"},%s"parent":"p/t1","created_ms":%s,"status_ms":%s,"turn":4,"cwd":"%s"}\n' \
+    "$a" "$a" "$lab" "$old" "$old" "$T/gone-$a" >"$T/get-$a.json"
+done
+cat >"$T/bin/hc" <<EOF
+#!/bin/bash
+case \$1 in
+  ls) exec cat "$T/ls.json" ;;
+  get) [ -e "$T/killed-\$2" ] && { echo "{\"address\":\"\$2\",\"state\":\"finished\"}"; exit 0; }
+       [ -f "$T/get-\$2.json" ] && exec cat "$T/get-\$2.json" ;;
+  kill) [ -s "$T/home/.local/state/hc-lane/events.tsv" ] && cp "$T/home/.local/state/hc-lane/events.tsv" "$T/ev-at-kill"; touch "$T/killed-\$2"; exit 0 ;;
+  rm) exit 0 ;;
+esac
+exit 1
+EOF
+EVT=$T/home/.local/state/hc-lane/events.tsv
+sweep --min-age 0
+t "정리됨: 두 터미널 다 닫음(R3)" 'printf "%s" "$out" | grep -q "닫힘: R3 t61" && printf "%s" "$out" | grep -q "닫힘: R3 t62"'
+t "정리됨: 레인 터미널만 events.tsv에 한 줄(8칸: 시각·기계·주소·레인·정리됨·-·까닭·turn)" '[ "$(grep -c . "$EVT")" = 1 ] && awk -F"\t" "NF == 8 && \$3 == \"t61\" && \$4 == \"lane-t61\" && \$5 == \"정리됨\" && \$6 == \"-\" && \$7 ~ /hc-sweep R3/ && \$8 == 4" "$EVT" | grep -q . || { cat "$EVT"; false; }'
+t "정리됨: kill 전에 적음(그 사이 wait가 끝남을 봐도 뜻밖의 종료로 안 알리게)" 'grep -q "정리됨" "$T/ev-at-kill"'
+
 kill "$(cat "$P/b-kid")" "$(cat "$P/k-kid")" 2>/dev/null
 kill "$(pid a)" "$(pid b)" "$(pid k)" "$(pid o)" 2>/dev/null
 t "이 시험의 고아 0" allgone

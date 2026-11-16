@@ -17,6 +17,8 @@ R2·R3 공통 보호: cwd가 아직 있는 링크된 git 워크트리(그 폴더
    레인은 착지 뒤 hc-lane clean으로 워크트리를 지우니, 남아 있으면 일이 안 끝났다. git을 부르지 않는다.
 판정은 모두 fail-closed: 예외·시간 초과·읽기 실패·모르는 값은 「닫지 않음」이다.
 R3 오래 쉰 세션: status_ms로부터 6시간 이상
+닫는 터미널이 hc-lane 레인(라벨 hc-lane=1)이면 닫기 전에 hc-lane events.tsv에 「정리됨」 한 줄(hc-lane wait는 그 레인의
+앞 report가 착지·판정 그 턴이면 조용히, 아니면 「뜻밖의 종료(정리됨)」로 알린다).
 다시 열기: closed.log의 cwd·sessionId로 cd <cwd> && claude --resume <sessionId>
 터미널의 argv·환경 변수는 출력하지도 기록하지도 않는다(자격증명이 섞여 있다).
 
@@ -37,6 +39,7 @@ import json
 import os
 import re
 import signal
+import socket
 import stat
 import subprocess
 import time
@@ -179,9 +182,30 @@ def record(t, why, sid):
         f.write("\t".join(str(x).replace("\t", " ").replace("\n", " ") for x in fields) + "\n")
 
 
+def lane_event(t, why):
+    """레인 터미널(라벨 hc-lane=1)이면 hc-lane events.tsv에 「정리됨」 한 줄(hc-lane report와 같은 8칸, turn은 닫을 때 것).
+    hc-lane wait는 앞 report가 착지·판정 그 턴(turn+1 이하)이면 조용히, 아니면 「뜻밖의 종료(정리됨)」로 알리고, 뒤따른
+    끝남은 다시 알리지 않는다. kill 전에 적는다(그 사이 wait가 끝남을 먼저 「뜻밖의 종료(finished)」로 보지 않게).
+    못 써도 닫기는 계속한다(알림 하나가 더 나는 쪽)."""
+    if (t.get("labels") or {}).get("hc-lane") != "1":
+        return
+    flat = lambda x: str(x).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    d = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-lane")
+    fields = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              os.environ.get("HC_LANE_MACHINE") or socket.gethostname().split(".")[0] or "-",
+              t["address"], t.get("name") or "-", "정리됨", "-", "hc-sweep " + why, "-" if t.get("turn") is None else t["turn"]]
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "events.tsv"), "a") as f:
+            f.write("\t".join(flat(x) for x in fields) + "\n")
+    except OSError:
+        pass
+
+
 def close(t, why):
     address = t["address"]
     record(t, why, session_id(t.get("pid")))
+    lane_event(t, why)
     try:
         hc("kill", address)
     except RuntimeError as err:
