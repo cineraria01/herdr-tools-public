@@ -19,6 +19,7 @@ cat >"$T/bin/hc" <<'EOF'
 #!/bin/bash
 if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널로 답한다(report의 turn 칸)
   echo "$2" >>"$HCLOG.get"
+  [ ! -e "$HCLOG.getdown" ] || { echo "error: cannot reach the core" >&2; exit 1; }   # 코어 연결 실패(「없음」이 아님)
   # $HC_FAKE_STATUS_AGE초 전에 status가 바뀐 쉬는 터미널(wait 유예 시험)
   # $HC_FAKE_PID가 있으면 그 터미널 프로그램 pid도(배경 작업 프로세스 판정 시험). 앞의 foreground pid는 다른 값
   [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
@@ -35,13 +36,20 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
     esac
     echo "{\"address\":\"$2\",\"name\":\"x\",\"state\":\"live\",\"status\":$s,\"turn\":0}"; exit 0 ;;
   esac
-  [ "$2" = "${HC_FAKE_LIVE-}" ] && { echo "{\"address\":\"t1aa\",\"name\":\"$2\",\"state\":\"live\"}"; exit 0; }
+  # 살아 있는 지휘 여럿: $HCLOG.live 파일의 「주소 pid」 줄(배경 watch가 도중에 바뀌게 파일로). 이름은 주소와 같게
+  if [ -f "$HCLOG.live" ]; then p_=$(awk -v a="$2" '$1 == a { print $2 }' "$HCLOG.live"); [ -z "$p_" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":$p_,\"state\":\"live\"}"; exit 0; }; fi
+  # 살아 있는 터미널(앞의 foreground pid·name은 다른 값 — 진짜 hc 꼴). pid는 $HC_FAKE_LIVE_PID(기본 4242)
+  [ "$2" = "${HC_FAKE_LIVE-}" ] && { echo "{\"address\":\"t1aa\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":${HC_FAKE_LIVE_PID:-4242},\"state\":\"live\",\"status\":{\"state\":\"idle\"}}"; exit 0; }
+  # 레인 터미널(라벨 hc-lane=1): 지휘 정보로 적지 않아야 한다
+  [ "$2" = "${HC_FAKE_LANETERM-}" ] && { echo "{\"address\":\"$2\",\"labels\":{\"hc-lane\":\"1\"},\"name\":\"lane-x\",\"pid\":5555,\"state\":\"live\"}"; exit 0; }
   [ "$2" = "${HC_FAKE_ID-}" ] && { echo "{\"address\":\"$2\",\"name\":\"other\",\"state\":\"live\"}"; exit 0; }
   echo '{"error":{"kind":"not_found"}}' >&2; exit 3
 fi
 if [ "$1" = ls ]; then   # $HC_FAKE_LS(JSON)를 답한다. $HC_FAKE_LS_FAIL이면 실패. 인자는 $HCLOG.ls에 한 줄로
   echo "$*" >>"$HCLOG.ls"
   [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3
+  [ ! -e "$HCLOG.lsfail" ] || exit 3
+  [ ! -f "$HCLOG.lsfile" ] || { cat "$HCLOG.lsfile"; exit 0; }   # 배경 watch가 도중에 바뀌는 목록을 보게 파일이 앞
   if [ -n "${HC_FAKE_LS-}" ]; then printf '%s\n' "$HC_FAKE_LS"; else echo '{"terminals":[]}'; fi; exit 0
 fi
 if [ "$1" = machine ]; then   # machine ls --json: $HC_FAKE_MACHINES(JSON)
@@ -53,16 +61,20 @@ if [ "$1" = read ]; then   # 화면: $HC_FAKE_SCREEN 파일(없으면 빈 화면
   [ -z "${HC_FAKE_SCREEN-}" ] || cat "$HC_FAKE_SCREEN"; exit 0
 fi
 if [ "$1" = keys ]; then shift; echo "$*" >>"$HCLOG.keys"; exit 0; fi
+if [ "$1" = send ]; then   # 「<터미널><탭><글>」을 $HCLOG.send에. $HCLOG.sendfail 파일이 있으면 실패(배경 watch가 도중에 바뀌게 파일로)
+  [ ! -e "$HCLOG.sendfail" ] || exit 1
+  printf '%s\t%s\n' "$2" "$3" >>"$HCLOG.send"; exit 0
+fi
 f=$HCLOG; [ "$1" = exec ] && f=$HCLOG.exec
 { echo "--- $PWD"; for a in "$@"; do echo "$a"; done; } >>"$f"
 case $1 in
   run) [ -n "${HC_FAKE_RUN_FAIL-}" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; }
-       echo '{"address":"t9zz","agent":"x","state":"live"}' ;;
+       echo "{\"address\":\"${HC_FAKE_RUN_ADDR:-t9zz}\",\"agent\":\"x\",\"state\":\"live\"}" ;;
   exec) on=; while [ "$1" != -- ]; do [ "$1" != --on ] || on=$2; shift; done; shift
         # $HC_FAKE_MACH_HOME가 있으면 기계마다 HOME을 <그 폴더>/<기계>로(폴더가 없으면 모르는 기계, 종료 4)
         if [ -n "$on" ] && [ -n "${HC_FAKE_MACH_HOME-}" ]; then
           [ -d "$HC_FAKE_MACH_HOME/$on" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; }
-          HOME=$HC_FAKE_MACH_HOME/$on exec "$@"
+          HOME=$HC_FAKE_MACH_HOME/$on exec env -u XDG_STATE_HOME "$@"   # 그 기계 집의 상태 폴더(이 기계 XDG_STATE_HOME 말고)
         fi
         exec "$@" ;;
 esac
@@ -1263,6 +1275,306 @@ run fetch --on box
 t "fetch: --repo 없으면 사용법" '[ $rc = 2 ]'
 run fetch --repo "$R" main "--upload-pack=touch $T/pwned; git-upload-pack"
 t "fetch: 둘째 참조부터도 - 로 시작하면 거절, 아무것도 안 돎(감사 [중간] 2)" '[ $rc != 0 ] && [ ! -e "$T/pwned" ] && grep -Fq upload-pack "$T/err"'
+
+# watch(lane-push, 2026-11-16 실측: 지휘가 wait를 사건마다 다시 걸다 한 번 빠뜨리자 완료를 34·14분 늦게 봤다):
+# 늘 도는 감시가 wait와 같은 판정으로 새 사건을 지휘 터미널에 hc send로 밀어 준다. 커서는 wait와 같은 지휘별 커서
+export XDG_STATE_HOME=$T/wst HC_FAKE_LS='{"terminals":[]}' HC_LANE_WAIT_TICK=1
+unset HC_FAKE_MACHINES
+WD=$T/wst/hc-lane
+mkdir -p "$WD"; printf 't7cc\t4242\tt7cc\t0\n' >"$WD/coord.t7cc"   # 지휘마다 지휘 정보(주소·pid·이름·마지막 레인 띄운 시각) — 보낼 때마다 hc get과 맞춰 본다
+rm -f "$HCLOG.send" "$HCLOG.sendfail"
+sends() { grep -c . "$HCLOG.send" 2>/dev/null || true; }
+upto() { i_=0; while [ $i_ -lt 80 ]; do eval "$1" && return 0; sleep 0.1; i_=$((i_ + 1)); done; return 1; }   # 8초까지 기다림
+alive() { kill -0 "$1" 2>/dev/null; }
+stopw() { kill -TERM "$1" 2>/dev/null; wait "$1" 2>/dev/null; }
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w1=$!
+upto '[ -d "$WD/watch.t7cc" ]'
+HC_LANE=lane-w "$LANE" report 완료 abcd1234 끝냄 >/dev/null
+upto '[ "$(sends)" = 1 ]'
+t "watch: 새 사건은 지휘 터미널에 hc send 한 번(한 줄)" '[ "$(sends)" = 1 ] && [ "$(cut -f1 "$HCLOG.send")" = t7cc ] && grep -Fq "lane-w 완료 abcd1234 끝냄" "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+sleep 2.5
+t "watch: 같은 사건은 다시 안 보냄" '[ "$(sends)" = 1 ]'
+run watch --to t7cc
+t "watch: 같은 지휘 주소로 두 번째는 종료 75" '[ $rc = 75 ] && alive $w1 || { cat "$T/err"; false; }'
+HC_TERMINAL_ID=t7cc run wait --timeout 0
+t "watch: wait와 커서를 함께 씀(watch가 보낸 사건을 wait가 다시 안 알림)" '[ $rc = 75 ]'
+touch "$HCLOG.sendfail"
+HC_LANE=lane-w "$LANE" report 막힘 - 막혔음 >/dev/null
+sleep 2.5
+t "watch: hc send가 실패하면 커서에 안 적음" '[ "$(sends)" = 1 ] && ! grep -Fq 막혔음 "$WD/seen.t7cc"'
+rm -f "$HCLOG.sendfail"
+upto '[ "$(sends)" = 2 ]'
+t "watch: 다음 바퀴에 다시 보냄(한 번)" '[ "$(sends)" = 2 ] && grep -Fq "lane-w 막힘 막혔음" "$HCLOG.send" || cat "$HCLOG.send"'
+stopw $w1
+t "watch: 끄면 잠금을 지우고 프로세스를 안 남김" '! alive $w1 && [ ! -e "$WD/watch.t7cc" ] && [ -z "$(pgrep -f "watch --to t7cc")" ]'
+HC_LANE=lane-w "$LANE" report 중간 - 반쯤 >/dev/null
+HC_TERMINAL_ID=t7cc run wait --timeout 0
+t "watch 꺼진 사이 사건은 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 반쯤'
+mkdir -p "$WD/watch.t7cc" && echo 1 >"$WD/watch.t7cc/pid"   # 남은 잠금(pid가 hc-lane이 아님)
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w2=$!
+HC_LANE=lane-w "$LANE" report 착지 abcd1234 끝 >/dev/null
+upto '[ "$(sends)" = 3 ]'
+t "watch: 남은 잠금은 넘겨받음, wait가 받은 사건은 안 보냄" 'alive $w2 && [ "$(sends)" = 3 ] && tail -n 1 "$HCLOG.send" | grep -Fq "lane-w 착지 abcd1234" && ! grep -Fq 반쯤 "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+stopw $w2
+# 지휘가 사라지면(hc get 실패 3번) 스스로 끝남
+"$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w3=$!
+upto '! alive $w3'
+wait $w3; wrc=$?
+t "watch: 지휘 터미널이 사라지면 스스로 종료 0, 잠금 지움" '[ $wrc = 0 ] && grep -Fq 사라짐 "$T/we" && [ ! -e "$WD/watch.t7cc" ] || { cat "$T/we"; false; }'
+# 원격 기계 연결 실패: 「연결 안 됨」 한 번, 다음 바퀴에 다시 보고 붙으면 그 사건
+export HC_FAKE_MACHINES='{"machines":[{"name":"m9","state":"connected"}]}' HC_FAKE_MACH_HOME=$MH
+rm -rf "$MH/m9"
+HC_FAKE_LIVE=t7cc "$LANE" watch --all --to t7cc >"$T/wo" 2>"$T/we" &
+w4=$!
+upto 'grep -Fq "연결 안 됨 m9" "$HCLOG.send" 2>/dev/null'
+sleep 2.5
+t "watch: 원격 연결 실패는 「연결 안 됨」 한 번만" '[ "$(grep -c "연결 안 됨 m9" "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send" "$T/we"; false; }'
+mkdir -p "$MH/m9/.local/state/hc-lane"
+ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" h9 t3 lane-r 완료 eeee9999 원격 >"$MH/m9/.local/state/hc-lane/events.tsv"
+upto 'grep -Fq "lane-r 완료 eeee9999" "$HCLOG.send" 2>/dev/null'
+t "watch: 다음 바퀴에 다시 붙으면 그 기계 사건을 보냄" 'grep -Fq "lane-r 완료 eeee9999 원격 (m9/t3)" "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+stopw $w4
+unset HC_FAKE_MACHINES HC_FAKE_MACH_HOME
+# 지휘가 손으로 걸 일 없게: 레인·감사를 띄우면 그 지휘($HC_TERMINAL_ID)의 watch가 없을 때 저절로 하나(사용자 「코드적으로 처리」)
+mk t21
+rm -f "$WD/coord.t7cc"
+HC_FAKE_LIVE=t7cc HC_TERMINAL_ID=t7cc run --name lane-a1 --repo "$R" -- claude
+t "지휘 터미널에서 레인을 띄우면 지휘 정보(주소·pid·이름·띄운 시각)를 coord.<주소>에 남기고, 레인 기록에 그 지휘" '[ "$(cut -f1-3 "$WD/coord.t7cc")" = "t7cc${tab}4242${tab}t7cc" ] && [ "$(cut -f4 "$WD/coord.t7cc")" -gt 0 ] && grep -Fxq "t9zz${tab}lane-a1${tab}t7cc" "$WD/lanes.tsv" || { cat "$WD/coord.t7cc" "$WD/lanes.tsv"; false; }'
+t "레인을 띄우면 지휘의 watch를 hc run --bg로 띄움(--all --to 지휘, 라벨 hc-lane-watch=1, --no-notify)" '[ $rc = 0 ] && pair --name lane-watch-t7cc && has watch && has --all && pair --to t7cc && pair --label hc-lane-watch=1 && has --no-notify && printf "%s\n" "$out" | grep -Fq "감시 lane-watch-t7cc 띄움" || { cat "$HCLOG" "$T/err"; false; }'
+t "watch 터미널은 레인 라벨(hc-lane=1)이 아님" '[ "$(grep -c -Fx -- --label=hc-lane=1 "$HCLOG")" = 0 ] && [ "$(grep -A1 -Fx -- --label "$HCLOG" | grep -cFx hc-lane=1)" = 1 ]'
+t "레인 JSON 끝 줄은 그대로 레인 주소" 'printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"lane\":\"t9zz\""'
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w5=$!
+upto '[ -s "$WD/watch.t7cc/pid" ]'
+rm -f "$HCLOG"
+HC_TERMINAL_ID=t7cc run --read --name lane-a2 --repo "$R" -- claude
+t "둘째 레인(--read 포함)은 watch가 돌고 있으면 안 띄움" '[ $rc = 0 ] && ! has lane-watch-t7cc && [ "$(grep -cFx run "$HCLOG")" = 1 ] || { cat "$HCLOG"; false; }'
+stopw $w5
+rm -f "$HCLOG"
+run --name lane-a3 --repo "$R" -- claude
+t "지휘가 없으면(\$HC_TERMINAL_ID 없음 — hc-fill 등) watch를 안 띄움" '[ $rc = 0 ] && ! has watch && [ "$(grep -cFx run "$HCLOG")" = 1 ]'
+rm -f "$HCLOG"
+HC_FAKE_LIVE=t7cc HC_TERMINAL_ID=t7cc run --dry-run --name lane-a4 --repo "$R" -- claude
+t "--dry-run은 watch도 띄우지 않고 할 일만" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "[dry-run] hc run --bg --no-notify --rm --name lane-watch-t7cc" && [ ! -e "$HCLOG" ]'
+# 레인이 다 끝나고 lane.watch_idle분(시험은 초) 동안 사건도 없으면 watch가 스스로 끝남
+printf '%s\n' '{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","state":"live","status":"working","turn":1}]}' >"$HCLOG.lsfile"
+HC_LANE_WATCH_IDLE=2 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w6=$!
+sleep 3.5
+t "watch: 이 지휘의 살아 있는 레인이 있으면 쉬어도 안 끝남" 'alive $w6 || { cat "$T/we"; false; }'
+printf '%s\n' '{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","state":"finished","turn":1},{"address":"t61","name":"lane-o","parent":"mac/t7","state":"live","status":"working","turn":1}]}' >"$HCLOG.lsfile"
+upto '! alive $w6'
+wait $w6; wrc=$?
+t "watch: 이 지휘의 레인이 다 끝나고 그 시간이 지나면 종료 0(남의 지휘 레인은 안 셈), 잠금 지움" '[ $wrc = 0 ] && grep -Fq "끝낸다" "$T/we" && [ ! -e "$WD/watch.t7cc" ] || { cat "$T/we"; false; }'
+rm -f "$HCLOG.lsfile"
+# 감사 [중간] 1: hc-fill(launchd, $HC_TERMINAL_ID 없음)이 띄운 레인도 지휘(HC_LANE_COORD — hc-fill 설정 coord)의 watch를 띄움
+rm -f "$HCLOG"
+HC_FAKE_LIVE=t7cc HC_LANE_COORD=t7cc run --name lane-a5 --repo "$R" -- claude
+t "HC_LANE_COORD(터미널 밖)면 그 지휘의 watch를 띄움" '[ $rc = 0 ] && pair --name lane-watch-t7cc && pair --to t7cc && has --rm || { cat "$HCLOG" "$T/err"; false; }'
+rm -f "$HCLOG"
+HC_FAKE_LIVE=t7cc HC_LANE_COORD=t7cc HC_TERMINAL_ID=t3zz run --name lane-a6 --repo "$R" -- claude
+t "HC_LANE_COORD가 \$HC_TERMINAL_ID보다 앞" '[ $rc = 0 ] && pair --to t7cc && ! has t3zz'
+# 쉼 종료는 hc-fill 대기열에 걸린 요청(wait·up)이 없을 때만
+mkdir -p "$T/fq"
+printf 'lane-q1\tp\tb\t-\t-\twait\t-\t-\t-\t-\t-\n' >"$T/fq/queue.tsv"
+HC_FILL_DATA=$T/fq HC_LANE_WATCH_IDLE=2 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w7=$!
+sleep 3.5
+t "watch: hc-fill 대기열에 기다리는 요청이 있으면 레인이 없어도 안 끝남" 'alive $w7 || { cat "$T/we"; false; }'
+printf 'lane-q1\tp\tb\t-\t-\tsent\tm\tm/t1\t-\t-\t-\n' >"$T/fq/queue.tsv"
+upto '! alive $w7'
+wait $w7; wrc=$?
+t "watch: 대기열이 비면(sent만) 그 시간 뒤 끝남" '[ $wrc = 0 ] && grep -Fq "끝낸다" "$T/we" || { cat "$T/we"; false; }'
+# 2차 감사 [중간] A: 끝난 up 줄(hc-fill add 줄은 rm할 때까지 up으로 남음)은 세지 않는다 — 살아 있는 up 레인은 hc ls가 센다
+printf 'lane-q1\tp\tb\t-\t-\tup\tm\tm/t1\t-\t-\t-\n' >"$T/fq/queue.tsv"
+HC_FILL_DATA=$T/fq HC_LANE_WATCH_IDLE=2 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w7=$!
+upto '! alive $w7' || kill $w7
+wait $w7; wrc=$?
+t "watch: 대기열의 끝난 up 줄은 세지 않고 그 시간 뒤 끝남" '[ $wrc = 0 ] && grep -Fq "끝낸다" "$T/we" || { cat "$T/we"; false; }'
+# 감사 [중간] 2: hc ls 실패는 실패 시작·회복 때 한 번씩만 보냄(같은 상태 되풀이는 안 보냄)
+rm -f "$HCLOG.send"; touch "$HCLOG.lsfail"
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w8=$!
+upto 'grep -Fq "hc ls 실패" "$HCLOG.send" 2>/dev/null'
+sleep 7
+t "watch: hc ls가 계속 실패해도 알림은 한 번" '[ "$(grep -c "hc ls 실패" "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send"; false; }'
+rm -f "$HCLOG.lsfail"
+upto 'grep -Fq "hc ls 회복" "$HCLOG.send" 2>/dev/null'
+sleep 2.5
+t "watch: 되살아나면 「회복」 한 번" '[ "$(grep -c "hc ls 회복" "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send"; false; }'
+touch "$HCLOG.lsfail"
+upto '[ "$(grep -c "hc ls 실패" "$HCLOG.send")" = 2 ]'
+t "watch: 다시 실패하면 한 번 더" '[ "$(grep -c "hc ls 실패" "$HCLOG.send")" = 2 ] || { cat "$HCLOG.send"; false; }'
+rm -f "$HCLOG.lsfail"
+stopw $w8
+# 감사 5: 지휘 hc get이 연결 실패면 끝내지 않고 계속 돈다(「없음」일 때만 끝냄)
+touch "$HCLOG.getdown"
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w9=$!
+sleep 5
+t "watch: 지휘 hc get 연결 실패는 사라짐이 아님(계속 돈다)" 'alive $w9 || { cat "$T/we"; false; }'
+rm -f "$HCLOG.getdown"
+# 감사 [낮음] 1: 보내는 글에서 제어 문자를 지움
+rm -f "$HCLOG.send"
+HC_LANE=lane-w "$LANE" report 중간 - "$(printf 'esc\033[2Jx\001y')" >/dev/null
+upto '[ -s "$HCLOG.send" ]'
+t "watch: hc send 글에 제어 문자가 없음" 'grep -Fq "esc[2Jxy" "$HCLOG.send" && ! LC_ALL=C grep -q "$(printf "[\001-\010\033]")" "$HCLOG.send" || { cat -v "$HCLOG.send"; false; }'
+stopw $w9
+# 2차 감사 [중간] B: 지휘 주소를 설정에 박지 않는다. coord 파일의 pid·이름이 지금 그 주소의 터미널과 다르면(코어가 다시 떠
+# 주소가 남에게 감) 보내지 않고 끝내며, 사건은 커서에 안 적혀 events에 남는다(지휘가 돌아와 wait/watch를 걸면 받음)
+rm -f "$HCLOG.send"
+HC_LANE=lane-w "$LANE" report 완료 cafe1234 남의터미널 >/dev/null
+HC_FAKE_LIVE=t7cc HC_FAKE_LIVE_PID=9999 "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w10=$!
+upto '! alive $w10' || kill $w10
+wait $w10; wrc=$?
+t "watch: 그 주소의 pid가 coord와 다르면 hc send 0번, 「지휘 없음」 남기고 종료 0" '[ $wrc = 0 ] && [ ! -s "$HCLOG.send" ] && grep -Fq "지휘 없음" "$T/we" && grep -Fq "지휘 없음" "$WD/watch.log" || { cat "$T/we" "$HCLOG.send"; false; }'
+HC_TERMINAL_ID=t7cc HC_FAKE_LIVE=t7cc run wait --timeout 0
+t "watch가 못 보낸 사건은 커서에 안 적혀 지휘의 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 남의터미널 || { printf "%s\n" "$out"; false; }'
+rm -f "$WD/coord.t7cc"
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+w11=$!
+HC_LANE=lane-w "$LANE" report 중간 - 파일없음 >/dev/null
+upto '! alive $w11' || kill $w11
+wait $w11; wrc=$?
+t "watch: coord 파일이 없어도 보내지 않고 「지휘 없음」으로 끝남" '[ $wrc = 0 ] && [ ! -s "$HCLOG.send" ] && grep -Fq "지휘 없음" "$T/we" || { cat "$T/we"; false; }'
+HC_TERMINAL_ID=t7cc HC_FAKE_LIVE=t7cc run wait --timeout 0
+t "지휘가 wait를 걸면 지휘 정보를 coord.<주소>에 남김(그 사건도 받음)" '[ "$(cut -f1-3 "$WD/coord.t7cc")" = "t7cc${tab}4242${tab}t7cc" ] && printf "%s\n" "$out" | grep -Fq 파일없음 || { cat "$WD/coord.t7cc"; false; }'
+HC_FAKE_LIVE=t7cc run coord
+t "coord: 파일과 hc get(pid·이름)이 같으면 주소, 종료 0" '[ $rc = 0 ] && [ "$out" = t7cc ] || { cat "$T/err"; false; }'
+HC_FAKE_LIVE=t7cc HC_FAKE_LIVE_PID=9999 run coord
+t "coord: pid가 다르면 종료 1, 까닭 한 줄" '[ $rc = 1 ] && [ -z "$out" ] && grep -Fq "지휘 없음" "$T/err"'
+rm -f "$HCLOG"
+HC_FAKE_LIVE=t7cc HC_FAKE_LIVE_PID=9999 HC_LANE_COORD=t7cc run --name lane-a7 --repo "$R" -- claude
+t "레인 띄우기: HC_LANE_COORD가 coord와 안 맞으면 watch를 안 띄우고 한 줄(레인은 뜸)" '[ $rc = 0 ] && ! has watch && grep -Fq "지휘 없음" "$T/err" || { cat "$HCLOG" "$T/err"; false; }'
+cp "$WD/coord.t7cc" "$T/coord.bak"
+HC_FAKE_LANETERM=t5ln HC_TERMINAL_ID=t5ln run --name lane-a8 --repo "$R" -- claude
+t "레인 터미널(라벨 hc-lane=1)에서 띄우면 지휘 정보로 안 적고 watch도 안 띄움" '[ "$(cat "$WD/coord.t7cc")" = "$(cat "$T/coord.bak")" ] && [ ! -e "$WD/coord.t5ln" ] && ! pair --to t5ln'
+# 3차 감사 [중간] 1: 지휘 정보는 지휘마다(coord.<주소>), 사건은 그 레인을 띄운 지휘의 watch만 보낸다. 같은 기계에서 지휘 둘이
+# 레인을 띄워도 각자 자기 사건만 받고, 한쪽이 hc-lane을 써도 다른 쪽 watch는 계속 돈다. 띄운 지휘가 없는 레인(hc-fill)은
+# 살아 있고 pid·이름이 맞는 지휘 가운데 가장 최근에 레인을 띄운 한 곳으로, 없으면 안 보내고 events에 남긴다
+rm -f "$WD"/coord.* "$WD/lanes.tsv" "$HCLOG.send" "$HCLOG"
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"
+HC_TERMINAL_ID=ta1 HC_FAKE_RUN_ADDR=t9aa run --name lane-ma --repo "$R" -- claude
+sleep 1.1   # 띄운 시각(초)이 달라야 「가장 최근」이 갈린다
+HC_TERMINAL_ID=tb2 HC_FAKE_RUN_ADDR=t9bb run --name lane-mb --repo "$R" -- claude
+t "지휘 둘: 지휘마다 지휘 정보 파일, 레인 기록에 띄운 지휘" '[ "$(cut -f1-3 "$WD/coord.ta1")" = "ta1${tab}1111${tab}ta1" ] && [ "$(cut -f1-3 "$WD/coord.tb2")" = "tb2${tab}2222${tab}tb2" ] && grep -Fxq "t9aa${tab}lane-ma${tab}ta1" "$WD/lanes.tsv" && grep -Fxq "t9bb${tab}lane-mb${tab}tb2" "$WD/lanes.tsv" || { cat "$WD"/coord.* "$WD/lanes.tsv"; false; }'
+t "지휘 둘: 각자 자기 watch(lane-watch-<주소>)를 띄움" 'pair --to ta1 && pair --to tb2 && pair --name lane-watch-ta1 && pair --name lane-watch-tb2'
+"$LANE" watch --to ta1 >"$T/woa" 2>"$T/wea" &
+wa=$!
+"$LANE" watch --to tb2 >"$T/wob" 2>"$T/web" &
+wb=$!
+upto '[ -s "$WD/watch.ta1/pid" ] && [ -s "$WD/watch.tb2/pid" ]'
+HC_TERMINAL_ID=t9aa HC_LANE=lane-ma "$LANE" report 완료 aaaa1111 에이것 >/dev/null
+HC_TERMINAL_ID=t9bb HC_LANE=lane-mb "$LANE" report 완료 bbbb2222 비것 >/dev/null
+HC_TERMINAL_ID=t9cc HC_LANE=lane-fill "$LANE" report 완료 cccc3333 필것 >/dev/null   # 띄운 지휘가 없는 레인(hc-fill 꼴)
+upto 'grep -Fq 에이것 "$HCLOG.send" 2>/dev/null && grep -Fq 비것 "$HCLOG.send" && grep -Fq 필것 "$HCLOG.send"'
+sleep 2.5
+t "지휘 둘: 각자 자기 레인 사건만 받음(남의 사건 send 0)" '[ "$(grep -F 에이것 "$HCLOG.send" | cut -f1 | sort -u)" = ta1 ] && [ "$(grep -F 비것 "$HCLOG.send" | cut -f1 | sort -u)" = tb2 ] && [ "$(grep -c 에이것 "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send" "$T/wea" "$T/web"; false; }'
+t "지휘 둘: 띄운 지휘가 없는 레인 사건은 가장 최근에 레인을 띄운 지휘(tb2) 한 곳만" '[ "$(grep -F 필것 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "tb2 " ] || { cat "$HCLOG.send"; false; }'
+HC_TERMINAL_ID=tb2 run wait --timeout 0   # 다른 지휘가 hc-lane을 써도
+HC_TERMINAL_ID=t9aa HC_LANE=lane-ma "$LANE" report 착지 aaaa1111 에이착지 >/dev/null
+upto 'grep -Fq 에이착지 "$HCLOG.send" 2>/dev/null'
+t "지휘 둘: 다른 지휘가 wait를 걸어도 앞 지휘 watch는 계속 돌고 자기 사건을 받음" 'alive $wa && [ "$(grep -F 에이착지 "$HCLOG.send" | cut -f1)" = ta1 ] || { cat "$HCLOG.send" "$T/wea"; false; }'
+# 4차 감사 [중간] 1: 「보냄」은 사건 하나에 한 번 — 끝난 지휘가 이미 받은 사건은 남은 지휘에게 다시 안 감, 못 받은 것만 넘어감
+touch "$HCLOG.sendfail"
+HC_TERMINAL_ID=t9bb HC_LANE=lane-mb "$LANE" report 막힘 - 비못받음 >/dev/null   # tb2가 보내려다 실패(커서·보냄 표시 없음)
+sleep 2.5
+printf 'ta1 1111\n' >"$HCLOG.live"   # tb2가 사라짐
+rm -f "$HCLOG.sendfail"
+HC_TERMINAL_ID=t9cc HC_LANE=lane-fill "$LANE" report 착지 cccc3333 필착지 >/dev/null
+upto 'grep -Fq 필착지 "$HCLOG.send" 2>/dev/null && grep -Fq 비못받음 "$HCLOG.send"'
+sleep 2.5
+t "지휘 둘: 가장 최근 지휘가 사라지면 띄운 지휘 없는 레인 사건은 살아 있는 지휘(ta1)로" '[ "$(grep -F 필착지 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send"; false; }'
+t "지휘 둘: 끝난 지휘(tb2)가 이미 받은 사건(비것·필것)은 ta1에게 다시 안 감" '! grep "^ta1" "$HCLOG.send" | grep -Eq "비것|필것" || { cat "$HCLOG.send"; false; }'
+t "지휘 둘: tb2가 못 받은 사건(보내기 실패)은 ta1이 한 번 받음" '[ "$(grep -F 비못받음 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send"; false; }'
+stopw $wa; stopw $wb
+: >"$HCLOG.live"   # 지휘가 아무도 없음
+rm -f "$HCLOG.send"
+HC_TERMINAL_ID=t9cc HC_LANE=lane-fill "$LANE" report 중간 - 아무도없음 >/dev/null
+run coord
+t "coord: 살아 있는 지휘가 없으면 종료 1(hc-fill은 watch를 안 띄움)" '[ $rc = 1 ] && grep -Fq "지휘 없음" "$T/err"'
+printf 'ta1 1111\n' >"$HCLOG.live"
+HC_TERMINAL_ID=ta1 run wait --timeout 0
+t "보내지 못한 사건은 events에 남아 지휘가 wait를 걸면 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 아무도없음'
+# wait로 받은 사건도 「보냄」: 그 지휘가 끝난 뒤 다른 지휘의 watch가 다시 보내지 않음
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"
+# 이 시험은 tb2가 주인인 레인이어야 한다(앞에서 t9bb는 ta1이 넘겨받아 주인이 바뀜 — 5차 규칙 2) — tb2가 새 레인을 띄움
+HC_TERMINAL_ID=tb2 HC_FAKE_RUN_ADDR=t9ee run --name lane-me --repo "$R" -- claude
+HC_TERMINAL_ID=t9ee HC_LANE=lane-me "$LANE" report 중간 - 비웨이트 >/dev/null
+HC_TERMINAL_ID=tb2 run wait --timeout 0
+t "wait로 받음(tb2)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 비웨이트'
+printf 'ta1 1111\n' >"$HCLOG.live"; rm -f "$HCLOG.send"
+"$LANE" watch --to ta1 >"$T/woa" 2>"$T/wea" &
+wa=$!
+HC_TERMINAL_ID=t9ee HC_LANE=lane-me "$LANE" report 중간 - 비새것 >/dev/null
+upto 'grep -Fq 비새것 "$HCLOG.send" 2>/dev/null'
+t "지휘가 wait로 받은 사건은 그 지휘가 끝난 뒤 남은 지휘 watch가 다시 안 보냄(새 것만)" 'grep -Fq 비새것 "$HCLOG.send" && ! grep -Fq 비웨이트 "$HCLOG.send" || { cat "$HCLOG.send" "$T/wea"; false; }'
+stopw $wa
+# 4차 감사 [낮음] 1: 레인 기록이 -(띄울 때 지휘 확인 실패)여도 hc parent가 있으면 그 지휘로(가장 최근 지휘 tb2가 아니라)
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"; rm -f "$HCLOG.send"
+printf 't9dd\tlane-md\t-\n' >>"$WD/lanes.tsv"
+printf '%s\n' '{"terminals":[{"address":"t9dd","name":"lane-md","parent":"mac/ta1","state":"live","status":"working","turn":1}]}' >"$HCLOG.lsfile"
+"$LANE" watch --to ta1 >"$T/woa" 2>"$T/wea" &
+wa=$!
+"$LANE" watch --to tb2 >"$T/wob" 2>"$T/web" &
+wb=$!
+HC_TERMINAL_ID=t9dd HC_LANE=lane-md "$LANE" report 완료 dddd4444 디것 >/dev/null
+upto 'grep -Fq 디것 "$HCLOG.send" 2>/dev/null'
+sleep 2.5
+t "레인 기록이 -여도 hc parent(ta1)가 있으면 그 지휘에게만" '[ "$(grep -F 디것 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send"; false; }'
+stopw $wa; stopw $wb
+rm -f "$HCLOG.lsfile"
+# 5차 감사 [중간] 1: sent는 watch만 쓴다. 남의 지휘(tb2)의 wait가 ta1 레인 사건을 봐도 ta1 watch는 그 사건을 보낸다
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"; rm -f "$HCLOG.send"
+HC_TERMINAL_ID=t9aa HC_LANE=lane-ma "$LANE" report 중간 - 에이늦음 >/dev/null
+HC_TERMINAL_ID=tb2 run wait --timeout 0
+t "남의 지휘(tb2)의 wait는 ta1 레인 사건을 보기만 함" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 에이늦음 && ! grep -Fq 에이늦음 "$WD/sent" 2>/dev/null'
+"$LANE" watch --to ta1 >"$T/woa" 2>"$T/wea" &
+wa=$!
+upto 'grep -Fq 에이늦음 "$HCLOG.send" 2>/dev/null'
+t "그 뒤에도 주인 ta1의 watch가 자기 레인 사건을 보냄" '[ "$(grep -F 에이늦음 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send" "$T/wea"; false; }'
+touch "$HCLOG.sendfail"
+HC_TERMINAL_ID=t9aa HC_LANE=lane-ma "$LANE" report 막힘 - 에이남음 >/dev/null   # ta1이 보내려다 실패
+sleep 2.5
+printf 'tb2 2222\n' >"$HCLOG.live"   # ta1이 끝남
+upto '! alive $wa' || kill $wa
+wait $wa 2>/dev/null
+rm -f "$HCLOG.sendfail"
+"$LANE" watch --to tb2 >"$T/wob" 2>"$T/web" &
+wb=$!
+upto 'grep -Fq 에이남음 "$HCLOG.send" 2>/dev/null'
+sleep 2.5
+t "ta1이 끝난 뒤 tb2 watch는 ta1이 안 보낸 것(에이남음)만 받음 — 보낸 것(에이늦음)은 다시 안 감" '[ "$(grep -F 에이남음 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "tb2 " ] && [ "$(grep -c 에이늦음 "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send" "$T/web"; false; }'
+t "넘겨받은 watch가 그 레인의 주인이 됨(레인 기록에 tb2)" '[ "$(awk -F"\t" "\$1 == \"t9aa\" { o = \$3 } END { print o }" "$WD/lanes.tsv")" = tb2 ] || { cat "$WD/lanes.tsv"; false; }'
+stopw $wb
+# 6차 감사 [중간] 1(R6): 「보낸 것」 = sent ∪ 그 레인의 옛 주인 seen. 옛 주인이 wait로 받은 사건은 넘겨받아 주인이 된 뒤에도 다시 안 감
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"; rm -f "$HCLOG.send"
+HC_TERMINAL_ID=ta1 HC_FAKE_RUN_ADDR=t9ff run --name lane-mf --repo "$R" -- claude
+HC_TERMINAL_ID=t9ff HC_LANE=lane-mf "$LANE" report 완료 ffff6666 에프하나 >/dev/null
+HC_TERMINAL_ID=ta1 run wait --timeout 0
+t "R6: ta1이 wait로 에프하나를 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 에프하나'
+HC_TERMINAL_ID=t9ff HC_LANE=lane-mf "$LANE" report 중간 - 에프둘 >/dev/null
+printf 'tb2 2222\n' >"$HCLOG.live"   # ta1이 끝남
+"$LANE" watch --to tb2 >"$T/wob" 2>"$T/web" &
+wb=$!
+upto 'grep -Fq 에프둘 "$HCLOG.send" 2>/dev/null'
+sleep 4
+t "R6: 넘겨받은 tb2는 에프둘만 받고, ta1이 wait로 받은 에프하나는 주인이 된 뒤에도 다시 안 받음" 'grep -Fq 에프둘 "$HCLOG.send" && ! grep -Fq 에프하나 "$HCLOG.send" || { cat "$HCLOG.send" "$T/web"; false; }'
+stopw $wb
+printf 'ta1 1111\n' >"$HCLOG.live"
+run coord
+t "coord: 살아 있는 지휘 가운데 가장 최근에 레인을 띄운 곳(지금은 ta1)" '[ $rc = 0 ] && [ "$out" = ta1 ] || { cat "$T/err"; false; }'
+rm -f "$HCLOG.live"
+unset XDG_STATE_HOME HC_LANE_WAIT_TICK
+run watch
+t "watch: --to 없으면 오류" '[ $rc != 0 ] && [ $rc != 75 ] && grep -Fq -- --to "$T/err"'
+run watch --to t7cc --timeout 5
+t "watch: --timeout은 wait만" '[ $rc != 0 ] && [ $rc != 75 ]'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

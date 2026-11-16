@@ -6,7 +6,8 @@ hc-sweep --dry-run    닫을 것·끌 것과 이유만 출력
 hc-sweep --self-test  가짜 기록으로 규칙 판정 확인(hc를 부르지 않는다)
 
 대상: 이 기계(주소에 "/" 없음)의 live 터미널 중 status.app이 있고 state가 idle·done인 것.
-닫지 않음: 이름에 loop, -proxy로 끝남, ~/.claude-tasks/keep(한 줄에 이름·주소 하나),
+닫지 않음: 이름에 loop, -proxy로 끝남, hc-lane 감시(이름 lane-watch-* 또는 라벨 hc-lane-watch=1 — 스스로 끝난다),
+~/.claude-tasks/keep(한 줄에 이름·주소 하나),
 사람이 연 칸(parent 없는 where 라벨 칸, 또는 터미널 자체 프로그램이 셸 — kill하면 칸이 사라진다).
 where 라벨이 있어도 parent가 있으면 지휘가 띄운 worker다(herdr-balance가 붙이며 라벨을 단다).
 R1 안 쓴 세션: parent 없음, turn 0, 시작부터 줄곧 idle(status_ms-created_ms<60초), 만든 지 30분 이상
@@ -77,6 +78,7 @@ def rule(t, now, keep):
     if (t.get("state") != "live" or "/" in t["address"] or not isinstance(status, dict)
             or not status.get("app") or status.get("state") not in ("idle", "done")
             or "loop" in name or name.endswith("-proxy") or name in keep or t["address"] in keep
+            or name.startswith("lane-watch-") or (t.get("labels") or {}).get("hc-lane-watch") == "1"
             or ((t.get("where") or (t.get("labels") or {}).get("where")) and not t.get("parent"))
             or t.get("shell")):
         return None
@@ -473,6 +475,8 @@ def self_test():
     assert rule(t(address="w1/t4rn"), now, keep) is None
     assert rule(t(name="d1-loop-w1"), now, keep) is None
     assert rule(t(name="claude-proxy"), now, keep) is None
+    assert rule(t(name="lane-watch-t7cc", parent="t7cc", status_ms=now - 2 * h), now, keep) is None  # hc-lane 감시
+    assert rule(t(name="w", labels={"hc-lane-watch": "1"}, parent="t7cc", status_ms=now - 7 * h), now, keep) is None
     assert rule(t(name="keepme"), now, keep) is None
     assert rule(t(address="t9"), now, keep) is None
     assert rule(t(labels={"where": "proj / 1"}), now, keep) is None

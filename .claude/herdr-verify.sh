@@ -30,7 +30,8 @@ for t in tests/*.test.sh; do
   HC_LANE_BIN="$PWD/bin/hc-lane" python3 -c 'import os,sys; os.setpgid(0, 0); os.execvp("bash", ["bash"] + sys.argv[1:])' "$PWD/$t" \
     >"$tmp/log" 2>&1 </dev/null &
   pg=$!
-  if wait $pg; then echo "통과 $t"; else echo "실패 $t"; tail -40 "$tmp/log"; fail=1; fi
+  # 실패면 FAIL 줄을 먼저(끝 40줄에 잘려 흔들린 시험 번호가 안 보였다 — lane-push 4차 감사 [낮음] 3)
+  if wait $pg; then echo "통과 $t"; else echo "실패 $t"; grep -E '^(FAIL|not ok)' "$tmp/log"; tail -40 "$tmp/log"; fail=1; fi
   python3 - "$pg" "$tmp/before" "$PWD" "$(pwd -P)" <<'PY' || { echo "실패 $t: 고아를 남김(위 목록, 껐음)"; fail=1; }
 import os, signal, subprocess, sys, time
 pg, before, here, me = int(sys.argv[1]), set(open(sys.argv[2]).read().split()), sys.argv[3:], os.getpid()

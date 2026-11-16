@@ -36,8 +36,10 @@ EOF
 # 가짜 hc-lane: 받은 인자를 한 줄에 하나씩 $T/lane.log에. --print-steps는 착지 줄 대신 표식, 띄우기는 JSON(주소 = <기계>/<이름>).
 cat >"$T/bin/hc-lane" <<'EOF'
 #!/bin/bash
+if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
 if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
 on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
@@ -64,7 +66,7 @@ cat >"$T/bin/herdr-balance" <<'EOF'
 echo "$*" >>"$T_LOG/balance.log"
 EOF
 chmod +x "$T/bin/"*
-export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0
+export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0 HC_FAKE_COORD=t8kk
 mkdir -p "$HOME"
 : >"$T/commits"
 
@@ -76,7 +78,7 @@ Q=$HOME/.local/share/hc-fill/queue.tsv
 mj() { s='{"machines":['; c=; for m in box-1 box-2 shared slow; do st=disconnected; case " $* " in *" $m "*) st=connected ;; esac; s="$s$c{\"name\":\"$m\",\"state\":\"$st\"}"; c=,; done; export HC_FAKE_MACHINES="$s]}"; }
 # 터미널: lj <주소>:<agent>:<이름>[:<상태, 기본 working>[:<cwd>]] …
 lj() { s='{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"}'; c=,; for x in "$@"; do IFS=: read -r a g nm st cw <<<"$x"; s="$s$c{\"address\":\"$a\",\"agent\":\"$g\",\"name\":\"$nm\",\"state\":\"live\",\"status\":\"${st:-working}\",\"cwd\":\"${cw:-/}\"}"; c=,; done; export HC_FAKE_LS="$s]}"; }
-fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED; }
+fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED; }
 brief() { printf '# 지시문 %s\n본문\n' "$1" >"$T/$1.md"; echo "$T/$1.md"; }
 add() { "$FILL" add --name "$1" --project app --brief "$(brief "$1")" "${@:2}" >/dev/null 2>&1; }
 where() { awk -F'\t' -v n="$1" '$1==n {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소
@@ -147,6 +149,7 @@ run run
 t "shared: 다음 바퀴에도 hc-fill 레인 2개가 살아 있으면 안 띄움 → here" '[ "$(where s4)" = "up here s4" ]'
 t "here(local): --on 없이 띄우고 herdr-balance --main <설정 coord> --add" '! awk "/^---\$/ {b=\"\"} {b=b \"\\n\" \$0} END {print b}" "$T/lane.log" | grep -Fxq -- --on && grep -Fxq -- "--main t0 --add s4" "$T/balance.log"'
 t "here(local): 경로는 local 기계의 repo 줄" 'grep -Fxq /Users/me/src/app "$T/lane.log"'
+t "레인을 띄울 때 hc-lane coord가 확인한 지휘 주소(설정 coord가 아님)를 HC_LANE_COORD로 넘김(지휘의 watch가 없으면 hc-lane이 띄운다 — 감사 [중간] 1·2차 B)" '[ "$(sort -u "$T/coord.log")" = t8kk ] || { cat "$T/coord.log"; false; }'
 
 # 3b. 자리 세기: working·blocked는 늘 셈. done·idle은 작업 트리(<저장소>.wt/…)가 그 기계에 남은 쓰기 레인만 셈.
 #     읽기 전용(저장소 폴더 그대로)·작업 트리가 정리된 끝난 레인은 안 셈. all 칸 기계(shared)는 다 셈.
@@ -190,6 +193,9 @@ sed -i '' 's/^coord .*/coord/' "$T/conf/hc-fill.tsv"
 add cf --only here
 run run
 t "설정: coord 키 혼자면 빈 값 → 붙이지 않음" '[ "$(where cf)" = "up here cf" ] && [ ! -e "$T/balance.log" ]'
+fresh; add cn --only here
+HC_FAKE_COORD= run run
+t "지휘 정보가 없거나 안 맞으면(hc-lane coord 실패) HC_LANE_COORD를 안 넘기고 「지휘 없음」 한 줄(레인은 띄움)" '[ "$(where cn)" = "up here cn" ] && [ "$(tail -n 1 "$T/coord.log")" = 없음 ] && printf "%s" "$out" | grep -Fq "지휘 없음" || { printf "%s\n" "$out"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"; echo "local    other" >>"$T/conf/hc-fill.tsv"
 fresh; add cg
 run run
