@@ -1,0 +1,49 @@
+#!/bin/bash
+# hc-core-relaunch <기계>... — 원격 맥(워커·서버)의 herdr-core를 launchd(gui) 문맥으로 다시 띄운다. 도는 프로그램은 살린다.
+# 2026-11-16 사용자 요청으로 만듦. 실측: 원격 맥 네 대에서 죽은 터미널 0개.
+# 왜: SSH(hc 재접속·hc machine add/update)로 뜬 코어는 SSH 문맥이라 hc 터미널에서 키체인이 막힌다(User interaction is not allowed).
+# 어떻게: 그 기계 gui 도메인에 한 번짜리 launchd 작업을 올려 `herdr-core server restart`(프로그램은 hold가 붙듦)를 돌린다.
+#   재시작하는 몇 초 동안 SSH로 붙은 `herdr-core connect`를 SIGSTOP해 둔다 — 안 그러면 다른 기계의 hc 재접속이
+#   SSH 문맥 코어를 먼저 띄운다(한 워커 맥에서 세 번 연속 그렇게 졌다). 끝나면 SIGCONT.
+# 확인은 worker-mac-check <기계>의 「코어 문맥」·「키체인(hc 문맥)」 줄.
+set -u
+[ $# -ge 1 ] || { echo "사용: hc-core-relaunch <기계>..." >&2; exit 64; }
+rc=0
+for M in "$@"; do
+  echo "== $M"
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$M" 'bash -s' <<'EOS' || rc=1
+set -u
+H=$HOME; U=$(id -un); L="com.$U.herdr-core-restart"; P="$H/Library/LaunchAgents/$L.plist"; S="$H/.local/state/core-restart.sh"
+B="$H/.local/bin/herdr-core"; [ -x "$B" ] || { echo "✗ $B 없음"; exit 1; }
+mkdir -p "$H/.local/state" "$H/Library/LaunchAgents" "$H/Library/Logs"
+cat > "$S" <<'EOF'
+#!/bin/bash
+pk=$(pgrep -f "herdr-core connect" | tr '\n' ' ')
+[ -n "$pk" ] && kill -STOP $pk
+"$HOME/.local/bin/herdr-core" server restart
+sleep 4
+[ -n "$pk" ] && kill -CONT $pk
+echo "멈췄다 푼 connect: ${pk:-없음}"
+EOF
+cat > "$P" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>$L</string>
+<key>ProgramArguments</key><array><string>/bin/bash</string><string>$S</string></array>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>$H/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>LANG</key><string>en_US.UTF-8</string><key>HOME</key><string>$H</string></dict>
+<key>RunAtLoad</key><true/>
+<key>StandardOutPath</key><string>$H/Library/Logs/herdr-core-restart.log</string>
+<key>StandardErrorPath</key><string>$H/Library/Logs/herdr-core-restart.log</string>
+</dict></plist>
+EOF
+: > "$H/Library/Logs/herdr-core-restart.log"
+echo "전: $(pgrep -lf '(herdr-core|/hc) (serve|--hc-launchd)' | cut -c1-70)"
+launchctl bootstrap "gui/$(id -u)" "$P"; sleep 10
+launchctl bootout "gui/$(id -u)/$L" 2>/dev/null; rm -f "$P"
+echo "후: $(pgrep -lf '(herdr-core|/hc) (serve|--hc-launchd)' | cut -c1-70)"
+tail -1 "$H/Library/Logs/herdr-core-restart.log"
+EOS
+  worker-mac-check "$M" 2>&1 | grep -E "코어 문맥|키체인\(hc"
+done
+exit $rc

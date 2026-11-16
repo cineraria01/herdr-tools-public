@@ -1,0 +1,445 @@
+#!/bin/bash
+# 맥의 실제 파일을 정본으로 두 저장소(범용 도구·개인 설정)와 hc에 등록된 기계에 맞춘다 (계약 CONTRACT.md).
+# 무엇을 맞추는지는 개인 저장소의 sync.list와 settings/keys.json이 정한다. 맥에서만 돈다.
+#
+#   herdr-sync                      저장소 ↔ 맥, 그다음 hc machine ls의 모든 기계에 맞춘다
+#   herdr-sync <기계>…              고른 기계만
+#   herdr-sync --check [<기계>…]    고치지 않고 비교만 한다 (다름·충돌이 있으면 종료 1)
+#   herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다)
+#   herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
+#
+# 경로는 sync.list의 맥 경로(~ 아래)나 설정 키(.model, hook:PreToolUse:cotenant-guard.sh 꼴), *는 그 기계의 충돌 전부다.
+# 저장소와의 충돌은 기계 자리에 repo를 쓴다: --take repo:<경로>는 맥 값을, --pull repo:<경로>는 저장소 값을 남긴다.
+# 범용 저장소는 HERDR_TOOLS_REPO (기본 ~/Documents/app/herdr-tools), 개인 저장소는 HERDR_TOOLS_CONFIG (기본 ~/.config/herdr-tools).
+set -u
+REPO=${HERDR_TOOLS_REPO:-$HOME/Documents/app/herdr-tools}
+CONF=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
+STATE=$HOME/.local/state/herdr-sync
+die() { echo "herdr-sync: $*" >&2; exit 1; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+# 맥 확인: Herdr 앱이 있고 hc가 다른 기계를 아는 곳. 워커 맥의 hc는 다른 기계를 모른다.
+# (HERDR_SYNC_SYSAPPS는 시험용: /Applications 대신 볼 폴더)
+all=$(hc machine ls 2> /dev/null | jq -r '.machines[].name' 2> /dev/null)
+if { [ ! -d "$HOME/Applications/Herdr.app" ] && [ ! -d "${HERDR_SYNC_SYSAPPS:-/Applications}/Herdr.app" ]; } || [ -z "$all" ]; then
+  echo "herdr-sync: 맥에서만 돈다 (~/Applications/Herdr.app 또는 /Applications/Herdr.app이 있고 hc machine ls에 기계가 있는 곳)" >&2
+  exit 2
+fi
+mkdir -p "$STATE" || exit 1
+if [ -z "${HERDR_SYNC_LOCKED-}" ]; then
+  HERDR_SYNC_LOCKED=1 lockf -s -t 0 "$STATE/lock" "$0" "$@"
+  rc=$?
+  [ $rc = 75 ] && echo "herdr-sync: 다른 herdr-sync가 돌고 있다 ($STATE/lock)" >&2
+  exit $rc
+fi
+
+check=0 takes="" pulls="" machines=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check=1 ;;
+    --take | --pull)
+      case ${2-} in *?:?*) ;; *) usage ;; esac
+      if [ "$1" = --take ]; then takes="$takes $2"; else pulls="$pulls $2"; fi
+      shift ;;
+    -*) usage ;;
+    *) machines="$machines $1" ;;
+  esac
+  shift
+done
+[ $check = 1 ] && [ -n "$takes$pulls" ] && { echo "herdr-sync: --check는 --take·--pull과 함께 쓰지 않는다" >&2; exit 2; }
+[ -n "$machines" ] || machines=$all
+
+# 기계마다(맥 포함) 도는 조각. POSIX sh(dash 포함)만 쓴다. 키는 sync.list의 맥 경로다.
+#   q <키>… -- <지울 경로>…   키마다 "U 현재 base", 있는 지울 경로마다 "R 경로", 끝에 "H $HOME"·"O uname"
+#   r <키>                    값을 출력한다
+#   w <키> <x|-> <값 서명> <시각>   표준 입력을 값으로 쓴다 (임시 파일 → 바꿔 넣기, 백업, base 갱신)
+#   d <경로> <시각>           백업 폴더로 옮긴다      l <키> <대상>   없으면 심볼릭 링크를 만든다
+#   b <키> <서명>…            base만 고친다
+# 서명은 "crc.크기.x|-", 없으면 -, 지침 본문 표식이 없으면 !, Codex 지침 파일이 없으면 ~, 그 파일에 codex-shared 표식 한 쌍이 없으면 ?다.
+# 링크는 readlink 값.
+# base 파일은 HSB(기본 ~/.local/state/herdr-sync/base.tsv), HSB=-이면 base를 고치지 않는다.
+IFS= read -r -d '' AGENT << 'EOF'
+S=$HOME/.local/state/herdr-sync
+B=${HSB:-$S/base.tsv}
+T=$(mktemp -d "${TMPDIR:-/tmp}/herdr-sync.XXXXXX") || exit 1
+MARK='<!-- User customizations -->'
+CS='<!-- codex-shared:start -->'
+CE='<!-- codex-shared:end -->'
+trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM
+at() { p=${1%%#*}; p=${p%@}; f=$HOME/$p; }
+mark() { n=$(grep -n -x -F -- "$MARK" "$f" | head -n 1 | cut -d: -f1); [ -n "$n" ]; }
+val() {
+  at "$1"
+  case $1 in
+    *'#body') [ -f "$f" ] || return 1; mark || return 3; tail -n +"$((n + 1))" "$f" ;;
+    *'#codex-shared') [ -f "$f" ] || return 4; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
+      awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" ;;
+    *) [ -f "$f" ] || return 1; cat "$f" ;;
+  esac
+}
+sum() { cksum < "$1" | awk '{print $1"."$2}'; }
+sig() {
+  case $1 in *@) at "$1"; if [ -L "$f" ]; then readlink "$f"; elif [ -e "$f" ]; then echo '!'; else echo -; fi; return ;; esac
+  val "$1" > "$T/v"
+  case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; *) echo -; return ;; esac
+  x=-; case $1 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
+  echo "$(sum "$T/v").$x"
+}
+bsig() { if [ -f "$B" ]; then awk -F'\t' -v k="$1" '$1==k{s=$2} END{print (s=="" ? "-" : s)}' "$B"; else echo -; fi; }
+setb() {
+  [ "$B" = - ] && return 0
+  mkdir -p "$(dirname "$B")" && { [ -f "$B" ] || : > "$B"; } || return 1
+  while [ $# -ge 2 ]; do
+    awk -F'\t' -v k="$1" '$1!=k' "$B" > "$B.$$" && printf '%s\t%s\n' "$1" "$2" >> "$B.$$" && mv -f "$B.$$" "$B" || { rm -f "$B.$$"; return 1; }
+    shift 2
+  done
+}
+bak() { at "$1"; [ -f "$f" ] || return 0; o=$S/bak/$2/$p; mkdir -p "$(dirname "$o")" && cp -p "$f" "$o"; }
+q() {
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do printf 'U\t%s\t%s\n' "$(sig "$1")" "$(bsig "$1")"; shift; done
+  [ $# -gt 0 ] && shift
+  for r in "$@"; do if [ -e "$HOME/$r" ] || [ -L "$HOME/$r" ]; then printf 'R\t%s\n' "$r"; fi; done
+  printf 'H\t%s\nO\t%s\n' "$HOME" "$(uname -s)"
+}
+w() {
+  k=$1 x=$2 want=$3
+  cat > "$T/c"
+  [ "$(sum "$T/c")" = "${want%.*}" ] || { echo "받은 내용이 깨졌다: $k" >&2; return 1; }
+  at "$k"
+  t=$f.hsync.$$
+  case $k in
+    *'#body') [ -f "$f" ] && mark || return 3
+      cp -p "$f" "$t" && { head -n "$n" "$f"; cat "$T/c"; } > "$t" ;;
+    *'#codex-shared') [ -f "$f" ] || return 4
+      if grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f"; then
+        cp -p "$f" "$t" && awk -v body="$T/c" -v s="$CS" -v e="$CE" '$0==s{print; while ((getline l < body) > 0) print l; skip=1; next} $0==e{skip=0} !skip' "$f" > "$t"
+      else
+        cp -p "$f" "$t" && awk '/^<!-- codebase-memory-mcp:start -->$/{k=1} k{print} /^<!-- codebase-memory-mcp:end -->$/{k=0}' "$f" > "$t" \
+          && { [ ! -s "$t" ] || echo >> "$t"; } && { echo "$CS"; cat "$T/c"; echo "$CE"; } >> "$t"
+      fi ;;
+    *) mkdir -p "$(dirname "$f")" && cat "$T/c" > "$t" && if [ "$x" = x ]; then chmod +x "$t"; else chmod a-x "$t"; fi ;;
+  esac || { rm -f "$t"; return 1; }
+  bak "$k" "$4" || { rm -f "$t"; return 1; }
+  if [ -L "$f" ]; then cat "$t" > "$f" && rm -f "$t"; else mv -f "$t" "$f"; fi && setb "$k" "$want"
+}
+d() { at "$1"; { [ -e "$f" ] || [ -L "$f" ]; } || return 0; o=$S/bak/$2/$p; mkdir -p "$(dirname "$o")" && mv "$f" "$o"; }
+l() { at "$1"; { [ -e "$f" ] || [ -L "$f" ]; } && return 1; mkdir -p "$(dirname "$f")" && ln -s "$HOME/$2" "$f"; }
+op=$1; shift
+case $op in q) q "$@" ;; r) val "$1" ;; w) w "$@" ;; d) d "$@" ;; l) l "$@" ;; b) setb "$@" ;; *) exit 2 ;; esac
+EOF
+
+# 개인 저장소가 없으면 아무것도 쓰지 않고 멈춘다 (범용 저장소 pull도 하지 않는다)
+[ -f "$CONF/sync.list" ] || { echo "herdr-sync: 개인 저장소가 없다: $CONF (sync.list·settings/keys.json, 꼴은 범용 저장소 config.example 참고)" >&2; exit 2; }
+ready() {   # ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only
+  git -C "$1" rev-parse --git-dir > /dev/null 2>&1 || die "저장소가 없다: $1"
+  [ "$(git -C "$1" symbolic-ref --short HEAD 2> /dev/null)" = main ] || die "저장소가 main 브랜치가 아니다: $1"
+  [ -z "$(git -C "$1" status --porcelain)" ] || die "저장소에 커밋하지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시: $1"
+  git -C "$1" pull -q --ff-only || die "git pull --ff-only 실패: $1 (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main)"
+}
+ready "$REPO"
+ready "$CONF"
+STAMP=$(date +%Y%m%d-%H%M%S)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/herdr-sync.XXXXXX") || exit 1
+trap 'rm -rf "$TMP"' EXIT
+
+# sync.list → 단위 배열 UB(묶음) UK(맥 경로) UR(저장소 경로·링크 대상) UD(저장소 폴더) UT(대상), 지울 것 RMK·RMT
+# 저장소 경로가 tools:<경로>면 범용 저장소, 그 밖은 개인 저장소다.
+UB=() UK=() UR=() UD=() UT=() RMK=() RMT=() n=0
+add() { UB[n]=$1 UK[n]=$2 UR[n]=$3 UD[n]=$4 UT[n]=$5; n=$((n + 1)); }
+names() { (cd "$1" 2> /dev/null && for f in $2; do [ -f "$f" ] && echo "$f"; done); }
+while read -r b k r t _; do
+  case $b in '' | '#'*) continue ;; esac
+  [ -n "${t-}" ] || die "sync.list 줄에 칸이 모자란다: $b $k"
+  for o in ${t//,/ }; do
+    case $o in all9 | mac7 | mac-only)
+      case $o in all9) w=all ;; mac7) w=macos ;; *) w=local ;; esac
+      echo "herdr-sync: 옛 묶음 이름 ${o} — ${w}로 바꾼다 ($CONF/sync.list: $b $k)" >&2; exit 2 ;;
+    esac
+  done
+  if [ "$b" = 지움 ]; then RMK+=("$k") RMT+=("$t"); continue; fi
+  d=$CONF; case $r in tools:*) d=$REPO r=${r#tools:} ;; esac
+  case $k in
+    *'*'*) for f in $({ names "$HOME/${k%/*}" "${k##*/}"; names "$d/$r" "${k##*/}"; } | sort -u); do add "$b" "${k%/*}/$f" "${r%/}/$f" "$d" "$t"; done ;;
+    *) add "$b" "$k" "$r" "$d" "$t" ;;
+  esac
+done < "$CONF/sync.list"
+[ $n -gt 0 ] || die "sync.list에 맞출 것이 없다"
+
+unit() { local k; for k in "${UK[@]}"; do [ "$k" = "$1" ] && return 0; done; return 1; }
+KEYS=$CONF/settings/keys.json
+setkey() { case $1 in hook:?*:?*) return 0 ;; esac; [ -f "$KEYS" ] && jq -e --arg k "$1" 'any((.values // [])[]; . == $k)' "$KEYS" > /dev/null; }
+known() { [ "$1" = '*' ] || unit "$1" || setkey "$1"; }
+for s in $takes $pulls; do known "${s#*:}" || die "sync.list에 없는 경로: $s"; done
+spec() { for s in $1; do [ "$s" = "$2:$3" ] || [ "$s" = "$2:*" ] && return 0; done; return 1; }   # spec <목록> <기계> <키>
+
+# query mac | query on <기계>: 그 자리에서 q를 돌려 QC(현재) QB(base) QRM(있는 지울 경로) QH QO를 채운다
+query() {
+  local out tag a b i=0
+  out=$("$@" q "${UK[@]}" -- ${RMK[@]+"${RMK[@]}"}) || return 1
+  QC=() QB=() QRM=" " QH="" QO=""
+  while IFS=$'\t' read -r tag a b; do
+    case $tag in U) QC[i]=$a QB[i]=$b; i=$((i + 1)) ;; R) QRM="$QRM$a " ;; H) QH=$a ;; O) QO=$a ;; esac
+  done <<< "$out"
+  [ $i = $n ] && [ -n "$QH" ]
+}
+mac() { HSB=$STATE/repo-base.tsv sh -c "$AGENT" _ "$@"; }      # 맥에서 돌리기 (base = 저장소와의 base)
+on() { local m=$1; shift; hc exec --on "$m" -- sh -c "$AGENT" _ "$@"; }
+oni() { local m=$1; shift; hc exec -i --on "$m" -- sh -c "$AGENT" _ "$@"; }
+rsig() {   # rsig <저장소 파일 절대 경로> <키>: 서명 (맥 서명과 같은 꼴)
+  local f=$1 x=-
+  [ -f "$f" ] || { echo -; return; }
+  case $2 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
+  echo "$(cksum < "$f" | awk '{print $1"."$2}').$x"
+}
+lines() { [ -f "$2" ] || set -- "$1" /dev/null; diff "$1" "$2" | grep -c '^[<>]'; }
+targets() {   # targets <대상> <기계> <OS>
+  case $1 in
+    all) return 0 ;;
+    macos) [ "$3" = Darwin ] ;;
+    local) [ "$2" = 맥 ] ;;
+    *) case ",$1," in *",$2,"*) return 0 ;; esac; return 1 ;;
+  esac
+}
+macval() { [ -f "$TMP/v$1" ] || mac r "${UK[$1]}" > "$TMP/v$1"; }   # 맥 값 (단위 번호) → $TMP/v<번호>
+
+rows="" rc=0
+row() {   # row <이름> <다름 묶음 목록> <충돌 수>
+  local d s
+  d=$(printf '%s\n' $2 | awk 'NF && !seen[$0]++ {s = s (s == "" ? "" : "·") $0} END {print s}')
+  s=""
+  [ -n "$d" ] && s="다름 ($d)"
+  [ "$3" -gt 0 ] && s="${s:+$s · }충돌 $3건"
+  [ -n "$s" ] && rc=1
+  rows="$rows$1: ${s:-같음}"$'\n'
+}
+
+# --pull <기계>:<경로|*> — 그 기계 값을 맥 실제 파일로 가져온다 (저장소 쪽은 아래 repo_sync가 한다)
+for s in $pulls; do
+  m=${s%%:*} k=${s#*:}
+  case $k in *'#codex-shared') die "Codex 구역은 맥 지침에서 다시 만드므로 --pull을 받지 않는다. --take를 쓴다: $s" ;; esac
+  [ "$m" = repo ] && continue
+  [ "$k" = '*' ] || unit "$k" || die "설정 키는 --pull을 받지 않는다. 맥 settings.json을 고친 뒤 --take를 쓴다: $s"
+  query mac || die "맥 값을 읽지 못했다"
+  MS=("${QC[@]}")
+  query on "$m" || die "$m 연결 실패"
+  got=0
+  for ((i = 0; i < n; i++)); do
+    c=${QC[i]}
+    targets "${UT[i]}" "$m" "$QO" || continue
+    case ${UK[i]} in *@ | *'#codex-shared') continue ;; esac   # Codex 구역은 맥에서 다시 만들므로 가져오지 않는다
+    case $c in - | '!' | '~' | '?') continue ;; esac
+    if [ "$k" = '*' ]; then [ "${MS[i]}" != - ] && [ "$c" != "${MS[i]}" ] && [ "$c" != "${QB[i]}" ] || continue   # 표에 충돌로 보인 것만
+    else [ "$k" = "${UK[i]}" ] || continue; fi
+    on "$m" r "${UK[i]}" > "$TMP/pull" && HSB=- sh -c "$AGENT" _ w "${UK[i]}" "${c##*.}" "$c" "$STAMP" < "$TMP/pull" \
+      || die "${m}에서 ${UK[i]}를 가져오지 못했다"
+    echo "맥 가져옴 ${UK[i]} ($m)"
+    got=$((got + 1))
+  done
+  [ $got -gt 0 ] || echo "herdr-sync: ${s}에 가져올 것이 없다" >&2
+done
+
+# 맥 ↔ 저장소 3-way. 모두 정한 뒤, 충돌이 하나라도 있으면 쓰지 않는다. 저장소는 줄마다 UD(범용 또는 개인)다.
+# 범용 저장소로 모을 맥 값에 개인 값(herdr-tools-config lint, 패턴은 개인 저장소 private-patterns.txt)이 있으면 충돌이다.
+rdiff="" rconf=0
+leak() {   # leak <단위 번호>: 범용 저장소로 모을 맥 값이 개인 값 검사에 걸리면(또는 검사를 못 하면) 참, 까닭은 why
+  [ "${UD[$1]}" = "$REPO" ] || return 1
+  why="개인 값 검사 못 함 — $CONF/private-patterns.txt에 패턴이 없다"   # 검사를 못 하면 모으지 않는다(fail-closed)
+  grep -q -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$CONF/private-patterns.txt" 2> /dev/null || return 0
+  why="개인 값 검사 못 함"
+  mac r "${UK[$1]}" > "$TMP/leak" || return 0
+  why="개인 값"
+  HERDR_TOOLS_CONFIG=$CONF bash "$REPO/bin/herdr-tools-config" lint "$TMP/leak" > /dev/null 2>&1
+  [ $? != 0 ]
+}
+repo_sync() {
+  local i k m r b d act why ctool="" cconf="" basepairs="" acts=() idx=""
+  query mac || die "맥 값을 읽지 못했다"
+  for ((i = 0; i < n; i++)); do
+    k=${UK[i]} m=${QC[i]} b=${QB[i]} act="" why=""
+    case $k in *@) continue ;; esac
+    [ "$m" = '!' ] && die "맥 ~/${k%%#*}에 '<!-- User customizations -->' 줄이 없다"
+    case $m in '~' | '?') continue ;; esac   # 맥에 Codex 지침이나 그 표식이 없다
+    r=$(rsig "${UD[i]}/${UR[i]}" "$k")
+    if [ "$m" = "$r" ]; then [ "$b" = "$m" ] || basepairs="$basepairs $k $m"; continue; fi
+    if spec "$takes" repo "$k"; then act=모음
+    elif spec "$pulls" repo "$k"; then act=깖
+    elif [ "$r" = "$b" ]; then act=모음
+    elif [ "$m" = "$b" ]; then act=깖; fi
+    case $act$r in 깖-) case $k in *'#'*) act="" ;; esac ;; esac   # 구역 파일이 저장소에서 지워졌으면 충돌로
+    [ "$act" = 모음 ] && [ "$m" != - ] && leak "$i" && act=""
+    if [ -z "$act" ]; then
+      macval "$i"
+      [ -n "$why" ] || why="$(lines "$TMP/v$i" "${UD[i]}/${UR[i]}")줄 다름"
+      echo "충돌 저장소 $k ($why)"
+      rconf=$((rconf + 1))
+      continue
+    fi
+    acts[i]=$act idx="$idx $i"
+    rdiff="$rdiff ${UB[i]}"
+  done
+  [ $check = 1 ] && { for i in $idx; do echo "저장소 다름:${acts[i]} ${UK[i]}"; done; return 0; }
+  [ $rconf -gt 0 ] && { row 맥 "$rdiff" $rconf; printf '%s' "$rows"; echo "herdr-sync: 저장소와 충돌이 있어 멈춘다. --take repo:<경로>(맥 값) 또는 --pull repo:<경로>(저장소 값)로 푼다. 개인 값이면 맥 파일에서 빼거나 그 줄을 개인 저장소로 옮긴다" >&2; exit 1; }
+  # 모음을 먼저 커밋·push하고 base를 쓴 뒤에 깐다. 깔다 멈춰도 모은 것이 스테이징에만 남지 않는다.
+  for i in $idx; do
+    [ "${acts[i]}" = 모음 ] || continue
+    k=${UK[i]} m=${QC[i]} d=${UD[i]} r=${UD[i]}/${UR[i]}
+    if [ "$m" = - ]; then git -C "$d" rm -q -- "${UR[i]}" || die "git rm 실패: $r"
+    else
+      mkdir -p "$(dirname "$r")" && mac r "$k" > "$r.hsync.$$" \
+        && if [ "${m##*.}" = x ]; then chmod +x "$r.hsync.$$"; else chmod a-x "$r.hsync.$$"; fi \
+        && mv -f "$r.hsync.$$" "$r" && git -C "$d" add -- "${UR[i]}" || { rm -f "$r.hsync.$$"; die "저장소에 쓰지 못했다: $r"; }
+    fi
+    if [ "$d" = "$REPO" ]; then ctool="$ctool ${UR[i]}"; else cconf="$cconf ${UR[i]}"; fi
+    basepairs="$basepairs $k $m"
+    echo "맥 모음 $k"
+  done
+  # 저장소마다 따로 커밋·push한다. 지난번에 push하지 못한 커밋도 여기서 다시 보낸다.
+  [ -z "$ctool" ] || git -C "$REPO" commit -q -m "herdr-sync 모음:$ctool" -- $ctool || die "커밋 실패: $REPO"
+  [ -z "$cconf" ] || git -C "$CONF" commit -q -m "herdr-sync 모음:$cconf" -- $cconf || die "커밋 실패: $CONF"
+  for d in "$CONF" "$REPO"; do
+    [ -z "$(git -C "$d" rev-list -1 origin/main..HEAD)" ] && continue
+    HERDR_LAND=1 git -C "$d" push -q origin HEAD:main || die "push 실패: $d. 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main"
+  done
+  [ -z "$basepairs" ] || mac b $basepairs || die "저장소 base를 쓰지 못했다"
+  for i in $idx; do
+    [ "${acts[i]}" = 깖 ] || continue
+    k=${UK[i]} r=$(rsig "${UD[i]}/${UR[i]}" "$k")
+    if [ "$r" = - ]; then mac d "$k" "$STAMP" && mac b "$k" - || die "맥에서 지우지 못했다: $k"
+    else mac w "$k" "${r##*.}" "$r" "$STAMP" < "${UD[i]}/${UR[i]}" || die "맥에 깔지 못했다: $k"; fi
+    echo "맥 깖 $k"
+    [ "$k" = '.claude/CLAUDE.md#body' ] && body=1
+  done
+  rdiff=""
+}
+# 맞추기 전에 개인 설정 sync.prebuild를 sh -c로 돌린다(예: 맥 지침에서 Codex 공통 구역을 다시 만듦). 없으면 아무것도 안 한다.
+# 저장소에서 지침 본문을 깔았으면 한 번 더 돌리고 모은다.
+build() {
+  local pre
+  [ $check = 0 ] || return 0
+  pre=$(HERDR_TOOLS_CONFIG=$CONF bash "$REPO/bin/herdr-tools-config" get sync.prebuild "") || die "개인 설정을 읽지 못했다: $CONF/config"
+  [ -n "$pre" ] || return 0
+  sh -c "$pre" > /dev/null || die "sync.prebuild 실패: $pre"
+}
+body=0
+build
+repo_sync
+[ $body = 1 ] && build && repo_sync
+query mac || die "맥 값을 읽지 못했다"
+MS=("${QC[@]}") MRM=$QRM
+
+SIN=""
+sin() {   # 계약의 표준 입력. 기계마다 같다(예외 키·$HOME 바꿔 넣기는 herdr-settings-merge가 한다)
+  local refs="{}" k c
+  [ -n "$SIN" ] && return 0
+  for k in $(jq -r '(.refs // [])[]' "$KEYS"); do
+    c=$(printf '%s\n' "$(jq -cS "$k" "$HOME/.claude/settings.json")" | cksum | awk '{print $1, $2}')
+    refs=$(jq -c --arg k "$k" --arg c "$c" '. + {($k): $c}' <<< "$refs") || return 1
+  done
+  SIN=$(jq -c --slurpfile k "$KEYS" --argjson refs "$refs" --arg home "$HOME" '
+    $k[0] as $k | . as $s
+    | {values: (reduce ($k.values // [])[] as $p ({}; . + {($p): ($s | getpath($p | ltrimstr(".") | split(".")))})),
+       hooks: [($k.hooks // {}) | to_entries[] | .key as $ev | .value as $marks
+         | $s.hooks[$ev][]? as $e | $e.hooks[]? | select(.command as $c | any($marks[]; . as $h | $c | contains($h)))
+         | {event: $ev, matcher: ($e.matcher // "")} + .],
+       refs: $refs, home: $home}' "$HOME/.claude/settings.json") && [ -n "$SIN" ]
+}
+settings() {   # settings <기계> — 대상 기계의 herdr-settings-merge에 넘기고 판정 줄을 옮긴다
+  local m=$1 out opts="" s line r c0=$conf wrote=0
+  [ -f "$KEYS" ] || return 0
+  sin || { echo "herdr-sync: 설정 입력을 만들지 못했다 ($KEYS·~/.claude/settings.json)" >&2; sdiff=도구문제:설정; return; }
+  [ $check = 1 ] && opts=--check
+  for s in $takes; do
+    case $s in "$m:*") opts="$opts --take *" ;; "$m:"*) unit "${s#"$m:"}" || opts="$opts --take ${s#"$m:"}" ;; esac
+  done
+  set -f
+  out=$(printf '%s\n' "$SIN" | hc exec -i --on "$m" -- env HERDR_MACHINE="$m" \
+    sh -c 'x=$HOME/.local/bin/herdr-settings-merge; [ -x "$x" ] || exit 127; exec "$x" "$@"' _ $opts 2> "$TMP/serr")
+  r=$?
+  set +f
+  while read -r s line; do
+    case $s in
+      충돌) echo "충돌 $m $line"; conf=$((conf + 1)) ;;
+      씀) if [ $check = 1 ]; then echo "$m 다름 $line"; else echo "$m 씀 $line"; fi; wrote=1 ;;
+      예외 | 참고) echo "$m $s $line" ;;
+    esac
+  done <<< "$out"
+  [ $check = 1 ] && [ $wrote = 1 ] && sdiff=설정
+  case $r in
+    0) ;;
+    1) # 충돌이 아니고, --check의 다름(표준 오류 없음)도 아니면 도구 문제
+      if [ $conf -gt $c0 ]; then :; elif [ $check = 1 ] && [ $wrote = 1 ] && [ ! -s "$TMP/serr" ]; then :; else r=x; fi ;;
+    127) echo "herdr-sync: ${m}에 ~/.local/bin/herdr-settings-merge가 없다 (설정을 맞추지 않음)" >&2; sdiff=도구문제:설정 ;;
+    *) r=x ;;
+  esac
+  [ "$r" = x ] && sdiff=도구문제:설정
+  [ -s "$TMP/serr" ] && sed "s/^/herdr-sync: $m: /" "$TMP/serr" >&2
+  return 0
+}
+
+for m in $machines; do
+  if ! query on "$m"; then echo "herdr-sync: $m 연결 실패" >&2; row "$m" 연결 0; continue; fi
+  diffs="" conf=0 basepairs="" sdiff=""
+  for ((i = 0; i < n; i++)); do
+    targets "${UT[i]}" "$m" "$QO" || continue
+    k=${UK[i]} mv=${MS[i]} c=${QC[i]} b=${QB[i]}
+    case $k in *@)
+      want=$QH/${UR[i]}
+      [ "$c" = "$want" ] && continue
+      if [ "$c" != - ] && ! spec "$takes" "$m" "$k"; then echo "충돌 $m $k (링크가 아니거나 다른 곳을 가리킨다: $c)"; conf=$((conf + 1))
+      elif [ $check = 1 ]; then echo "$m 다름:링크 $k"; diffs="$diffs ${UB[i]}"
+      elif { [ "$c" = - ] || on "$m" d "$k" "$STAMP" > /dev/null; } && on "$m" l "$k" "${UR[i]}" > /dev/null; then echo "$m 씀 $k"
+      else echo "herdr-sync: $m $k 링크를 만들지 못했다" >&2; diffs="$diffs ${UB[i]}"; fi
+      continue ;;
+    esac
+    case $mv in - | '~' | '?') continue ;; esac   # 맥에 없는 것은 맞추지 않는다 (지울 것은 지움 줄로)
+    [ "$c" = '~' ] && continue              # Codex 지침이 없는 기계 (표식만 없으면 ?로 충돌, --take로 넣는다)
+    [ "$c" = '!' ] && { echo "herdr-sync: $m ~/${k%%#*}에 '<!-- User customizations -->' 줄이 없다" >&2; diffs="$diffs ${UB[i]}"; continue; }
+    if [ "$c" = "$mv" ]; then [ "$b" = "$mv" ] || basepairs="$basepairs $k $mv"; continue; fi
+    macval "$i"
+    if [ "$c" != "$b" ] && ! spec "$takes" "$m" "$k"; then
+      on "$m" r "$k" > "$TMP/cur" 2> /dev/null
+      echo "충돌 $m $k ($(lines "$TMP/v$i" "$TMP/cur")줄 다름)"
+      conf=$((conf + 1))
+      continue
+    fi
+    if [ $check = 1 ]; then echo "$m 다름 $k"; diffs="$diffs ${UB[i]}"; continue; fi
+    if oni "$m" w "$k" "${mv##*.}" "$mv" "$STAMP" < "$TMP/v$i" > /dev/null; then echo "$m 씀 $k"
+    else echo "herdr-sync: $m $k 쓰기 실패" >&2; diffs="$diffs ${UB[i]}"; fi
+  done
+  [ $check = 1 ] || [ -z "$basepairs" ] || on "$m" b $basepairs > /dev/null || echo "herdr-sync: $m base를 쓰지 못했다" >&2
+  settings "$m"
+  diffs="$diffs $sdiff"
+  for ((j = 0; j < ${#RMK[@]}; j++)); do
+    targets "${RMT[j]}" "$m" "$QO" || continue
+    case $QRM in *" ${RMK[j]} "*) ;; *) continue ;; esac
+    if [ $check = 1 ]; then echo "$m 다름:지움 ${RMK[j]}"; diffs="$diffs 지움"
+    elif on "$m" d "${RMK[j]}" "$STAMP" > /dev/null; then echo "$m 지움 ${RMK[j]}"
+    else echo "herdr-sync: $m ${RMK[j]} 지우기 실패" >&2; diffs="$diffs 지움"; fi
+  done
+  row "$m" "$diffs" $conf
+done
+
+# 맥에서 지울 것 (지움 줄은 대상이 무엇이든 맥을 포함한다)
+for ((j = 0; j < ${#RMK[@]}; j++)); do
+  case $MRM in *" ${RMK[j]} "*) ;; *) continue ;; esac
+  if [ $check = 1 ]; then echo "맥 다름:지움 ${RMK[j]}"; rdiff="$rdiff 지움"
+  elif mac d "${RMK[j]}" "$STAMP"; then echo "맥 지움 ${RMK[j]}"
+  else echo "herdr-sync: 맥 ${RMK[j]} 지우기 실패" >&2; rdiff="$rdiff 지움"; fi
+done
+saved=$rows rows=""
+row 맥 "$rdiff" $rconf
+printf '%s%s' "$rows" "$saved"
+
+# 다 맞춘 뒤, 설정 publish.repo가 있으면 범용 저장소를 공개 저장소로 내보낸다(herdr-tools-publish, 기록 없이·검사 뒤).
+# 기계 맞추기와 별개라, 실패해도 크게 경고만 하고 종료 코드는 바꾸지 않는다.
+if [ $check = 0 ]; then
+  pubwarn() { printf '!!! herdr-sync: %s !!!\n' "$1" >&2; }
+  if ! pub=$(HERDR_TOOLS_CONFIG=$CONF bash "$REPO/bin/herdr-tools-config" get publish.repo ""); then
+    pubwarn "개인 설정을 읽지 못해 공개 저장소 내보내기를 건너뜀 ($CONF/config)"
+  elif [ -n "$pub" ]; then
+    HERDR_TOOLS_CONFIG=$CONF HERDR_TOOLS_REPO=$REPO bash "$REPO/bin/herdr-tools-publish" \
+      || pubwarn "공개 저장소 내보내기 실패 (맞추기는 끝났다) — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시"
+  fi
+fi
+exit $rc

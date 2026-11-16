@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""끝났는데 안 닫힌 hc 에이전트 터미널을 닫고, 레인이 남긴 고아 프로세스를 끈다 (launchd <사용자>.hc-sweep, 5분마다).
+
+hc-sweep              규칙에 걸린 터미널을 닫고 고아를 끄고 ~/.claude-tasks/closed.log에 남긴다
+hc-sweep --dry-run    닫을 것·끌 것과 이유만 출력
+hc-sweep --self-test  가짜 기록으로 규칙 판정 확인(hc를 부르지 않는다)
+
+대상: 이 기계(주소에 "/" 없음)의 live 터미널 중 status.app이 있고 state가 idle·done인 것.
+닫지 않음: 이름에 loop, -proxy로 끝남, ~/.claude-tasks/keep(한 줄에 이름·주소 하나),
+사람이 연 칸(parent 없는 where 라벨 칸, 또는 터미널 자체 프로그램이 셸 — kill하면 칸이 사라진다).
+where 라벨이 있어도 parent가 있으면 지휘가 띄운 worker다(herdr-balance가 붙이며 라벨을 단다).
+R1 안 쓴 세션: parent 없음, turn 0, 시작부터 줄곧 idle(status_ms-created_ms<60초), 만든 지 30분 이상
+R2 일 끝난 worker: parent 있음, 마지막 상태 변화(status_ms)로부터 30분 이상. 단 다음이면 닫지 않는다
+   (a) cwd가 git 작업 트리이고 git cherry origin/main HEAD에 + 커밋이 있음(착지 전 레인, fetch 안 함)
+   (b) 화면 마지막 줄들에 배경 실행 흔적(BUSY: "still running", 상태 줄 "· N shell(s)"·"· N monitor(s)")
+R2·R3 공통 보호: cwd가 아직 있는 링크된 git 워크트리(그 폴더나 위 폴더의 .git이 파일)면 닫지 않는다.
+   레인은 착지 뒤 hc-lane clean으로 워크트리를 지우니, 남아 있으면 일이 안 끝났다. git을 부르지 않는다.
+판정은 모두 fail-closed: 예외·시간 초과·읽기 실패·모르는 값은 「닫지 않음」이다.
+R3 오래 쉰 세션: status_ms로부터 6시간 이상
+다시 열기: closed.log의 cwd·sessionId로 cd <cwd> && claude --resume <sessionId>
+터미널의 argv·환경 변수는 출력하지도 기록하지도 않는다(자격증명이 섞여 있다).
+
+고아 쓸기: 이 사용자의 PPID 1 프로세스 가운데 명령 줄의 절대 경로나 cwd가 레인 작업 트리(<저장소><접미사>/<레인>,
+접미사는 설정 sweep.wt_suffix, 기본 .wt) 아래이고 만든 지 --min-age분(기본 10) 이상인 것. 실행 파일 이름이 설정
+sweep.orphan_keep(기본 codebase-memory-mcp herdr-core — 여러 세션이 함께 쓰는 데몬·코어)에 있으면 보지 않는다.
+  남김: 그 작업 트리 아래를 cwd로 쓰는 live hc 터미널이 있음(경로는 실제 경로로 견줌)
+  보류(찍기만): 작업 트리가 있는데 본 저장소(<저장소>) 아래를 쓰는 터미널이 있음(감사 스냅숏 꼴), 작업 트리가 있는데
+     cwd로만 걸림, 자손에 live 터미널 프로세스가 있음, 터미널 pid를 못 읽음
+  끔: 그 밖(작업 트리가 지워졌거나 쓰는 터미널 없음) — 그 프로세스와 자손에 TERM, 5초 뒤 남으면 KILL.
+끄기는 설정 sweep.orphan_kill on일 때만이다. 기본 off는 찍고 closed.log에 「고아 관찰」로 한 번만 남긴다.
+끈 것마다 pid·나이·명령 앞 80자를 closed.log에 남긴다. 작업 트리 밖(launchd 작업·로그인 항목·앱)은 보지 않는다.
+hc ls가 실패하거나 terminals 목록이 아니거나, cwd 모르는 이 기계 터미널이 있거나, 설정을 못 읽으면 아무것도 끄지 않는다
+(2026-11-16 시험이 남긴 hc-fill watch 고아 18개가 작업 트리를 지운 뒤에도 55분 돌았다).
+"""
+import argparse
+import json
+import os
+import re
+import signal
+import stat
+import subprocess
+import time
+
+TASKS = os.path.expanduser("~/.claude-tasks")
+SHELLS = {"zsh", "bash", "sh", "fish", "dash", "ksh"}
+SESSIONS = os.path.expanduser("~/.claude/sessions")
+MIN = 60 * 1000
+BUSY = re.compile(r"still running|·\s*\d+\s+(?:shell|monitor)s?\b")
+
+
+def hc(*args):
+    out = subprocess.run(["hc", *args, "--json"], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if out.returncode:
+        raise RuntimeError((out.stderr.strip().splitlines() or ["hc 실패"])[0][:200])
+    data = json.loads(out.stdout) if out.stdout.strip() else {}
+    if isinstance(data, dict):
+        data["shell"] = is_shell_pane(data.pop("argv", None) or [""])  # argv는 판정에만 쓰고 버린다
+        data.pop("env", None)
+        data.pop("foreground", None)
+    return data
+
+
+def is_shell_pane(argv):
+    """사람이 연 셸 칸인가. -c(-lc 등)나 스크립트 인자를 받은 셸은 명령 실행기라 아니다."""
+    args = argv[1:]
+    return (os.path.basename(argv[0]).lstrip("-") in SHELLS
+            and all(a.startswith("-") and (a.startswith("--") or "c" not in a) for a in args))
+
+
+def rule(t, now, keep):
+    """닫을 규칙(R1·R2·R3) 또는 None."""
+    status = t.get("status")
+    name = t.get("name") or ""
+    if (t.get("state") != "live" or "/" in t["address"] or not isinstance(status, dict)
+            or not status.get("app") or status.get("state") not in ("idle", "done")
+            or "loop" in name or name.endswith("-proxy") or name in keep or t["address"] in keep
+            or ((t.get("where") or (t.get("labels") or {}).get("where")) and not t.get("parent"))
+            or t.get("shell")):
+        return None
+    created = t.get("created_ms") or now
+    changed = t.get("status_ms") or now
+    if not t.get("parent") and t.get("turn") == 0 and changed - created < MIN and now - created >= 30 * MIN:
+        return "R1"
+    if t.get("worktree") is not False:  # 남은 워크트리이거나 모름
+        return None
+    if (t.get("parent") and now - changed >= 30 * MIN and t.get("unlanded") is False
+            and isinstance(t.get("tail"), str) and not BUSY.search(t["tail"])):
+        return "R2"
+    if now - changed >= 6 * 60 * MIN:
+        return "R3"
+    return None
+
+
+def linked_worktree(cwd):
+    """cwd가 아직 있는 링크된 git 워크트리인가(.git이 파일). cwd가 없어졌거나 일반 폴더·메인 저장소면 False.
+    모르면(cwd 없음·읽기 오류) True(닫지 않는 쪽). 파일 검사만 한다(launchd의 git은 TCC에 멈춘다)."""
+    if not isinstance(cwd, str) or not cwd.startswith("/"):
+        return True
+    try:
+        os.stat(cwd)
+    except FileNotFoundError:
+        return False  # 착지 뒤 지운 워크트리
+    except OSError:
+        return True
+    d = os.path.normpath(cwd)
+    while True:
+        try:
+            st = os.lstat(os.path.join(d, ".git"))
+            return not stat.S_ISDIR(st.st_mode)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return True
+        if d == "/":
+            return False
+        d = os.path.dirname(d)
+
+
+def unlanded(cwd, run=subprocess.run):
+    """cwd 저장소에 origin/main에 없는 커밋이 있나(로컬 origin/main 기준, fetch 안 함).
+    cwd가 없거나 git 저장소가 아니면 False. 그 밖에 판정이 안 되면 True(닫지 않는 쪽).
+    git은 hc exec로 코어가 돌린다: launchd가 띄운 git은 ~/Documents에서 macOS 개인정보 보호(TCC)에
+    걸려 멈춘다(2026-11-13 워커 맥, 시간 초과를 「착지함」으로 읽어 레인 t134를 닫았다)."""
+    if not cwd:
+        return False
+    try:
+        out = run(["hc", "exec", "--cwd", cwd, "--env", "LC_ALL=C", "--timeout", "20", "--",
+                   "git", "cherry", "origin/main", "HEAD"], capture_output=True, text=True,
+                  stdin=subprocess.DEVNULL, timeout=40)
+    except Exception:
+        return True
+    if out.returncode == 0:
+        return any(line.startswith("+") for line in out.stdout.splitlines())
+    return not ("not a git repository" in out.stderr or "No such file or directory" in out.stderr)
+
+
+def screen_tail(address, run=subprocess.run):
+    """화면 마지막 비지 않은 6줄. 못 읽으면 BUSY에 걸리는 값(닫지 않는 쪽)."""
+    try:
+        out = run(["hc", "read", address], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=40)
+    except Exception:
+        out = None
+    if not out or out.returncode:
+        return "still running (화면 못 읽음)"
+    return "\n".join([line for line in out.stdout.splitlines() if line.strip()][-6:])
+
+
+def session_id(pid):
+    """pid와 그 자손 가운데 ~/.claude/sessions/<pid>.json이 있는 것의 sessionId."""
+    children = {}
+    ps = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout
+    for line in ps.splitlines():
+        child, parent = line.split()
+        children.setdefault(int(parent), []).append(int(child))
+    todo = [pid] if pid else []
+    while todo:
+        p = todo.pop(0)
+        try:
+            with open(os.path.join(SESSIONS, "%d.json" % p)) as f:
+                return json.load(f).get("sessionId") or "-"
+        except (OSError, ValueError):
+            todo += children.get(p, [])
+    return "-"
+
+
+def keep_list():
+    try:
+        with open(os.path.join(TASKS, "keep")) as f:
+            return {line.strip() for line in f if line.strip() and not line.startswith("#")}
+    except OSError:
+        return set()
+
+
+def record(t, why, sid):
+    os.makedirs(TASKS, exist_ok=True)
+    fields = [time.strftime("%Y-%m-%dT%H:%M:%S%z"), t["address"], t.get("name") or "-", why,
+              t.get("cwd") or "-", sid, t.get("title") or "-"]
+    with open(os.path.join(TASKS, "closed.log"), "a") as f:
+        f.write("\t".join(str(x).replace("\t", " ").replace("\n", " ") for x in fields) + "\n")
+
+
+def close(t, why):
+    address = t["address"]
+    record(t, why, session_id(t.get("pid")))
+    try:
+        hc("kill", address)
+    except RuntimeError as err:
+        record(t, why + " 실패(kill): " + str(err), "-")
+        return "실패(kill)"
+    for _ in range(30):
+        try:
+            if hc("get", address).get("state") == "finished":
+                break
+        except RuntimeError:
+            return "닫힘(이미 지워짐)"  # 감싸는 실행기가 끝날 때 자기 터미널을 지우기도 한다
+        time.sleep(1)
+    else:
+        record(t, why + " 실패(30초 안에 안 끝남)", "-")
+        return "실패(안 끝남)"
+    try:
+        hc("rm", address)
+    except RuntimeError as err:
+        record(t, why + " 실패(rm): " + str(err), "-")
+        return "실패(rm)"
+    return "닫힘"
+
+
+def conf(key, default, tool=None, run=subprocess.run):
+    """설정 값(herdr-tools-config get). 설정 도구가 곁에 없으면(맥 밖) 기본값, 있는데 실패하면 None(끄지 않음)."""
+    tool = tool or os.path.join(os.path.dirname(os.path.realpath(__file__)), "herdr-tools-config")
+    if not os.access(tool, os.X_OK):
+        return default
+    try:
+        out = run([tool, "get", key, default], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=20)
+    except Exception:
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def secs(etime):
+    """ps etime([[dd-]hh:]mm:ss) → 초."""
+    days, _, rest = etime.rpartition("-")
+    n = 0
+    for part in rest.split(":"):
+        n = n * 60 + int(part)
+    return n + int(days or 0) * 86400
+
+
+def processes(run=subprocess.run):
+    """이 사용자의 프로세스 {pid: (ppid, 나이 초, 명령)}."""
+    out = run(["ps", "-x", "-o", "pid=,ppid=,etime=,command="], capture_output=True, text=True,
+              stdin=subprocess.DEVNULL, timeout=60)
+    if out.returncode:
+        raise RuntimeError("ps 실패")
+    procs = {}
+    for line in out.stdout.splitlines():
+        f = line.split(None, 3)
+        if len(f) >= 3 and f[0].isdigit():
+            procs[int(f[0])] = (int(f[1]), secs(f[2]), f[3] if len(f) > 3 else "")
+    return procs
+
+
+def cwds(pids, run=subprocess.run):
+    """{pid: cwd}. 못 읽은 pid는 빠진다(명령 줄로만 판정)."""
+    if not pids:
+        return {}
+    try:
+        out = run(["lsof", "-a", "-d", "cwd", "-p", ",".join(map(str, pids)), "-Fpn"], capture_output=True,
+                  text=True, stdin=subprocess.DEVNULL, timeout=60).stdout
+    except Exception:
+        return {}
+    res, pid = {}, None
+    for line in out.splitlines():
+        if line[:1] == "p":
+            pid = int(line[1:])
+        elif line[:1] == "n" and pid:
+            res[pid] = line[1:]
+    return res
+
+
+def lane_root(path, suffix):
+    """절대 경로가 레인 작업 트리 아래면 그 작업 트리(<…><접미사>/<레인>), 아니면 None."""
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    parts = os.path.normpath(path).split("/")
+    for i, p in enumerate(parts[:-1]):
+        if p.endswith(suffix) and len(p) > len(suffix):
+            return "/".join(parts[:i + 2])
+    return None
+
+
+def exists(path):
+    """지워졌으면 False. 그 밖 읽기 오류는 True(있다고 보고 터미널로 판정)."""
+    try:
+        os.stat(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+
+def under(c, root):
+    return c == root or c.startswith(root + "/")
+
+
+def orphans(procs, cwd_of, term_cwds, suffix, min_age, me=None, only=None, exists=exists, keep=()):
+    """고아 후보 [(pid, 작업 트리, 나이 초, 명령, 까닭, 끔 여부)]. 그 작업 트리 아래를 쓰는 live 터미널이 있으면 빼고,
+    작업 트리가 있는데 본 저장소 아래를 쓰는 터미널이 있거나 cwd로만 걸린 것은 보류(끔 False). 경로는 실제 경로로 견준다."""
+    terms = [os.path.realpath(c) for c in term_cwds]
+    found = []
+    for pid, (ppid, age, cmd) in sorted(procs.items()):
+        if ppid != 1 or pid == me or age < min_age or os.path.basename((cmd.split() or [""])[0]) in keep:
+            continue
+        by_cmd = {r for r in (lane_root(x.split("=", 1)[-1], suffix) for x in cmd.split()) if r}
+        roots = sorted(by_cmd | {r for r in [lane_root(cwd_of.get(pid), suffix)] if r})
+        if only:
+            roots = [r for r in roots if r.startswith(only.rstrip("/") + "/")]
+            by_cmd &= set(roots)
+        if not roots or any(exists(r) and any(under(c, os.path.realpath(r)) for c in terms) for r in roots):
+            continue
+        there = [r for r in roots if exists(r)]
+        mains = [os.path.realpath(os.path.dirname(r)[:-len(suffix)]) for r in there]
+        if any(under(c, m) for m in mains for c in terms):
+            why, kill = "보류: 본 저장소 터미널 있음", False
+        elif there and not by_cmd:
+            why, kill = "보류: cwd로만 걸림, 작업 트리 있음", False
+        else:
+            why, kill = "쓰는 터미널 없음" if there else "작업 트리 지워짐", True
+        found.append((pid, (there or roots)[0], age, cmd, why, kill))
+    return found
+
+
+def tree(pids, procs):
+    """pids와 그 자손."""
+    kids = {}
+    for p, (pp, _, _) in procs.items():
+        kids.setdefault(pp, []).append(p)
+    todo, out = list(pids), set()
+    while todo:
+        p = todo.pop()
+        if p not in out:
+            out.add(p)
+            todo += kids.get(p, [])
+    return out
+
+
+def kill_tree(pids, procs, wait=5.0):
+    """pids와 그 자손을 끈다(TERM, wait초 뒤 남으면 KILL). 지금 다시 본 ppid·명령이 같은 것만. KILL까지 간 pid 집합."""
+    now = processes()
+    todo = {p for p in tree(pids, procs) if p in now and (now[p][0], now[p][2]) == (procs[p][0], procs[p][2])}
+
+    def send(ps, sig):
+        for p in ps:
+            try:
+                os.kill(p, sig)
+            except OSError:
+                pass
+
+    def alive(p):
+        try:
+            os.kill(p, 0)
+            return True
+        except OSError:
+            return False
+
+    send(todo, signal.SIGTERM)
+    end = time.time() + wait
+    while time.time() < end and any(alive(p) for p in todo):
+        time.sleep(0.2)
+    left = {p for p in todo if alive(p)}
+    send(left, signal.SIGKILL)
+    return left
+
+
+def seen(pid, head, path=None):
+    """closed.log에 이 pid·명령 앞부분의 관찰 기록이 이미 있나. 제목 「나이 N분 <명령>」의 나이는 견주지 않는다."""
+    try:
+        with open(path or os.path.join(TASKS, "closed.log")) as f:
+            return any(x[1:2] == ["pid:%d" % pid] and x[6:7] and x[6].split(" ", 2)[2:] == [head] and "관찰" in x[3]
+                       for x in (line.rstrip("\n").split("\t") for line in f))
+    except OSError:
+        return False
+
+
+def sweep_orphans(terms, dry, min_age, only=None):
+    """고아 쓸기 한 바퀴. 끌 것 수."""
+    suffix = conf("sweep.wt_suffix", ".wt")
+    keep = conf("sweep.orphan_keep", "codebase-memory-mcp herdr-core")
+    mode = conf("sweep.orphan_kill", "off")
+    if not suffix or "/" in suffix or keep is None or mode is None:
+        print("고아 쓸기 건너뜀: 설정 sweep.wt_suffix·sweep.orphan_keep·sweep.orphan_kill을 못 읽음")
+        return 0
+    if mode not in ("on", "off"):
+        print("고아 쓸기: sweep.orphan_kill은 on·off다(지금 %r) — 끄지 않는다" % mode)
+        mode = "off"
+    if not isinstance(terms, list) or not all(isinstance(t, dict) and isinstance(t.get("address"), str) for t in terms):
+        print("고아 쓸기 건너뜀: hc ls에 terminals 목록이 없다")
+        return 0
+    live = [t for t in terms if t.get("state") == "live"]
+    local = [t for t in live if "/" not in t["address"]]
+    if any(not isinstance(t.get("cwd"), str) for t in local):
+        print("고아 쓸기 건너뜀: cwd를 모르는 이 기계 터미널이 있다")
+        return 0
+    procs = processes()
+    cwd_of = cwds([p for p, (pp, _, _) in procs.items() if pp == 1])
+    found = orphans(procs, cwd_of, [t["cwd"] for t in live if isinstance(t.get("cwd"), str)], suffix, min_age,
+                    os.getpid(), only, keep=set(keep.split()))
+    term_pids = set()
+    if any(f[5] for f in found):  # 자손에 live 터미널 프로세스(코어·에이전트)가 있으면 끄지 않는다
+        for t in local:
+            try:
+                term_pids.add(int(hc("get", t["address"])["pid"]))
+            except (RuntimeError, KeyError, TypeError, ValueError):
+                term_pids = None
+                break
+    targets = 0
+    for pid, root, age, cmd, why, kill in found:
+        if kill and term_pids is None:
+            why, kill = "보류: 터미널 pid를 못 읽음", False
+        elif kill and tree([pid], procs) & term_pids:
+            why, kill = "보류: 자손에 터미널 프로세스 있음", False
+        line = "pid %d 나이 %d분 %s (%s) %s" % (pid, age // 60, root, why, cmd[:80])
+        head = cmd[:80].replace("\t", " ").replace("\n", " ")
+        title = "나이 %d분 %s" % (age // 60, head)
+        if not kill:
+            print("보류 고아:", line)
+            continue
+        targets += 1
+        if dry:
+            print("끌 고아:", line)
+        elif mode == "off":
+            print("고아(끄기 꺼짐, 기록만):", line)
+            if not seen(pid, head):
+                record({"address": "pid:%d" % pid, "name": "-", "cwd": root, "title": title}, "고아 관찰(%s)" % why, "-")
+        else:
+            hard = kill_tree([pid], procs)
+            record({"address": "pid:%d" % pid, "name": "-", "cwd": root, "title": title},
+                   "고아(%s)%s" % (why, " KILL" if hard else ""), "-")
+            print("끈 고아:", line, "(KILL)" if hard else "")
+    return targets
+
+
+def self_test():
+    now, h = 1_000_000_000_000, 60 * MIN
+    keep = {"keepme", "t9"}
+
+    def t(**kw):
+        base = {"address": "t1", "name": "claude-x", "state": "live", "status": {"app": "claude-code", "state": "idle"},
+                "created_ms": now - 3 * h, "status_ms": now - 3 * h + 500, "turn": 0, "parent": None, "labels": {},
+                "worktree": False, "unlanded": False, "tail": ""}
+        base.update(kw)
+        return base
+
+    assert rule(t(), now, keep) == "R1"
+    assert rule(t(created_ms=now - 20 * MIN, status_ms=now - 20 * MIN), now, keep) is None  # 아직 30분 안 됨
+    assert rule(t(status_ms=now - 2 * h), now, keep) is None  # 한 번 일했다 쉰 지 2시간
+    assert rule(t(turn=3, status_ms=now - 3 * h + 500), now, keep) is None
+    assert rule(t(parent="t0", turn=2, status_ms=now - 31 * MIN), now, keep) == "R2"
+    assert rule(t(parent="t0", turn=2, status_ms=now - 10 * MIN), now, keep) is None
+    assert rule(t(parent="t0", status={"app": "claude-code", "state": "done"}, status_ms=now - h), now, keep) == "R2"
+    assert rule(t(turn=5, created_ms=now - 9 * h, status_ms=now - 7 * h), now, keep) == "R3"
+    assert rule(t(turn=5, created_ms=now - 9 * h, status_ms=now - 5 * h), now, keep) is None
+    for state in ("working", "blocked", "error"):
+        assert rule(t(status={"app": "claude-code", "state": state}), now, keep) is None
+    assert rule(t(status=None), now, keep) is None
+    assert rule(t(status={"state": "idle"}), now, keep) is None
+    assert rule(t(state="finished"), now, keep) is None
+    assert rule(t(address="w1/t4rn"), now, keep) is None
+    assert rule(t(name="d1-loop-w1"), now, keep) is None
+    assert rule(t(name="claude-proxy"), now, keep) is None
+    assert rule(t(name="keepme"), now, keep) is None
+    assert rule(t(address="t9"), now, keep) is None
+    assert rule(t(labels={"where": "proj / 1"}), now, keep) is None
+    done = {"app": "claude-code", "state": "done"}
+    lane = dict(parent="t0", turn=4, status=done, status_ms=now - 31 * MIN, labels={"where": "proj / Claude Code"})
+    assert rule(t(**lane), now, keep) == "R2"  # 지휘가 띄워 탭에 붙인 worker
+    assert rule(t(**dict(lane, parent=None)), now, keep) is None  # 사람이 연 칸(R3 시간 전)
+    assert rule(t(**dict(lane, shell=True)), now, keep) is None
+    assert rule(t(**dict(lane, unlanded=True)), now, keep) is None  # 착지 전 커밋
+    assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on · 2 shells")), now, keep) is None
+    assert rule(t(**dict(lane, tail="⎿ 1 monitor still running")), now, keep) is None
+    assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on · 1 shell · 1 monitor")), now, keep) is None
+    assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on (shift+tab to cycle)")), now, keep) == "R2"
+    assert rule(t(**dict(lane, unlanded=True, status_ms=now - 7 * h)), now, keep) == "R3"  # R3는 보호 없음
+    assert rule(t(shell=True, labels={"herdr.space": "sp1", "herdr.tab": "tb1"}), now, keep) is None  # Ovis 새 탭 셸
+    assert rule(t(shell=False, labels={"herdr.space": "sp1", "herdr.tab": "tb1", "ovis.tab": "지휘"}), now, keep) == "R1"
+    assert rule(t(status_ms=None, created_ms=None), now, keep) is None
+    # 남은 워크트리·모르는 값은 R2·R3 모두 닫지 않음
+    assert rule(t(**dict(lane, worktree=True)), now, keep) is None
+    assert rule(t(**dict(lane, worktree=True, status_ms=now - 7 * h)), now, keep) is None
+    for missing in ("worktree", "unlanded", "tail"):
+        x = t(**lane)
+        del x[missing]
+        assert rule(x, now, keep) is None, missing
+    assert rule(t(**dict(lane, tail=None)), now, keep) is None
+    assert rule(t(turn=None), now, keep) is None  # turn 모름이면 R1 아님
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        root = os.path.realpath(root)
+        main, wt = os.path.join(root, "repo"), os.path.join(root, "repo.wt", "lane")
+        os.makedirs(os.path.join(main, ".git"))
+        os.makedirs(os.path.join(main, "sub"))
+        os.makedirs(os.path.join(wt, "frontend"))
+        with open(os.path.join(wt, ".git"), "w") as f:
+            f.write("gitdir: " + main + "/.git/worktrees/lane\n")
+        assert linked_worktree(wt) is True
+        assert linked_worktree(os.path.join(wt, "frontend")) is True
+        assert linked_worktree(main) is False
+        assert linked_worktree(os.path.join(main, "sub")) is False
+        assert linked_worktree(root) is False
+        assert linked_worktree(os.path.join(root, "repo.wt", "gone")) is False  # 지운 워크트리
+        assert linked_worktree(None) is True and linked_worktree("") is True and linked_worktree("rel/x") is True
+        os.chmod(os.path.join(root, "repo.wt"), 0)
+        try:
+            assert linked_worktree(wt) is True  # 읽기 오류는 닫지 않음
+        finally:
+            os.chmod(os.path.join(root, "repo.wt"), 0o755)
+
+    def fake(rc=0, out="", err="", exc=None):
+        def run(*a, **kw):
+            if exc:
+                raise exc
+            return subprocess.CompletedProcess(a, rc, out, err)
+        return run
+
+    assert unlanded("/x", fake(out="+ abc\n")) is True
+    assert unlanded("/x", fake(out="- abc\n")) is False
+    assert unlanded("/x", fake(out="")) is False
+    assert unlanded(None, fake(exc=AssertionError("부르면 안 됨"))) is False
+    assert unlanded("/x", fake(rc=128, err="fatal: not a git repository (or any of the parent directories): .git")) is False
+    assert unlanded("/x", fake(rc=1, err='{"error":{"message":"cannot start folder /x: No such file or directory"}}')) is False
+    assert unlanded("/x", fake(exc=subprocess.TimeoutExpired("hc", 40))) is True  # 판정 실패는 닫지 않음
+    assert unlanded("/x", fake(exc=OSError("hc 없음"))) is True
+    assert unlanded("/x", fake(rc=124, err="timed out")) is True
+    assert unlanded("/x", fake(rc=128, err="fatal: bad revision 'origin/main'")) is True
+    assert BUSY.search(screen_tail("t1", fake(rc=1)))
+    assert BUSY.search(screen_tail("t1", fake(exc=subprocess.TimeoutExpired("hc", 40))))
+    assert not BUSY.search(screen_tail("t1", fake(out="a\n\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n")))
+    for argv in (["/bin/zsh", "-l"], ["-zsh"], ["bash"], ["zsh", "-i"], ["/bin/bash", "--login"]):
+        assert is_shell_pane(argv), argv
+    for argv in (["/bin/zsh", "-lc", "exec claude run"], ["zsh", "-c", "x"], ["bash", "/x/hc-loop-start"],
+                 ["env", "claude"], ["claude", "run"]):
+        assert not is_shell_pane(argv), argv
+    sfx = ".wt"
+    assert lane_root("/a/app.wt/l1/tests/../bin/x", sfx) == "/a/app.wt/l1"
+    assert lane_root("/a/app.wt/l1", sfx) == "/a/app.wt/l1"
+    assert lane_root("/a/app.wt", sfx) is None and lane_root("/a/.wt/l1/x", sfx) is None
+    assert lane_root("rel/app.wt/l1", sfx) is None and lane_root(None, sfx) is None
+    assert lane_root("/a/app.lanes/l1/x", ".lanes") == "/a/app.lanes/l1"
+    assert secs("05:03") == 303 and secs("1:00:00") == 3600 and secs("2-01:00:00") == 2 * 86400 + 3600
+    there = {"/a/app.wt/l1", "/a/app.wt/l2", "/a/app.wt/l3", "/a/main.wt/m1"}
+    procs = {10: (1, 3600, "/usr/bin/python3 /a/app.wt/l1/tests/../bin/hc-fill watch --every 1"),
+             11: (1, 3600, "sleep 300"),                       # cwd로 l2
+             12: (1, 3600, "/a/app.wt/l3/bin/x"),              # l3은 터미널이 씀
+             13: (1, 3600, "/Applications/Foo.app/Contents/MacOS/Foo"),
+             14: (1, 3600, "/a/app.wt/gone/bin/x --root=/a/app.wt/gone"),
+             15: (99, 3600, "/a/app.wt/l1/bin/y"),             # 부모가 살아 있음
+             16: (1, 30, "/a/app.wt/l1/bin/z"),                # 너무 어림
+             17: (1, 3600, "/usr/local/bin/agent"),            # launchd 작업, cwd가 작업 트리 밖
+             18: (1, 3600, "/b/app.wt/l9/bin/w"),              # --only-under 밖
+             19: (1, 3600, "/Users/u/.local/bin/cbm-mcp --daemon"),  # 여러 세션이 쓰는 데몬(keep), cwd가 작업 트리
+             20: (1, 3600, "/a/main.wt/m1/bin/x"),             # 본 저장소 /a/main을 터미널이 씀(감사 스냅숏 꼴)
+             22: (1, 3600, "/opt/h/herdr-core server")}        # 코어(keep)
+    cwd_of = {11: "/a/app.wt/l2/sub", 17: "/Users/u", 19: "/a/app.wt/gone", 22: "/a/app.wt/gone"}
+    got = orphans(procs, cwd_of, ["/a/app.wt/l3/frontend", "/a/app.wt/l2x", "/a/main/sub"], sfx, 600, only="/a",
+                  exists=lambda p: p in there, keep={"cbm-mcp", "herdr-core"})
+    assert [(g[0], g[1], g[4], g[5]) for g in got] == [
+        (10, "/a/app.wt/l1", "쓰는 터미널 없음", True),
+        (11, "/a/app.wt/l2", "보류: cwd로만 걸림, 작업 트리 있음", False),
+        (14, "/a/app.wt/gone", "작업 트리 지워짐", True),
+        (20, "/a/main.wt/m1", "보류: 본 저장소 터미널 있음", False)], got
+    got = orphans(procs, cwd_of, [], sfx, 600, me=10, exists=lambda p: p in there)
+    assert [g[0] for g in got if g[5]] == [12, 14, 18, 19, 20, 22] and [g[0] for g in got if not g[5]] == [11], got
+    assert tree([10], {10: (1, 0, ""), 11: (10, 0, ""), 12: (11, 0, ""), 13: (1, 0, "")}) == {10, 11, 12}
+    assert conf("sweep.wt_suffix", ".wt", "/nonexistent/tool") == ".wt"
+    with tempfile.TemporaryDirectory() as root:
+        tool = os.path.join(root, "cfg")
+        with open(tool, "w") as f:
+            f.write("#!/bin/sh\nexit 2\n")
+        os.chmod(tool, 0o755)
+        assert conf("sweep.wt_suffix", ".wt", tool) is None  # 설정을 못 읽으면 끄지 않음
+        log = os.path.join(root, "closed.log")
+        with open(log, "w") as f:
+            f.write("t\tpid:5\t-\t고아 관찰(쓰는 터미널 없음)\t/a.wt/l\t-\t나이 0분 sleep 300\n")
+        assert seen(5, "sleep 300", log) and not seen(6, "sleep 300", log) and not seen(5, "sleep 30", log)
+    print("ok")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="끝났는데 안 닫힌 hc 에이전트 터미널을 닫는다")
+    parser.add_argument("--dry-run", action="store_true", help="닫을 것과 이유만 출력")
+    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--min-age", type=float, default=10, help="고아로 끌 최소 나이(분, 기본 10)")
+    parser.add_argument("--only-under", help="이 폴더 아래 작업 트리만(시험용)")
+    args = parser.parse_args()
+    if args.self_test:
+        return self_test()
+    keep, now = keep_list(), time.time() * 1000
+    terms = hc("ls").get("terminals")
+    listed = [t for t in (terms if isinstance(terms, list) else []) if isinstance(t, dict)
+              and t.get("state") == "live" and "/" not in t["address"] and t.get("status") in ("idle", "done")]
+    closed = targets = 0
+    for brief in listed:
+        try:
+            t = hc("get", brief["address"])
+        except RuntimeError:
+            continue
+        t["worktree"] = linked_worktree(t.get("cwd"))
+        if t.get("parent") and not t["worktree"]:  # R2 보호에만 쓴다
+            t["unlanded"] = unlanded(t.get("cwd"))
+            t["tail"] = screen_tail(t["address"])
+        why = rule(t, now, keep)
+        if not why:
+            continue
+        age = "만든 지 %d분·상태 그대로 %d분" % ((now - t["created_ms"]) // MIN, (now - t["status_ms"]) // MIN)
+        line = "%s %s %s (%s, turn %s) %s" % (why, t["address"], t.get("name") or "-", age, t.get("turn"), t.get("cwd"))
+        targets += 1
+        if args.dry_run:
+            print("닫을 것:", line)
+            continue
+        result = close(t, why)
+        closed += result.startswith("닫힘")
+        print(result + ":", line)
+    print("%s 이 기계 idle·done %d개 확인, %s %d개" % (time.strftime("%Y-%m-%d %H:%M:%S"), len(listed),
+          "닫을 것" if args.dry_run else "닫음", targets if args.dry_run else closed))
+    sweep_orphans(terms, args.dry_run, args.min_age * 60, args.only_under)
+
+
+if __name__ == "__main__":
+    main()

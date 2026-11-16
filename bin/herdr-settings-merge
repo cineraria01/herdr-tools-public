@@ -1,0 +1,149 @@
+#!/bin/sh
+# herdr-settings-merge: 이 기계 ~/.claude/settings.json의 정한 키만 맥 값으로 맞춘다. 키마다 3-way(CONTRACT.md 「설정」).
+# POSIX sh + jq(1.6+, walk). 리눅스 dash에서도 돈다.
+#
+# 표준 입력: {"values":{"<키>":<값>,…},"hooks":[{"event":"…","matcher":"…","command":"…",<그 밖의 훅 필드>},…],
+#             "refs":{"<키>":"<cksum>"},"home":"<맥 HOME>"}
+#   - refs·home은 선택이다. 값이 null이면 그 키를 지운다(맥에 없는 키).
+#   - 훅의 event·matcher·command 밖의 필드(timeout·onFailure 등)는 훅 항목에 그대로 넣는다. type은 없으면 "command".
+#   - cksum은 `jq -cS` 한 줄(줄바꿈 포함)을 cksum에 넣은 출력의 두 수 "CRC 길이"다. refs도 base도 같은 방식이다.
+#   - home이 있으면 values·hooks의 문자열 안 맥 HOME을 이 기계 $HOME으로 바꾼다. refs는 이 기계 값의 $HOME을 맥 HOME으로 되돌려 비교한다.
+# 인자: [--check] [--take <키|*>]…   (--take는 여러 번 줄 수 있다. 예외 키는 --take로도 손대지 않는다)
+# 환경: HERDR_MACHINE(필수, 예외 판정), HERDR_KEYS(keys.json 경로, 없으면 ../settings/keys.json → ~/.local/share/herdr-sync/keys.json)
+# 출력: 한 줄에 하나씩 같음|씀|충돌|예외|참고 <키>. 훅 키는 hook:<event>:<판별 글자>.
+# 종료: 0 문제 없음, 1 (--check에서 씀이 있음)·충돌·settings.json이 깨짐, 2 잘못 부름. 그 밖의 출력은 표준 오류.
+set -u
+die2() { echo "herdr-settings-merge: $*" >&2; exit 2; }
+check=0 takes=" "
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check=1 ;;
+    --take) [ $# -ge 2 ] && [ -n "$2" ] || die2 "--take 뒤에 키가 없음"; takes="$takes$2 "; shift ;;
+    *) die2 "모르는 인자: $1" ;;
+  esac
+  shift
+done
+[ -n "${HERDR_MACHINE-}" ] || die2 "HERDR_MACHINE 없음"
+K=${HERDR_KEYS-}
+if [ -z "$K" ]; then
+  K=$(dirname "$0")/../settings/keys.json
+  [ -f "$K" ] || K=$HOME/.local/share/herdr-sync/keys.json
+fi
+jq -e 'type=="object"' "$K" >/dev/null 2>&1 || die2 "keys.json을 읽을 수 없음: $K"
+
+T=$(mktemp -d "${TMPDIR:-/tmp}/herdr-settings-merge.XXXXXX") || exit 1
+tmp= btmp=
+trap 'rm -rf "$T" ${tmp:+"$tmp"} ${btmp:+"$btmp"}' EXIT
+trap 'exit 1' HUP INT TERM
+cat >"$T/in"
+# keys.json 목록 밖의 키·훅은 받지 않는다(L1의 실수 한 번이 .hooks·.permissions 같은 키를 덮지 않게)
+jq -e --slurpfile K "$K" '
+  $K[0] as $k
+  | (.values | type == "object" and all(keys_unsorted[]; . as $x | any(($k.values // [])[]; . == $x)))
+    and ((.refs // {}) | type == "object" and all(keys_unsorted[]; . as $x | any(($k.refs // [])[]; . == $x)))
+    and ((.home // "") | type == "string")
+    and ((.hooks // []) | type == "array" and all(.[];
+      (.event | type == "string") and (.matcher | type == "string") and (.command | type == "string")
+      and (. as $h | [($k.hooks[$h.event] // [])[] | select(. as $m | $h.command | contains($m))] | length == 1)))
+    and ([(.hooks // [])[] | . as $h | [$h.event, ([($k.hooks[$h.event] // [])[] | select(. as $m | $h.command | contains($m))][0])]]
+      | length == (unique | length))' "$T/in" >/dev/null 2>&1 \
+  || die2 "표준 입력이 약속한 JSON이 아님(또는 keys.json 목록 밖의 키·훅)"
+mh=$(jq -r '.home // ""' "$T/in")
+# rh(from; to): 문자열 안의 from을 to로 바꾼다. 뒤에 이름 글자([A-Za-z0-9._-])가 이어지면 그대로 둔다(/Users/a가 /Users/ab를 건드리지 않게)
+RH='def rh($f; $t): walk(if type == "string" then (split($f) as $p
+  | reduce range(1; $p | length) as $i ($p[0]; . + (if $p[$i] | test("^[A-Za-z0-9._-]") then $f else $t end) + $p[$i])) else . end);'
+jq "$RH"' if $f == "" or $f == $t then . else (.values, .hooks) |= rh($f; $t) end' --arg f "$mh" --arg t "$HOME" "$T/in" >"$T/want" || exit 1
+
+S=$HOME/.claude/settings.json
+if [ -e "$S" ]; then
+  jq -e 'type=="object"' "$S" >/dev/null 2>&1 || { echo "herdr-settings-merge: $S 이 올바른 JSON 객체가 아니라 손대지 않음" >&2; exit 1; }
+  cp "$S" "$T/work"
+else
+  echo '{}' >"$T/work"
+fi
+ST=$HOME/.local/state/herdr-sync
+B=$ST/settings-base.json
+if jq -e 'type=="object"' "$B" >/dev/null 2>&1; then cp "$B" "$T/base"; else echo '{}' >"$T/base"; fi
+cp "$T/base" "$T/base0"
+
+ck() { printf '%s\n' "$1" | cksum | awk '{print $1, $2}'; }
+setbase() { jq --arg k "$1" --arg c "$(ck "$2")" '.[$k] = $c' "$T/base" >"$T/b2" && mv "$T/b2" "$T/base"; }
+fail() { echo "herdr-settings-merge: $*, 아무것도 쓰지 않음" >&2; exit 1; }
+edit() { jq "$@" "$T/work" >"$T/w2" && mv "$T/w2" "$T/work" && changed=1 || fail "jq로 고치기 실패"; }
+changed=0 bad=0
+exec 3>&1 >"$T/out"   # 판정 줄은 모았다가 끝에서 낸다. 도중에 fail하면 버려서, 쓰지 않은 것을 「씀」이라 하지 않는다
+# decide <키> <현재> <맥 값>: 판정을 찍는다. 씀이면 0을 돌려준다(쓰는 것은 부른 쪽)
+decide() {
+  if [ "$2" = "$3" ]; then echo "같음 $1"; setbase "$1" "$3"; return 1; fi
+  b=$(jq -r --arg k "$1" '.[$k] // ""' "$T/base")
+  case $takes in *" $1 "* | *" * "*) take=1 ;; *) take=0 ;; esac
+  if { [ -n "$b" ] && [ "$(ck "$2")" = "$b" ]; } || [ $take = 1 ]; then
+    echo "씀 $1"; setbase "$1" "$3"; [ $check = 1 ] && bad=1; return 0
+  fi
+  echo "충돌 $1"; bad=1; return 1
+}
+
+jq -r '.values | keys_unsorted[]' "$T/want" >"$T/keys"
+while IFS= read -r k; do
+  if jq -e --arg m "$HERDR_MACHINE" --arg k "$k" 'any((.exceptions[$m] // [])[]; . == $k)' "$K" >/dev/null; then
+    echo "예외 $k"; continue
+  fi
+  p=$(jq -cn --arg k "$k" '$k | ltrimstr(".") | split(".")')
+  cur=$(jq -cS --argjson p "$p" 'getpath($p)' "$T/work" 2>/dev/null) || fail "$k 를 읽을 수 없음(중간 키가 객체가 아님)"
+  want=$(jq -cS --arg k "$k" '.values[$k]' "$T/want")
+  if decide "$k" "$cur" "$want"; then
+    edit --argjson p "$p" --argjson v "$want" 'if $v == null then delpaths([$p]) else setpath($p; $v) end'
+  fi
+done <"$T/keys"
+
+jq -c '(.hooks // [])[]' "$T/want" >"$T/hooks"
+while IFS= read -r h; do
+  ev=$(printf '%s\n' "$h" | jq -r '.event')
+  mk=$(jq -r --argjson h "$h" '[(.hooks[$h.event] // [])[] | select(. as $m | $h.command | contains($m))][0]' "$K")
+  k="hook:$ev:$mk"
+  want=$(printf '%s\n' "$h" | jq -cS '{matcher, hook: ({type: "command"} + del(.event, .matcher))}')
+  cur=$(jq -cS --arg ev "$ev" --arg mk "$mk" '[(.hooks[$ev] // [])[] | .matcher as $mt | (.hooks // [])[]
+    | select((.command // "") | contains($mk)) | {matcher: $mt, hook: .}][0]' "$T/work" 2>/dev/null) || fail "hooks.$ev 를 읽을 수 없음"
+  if [ "$cur" = null ]; then   # 대상에 없으면 base와 상관없이 더한다
+    echo "씀 $k"; setbase "$k" "$want"; [ $check = 1 ] && bad=1; w=1
+  elif decide "$k" "$cur" "$want"; then w=1
+  else w=0
+  fi
+  # 판별 글자가 든 항목만 빼고(그래서 빈 묶음만 지우고) 맥 항목을 끝에 붙인다. 다른 훅 항목은 그대로 둔다
+  [ $w = 1 ] && edit --arg ev "$ev" --arg mk "$mk" --argjson d "$want" '
+    def mine: (.command // "") | contains($mk);
+    .hooks[$ev] = (((.hooks[$ev] // []) | map(if any((.hooks // [])[]; mine) then (.hooks |= map(select(mine | not))) | select(.hooks | length > 0) else . end))
+      + [{matcher: $d.matcher, hooks: [$d.hook]}])'
+done <"$T/hooks"
+
+jq -r '(.refs // {}) | keys_unsorted[]' "$T/in" >"$T/refs"
+while IFS= read -r k; do
+  p=$(jq -cn --arg k "$k" '$k | ltrimstr(".") | split(".")')
+  c=$(jq -r --arg k "$k" '.refs[$k]' "$T/in")
+  cur=$(jq -cS "$RH"' getpath($p) | if $f == "" or $f == $t then . else rh($t; $f) end' --argjson p "$p" --arg f "$mh" --arg t "$HOME" "$T/work" 2>/dev/null) || fail "$k 를 읽을 수 없음"
+  [ "$(ck "$cur")" = "$c" ] || echo "참고 $k"
+done <"$T/refs"
+
+exec >&3 3>&-
+[ $check = 1 ] && { cat "$T/out"; exit $bad; }
+if [ $changed = 1 ]; then
+  jq -e 'type=="object"' "$T/work" >/dev/null 2>&1 || { echo "herdr-settings-merge: 고친 결과가 올바른 JSON이 아니라 쓰지 않음" >&2; exit 1; }
+  mkdir -p "$HOME/.claude" || exit 1
+  if [ -e "$S" ]; then
+    bak=$ST/bak/$(date +%Y%m%d-%H%M%S)
+    [ -e "$bak" ] && bak=$bak-$$   # 같은 초에 두 번 써도 앞 백업을 덮지 않게
+    mkdir -p "$bak" && cp -p "$S" "$bak/settings.json" || { echo "herdr-settings-merge: 백업 실패, 쓰지 않음" >&2; exit 1; }
+  fi
+  tmp=$S.herdr-tmp.$$
+  cp -p "$S" "$tmp" 2>/dev/null || (umask 077 && : >"$tmp")   # 원본을 복사해 그 위에 써서 권한을 그대로 둔다
+  if ! { jq . "$T/work" >"$tmp" && jq -e . "$tmp" >/dev/null; }; then
+    rm -f "$tmp"; echo "herdr-settings-merge: 임시 파일 쓰기 실패, 쓰지 않음" >&2; exit 1
+  fi
+  if [ -L "$S" ]; then cat "$tmp" >"$S" && rm -f "$tmp"; else mv "$tmp" "$S"; fi || exit 1   # 심볼릭 링크는 링크 대상에 쓴다
+fi
+cat "$T/out"   # settings를 다 썼으니 판정 줄은 참이다(base 쓰기가 실패하면 종료 1, 다음 실행이 같음으로 base를 다시 쓴다)
+if ! cmp -s "$T/base" "$T/base0"; then
+  btmp=$B.tmp.$$
+  mkdir -p "$ST" && jq . "$T/base" >"$btmp" && mv "$btmp" "$B" || { echo "herdr-settings-merge: base 쓰기 실패" >&2; exit 1; }
+fi
+exit $bad

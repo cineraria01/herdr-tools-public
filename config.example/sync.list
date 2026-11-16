@@ -1,0 +1,37 @@
+# herdr-sync가 맞추는 것의 예시 (가짜 값). 진짜는 개인 저장소 $HERDR_TOOLS_CONFIG/sync.list(기본 ~/.config/herdr-tools/sync.list).
+# 한 줄에 하나: 묶음  맥 경로  저장소 경로  대상   (꼴은 CONTRACT.md 「sync.list」)
+# - 맥 경로는 ~ 아래 상대 경로다. 이름 자리의 *는 맥과 저장소에 있는 파일을 모두 뜻한다.
+# - 저장소 경로: tools:<경로>는 범용 저장소(이 저장소, HERDR_TOOLS_REPO), 그 밖은 개인 저장소 안 경로다.
+# - 구역: <파일>#body는 「<!-- User customizations -->」 줄 아래, <파일>#codex-shared는 codex-shared 표식 사이다.
+# - <경로>@은 심볼릭 링크다. 저장소 경로 자리에 링크가 가리킬 곳(~ 아래 상대 경로)을 적는다.
+# - 대상: all(모든 기계) · macos(uname이 Darwin인 기계) · local(맥만) · 기계 이름을 쉼표로 (예: box-1,box-2).
+# - 묶음 지움: 그 기계에 있으면 백업 폴더로 옮긴다. 저장소 경로는 -.
+# - 설정 조각(settings.json의 정한 키)은 개인 저장소 settings/keys.json이 정한다(예: config.example/settings/keys.json).
+지침본문     .claude/CLAUDE.md#body                           claude/CLAUDE.body.md                           all
+주제지침     .claude/docs/*.md                                claude/docs/                                    all
+Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.shared.md                          all
+스킬         .agents/skills/my-skill/SKILL.md                 skills/my-skill/SKILL.md                        macos
+스킬         .claude/skills/my-skill@                         .agents/skills/my-skill                         macos
+훅           .claude/hooks/cotenant-guard.sh                  tools:claude/hooks/cotenant-guard.sh            macos
+훅           .claude/hooks/tests/cotenant-guard.test.sh       tools:claude/hooks/tests/cotenant-guard.test.sh macos
+훅           .claude/hooks/loop-no-question.sh                tools:claude/hooks/loop-no-question.sh          macos
+도구         .local/bin/hc-lane                               tools:bin/hc-lane                               macos
+도구         .local/bin/hc-sweep                              tools:bin/hc-sweep                              macos
+도구         .local/bin/ovis-split                            tools:bin/ovis-split                            macos
+도구         .local/bin/tests/hc-lane.test.sh                 tools:tests/hc-lane.test.sh                     macos
+도구         .local/bin/herdr-settings-merge                  tools:bin/herdr-settings-merge                  all
+도구         .local/bin/tests/herdr-settings-merge.test.sh    tools:tests/herdr-settings-merge.test.sh        macos
+설정         .local/share/herdr-sync/keys.json                settings/keys.json                              all
+패턴         .local/share/herdr-tools/private-patterns.txt    private-patterns.txt                            macos
+맥도구       .local/bin/herdr-sync                            tools:bin/herdr-sync                            local
+맥도구       .local/bin/tests/herdr-sync.test.sh              tools:tests/herdr-sync.test.sh                  local
+맥도구       .local/bin/hc-core-relaunch                      tools:bin/hc-core-relaunch                      local
+맥도구       .local/bin/herdr-balance                         tools:bin/herdr-balance                         local
+맥도구       .local/bin/worker-mac-check                      tools:bin/worker-mac-check                      local
+맥도구       .local/bin/worker-mac-setup                      tools:bin/worker-mac-setup                      local
+맥도구       .local/bin/hc-fill                               tools:bin/hc-fill                               local
+맥도구       .local/bin/tests/hc-fill.test.sh                 tools:tests/hc-fill.test.sh                     local
+맥도구       .local/share/hc-fill/hc-fill.example.tsv         tools:config.example/hc-fill.tsv                local
+맥도구       .local/bin/herdr-tools-config                    tools:bin/herdr-tools-config                    local
+맥도구       .local/bin/herdr-tools-publish                   tools:bin/herdr-tools-publish                   local
+지움         .local/bin/old-tool                              -                                               local

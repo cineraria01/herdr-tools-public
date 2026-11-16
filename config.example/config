@@ -1,0 +1,49 @@
+# herdr-tools 개인 설정 예시 (가짜 값). 진짜 값은 $HERDR_TOOLS_CONFIG/config(기본 ~/.config/herdr-tools/config)에 둔다.
+# 꼴: 한 줄에 「<키> <값>」, 값은 줄 끝까지(앞뒤 빈칸 뺌). 「<키>」 혼자면 빈 값. 목록은 빈칸으로 나눈다. 같은 키 두 번은 오류.
+# 읽기: herdr-tools-config get <키> [<기본값>]. 줄을 지우면 각 도구의 「없을 때」대로 동작한다.
+
+# herdr-sync: 맞추기 전에 sh -c로 돌릴 명령 (없으면 아무것도 안 함)
+sync.prebuild      python3 ~/.local/share/example-notes/build.py
+
+# herdr-tools-publish (herdr-sync가 다 맞춘 뒤 부른다): 범용 저장소를 기록 없이 내보낼 공개 저장소 주소(없으면 내보내지 않음),
+# 그 공개 쪽 bare clone 자리(없으면 ~/.local/share/herdr-tools/public), 공개 커밋 작성자「이름 <메일>」(없으면 그 clone의 git 설정),
+# 더 막을 비밀 꼴 ERE 하나(여러 꼴은 |로, 없으면 코드 안 범용 꼴만)
+publish.repo       git@example.com:alice-example/tools-public.git
+publish.dir        ~/.local/share/herdr-tools/public
+publish.author     Example Bot <bot@users.noreply.example.com>
+publish.secrets    example-token-[0-9]{6}|INTERNAL-[A-Z]{4}
+
+# herdr-balance --watch: 함께 맞출 원격 기계 탭 이름 앞부분 (없으면 원격 탭 안 맞춤)
+balance.remote     worker-a/ worker-b/
+
+# hc-sweep 고아 쓸기: 레인 작업 트리 폴더 접미사(<저장소><접미사>/<레인>, 없으면 .wt),
+# 보지 않을 실행 파일 이름(여러 세션이 함께 쓰는 데몬·코어, 없으면 codebase-memory-mcp herdr-core),
+# 끄기(on·off, 없으면 off = 찍고 closed.log에 관찰로만 남김. 기록을 며칠 보고 on)
+sweep.wt_suffix    .wt
+sweep.orphan_keep  example-daemon herdr-core
+sweep.orphan_kill  off
+
+# hc-lane: --brief 사본 자리(대상 기계 경로, ~ 는 그 기계 집. 없으면 지시문과 같은 폴더),
+# -- 뒤 명령이 없을 때 실행 명령 틀({brief} 자리에 사본 경로, 셸 문법. 없으면 -- 뒤 명령이 꼭 있어야 함),
+# 띄운 뒤 status를 기다릴 초(없으면 60, 0이면 신뢰 질문·시작 확인 끔), Claude 폴더 신뢰 질문 자동 넘김(on·off, 없으면 on)
+# wait가 done·idle 레인을 멈춤으로 보기 전 쉰 분(없으면 10, 0이면 끔), 마지막 상태 줄의 배경 작업 표시(확장 정규식, 빈 값이면 끔),
+# 표시가 있어도 멈춤으로 볼 쉰 분(없으면 30), 상태 줄을 고르는 확장 정규식(없으면 ✻ 따위로 시작하는 Claude 턴 끝 줄)
+lane.brief_dir     ~/.local/share/hc-lane/briefs
+lane.run           example-agent --model example-model "{brief} 를 읽고 진행하라"
+lane.start_wait    60
+lane.auto_trust    on
+lane.wait_grace    10
+lane.wait_busy     shells? still running|monitors? still running
+lane.wait_busy_max 30
+lane.wait_line     ^[[:space:]]*(✻|✶|✳|✢|✽)
+
+# hc-lane gc: 지우지 않을 가지 이름 무늬(빈칸으로 나눈 glob, 로컬·원격 refs/heads 모두. 없으면 남길 목록 없음)
+gc.keep_branches   archive/* release-*
+
+# worker-mac-check·setup: $HOME 기준 경로들
+worker.repo        src/example-app work/example-app
+worker.trust       src src/example-app
+worker.slots_file  .config/example-app/verify-slots
+worker.tools       git node
+worker.ssh_key     ~/.ssh/id_ed25519_workers
+worker.proxy       example-proxy

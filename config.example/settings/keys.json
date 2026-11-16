@@ -1,0 +1,37 @@
+{
+  "values": [
+    ".language",
+    ".model",
+    ".effortLevel",
+    ".modelSettings",
+    ".autoMode",
+    ".skillOverrides",
+    ".teammateMode",
+    ".autoCompactEnabled",
+    ".tui",
+    ".env.CLAUDE_CODE_SUBAGENT_MODEL",
+    ".env.ANTHROPIC_CUSTOM_MODEL_OPTION",
+    ".env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    ".env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+    ".env.ENABLE_TOOL_SEARCH",
+    ".env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      "cotenant-guard.sh",
+      "loop-no-question.sh"
+    ]
+  },
+  "refs": [
+    ".enabledPlugins",
+    ".statusLine",
+    ".pluginConfigs",
+    ".permissions"
+  ],
+  "exceptions": {
+    "lx": [
+      ".modelSettings",
+      ".effortLevel"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+# 개인 값 검사 패턴 예시 (가짜). 한 줄에 ERE 하나, # 줄은 주석.
+# 진짜 패턴은 $HERDR_TOOLS_CONFIG/private-patterns.txt(또는 ~/.local/share/herdr-tools/private-patterns.txt)에 둔다.
+# herdr-tools-config lint가 범용 저장소 파일에서 걸린 줄을 찾는다: 기계 이름·계정·홈 경로·IP·프로젝트 이름.
+alice-(laptop|desktop)
+build-server-[0-9]+
+/Users/alice/
+/home/alice/
+100\.64\.[0-9]+\.[0-9]+
+secret-project

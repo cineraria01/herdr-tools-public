@@ -1,0 +1,7 @@
+.bak*
+*.bak-*
+__pycache__/
+*.log
+.omc/
+.DS_Store
+.claude/settings.local.json

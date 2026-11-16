@@ -1,0 +1,102 @@
+#!/bin/bash
+# herdr-tools-config: 개인 설정 폴더($HERDR_TOOLS_CONFIG, 기본 ~/.config/herdr-tools)를 읽는 도우미.
+#   get <키> [<기본값>]  config의 값을 찍는다. 키가 없으면 기본값, 기본값도 없으면 종료 3
+#   file <이름>          그 폴더의 <이름> 파일 절대 경로. 없으면 종료 3
+#   lint [<파일>…]       개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
+#                        이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
+# config 꼴: 한 줄에 「<키> <값>」(값은 줄 끝까지, 앞뒤 빈칸 뺌), 「<키>」 혼자면 빈 값, # 줄은 주석.
+# 키는 <영역>.<이름>(^[a-z]+\.[a-z0-9_]+$). 같은 키 두 번·잘못 부름은 종료 2. 예시는 저장소 config.example/.
+set -u
+me=herdr-tools-config
+dir=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
+usage() { sed -n '2,7s/^# \{0,1\}//p' "$0"; }
+die2() { echo "$me: $*" >&2; exit 2; }
+
+cmd_get() {
+  [ $# -ge 1 ] && [ $# -le 2 ] || die2 "get <키> [<기본값>]"
+  local key=$1 out rc
+  [[ $key =~ ^[a-z]+\.[a-z0-9_]+$ ]] || die2 "키 이름 꼴이 틀림: $key (<영역>.<이름>, 소문자·숫자·_)"
+  if [ -f "$dir/config" ]; then
+    # 종료 0 찾음 · 1 없음 · 4 같은 키 두 번(표준 오류에 안내)
+    out=$(awk -v want="$key" -v f="$dir/config" '
+      { sub(/\r$/, "") }
+      /^[ \t]*(#|$)/ { next }
+      { line = $0; sub(/^[ \t]+/, "", line); k = line; sub(/[ \t].*$/, "", k)
+        v = substr(line, length(k) + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+        if (k !~ /^[a-z]+\.[a-z0-9_]+$/) next
+        if (k in seen) { printf "herdr-tools-config: 같은 키 두 번 %s (%s:%d·%d)\n", k, f, seen[k], NR > "/dev/stderr"; dup = 1; exit }
+        seen[k] = NR; if (k == want) { found = 1; val = v } }
+      END { if (dup) exit 4; if (found) { print val; exit 0 } exit 1 }' "$dir/config")
+    rc=$?
+    case $rc in 0) printf '%s\n' "$out"; return 0 ;; 4) exit 2 ;; 1) ;; *) die2 "읽기 실패 $dir/config" ;; esac
+  fi
+  [ $# = 2 ] && { printf '%s\n' "$2"; return 0; }
+  echo "$me: 설정 없음 $key ($dir/config — 예: config.example/config)" >&2
+  exit 3
+}
+
+cmd_file() {
+  [ $# = 1 ] && [ -n "$1" ] || die2 "file <이름>"
+  case "/$1/" in //*|*/../*|*/./*) die2 "이름은 설정 폴더 안의 상대 경로: $1" ;; esac
+  if [ -f "$dir/$1" ]; then printf '%s/%s\n' "$(cd "$dir" && pwd)" "$1"; return 0; fi
+  echo "$me: 설정 파일 없음 $dir/$1 (예: config.example/$1)" >&2
+  exit 3
+}
+
+cmd_lint() {
+  local pf=$dir/private-patterns.txt p f out self here files=() regs=() links=() pats=()
+  [ -f "$pf" ] || pf=$HOME/.local/share/herdr-tools/private-patterns.txt
+  if [ ! -f "$pf" ]; then
+    echo "$me: 개인 값 패턴 파일 없음($dir/private-patterns.txt, ~/.local/share/herdr-tools/private-patterns.txt) — 검사 건너뜀" >&2
+    return 0
+  fi
+  while IFS= read -r p || [ -n "$p" ]; do
+    p=${p%$'\r'}
+    case ${p#"${p%%[![:space:]]*}"} in ''|'#'*) continue ;; esac
+    grep -E -e "$p" </dev/null >/dev/null 2>&1
+    [ $? = 2 ] && die2 "틀린 패턴 $p ($pf)"
+    pats+=("$p")
+  done <"$pf"
+  if [ $# -gt 0 ]; then files=("$@")
+  else
+    git rev-parse --git-dir >/dev/null 2>&1 || die2 "lint: 파일을 주거나 git 저장소 안에서 부른다"
+    # 지금 읽은 패턴 파일 하나만 뺀다(패턴 글자가 자기에게 걸림). 실제 경로(링크 풂)로 견준다. 파일을 직접 주면 검사한다
+    self=$(realpath -- "$pf") here=$(pwd -P)
+    while IFS= read -r -d '' f; do
+      [ "$here/$f" = "$self" ] && continue
+      [ -e "$f" ] || [ -L "$f" ] && files+=("$f")   # 작업 트리에서 지운 추적 파일은 뺀다
+    done < <(git ls-files -z)
+  fi
+  [ ${#pats[@]} -gt 0 ] && [ ${#files[@]} -gt 0 ] || return 0
+  # 심볼릭 링크는 git에 대상 경로 글자로 들어간다: 그 글자를 견주고 대상 내용은 읽지 않는다
+  for f in "${files[@]}"; do if [ -L "$f" ]; then links+=("$f"); else regs+=("$f"); fi; done
+  # LC_ALL=C grep -a: 이진·UTF-8 아닌 파일도 바이트로 본다(macOS grep -I는 그런 파일을 통째로 건너뛰었다).
+  # 못 읽은 파일이 있으면(grep 종료 2) 「!」 줄을 남겨 검사 못 함(종료 2)으로 한다
+  out=$(for p in "${pats[@]}"; do
+    if [ ${#regs[@]} -gt 0 ]; then
+      # --null: 「파일\0줄:내용」이라 파일 이름에 :가 있어도 나눌 수 있다
+      LC_ALL=C grep -naHiE --null -e "$p" -- "${regs[@]}" |
+        while IFS= read -r -d '' f && IFS= read -r l; do printf '%s:%s: %s\n' "$f" "${l%%:*}" "$p"; done
+      [ "${PIPESTATUS[0]}" -le 1 ] || echo '!'
+    fi
+    [ ${#links[@]} -gt 0 ] && for f in "${links[@]}"; do
+      readlink -- "$f" | LC_ALL=C grep -qiE -e "$p" && printf '%s:1: %s\n' "$f" "$p"
+    done
+    # 경로 글자: 상대 경로로 준 것만(절대 경로는 임시 파일 같은 남의 자리라 보지 않는다)
+    for f in "${files[@]}"; do
+      [ "${f#/}" = "$f" ] && printf '%s\n' "$f" | LC_ALL=C grep -qiE -e "$p" && printf '%s:0: 경로 %s\n' "$f" "$p"
+    done
+  done | sort -t: -k1,1 -k2,2n)
+  case $'\n'$out$'\n' in *$'\n!\n'*) die2 "검사 못 함 — 못 읽은 파일이 있다" ;; esac
+  [ -z "$out" ] && return 0
+  printf '%s\n' "$out"
+  return 1
+}
+
+case ${1-} in
+  get) shift; cmd_get "$@" ;;
+  file) shift; cmd_file "$@" ;;
+  lint) shift; cmd_lint "$@" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
