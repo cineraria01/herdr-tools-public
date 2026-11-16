@@ -797,6 +797,10 @@ HC_LANE=lane-q run report 끝남 abc
 t "report: 모르는 상태는 거절, 아무것도 안 씀" '[ $rc = 2 ] && [ "$(grep -c . "$EV")" = 3 ]'
 HC_LANE=lane-q run report 완료 abc --name lane-n
 t "report: 레인 이름은 --name이 \$HC_LANE보다 앞" '[ "$(tail -n 1 "$EV" | cut -f4)" = lane-n ]'
+HC_LANE=lane-q run report 착지 6D295B6F 끝
+t "report: 대문자 sha는 소문자로 적음(한 줄 칸으로 보내지 않음 — 감사 wait-landed [낮음] 3)" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f5-7)" = "착지${tab}6d295b6f${tab}끝" ] || { tail -n 1 "$EV"; false; }'
+HC_LANE=lane-q run report 막힘 DB 연결 실패
+t "report: 7자 미만 16진 낱말은 한 줄 칸에 대문자 그대로(재감사 [낮음] 1)" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f5-7)" = "막힘${tab}-${tab}DB 연결 실패" ] || { tail -n 1 "$EV"; false; }'
 git -C "$R" checkout -q -b lane-br
 out=$(cd "$R" && "$LANE" report 중간 2>"$T/err"); rc=$?
 t "report: --name·\$HC_LANE 없으면 작업 트리 가지 이름" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f4)" = lane-br ]'
@@ -1086,6 +1090,30 @@ t "쉼 알림 먼저(준비)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "l
 ev8 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" here tc1 lane-tc1 정리됨 - "hc-sweep R2" 5 >>"$EV"
 HC_FAKE_LS='{"terminals":[]}' run wait --state 멈춤 --timeout 0
 t "정리됨: 같은 turn에 쉼으로 이미 알린 레인은 다시 안 알림" '[ $rc = 75 ] || { printf "%s\n" "$out"; false; }'
+# wait-landed(2026-11-16 실측): 착지 뒤 같은 sha의 「완료」를 그 턴에 한 번 더 report하고 끝나면 착지 뒤 종료다.
+# 다른 sha의 완료·중간이 뒤에 오거나, 착지와 완료 사이·그 뒤에 turn이 오르면(이어 받은 일), sha가 -면(판정 포함) 여전히 알린다
+nw=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{ ev8 "$nw" here td1 lane-td1 착지 6d295b6f 착지 2; ev8 "$nw" here td1 lane-td1 완료 6d295b6f 완료 2
+  ev8 "$nw" here td2 lane-td2 착지 6d295b6f 착지 2; ev8 "$nw" here td2 lane-td2 완료 abcd1234 새일 2
+  ev8 "$nw" here td3 lane-td3 착지 6d295b6f 착지 2; ev8 "$nw" here td3 lane-td3 완료 6d295b6f 완료 4
+  ev8 "$nw" here td4 lane-td4 착지 6d295b6f 착지 2; ev8 "$nw" here td4 lane-td4 완료 6d295b6f 완료 2; ev8 "$nw" here td4 lane-td4 중간 - 반 2
+  ev8 "$nw" here td5 lane-td5 판정 - 감사 2; ev8 "$nw" here td5 lane-td5 완료 - 끝 2
+  ev8 "$nw" here td6 lane-td6 착지 - 착지 2; ev8 "$nw" here td6 lane-td6 완료 - 새일 2
+  ev8 "$nw" here td7 lane-td7 착지 6d295b6f 착지 2; ev8 "$nw" here td7 lane-td7 완료 6d295b6f 완료 5
+  ev8 "$nw" here td8 lane-td8 착지 6d295b6 착지 2; ev8 "$nw" here td8 lane-td8 완료 "6d295b6f00112233445566778899""aabbccddeeff" 완료 2
+  ev8 "$nw" here td9 lane-td9 착지 6d295b6f 착지 2; ev8 "$nw" here td9 lane-td9 완료 6d295b6f 완료 3
+  ev8 "$nw" here te1 lane-te1 착지 6d295b6f 착지 2; ev8 "$nw" here te1 lane-te1 완료 6d295b6f 완료 2; ev8 "$nw" here te1 lane-te1 정리됨 - "hc-sweep R2" 3
+  ev8 "$nw" here te2 lane-te2 착지 6d295b6f 착지 2; ev8 "$nw" here te2 lane-te2 완료 abcd1234 새일 2; ev8 "$nw" here te2 lane-te2 정리됨 - "hc-sweep R2" 3; } >>"$EV"
+HC_FAKE_LS='{"terminals":[]}' run wait --state 착지,판정,완료,중간 --timeout 0   # report 줄은 먼저 소비
+HC_FAKE_LS='{"terminals":[{"address":"td1","name":"lane-td1","state":"finished","turn":3},{"address":"td2","name":"lane-td2","state":"finished","turn":3},{"address":"td3","name":"lane-td3","state":"finished","turn":7},{"address":"td4","name":"lane-td4","state":"finished","turn":3},{"address":"td5","name":"lane-td5","state":"finished","turn":3},{"address":"td6","name":"lane-td6","state":"finished","turn":3},{"address":"td7","name":"lane-td7","state":"finished","turn":6},{"address":"td8","name":"lane-td8","state":"finished","turn":3},{"address":"td9","name":"lane-td9","state":"finished","turn":4}]}' \
+  run wait --state 멈춤 --timeout 0
+t "착지 뒤 같은 sha 완료: 그 턴에 끝남·정리됨은 조용(실측 꼴, 짧은 쪽 길이 앞자리 비교)" '[ $rc = 0 ] && ! printf "%s\n" "$out" | grep -Eq "lane-t(d1|d8|e1)${tab}멈춤" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "sha가 -면 같은 sha로 치지 않음: 판정·착지 - 뒤 완료 - 의 끝남은 알림(감사 wait-landed [높음] 1)" 'printf "%s\n" "$out" | grep -Fq "${tab}td5${tab}lane-td5${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" && printf "%s\n" "$out" | grep -Fq "${tab}td6${tab}lane-td6${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" || { printf "%s\n" "$out"; false; }'
+t "착지와 같은 sha 완료 사이에 turn이 오르면(이어 받은 일) 끝남은 알림(감사 wait-landed [높음] 1)" 'printf "%s\n" "$out" | grep -Fq "${tab}td7${tab}lane-td7${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "착지 다음 턴(turn+1)의 같은 sha 완료도 새 일: 끝남은 알림(재감사 [낮음] 2)" 'printf "%s\n" "$out" | grep -Fq "${tab}td9${tab}lane-td9${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "착지 뒤 다른 sha 완료 뒤 끝남·정리됨은 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}td2${tab}lane-td2${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" && printf "%s\n" "$out" | grep -Fq "${tab}te2${tab}lane-te2${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨)" || { printf "%s\n" "$out"; false; }'
+t "착지 뒤 같은 sha 완료여도 turn이 오른 뒤 끝남은 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}td3${tab}lane-td3${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "착지·완료 뒤 중간이 오면 끝남은 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}td4${tab}lane-td4${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
 # 지휘 요청(감사 3차 [높음] 1로 기본 꺼짐): wait는 기본으로 모든 레인 사건, --mine이면 레인의 hc parent가 이 지휘($HC_TERMINAL_ID —
 # 원격 레인은 <기계>/<t…>로 본다)인 사건만. parent를 모르면(hc ls에 없음) 보여 준다(fail-open).
 # 기본이 거르면 지휘가 바뀌거나(옛 parent는 죽은 터미널) wait를 다른 터미널에서 부를 때 사건이 다 가려진다

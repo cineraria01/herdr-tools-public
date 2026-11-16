@@ -80,7 +80,8 @@ usage() {
                 --mine이면 레인의 hc parent가 부른 터미널($HC_TERMINAL_ID, 원격 레인은 …/<t…>)인 사건만(parent를 모르면 보임).
                 한 기계에 지휘가 여럿일 때만 쓴다(지휘가 바뀌었거나 wait를 다른 터미널에서 부르면 쓰지 않는다).
                 hc-lane이 띄운 레인 터미널(라벨 hc-lane=1)이 착지·판정 그 턴(report turn+1 이하, turn을 모르면 밖) 밖에서 끝났거나(한 줄 칸
-                「뜻밖의 종료(<상태>)」, 완료 — 착지 전 — 뒤와 착지·판정 뒤 이어 받은 일도 알림), 완료·착지·막힘·판정 없이(또는
+                「뜻밖의 종료(<상태>)」, 완료 — 착지 전 — 뒤와 착지·판정 뒤 이어 받은 일도 알림. 착지 뒤 같은 sha(- 아님)의 완료가
+                같은 턴(같은 turn 값)에만 이어지면 착지로 치고 turn은 그 완료의 것), 완료·착지·막힘·판정 없이(또는
                 그 report의 turn+1보다 뒤에) done·idle로 쉬거나, blocked·error면 「멈춤」 사건(한 줄 칸 「<상태> turn <n>」).
                 done·idle은 쉰 지 설정 lane.wait_grace분(기본 10, 0이면 끔)이 지나고 배경 작업이 없을 때 멈춤. 배경 작업은
                 터미널 pid 자손 가운데 명령 줄에 lane.wait_procs 글자(기본 shell-snapshots — Claude Bash 도구 셸)가 든 프로세스로
@@ -141,10 +142,11 @@ report_cmd() {
   done
   case " $evstates " in *" $st "*) [ -n "$st" ] ;; *) false ;; esac ||
     { echo "hc-lane report: 상태는 $evstates 가운데 하나: ${st:-(없음)}" >&2; exit 2; }
+  # 대문자 sha도 sha로(소문자로 적음). 7~40자가 아닌 16진 낱말(DB·CAFE)은 한 줄 칸으로 그대로
   case $sha in
     ''|-) sha=- ;;
-    *[!0-9a-f]*) msg="$sha${msg:+ $msg}" sha=- ;;   # hc-lane report 막힘 "이유"
-    *) [ ${#sha} -ge 7 ] && [ ${#sha} -le 40 ] || { msg="$sha${msg:+ $msg}" sha=-; } ;;
+    *[!0-9A-Fa-f]*) msg="$sha${msg:+ $msg}" sha=- ;;   # hc-lane report 막힘 "이유"
+    *) if [ ${#sha} -ge 7 ] && [ ${#sha} -le 40 ]; then sha=$(printf %s "$sha" | tr A-F a-f); else msg="$sha${msg:+ $msg}" sha=-; fi ;;
   esac
   m=${HC_LANE_MACHINE:-$(hostname -s 2>/dev/null)}
   # 줄 전체를 1000바이트 안으로: bash printf는 약 1KB씩 나눠 쓰니, 넘으면 여러 레인이 함께 더할 때 줄이 섞여
@@ -281,8 +283,10 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
       *) mn=${me:--} ;;
     esac
     # 정리됨(hc-sweep이 닫음)은 report가 아니라 마지막 report를 가리지 않는다. sw=1이면 그 뒤에 정리됨이 있었다
-    lr=$(printf '%s\n' "$1" | A=$a N=$nm LC_ALL=C awk -F'\t' '$3 == ENVIRON["A"] && $4 == ENVIRON["N"] {
-      if ($5 == "정리됨") w = 1; else { l = $5 "\t" (NF >= 8 ? $8 : "-"); w = 0 } } END { print l "\t" (w ? 1 : 0) }')
+    # 착지 뒤 그 턴의 같은 sha 완료는 착지로 친다(turn만 그 완료의 것으로) — $landed 참고
+    lr=$(printf '%s\n' "$1" | A=$a N=$nm LC_ALL=C awk -F'\t' "$landed"'$3 == ENVIRON["A"] && $4 == ENVIRON["N"] {
+      if ($5 == "정리됨") w = 1; else { lrep($5, $6, NF >= 8 ? $8 : "-"); l = lst["x"] "\t" ltn["x"]; w = 0 } }
+      END { print l "\t" (w ? 1 : 0) }')
     last=${lr%%"$tab"*} lt=${lr#*"$tab"} sw=${lr##*"$tab"} lt=${lt%"$tab"*}
     why=
     # 끝남: 착지·판정 그 턴(report turn+1 이하. turn을 모르면 알림 — 놓치는 것보다 거짓 알림 한 번)이면 알리지 않고, 아니면(완료 — 착지 전 감사 기다림, 막힘,
@@ -316,6 +320,16 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
 # 사건 awk는 LC_ALL=C로 돈다: macOS awk는 UTF-8 로캘에서 문자열 비교가 strcoll이라 "착지" == "멈춤"이 참이었다
 # (같은 한 줄의 완료→착지가 삼켜지고 --state 한 상태 거름이 꺼짐 — wait-grace 레인에서 발견해 함께 고침)
 evkey='function key(  w) { if ($5 != "멈춤") return $0; w = $7; sub(/^(done|idle) /, "쉼 ", w); return "멈춤\t" $3 "\t" $4 "\t" w }'
+# lrep <상태> <sha> <turn> [<열쇠>]: 레인(열쇠)의 마지막 report를 lst·ltn에. 착지 뒤 같은 sha의 완료가 같은 턴(같은 turn 값)에
+# 오면 착지 그대로 두고 turn만 그 완료의 것으로(레인 틀이 착지 뒤 같은 sha 완료를 한 번 더 적는 꼴 — 2026-11-16 실측 「뜻밖의 종료」).
+# sha가 -(판정, sha 없음)이거나 turn을 모르거나 사이에 turn이 올랐거나(다음 턴은 새 입력 — 재감사 [낮음] 2) 다른 sha·중간·막힘이면 새 마지막 report(새 일)
+# samesha: -가 아니고, 소문자로 짧은 쪽 길이만큼 앞자리가 같다(sha8 대 40자. report가 7자 미만은 -로 적는다)
+landed='function samesha(a, b,  n) { if (a == "-" || b == "-" || a == "" || b == "") return 0
+  n = length(a) < length(b) ? length(a) : length(b); return tolower(substr(a, 1, n)) == tolower(substr(b, 1, n)) }
+function lrep(s, h, t, k) { if (k == "") k = "x"
+  if (s == "완료" && (k in lsh) && samesha(h, lsh[k]) && t ~ /^[0-9]+$/ && lt0[k] ~ /^[0-9]+$/ && t + 0 <= lt0[k] + 0) { ltn[k] = t; return }
+  lst[k] = s; ltn[k] = t; delete lsh[k]; if (s == "착지" || s == "판정") { lsh[k] = h; lt0[k] = t } }
+'
 ev_cmd() {
   ec=$1; shift
   all=0 ons= since= to=110 sts= mn_=0
@@ -401,7 +415,7 @@ ev_cmd() {
     # ponytail: 앞 report는 바퀴마다 보는 끝 500줄 안에서 찾는다 — 못 찾으면 알리는 쪽
     # 착지·판정 뒤라도 정리됨 turn이 그 report turn+1보다 뒤면(이어 받은 일) 또는 turn을 모르면 알린다. 같은 turn의 쉼으로 이미 알린 레인은 다시 안 알림.
     # parent 거름(PM: 「주소<탭>parent」 줄)은 찍을지에만 쓴다 — 마지막 report 추적은 모든 줄로
-    new=$(printf '%s\n' "$cand" | grep "$tab" | F=$cur S=$since W=",$sts," PM=$pmap MY=$myp LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey"'
+    new=$(printf '%s\n' "$cand" | grep "$tab" | F=$cur S=$since W=",$sts," PM=$pmap MY=$myp LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey$landed"'
       BEGIN { fl = ""; while ((getline l < ENVIRON["F"]) > 0) { if (l ~ /^#since\t/) fl = substr(l, 8); else seen[l] = 1 }
               np = split(ENVIRON["PM"], pl, "\n"); for (i = 1; i <= np; i++) { split(pl[i], pf, "\t"); if (pf[1] != "") par[pf[1]] = pf[2] } }
       function num(x) { return x ~ /^[0-9]+$/ }
@@ -409,7 +423,7 @@ ev_cmd() {
       $5 == "정리됨" { if ((lst[t2] == "착지" || lst[t2] == "판정") && num($8) && num(ltn[t2]) && $8 + 0 <= ltn[t2] + 1) next
         if (("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
         $5 = "멈춤"; $6 = "-"; $7 = "뜻밖의 종료(정리됨) " $7 }
-      $5 != "멈춤" { lst[t2] = $5; ltn[t2] = (NF >= 8 ? $8 : "-") }
+      $5 != "멈춤" { lrep($5, $6, NF >= 8 ? $8 : "-", t2) }
       ENVIRON["MY"] != "" && ($3 in par) && par[$3] != "-" && par[$3] != ENVIRON["MY"] && substr(par[$3], length(par[$3]) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"] { next }
       $1 >= ENVIRON["S"] && $1 >= fl && (ENVIRON["W"] == ",," || index(ENVIRON["W"], "," $5 ",")) && !(key() in seen) && !(key() in done) { done[key()] = 1; print }' |
       sort -s -t "$tab" -k1,1)
