@@ -1667,6 +1667,17 @@ rm -f "$HCLOG.live"
 HC_TERMINAL_ID=tN HC_FAKE_MACH_HOME=$MH3 HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"}]}' HC_FAKE_LS=$lsN run wait --all --state 멈춤 --timeout 0
 t "killed 낮음 1: 조용히 넘긴 killed는 부모(지휘)가 끝난 뒤에도 다시 안 옴" '! printf "%s\n" "$out" | grep -Fq "lane-kR${tab}멈춤" || { printf "%s\n" "$out"; false; }'
 rm -f "$HCLOG.live"
+# watch-parent(2026-11-17 지휘 실측): hc는 원격 레인의 parent를 묻는 쪽 기준 주소로 준다 — 레인 기계에선 「<지휘 기계>/t7」,
+# 지휘 기계에선 앞부분 없이 「t7」. 그 레인 기계를 붙여(m1/t7) 물으면 「없음」이라 지휘가 닫은 레인이 뜻밖의 종료로 왔다
+printf 'tPlive 3333\n' >"$HCLOG.live"
+nw=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{ ev8 "$nw" x tkT lane-kT 완료 abcd1234 접두없음살아 2; ev8 "$nw" x tkU lane-kU 완료 abcd1234 접두없음죽음 2; } >>"$MH3/m1/.local/state/hc-lane/events.tsv"
+lsP2='{"terminals":[{"address":"m1/tkT","name":"lane-kT","parent":"tPlive","die_with_parent":true,"state":"finished","reason":"killed","signal":1,"turn":3},{"address":"m1/tkU","name":"lane-kU","parent":"tPdead","die_with_parent":true,"state":"finished","reason":"killed","signal":1,"turn":3}]}'
+HC_TERMINAL_ID=tN HC_FAKE_MACH_HOME=$MH3 HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"}]}' run wait --all --since "$nw" --state 완료 --timeout 0
+HC_TERMINAL_ID=tN HC_FAKE_MACH_HOME=$MH3 HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"}]}' HC_FAKE_LS=$lsP2 run wait --all --state 멈춤 --timeout 0
+t "killed watch-parent: 원격 레인 parent가 앞부분 없는 「t…」(지휘 기계 기준)이고 살아 있으면 조용" '! printf "%s\n" "$out" | grep -Fq "lane-kT${tab}멈춤" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "killed watch-parent: 앞부분 없는 parent가 죽었으면 그대로 뜻밖의 종료" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m1/tkU${tab}lane-kU${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+rm -f "$HCLOG.live"
 # sweep-rename 6(2026-11-17 지휘): 배경 검증을 기다리며 차례만 끝낸 레인이 「멈춤 done」으로 왔다(네 건). 그 레인 작업 트리 경로가
 # 명령 줄에 든 프로세스(터미널 자손이 아니어도 — 떨어져 나간 배경 실행)가 살아 있으면 쉬는 중이 아니라 바쁨
 printf '%s\n' '✻ Churned for 3m · done 12:33 PM' '❯ ' >"$GS"

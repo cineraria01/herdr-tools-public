@@ -96,7 +96,7 @@ usage() {
   wait          아직 본 적 없는 사건이 생길 때까지 HC_LANE_WAIT_TICK초(기본 60)마다 보고, 생기면 그 줄(들)을 찍고 종료 0.
                 상한이면 종료 75. 찍은 사건은 이 기계 …/hc-lane/seen.<$HC_TERMINAL_ID>(지휘마다, 터미널 밖이면 seen)에
                 적어 다시 알리지 않는다(바꾸는 것은 그 파일뿐). 새 커서는 --since(없으면 2시간 전)부터 본다.
-                --mine이면 레인의 hc parent가 부른 터미널($HC_TERMINAL_ID, 원격 레인은 …/<t…>)인 사건만(parent를 모르면 보임).
+                --mine이면 레인의 hc parent가 부른 터미널($HC_TERMINAL_ID — 원격 레인도 보통 앞부분 없는 <t…>, 옛 꼴 …/<t…>도 맞춤)인 사건만(parent를 모르면 보임).
                 한 기계에 지휘가 여럿일 때만 쓴다(지휘가 바뀌었거나 wait를 다른 터미널에서 부르면 쓰지 않는다).
                 hc-lane이 띄운 레인 터미널(라벨 hc-lane=1)이 착지·판정 그 턴(report turn+1 이하, turn을 모르면 밖) 밖에서 끝났거나(한 줄 칸
                 「뜻밖의 종료(<상태>)」, 완료 — 착지 전 — 뒤와 착지·판정 뒤 이어 받은 일도 알림. 착지 뒤 같은 sha(- 아님)의 완료가
@@ -280,16 +280,16 @@ procbusy() {
       }
       exit 1 }'
 }
-# pnorm <레인 주소> <parent>: 이 기계에서 물을 parent 주소(pq_ — palive가 machine_unknown일 때만 부름). parent는 그 레인 기계가 부르는 이름이다(3차 감사 [중간] N1):
-# 「<기계>/t…」의 앞부분이 hc machine ls에 없는 이름(= 이 기계 자신)이면 떼어 로컬로, 원격 레인의 접두 없는 parent는 그 레인 기계를 붙인다.
-# hc machine ls가 실패하면 그대로(못 풀면 살아 있지 않음 = 알림 쪽)
+# hc는 원격 레인의 parent를 묻는 쪽 기준 주소로 준다(watch-parent, 2026-11-17 실측 — 레인 기계 hc get은 「<지휘 기계>/t7」,
+# 지휘 기계 hc get은 앞부분 없이 「t7」). 그래서 parent는 그대로 이 기계에서 묻는다(앞부분 없음 = 이 기계 터미널).
+# 옛 꼴(바꿔 주지 않은 「<이 기계 이름>/t…」)만 machine_unknown으로 알아보고 앞부분을 떼어 다시 묻는다(3차 감사 [중간] N1).
+# pnorm <parent>: 「<기계>/t…」의 앞부분이 hc machine ls에 없는 이름(= 이 기계 자신)이면 뗀 주소(pq_). hc machine ls가 실패하면 그대로
 pnorm() {
-  pq_=$2
-  case $pq_ in
-    */*) [ -n "${mls_-}" ] || if mj_=$(capt 20 hc machine ls --json </dev/null 2>/dev/null) && printf '%s' "$mj_" | grep -q '"machines"'
-         then mls_=" $(printf '%s\n' "$mj_" | jrec name state | cut -f1 | tr '\n' ' ') "; else mls_=fail; fi
-         [ "$mls_" = fail ] || case $mls_ in *" ${pq_%%/*} "*) ;; *) pq_=${pq_#*/} ;; esac ;;
-    *) case $1 in */*) pq_=${1%%/*}/$pq_ ;; esac ;;
+  pq_=$1
+  case $pq_ in */*)
+    [ -n "${mls_-}" ] || if mj_=$(capt 20 hc machine ls --json </dev/null 2>/dev/null) && printf '%s' "$mj_" | grep -q '"machines"'
+      then mls_=" $(printf '%s\n' "$mj_" | jrec name state | cut -f1 | tr '\n' ' ') "; else mls_=fail; fi
+    [ "$mls_" = fail ] || case $mls_ in *" ${pq_%%/*} "*) ;; *) pq_=${pq_#*/} ;; esac ;;
   esac
 }
 # plive <주소>: 그 터미널(레인의 parent)이 지금 살아 있나. 바퀴(stopped 한 번)마다 주소당 hc get 한 번(pl_에 「주소=0|1|3」).
@@ -301,13 +301,13 @@ plive() {
   elif printf '%s\n' "$g_" | grep -q 'machine_unknown'; then pl_="$pl_ $1=3"; return 3; fi
   pl_="$pl_ $1=1"; return 1
 }
-# palive <레인 주소> <parent>: parent를 그대로 먼저 묻고(들어온 연결의 상대는 machine ls에 없어도 그대로 풀린다 — 3차 감사 [낮음] L1),
-# machine_unknown일 때만 pnorm으로 앞부분을 떼고 다시 묻는다. 원격 레인의 접두 없는 parent는 그 레인 기계를 붙여 묻는다
+# palive <parent>: parent를 그대로 먼저 묻고(들어온 연결의 상대는 machine ls에 없어도 그대로 풀린다 — 3차 감사 [낮음] L1),
+# machine_unknown일 때만 pnorm으로 앞부분을 떼고 다시 묻는다
+# ponytail: 앞부분 없는 parent를 레인 기계 터미널로 보던 판(바꿔 주지 않는 hc)은 안 받는다 — 그런 hc가 나오면 not_found일 때 <레인 기계>/t…도 묻는다
 palive() {
-  case $2 in */*) ;; *) case $1 in */*) plive "${1%%/*}/$2"; return $? ;; esac ;; esac
-  plive "$2"; r_=$?
+  plive "$1"; r_=$?
   [ $r_ = 3 ] || return $r_
-  pnorm "$1" "$2"; [ "$pq_" != "$2" ] || return 1
+  pnorm "$1"; [ "$pq_" != "$1" ] || return 1
   plive "$pq_"
 }
 resting() {
@@ -335,7 +335,7 @@ resting() {
   ! capt 10 hc read "$1" </dev/null 2>/dev/null | grep -Ei -e "$wline" -e "$wbusy" | tail -n 1 | grep -Eiq -e "$wbusy"
 }
 # mine <parent>: 이 지휘의 레인인가. 거르지 않으면(--mine 없음, 터미널 밖) 늘 참. parent를 모르면(-·빈 값) 참(fail-open).
-# 원격 레인의 parent는 그 기계가 부르는 이름 <이 기계>/<t…>라 끝의 /<t…>로 맞춘다.
+# 원격 레인의 parent는 hc가 묻는 쪽 기준으로 주어 보통 앞부분 없는 <t…>, 옛 꼴 <이 기계>/<t…>도 끝의 /<t…>로 맞춘다.
 # ponytail: 다른 기계의 지휘가 같은 t 이름이면 섞인다 — 잦으면 기계 이름까지 맞춘다
 mine() { [ -z "$myp" ] || case $1 in ''|-|"$myp"|*/"$myp") true ;; *) false ;; esac; }
 stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
@@ -376,7 +376,7 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
         *" $last "*) case $lt$tn in *[!0-9]*|'') why="뜻밖의 종료($s)" ;; *) [ "$tn" -le $((lt + 1)) ] || why="뜻밖의 종료($s)" ;; esac ;;
         *) why="뜻밖의 종료($s)" ;;
       esac
-      kq=0; [ -z "$why" ] || [ "$rs" != killed ] || case $pa in ''|-) kq=1 ;; *) ! palive "$a" "$pa" || kq=1 ;; esac
+      kq=0; [ -z "$why" ] || [ "$rs" != killed ] || case $pa in ''|-) kq=1 ;; *) ! palive "$pa" || kq=1 ;; esac
       # 조용히 넘긴 killed는 커서(watch는 sent도)에 그 멈춤 열쇠로 적는다: 지휘가 끝난 뒤 다음 판정에서 parent가 죽어 다시 오지 않게(3차 [낮음] 1)
       if [ $kq = 1 ]; then
         k_="멈춤$tab${a##*/}$tab$(flat "$nm")$tab$why turn $tn"
