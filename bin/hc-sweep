@@ -39,13 +39,22 @@ sweep.orphan_keep(기본 codebase-memory-mcp herdr-core — 여러 세션이 함
 끈 것마다 pid·나이·명령 앞 80자를 closed.log에 남긴다. 작업 트리 밖(launchd 작업·로그인 항목·앱)은 보지 않는다.
 hc ls가 실패하거나 terminals 목록이 아니거나, cwd 모르는 이 기계 터미널이 있거나, 설정을 못 읽으면 아무것도 끄지 않는다
 (2026-11-16 시험이 남긴 hc-fill watch 고아 18개가 작업 트리를 지운 뒤에도 55분 돌았다).
+
+색인 쓸기: codebase-memory 색인 폴더(${XDG_CACHE_HOME:-~/.cache}/codebase-memory-mcp) 바로 아래 <이름>.db(_config.db 빼고)
+가운데 projects 표의 root_path(빈 값 빼고)가 모두 지워진 것을 -wal·-shm·-journal과 함께 지우고 closed.log에 이름·root·크기를 남긴다.
+지운 워크트리의 색인이 기계마다 수십 GB 쌓였다(2026-11-18 — teardown이 없는 옛 워크트리, 손으로 지운 워크트리, teardown 뒤
+끝난 배경 색인). 건너뜀: mtime(.db·-journal·비지 않은 -wal)이 --min-age분 안(색인 중), 읽기 전용으로 못 열거나 표·줄 없음, root가 /Volumes/
+아래(안 붙은 디스크 — 링크를 풀어서도 본다), root가 하나라도 있거나 읽기 오류(TCC 등 — exists()와 같은 뜻). 터미널·고아 쓸기와 따로 돈다:
+hc ls가 실패해도 돌고, 이 쓸기의 오류는 나머지를 막지 않는다.
 """
 import argparse
 import json
 import os
+import pathlib
 import re
 import signal
 import socket
+import sqlite3
 import stat
 import subprocess
 import time
@@ -495,7 +504,93 @@ def sweep_orphans(terms, dry, min_age, only=None):
     return targets
 
 
+def index_gone(roots, exists=exists):
+    """색인의 원본이 모두 사라졌나. 빈 목록·상대 경로·/Volumes/ 아래·하나라도 있음(읽기 오류 포함)이면 False.
+    /Volumes는 실제 경로로도 본다: 링크를 거쳐 빠진 디스크로 가면 stat이 FileNotFoundError라 지울 뻔했다(감사 [중간])."""
+    return (bool(roots) and all(isinstance(r, str) and r.startswith("/") and not r.startswith("/Volumes/")
+                                and not os.path.realpath(r).startswith("/Volumes/") for r in roots)
+            and not any(exists(r) for r in roots))
+
+
+def index_roots(db):
+    """색인 DB의 root_path들(빈 값 빼고). 열기·읽기 실패·표 없음은 [](건너뜀)."""
+    try:
+        con = sqlite3.connect(pathlib.Path(db).as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            return [r[0] for r in con.execute("SELECT root_path FROM projects WHERE root_path <> ''")]
+        finally:
+            con.close()
+    except Exception:
+        return []
+
+
+def sweep_index(dry, min_age):
+    """색인 쓸기 한 바퀴. 지운(dry면 지울) 수."""
+    d = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "codebase-memory-mcp")
+    try:
+        names = sorted(os.listdir(d))
+    except FileNotFoundError:
+        return 0
+    n = size = 0
+    for f in names:
+        db = os.path.join(d, f)
+        if not f.endswith(".db") or f == "_config.db":
+            continue
+        try:
+            mb, roots = sweep_one(db, dry, min_age)
+        except Exception as err:  # 이 DB만 건너뛴다(다음 바퀴에 다시)
+            print("색인 쓸기 실패: %s %s" % (f[:-3], err))
+            continue
+        if roots is not None:
+            print("지울 색인:" if dry else "지운 색인:", "%s %s 크기 %.1fMB" % (f[:-3], " ".join(roots), mb))
+            n += 1
+            size += mb
+    if n or dry:  # 0개면 조용히(기계마다 하루 288줄)
+        print("색인 쓸기: %s %d개(%.1fMB)" % ("지울 것" if dry else "지움", n, size))
+    return n
+
+
+def sweep_one(db, dry, min_age):
+    """색인 DB 하나. 지웠으면(dry면 지울 것이면) (MB, roots), 아니면 (0, None).
+    나이는 열기 전에 .db·-journal·비지 않은 -wal로 본다. -shm과 빈 -wal은 뺀다: 읽기 전용으로 열기만 해도 SQLite가
+    -shm을 다시 쓰고 빈 -wal을 만들어서, 넣으면 매 바퀴 「최근」이 된다. 곁 파일은 연 뒤 다시 모으고 .db를 맨 끝에 지운다
+    (중간에 실패하면 .db가 남아 다음 바퀴에 다시 본다)."""
+    side = lambda: [x for x in (db + "-wal", db + "-shm", db + "-journal") if os.path.lexists(x)]
+    if not os.path.isfile(db):
+        return 0, None
+    aged = [db] + [x for x in side() if not x.endswith("-shm") and not (x.endswith("-wal") and os.path.getsize(x) == 0)]
+    if time.time() - max(os.stat(x).st_mtime for x in aged) < min_age:
+        return 0, None
+    roots = index_roots(db)
+    if not index_gone(roots):
+        return 0, None
+    files = side() + [db]
+    mb = sum(os.path.getsize(x) for x in files if os.path.isfile(x)) / 1e6
+    if not dry:
+        for x in files:
+            try:
+                os.remove(x)
+            except FileNotFoundError:
+                pass
+        record({"address": "색인:" + os.path.basename(db)[:-3], "name": "-", "cwd": " ".join(roots),
+                "title": "크기 %.1fMB" % mb}, "색인 지움(원본 없음)", "-")
+    return mb, roots
+
+
 def self_test():
+    assert index_gone(["/a/x.wt/gone"], exists=lambda p: False)
+    assert index_gone(["/a/x.wt/g1", "/a/x.wt/g2"], exists=lambda p: False)
+    assert not index_gone([], exists=lambda p: False)  # 빈 root만 있던 색인
+    assert not index_gone(["/a/x.wt/g1", "/a/live"], exists=lambda p: p == "/a/live")
+    assert not index_gone(["/Volumes/usb/repo"], exists=lambda p: False)
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:  # 링크를 거쳐 빠진 디스크(/Volumes)로 가면 남긴다(감사 [중간])
+        os.symlink("/Volumes/hc-sweep-self-test-없음", os.path.join(root, "usb"))
+        assert not index_gone([os.path.join(root, "usb", "repo")], exists=lambda p: False)
+        assert not index_gone([os.path.join(root, "usb", "repo")])
+    assert not index_gone(["rel/repo"], exists=lambda p: False)
+    assert not index_gone(["/Users/u/Documents/app/x"], exists=lambda p: True)  # TCC 권한 거부 = exists() 「있음」
+    assert index_roots("/nonexistent/x.db") == []
     now, h = 1_000_000_000_000, 60 * MIN
     keep = {"keepme", "t9"}
 
@@ -688,11 +783,15 @@ def main():
     parser = argparse.ArgumentParser(description="끝났는데 안 닫힌 hc 에이전트 터미널을 닫는다")
     parser.add_argument("--dry-run", action="store_true", help="닫을 것과 이유만 출력")
     parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--min-age", type=float, default=10, help="고아로 끌 최소 나이(분, 기본 10)")
+    parser.add_argument("--min-age", type=float, default=10, help="고아·색인 최소 나이(분, 기본 10)")
     parser.add_argument("--only-under", help="이 폴더 아래 작업 트리만(시험용)")
     args = parser.parse_args()
     if args.self_test:
         return self_test()
+    try:  # 색인 쓸기는 따로: hc ls 실패와 상관없이 돌고, 실패해도 터미널·고아 쓸기를 막지 않는다
+        sweep_index(args.dry_run, args.min_age * 60)
+    except Exception as err:
+        print("색인 쓸기 실패:", err)
     keep, now = keep_list(), time.time() * 1000
     terms = hc("ls").get("terminals")
     listed = [t for t in (terms if isinstance(terms, list) else []) if isinstance(t, dict)

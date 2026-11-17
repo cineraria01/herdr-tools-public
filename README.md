@@ -171,6 +171,7 @@ hc-lane fetch --on <기계> --repo <그 기계 저장소> [<참조…>]         
   - 터미널 닫기 R2(일 끝난 worker)는 parent가 있거나 라벨 `hc-lane=1`인 것 — hc-fill이 띄운 레인은 parent가 없다. 이 기계 hc-fill 대기열에 결과를 아직 되돌려 주지 않은(`up`) 받은편지 레인은 닫지 않는다.
   - `hc-sweep --dry-run`은 찾기만. hc ls 실패·terminals 목록 아님·설정 읽기 실패·cwd 모르는 이 기계 터미널이면 아무것도 끄지 않는다.
 - 설정 키: `sweep.wt_suffix`(기본 `.wt`), `sweep.orphan_keep`(보지 않을 실행 파일 이름 — `ps comm`(argv[0])으로 견주어 `…/Herdr Core.app/…/herdr-core`처럼 공백 든 경로도 맞음, 기본 `codebase-memory-mcp herdr-core`), `sweep.orphan_kill`(`on`·`off`, 기본 `off` = 찍고 closed.log에 pid·명령마다 「고아 관찰」 한 줄 — 기록을 며칠 보고 `on`). 설정 도구(`herdr-tools-config`, sync.list mac-only)가 곁에 없는 기계는 늘 기본값이라 off(관찰만)다. 켜려면 그 기계에 도구가 있어야 한다.
+- **색인 쓸기**: `hc-sweep`은 매 바퀴 먼저(hc ls 실패와 상관없이) codebase-memory 색인 폴더(`${XDG_CACHE_HOME:-~/.cache}/codebase-memory-mcp`)의 `<이름>.db`(`_config.db` 빼고) 가운데 projects 표의 root_path가 모두 지워진 것을 `-wal`·`-shm`·`-journal`과 함께 지우고 closed.log에 `색인:<이름>`·root·크기를 남긴다. `--min-age`분 안(색인 중)·못 읽음·root가 `/Volumes/` 아래(링크를 풀어서도)·root 읽기 오류면 남긴다. 지운 것이 없으면 요약 줄도 없다. teardown이 돌지 않은 워크트리(옛 워크트리·손으로 지움·rollback)의 색인이 기계마다 수십 GB 쌓였다(2026-11-18).
 - 레인 지시문(`hc-lane --print-steps`) 끝 단계에 「끝내기 전 `pgrep -fl <작업 트리>/`로 확인, 자기 셸·에이전트는 빼고 정확한 pid로 kill」 줄이 붙는다.
 
 ## hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)

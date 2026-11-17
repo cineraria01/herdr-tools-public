@@ -30,10 +30,68 @@ esac
 exit 1
 EOF
 chmod +x "$T/bin/hc"
-export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg"
+export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg" XDG_CACHE_HOME="$T/cache"
 sweep() { out=$(python3 "$SWEEP" --only-under "$T" "$@" 2>&1); rc=$?; }
 cfg() { printf '%s\n' "$@" >"$T/cfg/config"; }
 LOG=$T/home/.claude-tasks/closed.log
+
+# 색인 쓸기: 원본(root_path)이 모두 사라진 codebase-memory 색인 DB만 지운다. 고아·터미널이 없는 상태에서 먼저 본다
+IX=$T/cache/codebase-memory-mcp
+mkdir -p "$IX/logs" "$T/repo-live"
+mkdb() {  # mkdb <이름> <root_path…>: projects 표가 있는 가짜 색인 DB
+  local n=$1; shift
+  python3 - "$IX/$n.db" "$@" <<'PY'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("CREATE TABLE projects(name TEXT PRIMARY KEY, indexed_at TEXT, root_path TEXT)")
+for i, r in enumerate(sys.argv[2:]):
+    con.execute("INSERT INTO projects VALUES (?, '2026-11-12T07:51:04Z', ?)", ("p%d" % i, r))
+con.commit()
+con.close()
+PY
+}
+mkdb live "$T/repo-live"
+mkdb gone "$T/repo.wt/audit-x"
+printf w >"$IX/gone.db-wal"; printf s >"$IX/gone.db-shm"
+mkdb gone2 "$T/repo.wt/audit-y"
+: >"$IX/gone2.db-journal"                  # 실제 색인은 롤백 저널 방식
+ln -s /Volumes/hcsweep-test-없음 "$T/usblink"
+mkdb vlink "$T/usblink/repo"               # 링크를 거쳐 /Volumes(빠진 디스크) — 남김
+python3 - "$IX/walgone.db" "$T/repo.wt/audit-w" <<'PY2'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("PRAGMA journal_mode=WAL")
+con.execute("CREATE TABLE projects(name TEXT PRIMARY KEY, indexed_at TEXT, root_path TEXT)")
+con.execute("INSERT INTO projects VALUES ('p0', '2026', ?)", (sys.argv[2],))
+con.commit()
+con.close()
+PY2
+mkdb bad "$T/repo.wt/audit-bad"
+mkdir "$IX/bad.db-shm"                     # 곁 파일을 못 지움(폴더 — 롤백 방식이라 SQLite는 안 봄) — 이 DB만 실패하고 나머지는 계속
+mkdb recent "$T/repo.wt/new"
+mkdb vol "/Volumes/hcsweep-test-없음/repo"
+mkdb empty ""
+mkdb mixed "$T/repo-live" "$T/repo.wt/audit-z"
+mkdb _config "$T/repo.wt/cfg"
+printf 'not a db' >"$IX/broken.db"
+printf x >"$IX/logs/a.log"
+for f in "$IX"/*; do [ "$f" = "$IX/recent.db" ] || touch -t 202601010000 "$f"; done
+ix() { [ -e "$IX/$1" ]; }
+echo '{"terminals":[]}' >"$T/ls.json"
+sweep --dry-run
+t "색인 dry-run: 원본 없는 gone·gone2·walgone·bad만 찍고 안 지움" '[ $rc = 0 ] && ( for n in gone gone2 walgone bad; do printf "%s" "$out" | grep -q "지울 색인: $n " || exit 1; done ) && [ "$(printf "%s" "$out" | grep -c "지울 색인:")" = 4 ] && ix gone.db && ix gone.db-wal'
+mv "$T/ls.json" "$T/ls.bak"
+sweep
+t "색인: hc ls가 실패해도 색인 쓸기는 돎(gone·gone2·walgone 지움, -wal·-shm·-journal 포함)" '[ $rc != 0 ] && ! ix gone.db && ! ix gone.db-wal && ! ix gone.db-shm && ! ix gone2.db && ! ix gone2.db-journal && ! ix walgone.db'
+t "색인: WAL DB를 열며 새로 생긴 -wal·-shm도 지움" '! ls "$IX" | grep -q "^walgone"'
+t "색인: 한 DB의 오류(bad)는 그 DB만 실패로 찍고 나머지는 지움" 'printf "%s" "$out" | grep -q "색인 쓸기 실패: bad" && ix bad.db'
+mv "$T/ls.bak" "$T/ls.json"
+t "색인: 원본 있음·최근·/Volumes·링크로 /Volumes·빈 root·원본 하나라도 있음·깨진 파일·_config.db·logs는 남김" 'ix live.db && ix recent.db && ix vol.db && ix vlink.db && ix empty.db && ix mixed.db && ix broken.db && ix _config.db && ix logs/a.log'
+t "색인: closed.log에 이름·root·크기 한 줄씩" '[ "$(grep -c "	색인:gone	.*색인 지움(원본 없음)	$T/repo.wt/audit-x	-	크기 " "$LOG")" = 1 ] && grep -q "	색인:gone2	" "$LOG" && ! grep -q "	색인:bad	" "$LOG"'
+t "색인: 요약 한 줄" 'printf "%s" "$out" | grep -q "색인 쓸기: 지움 3개"'
+rmdir "$IX/bad.db-shm"; rm "$IX/bad.db"
+sweep
+t "색인: 다시 돌면 지울 것 없음 — 0개면 요약 줄도 안 찍음, 링크로 /Volumes(vlink)는 bad 없는 바퀴에서도 남음" '[ $rc = 0 ] && ! printf "%s" "$out" | grep -q "색인 쓸기" && ix live.db && ix vlink.db'
 
 # orphan <이름> <cwd> <명령…>: 부모가 1인 프로세스를 띄워 pid를 $P/<이름>에
 orphan() {
