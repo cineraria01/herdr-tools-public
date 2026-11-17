@@ -49,6 +49,7 @@ case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜
 for x in ${HC_FAKE_LANE_START-}; do case $x in "${on:-here}/$name="*)
   echo "hc-lane: 시작 안 됨 ${on:+$on/}$name: 가짜 로그인 막힘" >&2; echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\",\"start\":\"login\"}"; exit "${x#*=}" ;; esac; done
 echo "레인 $name"
+[ -z "${HC_FAKE_LANE_NOAPP-}" ] || [ -z "$on" ] || echo "hc-lane: Herdr 창이 없어 $on 공간 이름은 못 붙였다(창을 열면 $on/$name 가 보인다)" >&2   # 원격 표시 알림
 echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\"}"
 EOF
 # 가짜 git: fetch는 기록, symbolic-ref는 origin/main, log --grep=<정규식>은 $T/commits(「sha 제목」 줄)에서 grep -E.
@@ -120,6 +121,7 @@ run run
 t "차례: 종료 0" '[ $rc = 0 ]'
 t "차례: l1·l2는 box-1, l3은 상한 2를 넘어 box-2" '[ "$(where l1)" = "up box-1 box-1/l1" ] && [ "$(where l2)" = "up box-1 box-1/l2" ] && [ "$(where l3)" = "up box-2 box-2/l3" ]'
 t "띄우기: hc-lane --on <기계> --name --repo <그 기계 경로> -- <설정의 launch 틀>" 'grep -Fx -A1 -- --repo "$T/lane.log" | grep -Fxq /home/me/src/app && [ "$(launched example-agent)" = 0 ] && grep -Fxq "exec example-agent --model example-model \"\$1\"" "$T/lane.log"'
+t "띄우기: 원격 표시 알림이 없으면 「알림: Herdr 창」 줄 없음" '! printf "%s" "$out" | grep -q "알림: Herdr 창"'
 run_l1="$HOME/.local/share/hc-fill/runs/l1-run.md"
 t "띄우기: run 지시문 = 지시문 + 착지 줄(그 기계 HOME 아래)" 'grep -Fq "# 지시문 l1" "$run_l1" && grep -Fq "### 착지 STEPS l1 box-1" "$run_l1"'
 t "띄우기: 첫 지시는 설정 task 틀로 run 경로를 담은 한 인자" 'grep -Fxq "$run_l1 지시문을 읽고 진행하라." "$T/lane.log"'
@@ -132,6 +134,12 @@ lj box-1/x1:claude-code:a box-1/x2:claude-code:b box-1/p:env:proxy box-2/z:zsh:s
 add l1
 run run
 t "상한: box-1에 에이전트 2개면 box-2로(다른 종류는 세지 않음)" '[ "$(where l1)" = "up box-2 box-2/l1" ]'
+
+# 2b. 원격 띄우기의 창 표시 알림(hc-lane이 그 기계 공간에 못 붙였을 때)은 띄우기는 그대로, 알림 한 줄
+fresh
+add nv
+HC_FAKE_LANE_NOAPP=1 run run
+t "원격 표시 알림: 띄움은 그대로, hc-lane 알림을 「알림: Herdr 창 …」 한 줄로" '[ "$(where nv)" = "up box-1 box-1/nv" ] && [ "$(printf "%s\n" "$out" | grep -c "^알림: Herdr 창이 없어 box-1 ")" = 1 ] || { printf "%s\n" "$out"; false; }'
 
 # 3. 「n개 미만일 때만」과 레인상한: shared는 상한 3·레인상한 2
 fresh

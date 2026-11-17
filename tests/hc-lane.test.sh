@@ -90,6 +90,21 @@ cat >"$T/bin/ps" <<'EOF'
 echo "$*" >>"$HCLOG.ps"; cat "$HC_FAKE_PS"
 EOF
 chmod +x "$T/bin/ps"
+# 가짜 herdr-app: 인자는 $HCLOG.app에. $HC_FAKE_APP이 없으면 창 없음(종료 1 — 진짜 창은 늘 안 건드린다).
+# ls: $HCLOG.appls가 있으면 그것, 없고 hc run이 herdr.space=lanes를 받았으면 창이 그 터미널을 본 꼴(첫 터미널 이름의 box/lanes 공간 — 진짜 ls에는 named 칸이 없다).
+# do space.rename --id <id> --name <이름>: $HCLOG.appls를 그 공간이 이름 붙은 꼴로
+cat >"$T/bin/herdr-app" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$HCLOG.app"
+[ -n "${HC_FAKE_APP-}" ] || { echo '{"error":"herdr-app is not running"}' >&2; exit 1; }
+case $1 in
+  ls) if [ -f "$HCLOG.appls" ]; then cat "$HCLOG.appls"
+      elif grep -Fxq herdr.space=lanes "$HCLOG" 2>/dev/null; then echo '{"spaces":[{"id":"box/lanes","name":"lane-a","machine":"box"}]}'
+      else echo '{"spaces":[{"id":"sp1","name":"here","machine":null}]}'; fi ;;
+  do) [ "$2" = space.rename ] && printf '{"spaces":[{"id":"%s","name":"%s","machine":"box"}]}\n' "$4" "$6" >"$HCLOG.appls" ;;
+esac
+EOF
+chmod +x "$T/bin/herdr-app"
 ln -s "$LANE" "$T/bin/hc-lane"   # 착지 절차의 hc-lane clean이 이 사본을 쓰게
 export PATH="$T/bin:$PATH" HCLOG="$T/hc.log" HC_LANE_POLL=0.1
 unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
@@ -139,10 +154,16 @@ t "기본: 착지 절차에 경로·기준" 'printf "%s" "$out" | grep -Fq "cd '
 # 2. herdr-setup.sh 성공·실패
 mk t2
 seed .claude/herdr-setup.sh 'echo "$LANE_REPO|$LANE_BRANCH|$LANE_BASE|${HL_ZSHRC-}|${WT_MAIN-none}|${HERDR_BASE-none}" > setup-ran'
-run --name lane-s --repo "$R" -- true
+HC_TERMINAL_ID=t1zz run --name lane-s --repo "$R" -- true
 t "setup: 성공 시 종료 0" '[ $rc = 0 ]'
-t "setup: 워크트리 안에서 실행(LANE_REPO=메인 폴더·LANE_* 받음, WT_MAIN·HERDR_BASE 없음, 로컬은 ~/.zshrc 안 읽음)" '[ "$(cat "$R.wt/lane-s/setup-ran" 2>/dev/null)" = "$R|lane-s|main||none|none" ]'
+t "setup: 워크트리 안에서 실행(LANE_REPO=메인 폴더·LANE_* 받음, WT_MAIN·HERDR_BASE 없음, hc 터미널 안 로컬은 ~/.zshrc 안 읽음)" '[ "$(cat "$R.wt/lane-s/setup-ran" 2>/dev/null)" = "$R|lane-s|main||none|none" ]'
 t "setup: 성공 뒤 hc run" 'has run'
+t "setup: hc 터미널 안 로컬은 그 자리에서(hc exec 안 씀)" '! grep -Fq herdr-setup.sh "$HCLOG.exec" 2>/dev/null'
+rm -f "$HCLOG.exec"
+run --name lane-sc --repo "$R" -- true
+if command -v zsh >/dev/null 2>&1; then want=read; else want=; fi
+t "setup: hc 터미널 밖 로컬(launchd hc-fill)은 hc 코어 문맥으로(hc exec -- , --on 없이 — TCC로 bash가 ~/Documents를 못 읽음)" '[ $rc = 0 ] && grep -Fq .claude/herdr-setup.sh "$HCLOG.exec" && ! grep -Fxq -- --on "$HCLOG.exec"'
+t "setup: 코어 문맥이면 ~/.zshrc를 읽고 돈다(코어 PATH)" '[ "$(cat "$R.wt/lane-sc/setup-ran" 2>/dev/null)" = "$R|lane-sc|main|$want|none|none" ]'
 mk t2o
 seed .claude/wt-setup.sh 'echo old > old-setup-ran'
 run --name lane-so --repo "$R" -- true
@@ -153,6 +174,13 @@ run --name lane-f --repo "$R" -- true
 t "setup 실패: 종료 0 아님" '[ $rc != 0 ]'
 t "setup 실패: hc run 안 부름" '[ ! -e "$HCLOG" ]'
 t "setup 실패: 오류에 워크트리 경로와 기록 끝" 'grep -Fq "$R.wt/lane-f" "$T/err" && grep -q boom-setup "$T/err"'
+t "setup 실패: 방금 만든 워크트리·브랜치를 지움(고유 커밋 없음)" '[ ! -e "$R.wt/lane-f" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-f && grep -Fq "지웠다" "$T/err"'
+seed .claude/herdr-setup.sh 'true'
+run --name lane-f --repo "$R" -- true
+t "setup 실패 뒤 고쳐서 같은 명령: 「브랜치가 이미 있다」로 안 막힘" '[ $rc = 0 ] && [ -d "$R.wt/lane-f" ] || { cat "$T/err"; false; }'
+seed .claude/herdr-setup.sh 'git commit -q --allow-empty -m setup-commit; exit 3'
+run --name lane-fk --repo "$R" -- true
+t "setup 실패(고유 커밋 생김): 워크트리·브랜치를 남기고 지우는 명령 안내" '[ $rc != 0 ] && [ -d "$R.wt/lane-fk" ] && git -C "$R" show-ref -q --verify refs/heads/lane-fk && grep -Fq "지우려면:" "$T/err"'
 
 # 3. --read
 mk t4
@@ -215,10 +243,33 @@ t "--on: hc run --on box --cwd 워크트리" 'pair --on box && pair --cwd "$R.wt
 t "--on: JSON에 기계" 'printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"on\":\"box\""'
 seed .claude/herdr-setup.sh 'exit 5'
 run --on box --name lane-o2 --repo "$R" -- echo hi
+t "--on setup 실패: 방금 만든 워크트리·브랜치를 hc exec --on box로 지움" '[ $rc != 0 ] && [ ! -e "$R.wt/lane-o2" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-o2 && grep -Fxq remove "$HCLOG.exec"'
+seed .claude/herdr-setup.sh 'git commit -q --allow-empty -m setup-commit; exit 3'
+run --on box --name lane-o3 --repo "$R" -- echo hi
 undo=$(sed -n 's/.*지우려면: //p' "$T/err")
-t "--on setup 실패: 지우는 명령이 hc exec --on box 로" '[ $rc != 0 ] && printf "%s" "$undo" | grep -Fq "hc exec --on box -- git -C" && printf "%s" "$undo" | grep -Fq "&& hc exec --on box -- git -C"'
-(cd "$T" && eval "$undo") >/dev/null 2>&1
-t "--on setup 실패: 그 명령으로 정리됨" '[ ! -e "$R.wt/lane-o2" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-o2'
+t "--on setup 실패(고유 커밋): 남기고 안내하는 명령이 hc exec --on box 꼴, 그 명령으로 정리됨(감사 [낮음] 4)" '[ $rc != 0 ] && [ -d "$R.wt/lane-o3" ] && printf "%s" "$undo" | grep -Fq "hc exec --on box -- git -C" && printf "%s" "$undo" | grep -Fq "&& hc exec --on box -- git -C" && (cd "$T" && eval "${undo/branch -d/branch -D}") >/dev/null 2>&1 && [ ! -e "$R.wt/lane-o3" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-o3'
+
+# 8b. 다른 기계 레인은 맥 Herdr 창의 그 기계 공간(이름 = 기계, 기계마다 하나)에 탭으로(hc run --label herdr.space=<id>)
+mk t8b
+rm -f "$HCLOG.app" "$HCLOG.appls"
+HC_FAKE_APP=1 run --on box --name lane-a --repo "$R" -- echo hi
+t "원격 표시: 창에 그 기계 공간이 없으면 고정 id lanes로 붙인다" '[ $rc = 0 ] && pair --label herdr.space=lanes || { cat "$T/err"; false; }'
+t "원격 표시: 창이 만든 공간에 기계 이름을 붙인다(space.rename box/lanes → box)" 'grep -Fxq "do space.rename --id box/lanes --name box" "$HCLOG.app"'
+rm -f "$HCLOG" "$HCLOG.app"
+HC_FAKE_APP=1 run --read --on box --name lane-b --repo "$R" -- echo hi
+t "원격 표시: 같은 기계 두 번째 레인(--read 감사도)은 같은 공간(lanes)에, 이름은 다시 안 붙임" '[ $rc = 0 ] && pair --label herdr.space=lanes && ! grep -q rename "$HCLOG.app"'
+rm -f "$HCLOG" "$HCLOG.app"
+printf '{"spaces":[{"id":"box/sp9","name":"box","machine":"box"},{"id":"other/sp9","name":"box","machine":"other"}]}\n' >"$HCLOG.appls"
+HC_FAKE_APP=1 run --on box --name lane-c --repo "$R" -- echo hi
+t "원격 표시: 그 기계에 「<기계>」 공간이 있으면 그 id(창이 보이는 「box/」 접두는 뗀다 — 붙이면 새 공간)" '[ $rc = 0 ] && pair --label herdr.space=sp9 && ! grep -q rename "$HCLOG.app"'
+rm -f "$HCLOG" "$HCLOG.app" "$HCLOG.appls"
+run --on box --name lane-d --repo "$R" -- echo hi
+t "원격 표시: 창이 없으면 띄우기는 성공, 라벨은 lanes, 알림 한 줄" '[ $rc = 0 ] && pair --label herdr.space=lanes && grep -q "Herdr 창이 없어" "$T/err"'
+rm -f "$HCLOG"
+HC_FAKE_APP=1 run --name lane-e --repo "$R" -- echo hi
+t "원격 표시: 로컬 레인은 herdr.space 라벨 없음(지휘 옆 분할은 hc-fill의 herdr-balance)" '[ $rc = 0 ] && ! grep -q "^herdr.space=" "$HCLOG"'
+run --dry-run --on box --name lane-g --repo "$R" -- echo hi
+t "원격 표시: dry-run 줄에 라벨" 'printf "%s" "$out" | grep -Fq -- "--label herdr.space=lanes"'
 
 # 9. 인자 오류
 rm -f "$HCLOG"
@@ -281,10 +332,7 @@ t "이름 사용 중: 오류, 워크트리·브랜치·hc run 없음" '[ $rc != 
 HC_FAKE_ID=t12 run --name t12 --repo "$R" -- true
 t "ID가 같은 다른 이름의 터미널은 막지 않음" '[ $rc = 0 ]'
 HC_FAKE_RUN_FAIL=1 run --name lane-v --repo "$R" -- true
-undo=$(sed -n 's/.*지우려면: //p' "$T/err")
-t "hc run 실패: 오류에 지우는 명령" '[ $rc != 0 ] && [ -n "$undo" ]'
-(cd "$T" && eval "$undo") >/dev/null 2>&1
-t "hc run 실패: 알려 준 명령으로 워크트리·브랜치가 지워짐" '[ ! -e "$R.wt/lane-v" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-v'
+t "hc run 실패: 방금 만든 워크트리·브랜치를 지움(다음 시도가 막히지 않게)" '[ $rc != 0 ] && grep -Fq "지웠다" "$T/err" && [ ! -e "$R.wt/lane-v" ] && ! git -C "$R" show-ref -q --verify refs/heads/lane-v'
 git -C "$R" remote set-head origin -d
 run --name lane-w --repo "$R" -- true
 t "origin/HEAD 없음: main으로" '[ $rc = 0 ] && has LANE_BASE=main'

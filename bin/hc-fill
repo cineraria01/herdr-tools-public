@@ -410,6 +410,8 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> �
   SWHY=; [ $lr = 0 ] || SWHY=$(printf '%s\n' "$out" | grep -m 1 '^hc-lane: 시작 안 됨' | cut -c 1-200)
   ADDR=$(printf '%s\n' "$out" | tail -n 1 | jq -r '.lane // empty' 2>/dev/null)
   [ -n "$ADDR" ] || { echo "실패 $lane @${on:-$LOCAL}: hc-lane 출력에서 주소를 못 읽음: $(printf '%s\n' "$out" | tail -n 1)"; return 1; }
+  # 원격은 hc-lane이 맥 창의 그 기계 공간에 탭으로 붙인다(herdr-balance는 원격 터미널을 맥 탭에 못 넣는다). 못 붙였으면 그 알림 줄을 그대로
+  printf '%s\n' "$out" | sed -n 's/^hc-lane: \(Herdr 창.*\)/알림: \1/p'
   if [ -z "$on" ] && [ -n "$COORD" ] && command -v herdr-balance >/dev/null 2>&1; then
     i=0; until herdr-balance --main "$COORD" --add "$ADDR" >/dev/null 2>&1; do
       i=$((i + 1)); [ $i -lt 5 ] || { echo "알림: 분할 붙이기 실패 $ADDR (herdr-balance --main $COORD --add $ADDR)"; break; }; sleep 2

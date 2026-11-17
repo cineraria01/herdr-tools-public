@@ -23,6 +23,7 @@ usage() {
   --branch      브랜치 이름(기본: 레인 이름). 워크트리 폴더 이름은 브랜치의 / 를 - 로 바꾼 것
   --on          git·설정·실행을 그 기계에서(hc exec/run --on). --repo는 그 기계의 절대 경로(로컬 ~ 펼침 주의).
                 설정 단계는 그 기계에 zsh·~/.zshrc가 있으면 그걸 읽고 돈다(hc 코어 PATH에 bun 등이 없다)
+                띄운 레인은 맥 Herdr 창의 그 기계 공간(이름 = 기계)에 탭으로 보인다(hc run --label herdr.space=<id>, 창 없으면 알림만)
   --dry-run     만들지도 띄우지도 않고 할 일과 착지 절차만 출력
   --print-steps 레인 지시문에 붙일 착지·정리 절차만 출력(실행 명령 불필요)
   --brief       지시문에 착지·정리 절차(--read는 판정 알림)를 붙인 실행용 사본을 대상 기계에 두고, 실행 명령의 {brief}
@@ -867,7 +868,9 @@ case $name in *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) die "--name은 a-z 0-
 [ $cmd != launch ] || [ $steps = 1 ] || [ $# -gt 0 ] || [ -n "$brief" ] || die "-- 뒤에 실행 명령이 없다"
 
 # 대상 기계에서 실행(종료 코드 그대로).
-x() { if [ -n "$on" ]; then hc exec --on "$on" --timeout 600 -- "$@"; else "$@"; fi; }
+# core=1(hook이 hc 터미널 밖 로컬에서 켬): 로컬도 hc 코어 문맥(hc exec --)으로. launchd(hc-fill)가 띄운 bash는 ~/Documents의
+# 스크립트를 못 읽는다(TCC 「Operation not permitted」, 2026-11-17 travel-c0 실측). 코어가 띄우는 프로그램은 읽는다
+x() { if [ -n "$on" ]; then hc exec --on "$on" --timeout 600 -- "$@"; elif [ -n "${core-}" ]; then hc exec --timeout 600 -- "$@"; else "$@"; fi; }
 xi() { if [ -n "$on" ]; then hc exec -i --on "$on" --timeout 600 -- "$@"; else "$@"; fi; }   # 표준 입력을 넘긴다
 # zx <폴더> <명령…>: 대상 기계의 그 폴더에서. --on이면 hc 코어 환경이라 ~/.zshrc의 PATH(bun·gh 자격 도우미 등)가 없다
 # (150·151 실측, 2026-11-16 감사 대상 fetch가 「could not read Username」). zsh·~/.zshrc가 있으면 로그인 셸(~/.zprofile의
@@ -878,7 +881,7 @@ zx() {
       d=$1; shift 2
       exec zsh -lc "source \"\$HOME/.zshrc\" >/dev/null 2>&1; cd \"\$1\" && shift && exec \"\$@\"" zsh "$d" "$@"
     fi
-    shift 2; exec "$@"' hc-lane "$1" "$on" "${@:2}"
+    shift 2; exec "$@"' hc-lane "$1" "$on${core-}" "${@:2}"
 }
 q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 
@@ -1069,9 +1072,11 @@ read_steps() {  # --read(감사·조사) 레인: 판정은 사건으로
 # hook <setup|teardown>: 워크트리 안에서 .claude/herdr-<이름>.sh. 기록은 그 워크트리의 git 관리 폴더(worktree remove 때 같이 지워진다).
 # --on이면 hc 코어 환경이라 ~/.zshrc의 PATH(bun 등)가 없다(150·151 실측). zsh·~/.zshrc가 있으면 읽고 돈다.
 hook() {
+  core=; [ -n "$on" ] || [ -n "${HC_TERMINAL_ID-}" ] || core=1   # hc 터미널 밖(launchd 등) 로컬이면 코어 문맥으로(x 위 주석)
   log=$(x git -C "$wt" rev-parse --absolute-git-dir)/hc-lane-$1.log
   zx "$wt" env "LANE_REPO=$repo" "LANE_WORKTREE=$wt" "LANE_BRANCH=$branch" "LANE_BASE=$base" \
     sh -c 'exec bash "$1" >"$2" 2>&1 </dev/null' hc-lane ".claude/herdr-$1.sh" "$log"
+  r_=$?; core=; return $r_
 }
 
 # clean: 지우기 전에 다 확인하고, 하나라도 걸리면 아무것도 지우지 않는다(teardown도 안 돌린다).
@@ -1560,14 +1565,57 @@ auto_watch() {
   else echo "hc-lane: 감시 $wn 를 띄우지 못했다(이미 그 이름이 살아 있으면 괜찮다) — 지휘는 hc-lane wait --all로 볼 것" >&2; fi
 }
 
-start= rc=0
+# rollback: 띄우기 전에 실패하면(setup·hc run) 방금 만든 워크트리·브랜치를 지운다 — 고유 커밋이 없을 때만.
+# 남기면 다음 시도가 「로컬 브랜치가 이미 있다」로 영영 막힌다(2026-11-17 hc-fill travel-c0). 출력은 die에 붙일 한 줄
+rollback() {
+  k=$(x git -C "$repo" rev-list --count "$bref..refs/heads/$branch" 2>/dev/null) || k=?
+  if [ "$k" = 0 ] && x git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1; then
+    if x git -C "$repo" branch -q -d "$branch" >/dev/null 2>&1; then
+      echo "방금 만든 워크트리 ${wt}·브랜치 ${branch} 는 지웠다(고유 커밋 없음). 원인을 고친 뒤 같은 명령을 다시 돌린다"
+    else   # 워크트리는 이미 없으니 안내는 브랜치 지우기만(감사 [낮음] 2)
+      echo "방금 만든 워크트리 ${wt} 는 지웠고 브랜치 ${branch} 는 못 지웠다. 지우려면: ${rx}git -C $(q "$repo") branch -d $branch"
+    fi
+  else
+    echo "워크트리 $wt${on:+ (기계 $on)} 는 남겨 둠(고유 커밋 ${k}개 또는 지우기 실패)${log:+, 기록 $log}. 지우려면: $undo"
+  fi
+}
+
+# 다른 기계 레인은 맥 Herdr 창의 그 기계 공간(이름 = 기계 이름, 기계마다 하나)에 탭으로 보이게 hc run --label herdr.space=<id>.
+# <id>는 그 기계 쪽 공간 id(창이 보이는 「<기계>/」 접두를 뗀 것 — 붙이면 모르는 id라 새 공간이 생긴다, 2026-11-17 low-sg 공간).
+# 창에 그 기계의 「<기계>」 공간이 있으면 그 id, 없으면 고정 id lanes(창이 처음 보면 공간을 만든다 — 같은 기계 다음 레인도 같은 곳).
+# 창(herdr-app)이나 jq가 없으면 lanes로 붙이고 띄운 뒤 이름은 못 붙인다(알림 한 줄). 로컬 레인은 hc-fill의 herdr-balance(지휘 옆 분할)
+hsp=
+if [ -n "$on" ]; then
+  hsp=lanes
+  sp_=$(herdr-app ls 2>/dev/null | jq -r --arg m "$on" '[.spaces[]? | select(.machine == $m and .name == $m) | .id][0] // empty' 2>/dev/null)
+  [ -z "$sp_" ] || hsp=${sp_#"$on/"}
+fi
+# show_remote: 띄운 뒤 그 공간이 이름 없이 생겼으면 기계 이름을 붙인다. 창이 터미널을 보는 데 몇 초 걸려 HC_LANE_POLL초씩 5번까지
+show_remote() {
+  [ -n "$hsp" ] && [ -n "$addr" ] || return 0
+  i=0
+  while :; do
+    ls_=$(herdr-app ls 2>/dev/null) || { echo "hc-lane: Herdr 창이 없어 $on 공간 이름은 못 붙였다(창을 열면 $addr 가 보인다)" >&2; return 0; }
+    # 공간이 있으면 「=<이름>」. herdr-app ls에는 named 칸이 없어(2026-11-17 실측) 이름이 기계 이름과 다르면 붙인다
+    st_=$(printf %s "$ls_" | jq -r --arg id "$on/$hsp" '[.spaces[]? | select(.id == $id) | "=" + (.name // "")][0] // empty' 2>/dev/null)
+    case $st_ in
+      "=$on") return 0 ;;
+      =*) herdr-app do space.rename --id "$on/$hsp" --name "$on" >/dev/null 2>&1 && return 0
+          echo "hc-lane: Herdr 창의 $on 공간 이름을 붙이지 못했다(herdr-app do space.rename --id $on/$hsp --name $on)" >&2; return 0 ;;
+    esac
+    i=$((i + 1)); [ $i -lt 5 ] || { echo "hc-lane: Herdr 창에 $addr 공간($on/$hsp)이 아직 안 보인다 — 창을 확인" >&2; return 0; }
+    sleep "$poll"
+  done
+}
+
+start= rc=0 log=
 if [ $dry = 1 ]; then
   if [ $read = 0 ]; then
     [ $remote = 0 ] || echo "[dry-run] git -C $(q "$repo") fetch -q origin"
     echo "[dry-run] git -C $(q "$repo") worktree add --track -b $branch $(q "$wt") $bref"
     echo "[dry-run] ($blab 에 .claude/herdr-setup.sh 가 있으면) 워크트리에서 bash .claude/herdr-setup.sh"
   fi
-  printf '[dry-run] hc run --bg --json%s --name %s --label hc-lane=1 --cwd %s%s' "${nn:+ $nn}" "$name" "$(q "$cwd")" "${on:+ --on $on}"
+  printf '[dry-run] hc run --bg --json%s --name %s --label hc-lane=1%s --cwd %s%s' "${nn:+ $nn}" "$name" "${hsp:+ --label herdr.space=$hsp}" "$(q "$cwd")" "${on:+ --on $on}"
   for a in "$@"; do printf ' %s' "$(q "$a")"; done
   echo
   if [ $read = 1 ]; then read_steps; else print_steps; fi
@@ -1580,12 +1628,12 @@ else
     if x test -f "$wt/.claude/herdr-setup.sh"; then
       if ! hook setup; then
         x tail -n 20 "$log" >&2
-        die "herdr-setup.sh 실패, 레인을 띄우지 않았다. 워크트리 $wt, 기록 $log${on:+ (기계 $on)}. 지우려면: $undo"
+        die "herdr-setup.sh 실패, 레인을 띄우지 않았다. $(rollback)"
       fi
     fi
   fi
-  out=$(hc run --bg --json $nn --name "$name" --label hc-lane=1 --cwd "$cwd" ${on:+--on "$on"} "$@") ||
-    die "hc run 실패, 레인을 띄우지 않았다.${wt:+ 워크트리 $wt 는 남겨 둠. 지우려면: $undo}"
+  out=$(hc run --bg --json $nn --name "$name" --label hc-lane=1 ${hsp:+--label "herdr.space=$hsp"} --cwd "$cwd" ${on:+--on "$on"} "$@") ||
+    die "hc run 실패, 레인을 띄우지 않았다.${wt:+ $(rollback)}"
   addr=$(printf %s "$out" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$addr" ] || printf 'hc-lane: hc run 출력에서 주소를 읽지 못했다(hc ls --json 으로 확인): %s\n' "$out" >&2
   # 레인 기록: 이 레인을 띄운 지휘(지휘 터미널에서 띄웠을 때만. hc-fill·터미널 밖·레인이 띄운 레인은 - — 사건은 coord_default로)
@@ -1596,6 +1644,7 @@ else
   [ -z "$addr" ] || { mkdir -p "$evdir" && printf '%s\t%s\t%s%s\n' "$addr" "$name" "$lo_" "${lk_:+$tab$lk_}" >>"$evdir/lanes.tsv"; } ||
     echo "hc-lane: 레인 기록을 쓰지 못했다: $evdir/lanes.tsv" >&2
   auto_watch
+  show_remote
   if [ $read = 1 ]; then read_steps; else print_steps; fi
   if [ "$swait" = 0 ]; then start=off
   elif [ -n "$addr" ]; then start_check "$addr"; rc=$?; fi
