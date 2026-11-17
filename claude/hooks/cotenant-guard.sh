@@ -18,6 +18,9 @@
 # another agent shares the tree;
 # writes (sed -i, >, cp, mv, rm, tee, git rm/mv) to a file or folder holding someone else's uncommitted file are
 # refused, other file targets are leased. bash/sh/zsh -c, eval, timeout, nice and xargs are looked through.
+# Force push (-f, --force, bare --force-with-lease or one without ":<expect>", --mirror, a "+" refspec, --force-if-includes
+# without an expect lease) is refused always, shared tree or not (2026-11-17); push --delete, fetch "+refspec" and
+# --force-with-lease=<ref>:<expect> (compare-and-swap: refs/claims) are not. No agent bypass: the off switch below only.
 #
 # Off switch, people only: "AGENT_LEASE_OFF": "1" in the env block of ~/.claude/settings.json (read from the file,
 # an environment variable alone does nothing). Agents may not write that switch, disableAllHooks or touch
@@ -384,6 +387,7 @@ EOF
 }
 
 bash_git() {   # KIND DIR ARG
+  [ "$1" = FORCEPUSH ] && block "'$3' 은 강제 push다. 원격에 있던 남의 커밋을 지울 수 있어 동거와 상관없이 늘 막는다. 대신 새 이름의 참조로 push하거나(git push origin HEAD:refs/<새 이름>), 그 참조를 git push origin --delete <참조> 로 지운 뒤 다시 push하라. 기대값을 적은 --force-with-lease=<참조>:<sha>(없을 때만 만들기는 <참조>: 로 빈 값)는 비교 후 교체라 된다. 그 참조를 다른 레인·사람이 쓰거나 판단이 서지 않으면 지휘(또는 사람)에게 알려라. 이 규칙을 끄는 것은 사람만 한다."
   phys "$2" || return 0
   tree "$PD" || return 0
   local wt="../${ROOT##*/}.wt/land-<슬러그>" MSG
@@ -455,15 +459,19 @@ bash_write() {   # DIR ARG
   PEND="$PEND$PD$US$REL"$'\n'   # leased by check_bash once the whole command has passed
 }
 
-# analyze CMD CWD DEPTH: findings of the tokenizer below; SUB = a string run by bash -c / eval, analyzed again
+# analyze CMD CWD DEPTH [REMOTE]: findings of the tokenizer below; SUB = a string run by bash -c / eval, analyzed again;
+# RSUB = a command run on another machine (hc exec|run … --, ssh <host> …): only the force-push rule applies there
+# (its paths are not this machine's trees), REMOTE=1 for it and everything nested in it
 analyze() {
   local out kind dir arg
   out=$(CG_CWD=$2 $AWK_BIN "$AWK" <<<"$1") || { echo "cotenant-guard: Bash 명령 분석 실패" >&2; exit 1; }
   while IFS=$US read -r kind dir arg; do
     case $kind in
-      WRITE) bash_write "$dir" "$arg" ;;
-      SUB) [ "$3" -lt 3 ] && analyze "${arg//$'\036'/$'\n'}" "$dir" $(( $3 + 1 )) ;;
-      ?*) bash_git "$kind" "$dir" "$arg" ;;
+      FORCEPUSH) bash_git "$kind" "$dir" "$arg" ;;
+      SUB|RSUB) [ "$3" -lt 5 ] || block "명령 겹침이 5겹을 넘어(bash -c·ssh·hc exec 등) 강제 push 여부를 판정할 수 없어 막았다. 겹침을 줄여 다시 하라."
+        analyze "${arg//$'\036'/$'\n'}" "$dir" $(( $3 + 1 )) "$([ $kind = RSUB ] && echo 1 || echo "${4-}")" ;;
+      WRITE) [ "${4-}" = 1 ] || bash_write "$dir" "$arg" ;;
+      ?*) [ "${4-}" = 1 ] || bash_git "$kind" "$dir" "$arg" ;;
     esac
   done <<EOF
 $out
@@ -563,16 +571,26 @@ function sedi(k,   j, a, ip, script) {
     emit("WRITE", cwd, tilde(a))
   }
 }
-function git(k,   j, d, o, s, a, q, c2, dd, wt, st, dry, x, all, np) {
-  d = cwd; j = k + 1
+function git(k,   j, d, o, s, a, q, c2, dd, wt, st, dry, x, all, np, lz, fi, an, ab) {
+  d = cwd; j = k + 1; split("", AL)
   while (j <= nt && t[j] ~ /^-/) {
     o = t[j]
     if (o == "-C") { d = join(d, tilde(t[j+1])); j += 2; continue }
+    if (o == "-c") {   # a one-off remote config that makes a plain push forced; a one-off alias is expanded below
+      x = t[j+1]
+      if ((x ~ /^remote\..*\.mirror=/ && x !~ /=(false|no|off|0)$/) || x ~ /^remote\..*\.push=\+/) { emit("FORCEPUSH", d, "git -c " x); return }
+      if (x ~ /^alias\.[^=]+=/) { an = substr(x, 7); sub(/=.*/, "", an); AL[tolower(an)] = substr(x, index(x, "=") + 1) }   # git keys ignore case, the last wins
+    }
     if (o == "-c" || o == "--git-dir" || o == "--work-tree" || o == "--namespace" || o == "--config-env") { j += 2; continue }
     j++
   }
   if (j > nt) return
   s = t[j]
+  if (tolower(s) in AL) {   # git -c alias.<s>=<body> <s> args: analyze "git <body> args" (or the "!" shell line)
+    ab = AL[tolower(s)]; x = (ab ~ /^!/) ? substr(ab, 2) : "git " ab
+    for (a = j + 1; a <= nt; a++) x = x " " sq(t[a])
+    emit("SUB", d, x); return
+  }
   if (s == "add") {
     if (subnext || viax) emit("DYN", d, "git add " (viax ? "(xargs)" : "$(…)"))
     for (a = j + 1; a <= nt; a++) {
@@ -644,9 +662,55 @@ function git(k,   j, d, o, s, a, q, c2, dd, wt, st, dry, x, all, np) {
     emit("LAND", d, s)
   } else if (s == "rm" || s == "mv") {
     x = cwd; cwd = d; nonopt(j, 0); cwd = x
+  } else if (s == "push") {   # force forms (also a "+" refspec); --delete and :ref are not force
+    # --force-with-lease=<ref>:<expect> (expect may be empty: "only if absent") is compare-and-swap, as --delete then push:
+    # allowed (claims). Bare lease or <ref> without ":" leases against the tracking ref = blind. --force-if-includes only with it
+    lz = 0; fi = ""
+    for (a = j + 1; a <= nt; a++) {
+      o = t[a]
+      if (o ~ /^--force-with-lease=[^:]*:/) { lz = 1; continue }
+      if (o == "--force-if-includes") { fi = o; continue }
+      if (o ~ /^--(force|force-with-lease|mirror)(=|$)/) { emit("FORCEPUSH", d, "git push " o); return }
+      if (o == "-o" || o == "--push-option" || o == "--repo" || o == "--receive-pack" || o == "--exec") { a++; continue }
+      if (o ~ /^-[^-]/) {
+        for (q = 2; q <= length(o); q++) {
+          c2 = substr(o, q, 1)
+          if (c2 == "f") { emit("FORCEPUSH", d, "git push " o); return }
+          if (c2 == "o") { if (q == length(o)) a++; break }
+        }
+        continue
+      }
+      if (o ~ /^\+/) { emit("FORCEPUSH", d, "git push … " o); return }
+    }
+    if (fi != "" && !lz) emit("FORCEPUSH", d, "git push " fi " (기대값 적은 --force-with-lease 없이)")
   }
 }
-function cmd(   k, w, name, j, x) {
+# optend(J, SHORTV, LONGV): getopt walk of the options of a wrapper from t[J]; returns the index of the first operand (the
+# inner command). SHORTV = short options taking a value (getopt "p:"; -p22 and -tp 22 both), LONGV = " --long … " taking a
+# value (--long=value is one word); "--" ends options. OPTON = --on seen, OPTCWD = --cwd value. Every wrapper (hc exec|run,
+# ssh, sh -c) goes through this one walk, and analyze() repeats it for each nesting level
+function optend(j, shortv, longv, plus,   o, c, q) {
+  OPTON = 0; OPTCWD = ""
+  for (; j <= nt; j++) {
+    o = t[j]
+    if (o == "--") return j + 1
+    if (o !~ /^-./ && !(plus && o ~ /^\+./)) return j   # PLUS: +x +o v also options (sh family)
+    if (o ~ /^--/) {
+      c = o; sub(/=.*/, "", c)
+      if (c == "--on") OPTON = 1
+      if (c == "--cwd") OPTCWD = (o ~ /=/) ? substr(o, 7) : t[j+1]
+      if (o !~ /=/ && index(longv, " " o " ")) j++
+      continue
+    }
+    for (q = 2; q <= length(o); q++) if (index(shortv, substr(o, q, 1))) { if (q == length(o)) j++; break }
+  }
+  return j
+}
+function sq(s) {   # quote one argv word for re-parsing
+  if (s ~ /^[A-Za-z0-9_.\/:=@%+,-]+$/) return s
+  gsub(/\047/, "\047\\\047\047", s); return "\047" s "\047"
+}
+function cmd(   k, w, name, j, x, q) {
   mode = ""
   k = 1
   while (k <= nt) {
@@ -669,12 +733,23 @@ function cmd(   k, w, name, j, x) {
     else if (name == "sed") sedi(k)
     else if (name == "cp") nonopt(k, 1)
     else if (name == "mv" || name == "rm" || name == "rmdir" || name == "unlink" || name == "tee") nonopt(k, 0)
-    else if (name ~ /^(bash|sh|zsh|dash|ksh)$/) {
-      for (j = k + 1; j <= nt; j++) {
-        if (t[j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { emit("SUB", cwd, t[j+1]); break }
-        if (t[j] !~ /^[-+]/) break
-      }
+    else if (name ~ /^(bash|sh|zsh|dash|ksh)$/) {   # [opts] -c <line>: the first operand is the line
+      j = optend(k + 1, "oO", " --rcfile --init-file ", 1)
+      for (q = k + 1; q < j; q++) if (t[q] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { if (j <= nt) emit("SUB", cwd, t[j]); break }
     } else if (name == "eval") { x = ""; for (j = k + 1; j <= nt; j++) x = x (j > k + 1 ? " " : "") t[j]; emit("SUB", cwd, x) }
+    else if (name == "hc" && (t[k+1] == "exec" || t[k+1] == "run" || (t[k+1] == "--json" && (t[k+2] == "exec" || t[k+2] == "run")))) {   # hc [--json] exec|run [OPTIONS] <ARGV>… (hc … --help)
+      if (t[k+1] == "--json") k++
+      j = optend(k + 2, "", " --on --cwd --env --timeout --name --label --parent ")
+      if (j > nt) x = ""
+      else if (t[k+1] == "run" && j == nt) x = t[j]   # hc run with one word runs it as a shell line
+      else { x = ""; for (q = j; q <= nt; q++) x = x (q > j ? " " : "") sq(t[q]) }   # argv as given, no shell
+      if (x != "") emit(OPTON ? "RSUB" : "SUB", OPTCWD == "" ? cwd : join(cwd, tilde(OPTCWD)), x)
+    } else if (name == "ssh") {   # ssh [options] destination [command…] (ssh(1)): the remote shell parses the words joined by blanks
+      j = optend(k + 1, "BbcDEeFIiJLlmOoPpQRSWw", "") + 1
+      if (t[j] == "--") j++
+      x = ""; for (q = j; q <= nt; q++) x = x (q > j ? " " : "") t[q]
+      if (x != "") emit("RSUB", cwd, x)
+    }
   }
   nt = 0; viax = 0; split("", t)
 }

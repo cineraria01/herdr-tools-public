@@ -89,6 +89,10 @@ usage() {
   coord         지휘마다의 지휘 정보 …/hc-lane/coord.<주소>(주소·pid·이름·마지막 레인 띄운 시각 — 지휘 터미널이 레인을 띄우거나
                 wait·watch를 걸 때 남김) 가운데 지금 hc get pid·이름이 같고 가장 최근에 레인을 띄운 지휘의 주소를 찍고 0,
                 없으면 「지휘 없음 — <까닭>」과 1
+       hc-lane send --all [--audits] [--from <지휘 주소>] [--] <글…>   (hc-lane broadcast <글…> = send --all)
+  send          이 지휘($HC_TERMINAL_ID 또는 --from)가 띄운 살아 있는 레인 전부(원격 포함 — 레인 기록 lanes.tsv의 마지막 지휘,
+                없으면 hc parent)에 hc send. 감사(레인 기록 read·이름 audit-*)는 --audits일 때만. 한 줄씩 「보냄|실패 <주소> <레인>」,
+                끝 줄 「보냄 n · 실패 m」. 종료 0 다 보냄(대상 없음 포함), 1 보내기·hc ls 실패, 2 인자(--all 없음 포함)
        hc-lane events [--all | --on <기계>…] [--since <시각|30m·2h·1d>]
   events        이 기계(와 --all이면 hc machine ls의 연결된 기계마다 hc exec --on 한 번)의 events.tsv를 시각 순으로.
                 원격 줄의 기계·터미널은 hc 이름(<기계>/<t…>)으로 바꿔 찍는다. 읽지 못한 기계는 「모름 <기계>」 한 줄
@@ -748,8 +752,47 @@ watch_lock() {
   trap '[ -z "$sp_" ] || kill "$sp_" 2>/dev/null; [ "$(cat "$lk/pid" 2>/dev/null)" != $$ ] || rm -rf "$lk"' EXIT
   trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
 }
+# send --all [--audits] [--from <지휘 주소>] <글…>: 이 지휘가 띄운 살아 있는 레인 전부에 hc send(2026-11-17 지휘 「실수는 바로
+# 코드로」 — 착지 마감 연장을 원격 레인에만 보내 맥 레인이 멈췄다). 주인은 owner()(레인 기록 마지막 지휘, 없으면 hc parent)의 끝 t….
+# 감사(레인 기록 read·이름 audit-*)는 --audits일 때만. 한 줄씩 「보냄|실패 <주소> <레인>」, 끝 줄 「보냄 n · 실패 m」.
+# 종료 0 다 보냄(대상 없음 포함), 1 보내기·hc ls 실패, 2 인자
+send_cmd() {
+  sall=0 saud=0 sfrom=${HC_TERMINAL_ID-} smsg=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --all) sall=1 ;;
+      --audits) saud=1 ;;
+      --from) val "$@"; sfrom=$2; shift ;;
+      -h|--help) usage ;;
+      --) shift; smsg="${smsg:+$smsg }$*"; break ;;   # 끝 표시: 뒤 낱말은 옵션이어도 글(감사 L4)
+      *) smsg="${smsg:+$smsg }$1" ;;
+    esac
+    shift
+  done
+  [ $sall = 1 ] || { echo "hc-lane send: --all 을 준다(이 지휘의 레인 전부에 보낸다. 한 레인만이면 hc send <주소>)" >&2; exit 2; }
+  [ -n "$sfrom" ] || { echo "hc-lane send: 지휘 주소를 모른다(지휘 터미널에서 부르거나 --from <주소>)" >&2; exit 2; }
+  [ -n "$smsg" ] || { echo "hc-lane send: 보낼 글이 없다" >&2; exit 2; }
+  tl=$(capt 30 hc ls --all --json --label hc-lane=1 </dev/null 2>/dev/null) ||
+    { echo "hc-lane send: hc ls 실패 — 아무에게도 안 보냈다" >&2; exit 1; }
+  pmap=$(printf '%s\n' "$tl" | jrec address parent) km_=$(lkinds) ok_=0 bad_=0
+  while IFS=$tab read -r a_ n_; do
+    [ -n "$a_" ] && [ "$(owner "$a_")" = "${sfrom##*/}" ] || continue
+    if [ $saud = 0 ]; then
+      case $n_ in audit-*) continue ;; esac
+      ! printf '%s\n' "$km_" | A=${a_##*/} N=$n_ awk -F'\t' '$1 == ENVIRON["A"] && $2 == ENVIRON["N"] && $3 == "read" { f = 1 } END { exit !f }' || continue
+    fi
+    if e_=$(capt 60 hc send "$a_" "$smsg" </dev/null 2>&1 >/dev/null); then echo "보냄 $a_ $n_"; ok_=$((ok_ + 1))
+    else echo "실패 $a_ $n_ — $(flat "${e_:-hc send 실패}")"; bad_=$((bad_ + 1)); fi
+  done <<EOF
+$(printf '%s\n' "$tl" | jrec address state name | awk -F'\t' '$2 == "live" { print $1 "\t" $3 }')
+EOF
+  echo "보냄 $ok_ · 실패 $bad_"
+  [ $bad_ = 0 ]
+}
 case ${1-} in
   report) shift; report_cmd "$@"; exit $? ;;
+  send) shift; send_cmd "$@"; exit $? ;;
+  broadcast) shift; send_cmd --all "$@"; exit $? ;;
   events|wait|watch) c_=$1; shift; ev_cmd "$c_" "$@"; exit $? ;;
   coord) coord_default; c_=$?; [ $c_ = 0 ] && { echo "$cad_"; exit 0; }; echo "hc-lane coord: 지휘 없음 — $cwhy" >&2; exit 1 ;;
 esac

@@ -53,6 +53,86 @@ cut -d $'\037' -f5 "$(leasefile "$R" a.txt)" | grep -qx agent-a; RC=$?; check "�
 echo more >> "$R/a.txt"
 hook sa Bash "git add -A && git status"; check "동거 없음: git add -A 차단 없음" 0
 hook sa Edit "$R/a.txt"; check "내 임대는 계속 허용" 0
+# force push is refused always, cotenant or not (2026-11-17: the coordinator force-pushed a shared temp ref)
+for c in "git push -f origin main" "git push --force origin main" "git push -qf origin main" "git push --force-with-lease origin main" \
+  "git push --force-with-lease=main origin main" "git push -f --force-with-lease=main:abc origin main" \
+  "git push --force-with-lease=main:abc origin +main" "git push --force-with-lease --force-with-lease=main:abc origin main" \
+  "git push --force-if-includes origin main" "git push --force-if-includes --force-with-lease origin main" "git push --mirror origin" \
+  "git push -q origin +HEAD:refs/integ/x" "git push origin '+HEAD:refs/integ/x'" "git push origin \"+main\"" \
+  "git -C $R push -f origin main" "env HERDR_LAND=1 git push --force origin main" "git -c x.y=1 push -f origin main" \
+  "git fetch && git push -f origin main" "true; git push -f origin main" "echo x | git push -f origin main" \
+  "bash -c 'git push -f origin main'" "x=\$(git push -f origin main)" "git -C /nonexistent push -f origin main"; do
+  hook sa Bash "$c"; check "강제 push 차단(동거 없음): $c" 2 "강제 push.*기대값을 적은 --force-with-lease"
+done
+# audit M1: remote wrappers (hc exec/run --on … --, ssh <host> …) and nested shells; L1: git -c alias/mirror/+push
+for c in "hc exec --on mini -- git push -f origin main" "hc exec --on mini --timeout 60 -- bash -lc 'git push -f origin main'" \
+  "ssh mini 'cd x && git push -f origin main'" "ssh -p 22 -o BatchMode=yes mini git push --force origin main" \
+  "ssh mini -- git push origin +main" "hc run --bg --on mini --name x -- git push --mirror origin" \
+  "sh -c \"bash -lc 'zsh -c \\\"git push -f origin main\\\"'\"" "ssh mini \"hc exec --on m2 -- sh -c 'git push -f origin main'\"" \
+  "git -c alias.p='push -f' p origin main" "git -c remote.origin.mirror=true push origin" "git -c remote.origin.push=+refs/heads/*:refs/heads/* push origin"; do
+  hook sa Bash "$c"; check "감싼 강제 push 차단: $c" 2 "강제 push"
+done
+for c in "hc exec --on mini -- git push origin main" "ssh mini 'git push --force-with-lease=r:abc origin HEAD:r'" \
+  "hc exec --on mini -- git fetch origin +refs/heads/*:refs/remotes/origin/*" "ssh mini 'echo git push -f'" \
+  "hc exec --on mini -- bash -lc 'git push -q origin \"\${c}:refs/claims/\$n\" --force-with-lease=\"refs/claims/\$n:\"'" \
+  "hc send t1 'git push -f 금지'" "git -c alias.st=status st" "ssh -t mini" "hc exec --on mini -- ls"; do
+  hook sa Bash "$c"; check "감싼 정상 명령은 허용: $c" 0
+done
+# audit 2 M1-b: wrappers by their whole option grammar (hc exec/run --help, ssh(1)), -- or not, value options before/after,
+# nested; one table: verdict<TAB>command
+deep='git push origin main'; for i in 1 2 3 4 5 6; do deep="sh -c $(printf %q "$deep")"; done
+while IFS=$'\t' read -r want c; do
+  [ -n "$c" ] || continue
+  hook sa Bash "$c"
+  if [ "$want" = 2 ]; then check "감싸기 문법 표 막힘: $c" 2 "강제 push\|겹침"; else check "감싸기 문법 표 허용: $c" 0; fi
+done <<EOF
+2	hc exec --on mini-m4 git push -f origin main
+2	hc exec --on mini-m4 bash -lc 'git push -f origin main'
+2	hc exec --on mini-m4 --cwd /x git push --force origin main
+2	hc exec --on=mini --timeout=30 -i --env K=V git push -f origin main
+2	hc exec --json --on mini --stdin git push origin +main
+2	hc run --bg --on mini-m4 --name x 'cd app && git push -f origin main'
+2	hc run --on vps "git push --mirror origin"
+2	hc run --bg --on m --name x --cwd /w zsh -c 'git push -f origin main'
+2	hc run --label a=b --parent t1 --no-parent --no-notify --outlive-parent --rm --keep --timeout 9 --on m git push origin +main
+2	ssh -i ~/.ssh/k -J jump -l me -F cfg mini 'git push -f origin main'
+2	ssh -tp 22 mini git push -f origin main
+2	ssh -oBatchMode=yes -A mini git push --force origin main
+2	ssh -p22 -E log -b 1.2.3.4 me@mini "bash -lc 'git push -f origin main'"
+2	hc exec --on a ssh b "hc run --on c 'sh -c \"git push -f origin main\"'"
+2	ssh a hc exec --on b zsh -c "'git push --mirror origin'"
+2	git -c alias.p=push p origin +main
+2	git -c alias.p='!git push -f' p origin main
+2	$deep
+0	hc run --bg --on m --name x claude "git push -f 쓰지 마"
+0	hc run reviewer "review src/x.rs"
+0	hc exec --on m git push origin main
+0	hc exec --on m ls -f
+0	hc exec --on m git push -q origin "c:refs/claims/n" --force-with-lease=refs/claims/n:
+0	hc run --on m 'git push -q origin --delete refs/claims/n --force-with-lease=refs/claims/n:abc'
+0	git -c alias.pf='push --force-with-lease=main:abc' pf origin main
+0	hc-lane send --all -- 'git push --force 금지'
+0	ssh mini 'git log -f'
+0	ssh -f -p 22 mini 'sleep 1'
+2	git -c alias.p='push -f' -c alias.q=status p origin main
+2	git -c alias.P='push -f' p origin main
+2	bash +x -c 'git push -f origin main'
+2	hc exec --on m bash +o posix -c 'git push -f origin main'
+2	hc --json exec --on m git push -f origin main
+0	git -c alias.p='push -f' -c alias.p=status p
+0	bash +x script.sh -f
+EOF
+for c in "git push origin main" "git push -u origin HEAD" "git push origin --delete refs/integ/x" "git push origin :refs/integ/x" \
+  "git push -o ci.skip origin main" "git fetch origin +refs/heads/*:refs/remotes/origin/*" "git fetch -f origin" \
+  "git commit -m 'git push -f 금지' -- a.txt" "echo 'git push --force'" \
+  "git push --force-with-lease=main:abc origin main" "git push --force-with-lease=main:abc --force-if-includes origin main" \
+  'git push -q origin "${c}:refs/claims/$n" --force-with-lease="refs/claims/$n:" && echo "$n $c" >> ev/claims.txt' \
+  'git push -q origin "${c}:refs/claims/$n" --force-with-lease="refs/claims/$n:0123abcd"' \
+  'git push -q origin "${c2}:refs/claims/$n" --force-with-lease="refs/claims/$n:$old"' \
+  'git push -q origin --delete "refs/claims/$n" --force-with-lease="refs/claims/$n:$c"' \
+  'git push -q origin --delete refs/wt-claims/x --force-with-lease=refs/wt-claims/x:0123abcd'; do
+  hook sa Bash "$c"; check "강제 push 아님(기대값 적은 lease·선점 포함)은 허용: $c" 0
+done
 
 printf '{"pid": 1, "sessionId": "broken' > "$H/.claude/sessions/1.json"   # a half-written registry file
 agent; B=$!; reg $B sb "$R" agent-b
@@ -63,6 +143,10 @@ hook sb Bash "cd sub && git add ."; check "동거: git add . 차단" 2
 hook sb Bash "git commit -am fix"; check "동거: git commit -am 차단" 2
 hook sb Bash "git commit --all -m x"; check "동거: git commit --all 차단" 2
 hook sb Bash "git stash"; check "동거: git stash 차단" 2 "지우거나 숨길"
+hook sb Bash "ssh mini 'git add -A && git stash'"; check "동거여도 원격(ssh) 명령은 이 트리 동거 판정 안 함" 0
+hook sb Bash "hc exec --on mini -- git stash"; check "동거여도 원격(hc exec) 명령은 이 트리 동거 판정 안 함" 0
+hook sb Bash "hc exec --on mini -- git push -f origin main"; check "동거 중 원격 강제 push는 막힘" 2 "강제 push"
+hook sb Bash "hc exec -- git stash"; check "동거 중 --on 없는 로컬 hc exec는 이 트리 규칙(감사2 L-c)" 2 "지우거나 숨길"
 hook sb Bash "git stash list"; check "git stash list는 허용" 0
 hook sb Bash "git reset --hard HEAD"; check "동거: git reset --hard 차단" 2
 hook sb Bash "git checkout -- b.txt"; check "동거: git checkout -- 차단" 2

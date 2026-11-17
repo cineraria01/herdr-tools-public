@@ -1690,5 +1690,35 @@ t "배경: 작업 트리 아래 프로세스가 살아 있으면 쉬는 레인�
 HC_TERMINAL_ID=tK HC_FAKE_PID=4000 HC_FAKE_PS=$PSF HC_FAKE_SCREEN=$GS HC_FAKE_STATUS_AGE=660 HC_FAKE_LS=$lsB run wait --state 멈춤 --timeout 0
 t "배경: 그 프로세스가 끝났으면(이름만 비슷한 옆 작업 트리는 안 셈) 멈춤 done" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tb9${tab}lane-b9${tab}멈춤${tab}-${tab}done turn 2" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 
+# send --all(2026-11-17 지휘 「실수는 바로 코드로」): 지휘가 모든 레인에 알릴 마감 연장을 원격 레인에만 보내 맥 레인이 멈췄다.
+# 이 지휘가 띄운(레인 기록 마지막 지휘, 없으면 hc parent) 살아 있는 레인 전부(원격 포함)에 보낸다. 감사(read·audit-*)는 --audits로만
+SD=$T/.local/state/hc-lane; mkdir -p "$SD"; rm -f "$HCLOG.send" "$HCLOG.sendfail"
+printf '%s\n' "tA1${tab}impl-a${tab}tC" "mini/tA2${tab}impl-remote${tab}tC" "tA3${tab}audit-x${tab}tC${tab}read" "tA4${tab}other-lane${tab}tO" \
+  "tA5${tab}dead-lane${tab}tC" "tA6${tab}fill-lane${tab}-${tab}fill" "tA8${tab}moved${tab}tC" "tA8${tab}moved${tab}tO" >"$SD/lanes.tsv"
+lsS='{"terminals":[{"address":"tA1","name":"impl-a","parent":"mac/tC","state":"live"},{"address":"mini/tA2","name":"impl-remote","parent":"mac/tC","state":"live"},
+{"address":"tA3","name":"audit-x","parent":"mac/tC","state":"live"},{"address":"tA4","name":"other-lane","parent":"mac/tO","state":"live"},
+{"address":"tA5","name":"dead-lane","parent":"mac/tC","state":"finished"},{"address":"tA6","name":"fill-lane","parent":"mac/tC","state":"live"},
+{"address":"mini/tA7","name":"audit-y","parent":"mac/tC","state":"live"},{"address":"tA8","name":"moved","parent":"mac/tC","state":"live"},
+{"address":"tA9","name":"no-rec","parent":"tC","state":"live"}]}'
+HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run send --all "마감 07:30으로 연장"
+sent() { cut -f1 "$HCLOG.send" 2>/dev/null | sort | tr '\n' ' '; }
+t "send --all: 이 지휘의 살아 있는 구현 레인 전부(원격·기록 없는 parent·fill 포함), 감사·남의 지휘·끝난 레인은 뺌" '[ $rc = 0 ] && [ "$(sent)" = "mini/tA2 tA1 tA6 tA9 " ] || { echo "[$(sent)]"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "send --all: 글 그대로, 보낸 주소를 한 줄씩" 'grep -Fxq "tA1${tab}마감 07:30으로 연장" "$HCLOG.send" && printf "%s\n" "$out" | grep -Fq "보냄 mini/tA2 impl-remote" && printf "%s\n" "$out" | grep -Fq "보냄 4 · 실패 0"'
+rm -f "$HCLOG.send"; HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run broadcast --audits "x"
+t "broadcast --audits: 감사 레인(read 기록·audit- 이름)도 포함" '[ $rc = 0 ] && [ "$(sent)" = "mini/tA2 mini/tA7 tA1 tA3 tA6 tA9 " ] || { echo "[$(sent)]"; false; }'
+rm -f "$HCLOG.send"; touch "$HCLOG.sendfail"; HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run send --all "x"; rm -f "$HCLOG.sendfail"
+t "send --all: 보내기 실패는 한 줄씩 알리고 종료 1" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -Fq "실패 tA1 impl-a" && printf "%s\n" "$out" | grep -Fq "보냄 0 · 실패 4"'
+HC_TERMINAL_ID=tC HC_FAKE_LS_FAIL=1 run send --all "x"
+t "send --all: hc ls 실패면 아무에게도 안 보내고 종료 1" '[ $rc = 1 ] && [ ! -s "$HCLOG.send" ] && grep -Fq "hc ls" "$T/err"'
+HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run send "x"
+t "send: --all 없으면 종료 2(일부에만 보내는 꼴은 없다)" '[ $rc = 2 ] && [ ! -s "$HCLOG.send" ]'
+HC_FAKE_LS=$lsS run send --all "x"
+t "send --all: 지휘 주소(HC_TERMINAL_ID·--from)가 없으면 종료 2" '[ $rc = 2 ] && [ ! -s "$HCLOG.send" ]'
+HC_FAKE_LS=$lsS run send --all --from tO "x"
+t "send --all --from: 그 지휘의 레인에만" '[ $rc = 0 ] && [ "$(sent)" = "tA4 tA8 " ] || { echo "[$(sent)]"; false; }'
+rm -f "$HCLOG.send"; HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run send --all -- --all --audits 끝
+t "send --all --: 뒤 낱말은 옵션 꼴이어도 글(감사 L4)" '[ $rc = 0 ] && grep -Fxq "tA1${tab}--all --audits 끝" "$HCLOG.send" && ! grep -q "^tA3" "$HCLOG.send" || { cat "$HCLOG.send"; false; }'
+rm -f "$HCLOG.send" "$SD/lanes.tsv"
+
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]
