@@ -1,5 +1,5 @@
 #!/bin/bash
-# herdr-tools 검증: 문법 검사 + tests/*.test.sh 전부. hc-lane land가 이것을 부른다.
+# herdr-tools 검증: 문법 검사 + tests/*.test.sh·claude/hooks/tests/*.test.sh 전부. hc-lane land가 이것을 부른다.
 # 고아 검사: 시험마다 따로 프로세스 무리(pgid)로 돌린다. 시험이 끝난 뒤 그 무리에 남은 프로세스, 또는 검증 중 새로 생겨
 # 부모가 1이 된 프로세스 가운데 명령 줄이나 cwd에 이 폴더 경로가 든 것(과 그 자손)은 고아다: 목록을 찍고 끄고(TERM, 3초 뒤 KILL)
 # 검증 실패. 그래서 배경 프로세스를 남기는 시험은 착지 전에 걸린다(2026-11-16 hc-fill 시험이 watch 고아 18개를 남김).
@@ -25,7 +25,7 @@ stop() { [ -n "$pg" ] && kill -TERM -- "-$pg" 2>/dev/null; rm -rf "$tmp"; exit "
 trap 'stop 130' INT
 trap 'stop 143' TERM
 trap 'stop 129' HUP
-for t in tests/*.test.sh; do
+for t in tests/*.test.sh claude/hooks/tests/*.test.sh; do
   [ -f "$t" ] || continue
   HC_LANE_BIN="$PWD/bin/hc-lane" python3 -c 'import os,sys; os.setpgid(0, 0); os.execvp("bash", ["bash"] + sys.argv[1:])' "$PWD/$t" \
     >"$tmp/log" 2>&1 </dev/null &

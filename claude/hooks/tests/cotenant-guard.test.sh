@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests for ~/.claude/hooks/cotenant-guard.sh (PreToolUse lease guard). Temp git repos, a fake session registry (fake HOME), a fake `hc` on PATH, and
 # `sleep` processes standing in for agents. Run: bash ~/.claude/hooks/tests/cotenant-guard.test.sh  (exit 0 = pass)
-HOOK=${HOOK:-$HOME/.claude/hooks/cotenant-guard.sh}
+HOOK=${HOOK:-$(cd "$(dirname "$0")/.." && pwd)/cotenant-guard.sh}   # the hook beside this tests folder (repo or ~/.claude/hooks)
 T=$(mktemp -d "${TMPDIR:-/tmp}/cotenant-test.XXXXXX") && T=$(cd -P "$T" && pwd) || exit 1
 H=$T/home
 mkdir -p "$H/.claude/sessions" "$T/bin"
@@ -77,6 +77,22 @@ for c in "hc exec --on mini -- git push origin main" "ssh mini 'git push --force
   "hc exec --on mini -- bash -lc 'git push -q origin \"\${c}:refs/claims/\$n\" --force-with-lease=\"refs/claims/\$n:\"'" \
   "hc send t1 'git push -f 금지'" "git -c alias.st=status st" "ssh -t mini" "hc exec --on mini -- ls"; do
   hook sa Bash "$c"; check "감싼 정상 명령은 허용: $c" 0
+done
+# 2026-11-17 cg-multibyte: awk splits the command into bytes and cuts long words at 1024 bytes, mid-character for
+# Korean/emoji; in a UTF-8 locale awk's regex then died (towc: multibyte conversion failure) = "Bash 명령 분석 실패"
+# on a plain hc send. Pads 0..3 move the cut across every byte of a 3- and 4-byte character; verdicts stay the same
+for loc in ko_KR.UTF-8 C; do
+  for p in 0 1 2 3; do
+    pad=$(printf '%*s' $p '' | tr ' ' x)
+    for body in "$(printf '가나다라 %.0s' $(seq 1 120))" "$(printf '🙂한글 %.0s' $(seq 1 120))" "$(printf '깨�진 %.0s' $(seq 1 150))"; do
+      HOOK_ENV="LC_ALL=$loc" hook sa Bash "MSG='$pad$body'; for t in a/t1 a/t2; do hc send \"\$t\" \"\$MSG\" 2>&1 | tail -1; done; hc read b/t3 2>&1 | grep -E \"Model:|effort\" | tail -1"
+      check "긴 한국어 글 hc send 허용($loc, 자름 위치 +$p, ${body:0:2})" 0
+      HOOK_ENV="LC_ALL=$loc" hook sa Bash "MSG='$pad$body'; git push -f origin main"
+      check "긴 한국어 글 뒤 강제 push는 그대로 차단($loc, +$p, ${body:0:2})" 2 "강제 push"
+      HOOK_ENV="LC_ALL=$loc" hook sa Bash "bash -c 'git push -f origin main; echo $pad$body'"
+      check "긴 한국어 글이 든 bash -c 안 강제 push 차단($loc, +$p, ${body:0:2})" 2 "강제 push"
+    done
+  done
 done
 # audit 2 M1-b: wrappers by their whole option grammar (hc exec/run --help, ssh(1)), -- or not, value options before/after,
 # nested; one table: verdict<TAB>command

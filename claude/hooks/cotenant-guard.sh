@@ -290,7 +290,7 @@ scan_foreign() {
   done < <(GIT_OPTIONAL_LOCKS=0 $GIT -C "$ROOT" status --porcelain -z -uall -- "${lr[@]/#/:(literal)}" 2>/dev/null || printf 'status-failed\0')
   # leases on a changed path or on a folder holding one (folder leases of older versions)
   [ ${#dirty[@]} -gt 0 ] && for i in $( { printf '%s\n' "${dirty[@]}"; printf '\001\n'; printf '%s\n' "${lr[@]}"; } |
-      $AWK_BIN 's { if ($0 in d) print NR - s - 1; next } $0 == "\001" { s = NR; next } { d[$0]; while (sub(/\/[^\/]*$/, "")) d[$0] }'); do
+      LC_ALL=C $AWK_BIN 's { if ($0 in d) print NR - s - 1; next } $0 == "\001" { s = NR; next } { d[$0]; while (sub(/\/[^\/]*$/, "")) d[$0] }'); do
     hit[i]=1; [ -n "${lw[i]}" ] && fd+=("${lr[i]}$US${lw[i]}")
   done
   # no status of the leased paths: unknown which files are clean, delete nothing this time (lock released first: the
@@ -464,7 +464,7 @@ bash_write() {   # DIR ARG
 # (its paths are not this machine's trees), REMOTE=1 for it and everything nested in it
 analyze() {
   local out kind dir arg
-  out=$(CG_CWD=$2 $AWK_BIN "$AWK" <<<"$1") || { echo "cotenant-guard: Bash 명령 분석 실패" >&2; exit 1; }
+  out=$(CG_CWD=$2 LC_ALL=C $AWK_BIN "$AWK" <<<"$1") || { echo "cotenant-guard: Bash 명령 분석 실패" >&2; exit 1; }
   while IFS=$US read -r kind dir arg; do
     case $kind in
       FORCEPUSH) bash_git "$kind" "$dir" "$arg" ;;
@@ -492,6 +492,8 @@ EOF
 # Shell tokenizer: quotes, escapes, $( ), separators, redirections and heredoc bodies (also a heredoc inside
 # "$( )"); follows cd and git -C; looks through env, timeout, nice, xargs, bash/sh/zsh -c and eval.
 # Prints KIND\037DIR\037ARG per finding (newlines in ARG as \036). Long quoted words are cut at 1024 bytes.
+# Bytes, not characters (split(s, ch, "") is per byte): run under LC_ALL=C, or a cut mid-character makes the UTF-8 regex
+# fail (towc: multibyte conversion failure) and every long Korean command is refused. Every pattern here is ASCII.
 AWK='
 function word() {
   if (!intok) return
