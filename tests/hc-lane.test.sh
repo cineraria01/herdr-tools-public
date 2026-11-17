@@ -1902,5 +1902,52 @@ rm -f "$HCLOG.send"; HC_TERMINAL_ID=tC HC_FAKE_LS=$lsS run send --all -- --all -
 t "send --all --: 뒤 낱말은 옵션 꼴이어도 글(감사 L4)" '[ $rc = 0 ] && grep -Fxq "tA1${tab}--all --audits 끝" "$HCLOG.send" && ! grep -q "^tA3" "$HCLOG.send" || { cat "$HCLOG.send"; false; }'
 rm -f "$HCLOG.send" "$SD/lanes.tsv"
 
+# lane-fetch-race: 같은 클론에서 다른 레인의 착지·fetch가 origin/main을 함께 고쳐 git fetch가 참조 잠금 경합으로 실패하면
+# 짧게 쉬고 최대 3번 다시 한다(2026-11-18 워커 기계 실측). 다른 실패는 그대로 실패. 가짜 git이 fetch를 처음
+# $GITRACE번 실패시킨다(메시지 $GITRACE_MSG). fetch 횟수는 $GITRACE.n
+mkdir -p "$T/racebin"
+cat >"$T/racebin/git" <<EOF
+#!/bin/bash
+for a; do
+  [ "\$a" = fetch ] || continue
+  echo f >>"\$GITRACE.n"
+  c=\$(cat "\$GITRACE" 2>/dev/null || echo 0)
+  [ "\$c" -gt 0 ] && { echo \$((c - 1)) >"\$GITRACE"; printf '%s\n' "\$GITRACE_MSG" >&2; exit 1; }
+  break
+done
+exec $(command -v git) "\$@"
+EOF
+chmod +x "$T/racebin/git"
+race() { echo "$1" >"$T/race"; rm -f "$T/race.n"; }
+fn() { wc -l <"$T/race.n" 2>/dev/null | tr -d ' '; }
+rmsg="error: cannot lock ref 'refs/remotes/origin/main': is at 6323151 but expected 45c382a"
+export HC_LANE_FETCH_WAITS="0 0 0"
+mk tfr
+race 1
+GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" run --name fr-start --repo "$R" -- true
+t "fetch 경합: 시작 fetch가 잠금 경합이면 다시 해 레인을 띄운다" '[ $rc = 0 ] && [ -d "$R.wt/fr-start" ] && [ "$(fn)" = 2 ] && grep -Fq "다시" "$T/err" || { cat "$T/err"; fn; false; }'
+race 1
+GITRACE=$T/race GITRACE_MSG="error: unable to update local ref 'refs/remotes/origin/main'" PATH="$T/racebin:$PATH" run fetch --repo "$R"
+t "fetch 경합: hc-lane fetch도 unable to update local ref면 다시" '[ $rc = 0 ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+race 1
+GITRACE=$T/race GITRACE_MSG="error: 로컬 레퍼런스를 업데이트할 수 없습니다" PATH="$T/racebin:$PATH" run fetch --repo "$R"
+t "fetch 경합: 한국어 git 메시지(로컬 레퍼런스를 업데이트할 수 없습니다)도 다시" '[ $rc = 0 ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+race 1
+GITRACE=$T/race GITRACE_MSG="fatal: could not read Username for 'https://github.com'" PATH="$T/racebin:$PATH" run --name fr-auth --repo "$R" -- true
+t "fetch 경합: 다른 실패는 다시 하지 않고 그대로 실패" '[ $rc != 0 ] && [ ! -d "$R.wt/fr-auth" ] && [ "$(fn)" = 1 ] && grep -Fq "could not read Username" "$T/err" || { cat "$T/err"; fn; false; }'
+race 9
+GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" run --name fr-many --repo "$R" -- true
+t "fetch 경합: 다시 하기는 3번까지(모두 4번), 그래도 실패면 실패" '[ $rc != 0 ] && [ ! -d "$R.wt/fr-many" ] && [ "$(fn)" = 4 ] || { cat "$T/err"; fn; false; }'
+seed .claude/herdr-verify.sh 'exit 0'
+mklane fr-land
+seedp c2 c2
+race 1
+out=$(cd "$wt" && GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" "$LANE" land 2>"$T/err"); rc=$?
+t "fetch 경합: land의 fetch도 다시 해 착지" '[ $rc = 0 ] && [ "$(otop)" = fr-land ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+race 1
+GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" run clean --repo "$R" --branch fr-land
+t "fetch 경합: clean의 fetch도 다시 해 정리" '[ $rc = 0 ] && [ ! -e "$R.wt/fr-land" ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+unset HC_LANE_FETCH_WAITS
+
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

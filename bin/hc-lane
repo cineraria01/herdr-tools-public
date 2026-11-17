@@ -19,7 +19,8 @@ usage() {
                --name <레인> --repo <저장소 경로> [-- <실행 명령…>]
   기본          fetch → <저장소>.wt/<브랜치>에 origin/<기본> 기준 워크트리 → .claude/herdr-setup.sh(있으면) → hc run --bg
                 원격 origin이 없는 저장소는 fetch 없이 로컬 <기본>(main, 없으면 master) 기준
-  --read        워크트리 없이 --repo 폴더 그대로에서 띄운다(조사·감사처럼 커밋하지 않는 레인). 저장소 안 하위 폴더나
+                (모든 git fetch는 같은 클론의 참조 잠금 경합(cannot lock ref 등)이면 1·2·4초 쉬고 3번까지 다시)
+  --read       워크트리 없이 --repo 폴더 그대로에서 띄운다(조사·감사처럼 커밋하지 않는 레인). 저장소 안 하위 폴더나
                 저장소가 아닌 폴더도 된다(맨 hc run 대신 쓰면 아래 시작 확인을 받는다)
   --branch      브랜치 이름(기본: 레인 이름). 워크트리 폴더 이름은 브랜치의 / 를 - 로 바꾼 것
   --on          git·설정·실행을 그 기계에서(hc exec/run --on). --repo는 그 기계의 절대 경로(로컬 ~ 펼침 주의).
@@ -912,6 +913,22 @@ zx() {
     fi
     shift 2; exec "$@"' hc-lane "$1" "$on${core-}" "${@:2}"
 }
+# fetchr <명령…>: git fetch(그대로 또는 x·zx로)를 돌리고, 같은 클론에서 다른 레인의 착지·fetch가 원격 참조를 함께 고쳐 난
+# 참조 잠금 경합(cannot lock ref·unable to update local ref·is at … but expected, 한국어 git 메시지 포함)이면 1·2·4초 쉬고
+# 최대 3번 다시 한다(2026-11-18 워커 기계의 레인 시작 실패 실측). 다른 실패는 바로 그 종료 코드로. 쉬는 간격은
+# HC_LANE_FETCH_WAITS(시험용)
+fetchr() {
+  fr_e=$(mktemp "${TMPDIR:-/tmp}/hc-lane-fetch.XXXXXX") || { "$@"; return; }
+  for fr_w in ${HC_LANE_FETCH_WAITS:-1 2 4} -; do
+    "$@" 2>"$fr_e"; fr_rc=$?
+    cat "$fr_e" >&2
+    [ $fr_rc != 0 ] && [ "$fr_w" != - ] &&
+      grep -Eq "cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다" "$fr_e" || break
+    echo "hc-lane: git fetch 참조 잠금 경합(같은 클론의 다른 fetch·착지) — ${fr_w}초 뒤 다시" >&2
+    sleep "$fr_w"
+  done
+  rm -f "$fr_e"; return $fr_rc
+}
 q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 
 # 출력하는 명령에 따옴표 없이 넣으므로 브랜치 이름은 이 글자만 받는다.
@@ -980,7 +997,7 @@ land_cmd() {
   while :; do
     i=$((i + 1))
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
-    [ $remote = 0 ] || git fetch -q origin || die "land: git fetch 실패"
+    [ $remote = 0 ] || fetchr git fetch -q origin || die "land: git fetch 실패"
     git rev-parse -q --verify "$bref^{commit}" >/dev/null || die "land: $blab 가 없다"
     if ! git rebase -q "$bref"; then
       echo "hc-lane land: rebase 충돌. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 같은 줄(hc-lane land $base)을 다시" >&2
@@ -995,7 +1012,7 @@ land_cmd() {
         echo "hc-lane land: 착지 $(git rev-parse --short HEAD) → origin/$base"
         return 0
       fi
-      git fetch -q origin || die "land: push 실패 뒤 git fetch 실패"
+      fetchr git fetch -q origin || die "land: push 실패 뒤 git fetch 실패"
       git merge-base --is-ancestor "$bref" HEAD &&
         die "land: push 실패(다른 쪽 push가 앞선 것이 아니다 — 위 git 출력을 본다)"
     else
@@ -1076,7 +1093,7 @@ case $cmd in
   land) land_cmd; exit $? ;;
   guard) guard_cmd; exit $? ;;
   fetch)
-    zx "$repo" git fetch origin "$@" || die "fetch 실패: ${on:+$on:}$repo (위 git 출력을 본다)"
+    fetchr zx "$repo" git fetch origin "$@" || die "fetch 실패: ${on:+$on:}$repo (위 git 출력을 본다)"
     echo "hc-lane fetch: 받음 ${on:+$on:}$repo origin${1:+ $*}"; exit 0 ;;
 esac
 
@@ -1245,7 +1262,7 @@ clean_cmd() {
   # 1) 브랜치와 워크트리 HEAD가 origin/<기본>에 들어갔는지(폴더가 없어도 등록의 HEAD로 본다)
   if [ $remote = 0 ]; then :
   elif [ $dry = 1 ]; then echo "[dry-run] git fetch 건너뜀: 지금 있는 origin/$base 로 판정"
-  else x git -C "$repo" fetch -q origin || stop "git fetch 실패: $repo"; fi
+  else fetchr x git -C "$repo" fetch -q origin || stop "git fetch 실패: $repo"; fi
   x git -C "$repo" rev-parse -q --verify "$bref^{commit}" >/dev/null || stop "$blab 가 없다: $repo"
   set --
   [ $br = 1 ] && set -- "refs/heads/$branch"
@@ -1376,7 +1393,7 @@ rgc() {
 $refs
 EOF
   # 판정에 쓸 커밋만 받는다. --refmap=: refs/heads는 기본 refspec에 들어 이름만 줘도 origin/*를 고치므로 참조는 하나도 안 쓴다(dry-run도)
-  [ $# = 0 ] || x git -C "$repo" fetch -q --no-write-fetch-head --refmap= origin "$@" || die "gc: 원격 참조 커밋을 받지 못했다"
+  [ $# = 0 ] || fetchr x git -C "$repo" fetch -q --no-write-fetch-head --refmap= origin "$@" || die "gc: 원격 참조 커밋을 받지 못했다"
   while IFS=$tab read -r s r; do
     [ -n "$r" ] || continue
     case $r in refs/heads/*)
@@ -1404,7 +1421,7 @@ gc_cmd() {
   esac
   if [ $remote = 0 ]; then :
   elif [ $dry = 1 ]; then echo "[dry-run] git fetch 건너뜀: 지금 있는 origin/$base 로 판정"
-  else x git -C "$repo" fetch -q origin || die "gc: git fetch 실패: $repo"; fi
+  else fetchr x git -C "$repo" fetch -q origin || die "gc: git fetch 실패: $repo"; fi
   x git -C "$repo" rev-parse -q --verify "$bref^{commit}" >/dev/null || die "gc: $blab 가 없다: $repo"
   cur=$(x git -C "$repo" symbolic-ref -q --short HEAD)
   wl=$(x git -C "$repo" worktree list --porcelain) || die "gc: git worktree list 실패: $repo"
@@ -1549,7 +1566,7 @@ if [ $read = 1 ]; then
   wt= branch=
 else
   cwd=$wt
-  [ $dry = 1 ] || [ $remote = 0 ] || x git -C "$repo" fetch -q origin || die "git fetch 실패: $repo"
+  [ $dry = 1 ] || [ $remote = 0 ] || fetchr x git -C "$repo" fetch -q origin || die "git fetch 실패: $repo"
   again="다른 이름은 --branch <이름>"
   x git -C "$repo" show-ref --verify -q "refs/heads/$branch" && die "로컬 브랜치 $branch 가 이미 있다. $again"
   [ $remote = 1 ] && x git -C "$repo" show-ref --verify -q "refs/remotes/origin/$branch" && die "원격 브랜치 origin/$branch 가 이미 있다. $again"
