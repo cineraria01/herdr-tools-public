@@ -12,7 +12,7 @@
 | `herdr-tools-publish` | 범용 저장소를 기록 없이 공개 저장소로 내보내기(herdr-sync가 부른다) | 맥 |
 | `herdr-balance` | Herdr 창에서 지휘 pane 옆 worker 높이 맞추기(`--watch`) | 맥 |
 | `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `worker-mac-check`·`worker-mac-setup` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 워커 맥 점검·설정 | 맥·macOS 기계 |
-| `claude/hooks/` | 같은 작업 트리 동거 편집 가드, 무인 루프 질문 창 막기 | macOS 기계 |
+| `claude/hooks/` | 같은 작업 트리 동거 편집 가드, 무인 루프 질문 창 막기, `hc-lane wait` 분리(&) 실행 막기 | macOS 기계 |
 
 ## herdr-sync: 정본은 맥의 실제 파일, 두 저장소는 기록
 

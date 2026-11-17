@@ -20,6 +20,8 @@ Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.sha
 훅           .claude/hooks/cotenant-guard.sh                  tools:claude/hooks/cotenant-guard.sh            macos
 훅           .claude/hooks/tests/cotenant-guard.test.sh       tools:claude/hooks/tests/cotenant-guard.test.sh macos
 훅           .claude/hooks/loop-no-question.sh                tools:claude/hooks/loop-no-question.sh          macos
+훅           .claude/hooks/hc-lane-wait-guard.sh              tools:claude/hooks/hc-lane-wait-guard.sh        macos
+훅           .claude/hooks/tests/hc-lane-wait-guard.test.sh   tools:claude/hooks/tests/hc-lane-wait-guard.test.sh macos
 도구         .local/bin/hc-lane                               tools:bin/hc-lane                               macos
 도구         .local/bin/hc-sweep                              tools:bin/hc-sweep                              macos
 도구         .local/bin/ovis-split                            tools:bin/ovis-split                            macos
