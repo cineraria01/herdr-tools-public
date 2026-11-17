@@ -1327,6 +1327,50 @@ conf 'lane.start_wait 1' 'lane.auto_trust off'
 trust_screen '❯' ' '
 rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --name lane-to --repo "$R" -- claude
 t "lane.auto_trust off: 신뢰 질문을 안 건드리고 종료 5" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ] && grep -Fq "신뢰 질문" "$T/err"'
+# 외부 가져오기 질문(2026-11-17 Claude 2.1.326 화면 글자: 경로 줄은 두 칸 들여쓰기, 기본 커서는 No)
+imp_screen() {   # imp_screen <No 줄 앞> <Yes 줄 앞> <경로 줄…>
+  c1=$1 c2=$2; shift 2
+  { printf '%s\n' ' Allow external CLAUDE.md file imports?' '' \
+      " This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories." \
+      '' ' External imports:'
+    for l; do printf '   %s\n' "$l"; done
+    printf '%s\n' '' ' Important: Only use Claude Code with files you trust. Accessing untrusted files may pose security risks' '' \
+      " $c1 No, disable external imports" " $c2 Yes, allow external imports"; } >"$SC"
+}
+conf 'lane.start_wait 1'
+imp_screen '❯' ' ' "$R.wt/lane-im/AGENTS.md" "$R.wt/lane-im/docs/x.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=untilkeys run --name lane-im --repo "$R" -- claude
+t "외부 가져오기: 경로가 모두 작업 폴더 저장소 안이면 아래·엔터로 허용, 종료 0" '[ $rc = 0 ] && [ "$(cat "$HCLOG.keys")" = "t9zz down enter" ] && printf "%s\n" "$out" | grep -Fq "외부 가져오기 허용" || { cat "$T/err"; false; }'
+imp_screen ' ' '❯' "~/${R#"$T"/}.wt/lane-im2/AGENTS.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=untilkeys run --name lane-im2 --repo "$R" -- claude
+t "외부 가져오기: ~ 줄임 경로도 펼쳐 보고, 이미 Yes에 커서면 엔터만" '[ $rc = 0 ] && [ "$(cat "$HCLOG.keys")" = "t9zz enter" ] || { cat "$T/err"; false; }'
+imp_screen '❯' ' ' "$R.wt/lane-im3/AGENTS.md" "$R/AGENTS.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --name lane-im3 --repo "$R" -- claude
+t "외부 가져오기: 밖 경로가 하나라도 있으면 안 고르고 「모름 — 외부 가져오기 질문(<경로>)」, 종료 5" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ] && grep -Fq "모름 — 외부 가져오기 질문($R/AGENTS.md)" "$T/err" && ! grep -F "외부 가져오기 질문(" "$T/err" | grep -Fq "lane-im3/AGENTS.md"'
+imp_screen '❯' ' ' "$R.wt/lane-im4/AGENTS.md" '… +3 imports not shown.' 'Yes covers those too, plus any this project adds later.'
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --name lane-im4 --repo "$R" -- claude
+t "외부 가져오기: 다 보이지 않는 목록(… +N not shown)은 안 고름, 종료 5" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ] && grep -Fq "모름 — 외부 가져오기 질문(" "$T/err"'
+imp_screen '❯' ' ' "$R.wt/lane-im5/../../../etc/x.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --name lane-im5 --repo "$R" -- claude
+t "외부 가져오기: .. 로 빠져나가는 경로는 밖, 안 고름" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ]'
+conf 'lane.start_wait 1' 'lane.auto_trust off'
+imp_screen '❯' ' ' "$R.wt/lane-im6/AGENTS.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --name lane-im6 --repo "$R" -- claude
+t "외부 가져오기: lane.auto_trust off면 안 고름, 종료 5" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ] && grep -Fq "외부 가져오기 질문(lane.auto_trust off)" "$T/err"'
+conf 'lane.start_wait 1'
+# --read: 저장소 안 하위 폴더(.qa/…)·저장소가 아닌 폴더도 그 폴더에서, 시작 확인도 받는다
+mkdir -p "$R/.qa/감사 1"
+imp_screen '❯' ' ' "$R/AGENTS.md"
+rm -f "$HCLOG" "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=untilkeys run --read --name lane-iq --repo "$R/.qa/감사 1" -- claude
+t "--read 하위 폴더: 그 폴더에서 띄우고 저장소 루트 가져오기는 허용" '[ $rc = 0 ] && pair --cwd "$R/.qa/감사 1" && has "LANE_REPO=$R" && [ "$(cat "$HCLOG.keys")" = "t9zz down enter" ] || { cat "$T/err"; false; }'
+P="$T/저장소 아닌 폴더"; mkdir -p "$P"
+rm -f "$HCLOG" "$HCLOG.keys"; run --read --name lane-ip --repo "$P" -- claude
+t "--read 저장소 아닌 폴더: 그 폴더에서 띄움, LANE_BASE 빈 값, 종료 0" '[ $rc = 0 ] && pair --cwd "$P" && has "LANE_REPO=$P" && has LANE_BASE= || { cat "$T/err"; false; }'
+imp_screen '❯' ' ' "$P/AGENTS.md"
+rm -f "$HCLOG.keys"; HC_FAKE_SCREEN=$SC HC_FAKE_NOSTATUS=1 run --read --name lane-ip2 --repo "$P" -- claude
+t "--read 저장소 아닌 폴더: 가져오기 질문은 안 고름, 종료 5" '[ $rc = 5 ] && [ ! -e "$HCLOG.keys" ] && grep -Fq "저장소 아님" "$T/err"'
+run --read --name lane-ix --repo "$T/없는 폴더" -- claude
+t "--read: 없는 폴더는 띄우기 전에 오류" '[ $rc = 1 ] && grep -Fq "폴더가 없다" "$T/err"'
 conf 'lane.start_wait 0'
 HC_FAKE_NOSTATUS=1 run --name lane-s0 --repo "$R" -- claude
 t "lane.start_wait 0: 시작 확인 끔, 종료 0" '[ $rc = 0 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"off\""'
