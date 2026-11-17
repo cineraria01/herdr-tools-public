@@ -36,11 +36,16 @@ EOF
 # 가짜 hc-lane: 받은 인자를 한 줄에 하나씩 $T/lane.log에. --print-steps는 착지 줄 대신 표식, 띄우기는 JSON(주소 = <기계>/<이름>).
 cat >"$T/bin/hc-lane" <<'EOF'
 #!/bin/bash
+if [ "${1-}" = coord ] && [ "${2-}" = --check ]; then   # 지휘가 지금 살아 있나: $HC_FAKE_COORD_GONE(공백 목록)에 든 주소는 사라짐
+  echo "${3-}" >>"$T_LOG/coordcheck.log"; case " ${HC_FAKE_COORD_GONE-} " in *" ${3-} "*) echo "hc-lane coord --check: ${3-} 터미널이 없거나 끝남(가짜)" >&2; exit 1 ;; esac; exit 0; fi
+if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기: $HC_FAKE_COORD_SET_FAIL(공백 목록)에 든 주소는 지휘가 아님
+  echo "${3-}" >>"$T_LOG/coordset.log"; case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
 if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_OWNER:-없음}" >>"$T_LOG/owner.log"   # 레인 주인(lanes.tsv 셋째 칸)
 on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
@@ -69,6 +74,7 @@ echo "$*" >>"$T_LOG/balance.log"
 EOF
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0 HC_FAKE_COORD=t8kk
+unset HC_TERMINAL_ID   # 시험을 지휘 터미널에서 돌려도 add가 그 주소를 주인으로 잡지 않게(주인 시험은 따로 준다)
 mkdir -p "$HOME"
 : >"$T/commits"
 
@@ -80,7 +86,7 @@ Q=$HOME/.local/share/hc-fill/queue.tsv
 mj() { s='{"machines":['; c=; for m in box-1 box-2 shared slow; do st=disconnected; case " $* " in *" $m "*) st=connected ;; esac; s="$s$c{\"name\":\"$m\",\"state\":\"$st\"}"; c=,; done; export HC_FAKE_MACHINES="$s]}"; }
 # 터미널: lj <주소>:<agent>:<이름>[:<상태, 기본 working>[:<cwd>]] …
 lj() { s='{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"}'; c=,; for x in "$@"; do IFS=: read -r a g nm st cw <<<"$x"; s="$s$c{\"address\":\"$a\",\"agent\":\"$g\",\"name\":\"$nm\",\"state\":\"live\",\"status\":\"${st:-working}\",\"cwd\":\"${cw:-/}\"}"; c=,; done; export HC_FAKE_LS="$s]}"; }
-fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED; }
+fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED; }
 brief() { printf '# 지시문 %s\n본문\n' "$1" >"$T/$1.md"; echo "$T/$1.md"; }
 add() { "$FILL" add --name "$1" --project app --brief "$(brief "$1")" "${@:2}" >/dev/null 2>&1; }
 where() { awk -F'\t' -v n="$1" '$1==n {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소
@@ -441,6 +447,40 @@ run run; chmod 600 "$T/ob1.md"
 t "run: 읽지 못하는 지시문은 띄우지 않고 실패로 남김" '[ "$(where ob1)" = "wait - -" ] && [ "$(launched ob1)" = 0 ] && printf "%s" "$out" | grep -q "실패 ob1: 지시문을 읽지 못함("'
 t "run: 빈 지시문도 띄우지 않음" '[ "$(where ob2)" = "wait - -" ] && [ "$(launched ob2)" = 0 ] && printf "%s" "$out" | grep -q "실패 ob2: 지시문을 읽지 못함(빈 파일)"'
 t "run: 다음 레인은 그대로 띄우고 run 지시문에 본문이 들어감" '[ "$(where ob3)" = "up box-1 box-1/ob3" ] && grep -Fq "# 지시문 ob3" "$HOME/.local/share/hc-fill/runs/ob3-run.md"'
+
+# 10d. 주인 지휘(2026-11-17 hcfill-owner): 지휘 tq1가 넣은 레인을 다른 지휘가 넘겨받아 tq1가 알림을 못 받았다.
+# add는 부른 지휘($HC_TERMINAL_ID·--coord)를 대기열 열두째 칸에 적고 지휘 정보를 남기며, 띄울 때 그 지휘를 HC_LANE_OWNER·HC_LANE_COORD로
+fresh
+HC_TERMINAL_ID=tq1 run add --name ow1 --project app --brief "$(brief ow1)"
+t "주인: add가 부른 지휘를 열두째 칸에 적고 hc-lane coord --set으로 지휘 정보를 남김" '[ $rc = 0 ] && [ "$(awk -F"\t" "\$1==\"ow1\" {print \$12}" "$Q")" = tq1 ] && [ "$(cat "$T/coordset.log")" = tq1 ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run add --name ow2 --project app --brief "$(brief ow2)" --coord tq2
+t "주인: --coord로 바꿈" '[ $rc = 0 ] && [ "$(awk -F"\t" "\$1==\"ow2\" {print \$12}" "$Q")" = tq2 ]'
+add ow3
+t "주인: 터미널 밖 add는 주인 없음(-)" '[ "$(awk -F"\t" "\$1==\"ow3\" {print \$12}" "$Q")" = - ]'
+HC_FAKE_COORD_SET_FAIL=t5ln HC_TERMINAL_ID=t5ln run add --name ow4 --project app --brief "$(brief ow4)"
+t "주인: 지휘 터미널이 아니면(레인 안) 주인 없이 넣고 한 줄" '[ $rc = 0 ] && [ "$(awk -F"\t" "\$1==\"ow4\" {print \$12}" "$Q")" = - ] && printf "%s" "$out" | grep -Fq "주인 없이" || { printf "%s\n" "$out"; false; }'
+HC_FAKE_COORD_SET_FAIL=t5ln run add --name ow5 --project app --brief "$(brief ow5)" --coord t5ln
+t "주인: --coord가 지휘가 아니면 거절" '[ $rc = 1 ] && [ -z "$(where ow5)" ]'
+run ls
+t "ls: 주인 칸" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -q "^ow1 .*tq1" && printf "%s\n" "$out" | grep -q "^ow2 .*tq2" && printf "%s\n" "$out" | head -n 1 | grep -q 주인 || { printf "%s\n" "$out"; false; }'
+run run
+t "띄울 때 주인을 HC_LANE_OWNER·HC_LANE_COORD로(주인 없는 줄은 hc-lane coord 지휘 t8kk, 주인 없음)" '[ "$(paste -d" " "$T/owner.log" "$T/coord.log" | tr "\n" ,)" = "tq1 tq1,tq2 tq2,없음 t8kk,없음 t8kk," ] || { paste "$T/owner.log" "$T/coord.log"; printf "%s\n" "$out"; false; }'
+fresh
+HC_TERMINAL_ID=tq1 run add --name ow6 --project app --brief "$(brief ow6)" --only here
+run run
+t "로컬 레인은 주인 지휘 옆에 붙임(herdr-balance --main <주인>)" 'grep -Fxq -- "--main tq1 --add ow6" "$T/balance.log" || { cat "$T/balance.log" 2>/dev/null; printf "%s\n" "$out"; false; }'
+fresh
+mkdir -p "$(dirname "$Q")"; brief ow7 >/dev/null
+printf 'ow7\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\n' "$T/ow7.md" >"$Q"
+run run
+t "11칸 옛 줄은 주인 없음으로 띄움" '[ "$(where ow7)" = "up box-1 box-1/ow7" ] && [ "$(cat "$T/owner.log")" = 없음 ] || { printf "%s\n" "$out"; false; }'
+t "11칸 옛 줄은 주인 없음으로 띄움(주인 확인 안 함)" '[ ! -e "$T/coordcheck.log" ]'
+# 감사 [중간] 1(a): 대기열 레인은 --after 사슬로 몇 시간 뒤에 뜬다 — 그 사이 주인 지휘가 끝났으면 죽은 주소를 넘기지 않고 주인 없이,
+# watch는 살아 있는 지휘(hc-lane coord)에게
+fresh
+HC_TERMINAL_ID=tq1 run add --name ow8 --project app --brief "$(brief ow8)"
+HC_FAKE_COORD_GONE=tq1 run run
+t "주인 지휘가 띄우기 전에 사라지면 주인 없이(-) 띄우고 watch는 hc-lane coord 지휘에게, 한 줄 알림" '[ "$(where ow8)" = "up box-1 box-1/ow8" ] && [ "$(cat "$T/owner.log")" = 없음 ] && [ "$(cat "$T/coord.log")" = t8kk ] && [ "$(cat "$T/coordcheck.log")" = tq1 ] && printf "%s" "$out" | grep -Fq "주인 지휘 tq1 가 지금 없다" || { printf "%s\n" "$out"; paste "$T/owner.log" "$T/coord.log"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

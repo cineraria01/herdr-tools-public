@@ -3,8 +3,9 @@
 #
 # local    이 기계(hc --on 없이 띄우는 기계)의 이름. machine·repo 줄에서 이 이름을 쓴다
 # agent    셀 에이전트 종류(hc ls --json 의 agent 값)
-# coord    지휘 터미널 주소. 이 기계에 띄운 레인을 herdr-balance --main <주소> --add 로 붙인다. 빼면 붙이지 않는다.
-#          감시(hc-lane watch)의 대상은 이 값이 아니라 hc-lane coord(지휘가 레인을 띄우거나 wait를 걸 때 남긴 지휘 정보)다
+# coord    지휘 터미널 주소. 주인 없는 대기열 줄을 이 기계에 띄울 때 herdr-balance --main <주소> --add 로 붙인다(주인 지휘가
+#          있으면 그 옆). 빼면 붙이지 않는다. 감시(hc-lane watch)·알림 대상은 이 값이 아니라 대기열 줄의 주인 지휘(hc-fill add를
+#          부른 지휘), 주인이 없으면 hc-lane coord(지휘가 레인을 띄우거나 wait를 걸 때 남긴 지휘 정보)다
 # task     레인에게 줄 첫 지시. {run} 자리에 그 기계에 둔 run 지시문 경로가 들어간다
 # launch   hc-lane -- 뒤에 붙일 실행 명령 틀(셸 문법으로 나눈다). {task} 자리에 위 지시가 한 인자로 들어간다
 # gc       끝난 레인 정리(hc-lane gc) 간격, 분. run 바퀴 끝에 이 간격마다 한 번, 아래 repo 줄의 기계·저장소마다 부른다

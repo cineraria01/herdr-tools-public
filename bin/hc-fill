@@ -8,17 +8,22 @@ shopt -u patsub_replacement 2>/dev/null   # bash 5.2+: ${x//a/b}의 b 안 & 를 
 
 CONF=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}/hc-fill.tsv
 DATA=${HC_FILL_DATA:-$HOME/.local/share/hc-fill}
-Q=$DATA/queue.tsv   # 이름 프로젝트 지시문 선행 기계제한 상태(wait|up|sent) 기계 주소 남긴것(기계=주소,…) 더한시각 되돌릴곳 — 빈 칸은 -
+Q=$DATA/queue.tsv   # 이름 프로젝트 지시문 선행 기계제한 상태(wait|up|sent) 기계 주소 남긴것(기계=주소,…) 더한시각 되돌릴곳 주인 — 빈 칸은 -
                     # 되돌릴곳: 받은편지에서 온 레인의 결과를 쓸 <기계>:<경로>. 손으로 넣은 줄·10칸 옛 줄은 -
+                    # 주인: 넣은 지휘 주소(add의 $HC_TERMINAL_ID·--coord). 레인 사건은 그 지휘에게만. 받은편지 줄·11칸 옛 줄은 -(모든 지휘에)
 WAIT=${HC_FILL_WAIT:-60} POLL=${HC_FILL_POLL:-5}
 
 die() { printf 'hc-fill: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]]
+사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
         hc-fill ls | rm <레인> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
          지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
+         주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
+         (HC_LANE_OWNER)으로 넘겨 그 레인의 사건(hc-lane report·멈춤)은 그 지휘 watch에게만 간다. 지휘 터미널이 아니면(레인 안·
+         터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
+  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·선행·비고
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
          대기 레인을 넣은 차례대로, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
          들어갔으면 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
@@ -73,10 +78,10 @@ case $cmd in
     awk -F'\t' -v n="$1" '$1!=n' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
 
   add)
-    name= proj= brief= after=- only=-
+    name= proj= brief= after=- only=- coord= cx=
     while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || usage
-      case $1 in --name) name=$2 ;; --project) proj=$2 ;; --brief) brief=$2 ;; --after) after=$2 ;; --only) only=$2 ;; *) usage ;; esac
+      case $1 in --name) name=$2 ;; --project) proj=$2 ;; --brief) brief=$2 ;; --after) after=$2 ;; --only) only=$2 ;; --coord) coord=$2 cx=1 ;; *) usage ;; esac
       shift 2
     done
     okname "$name" || die "--name은 a-z 0-9 - _ 32자까지: $name"
@@ -89,13 +94,22 @@ case $cmd in
     [ "$only" = - ] || for m in $(printf %s "$only" | tr , ' '); do
       machines | awk -v m="$m" '$1==m {f=1} END {exit !f}' || die "설정에 machine 줄이 없는 기계: $m"
     done
+    # 주인 지휘: 지휘 정보를 남겨(hc-lane coord --set) 그 지휘 watch가 뜨고 보내게. 지휘가 아니면 --coord는 거절, 저절로 잡은 것은 -
+    [ -n "$cx" ] || coord=${HC_TERMINAL_ID-}
+    if [ -n "$coord" ]; then
+      case $coord in *[!A-Za-z0-9_./-]*) die "--coord 주소 글자: $coord" ;; esac
+      if ! ce=$(hc-lane coord --set "$coord" 2>&1 </dev/null); then
+        [ -z "$cx" ] || die "--coord $coord 를 지휘로 적지 못했다: $(printf '%s\n' "$ce" | tail -n 1)"
+        echo "알림: $coord 는 지휘 터미널이 아니라 주인 없이 넣음 — 이 레인 사건은 모든 지휘에게 간다 ($(printf '%s\n' "$ce" | tail -n 1))"; coord=
+      fi
+    fi
     # 지시문은 내용을 데이터 폴더로 복사해 둔다(launchd의 run이 ~/Documents 같은 곳을 못 읽어도 띄울 수 있게)
     bf=$DATA/briefs/added/$name.md
     mkdir -p "${bf%/*}" && cat -- "$brief" >"$bf.tmp.$$" && [ -s "$bf.tmp.$$" ] ||
       { rm -f "$bf.tmp.$$"; die "지시문을 복사하지 못했다: $brief → $bf"; }
-    HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - ||
+    HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - "${coord:--}" ||
       { rm -f "$bf.tmp.$$"; exit 1; }
-    note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"
+    note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"; note="$note, 주인 ${coord:-없음(모든 지휘)}"
     echo "더함 $name ($proj$note)"; exit 0 ;;
 
   rm) [ $# = 1 ] || usage; qlock _rm "$1" || exit 1; echo "뺌 $1 (떠 있는 터미널은 그대로)"; exit 0 ;;
@@ -103,9 +117,9 @@ case $cmd in
   ls)
     st=$(hc ls --json) || die "hc ls 실패"
     st=$(printf '%s\n' "$st" | jq -r '.terminals[] | [.address, (.status // "-" | tostring)] | @tsv') || die "hc ls --json 출력을 읽지 못했다"
-    printf '%-24s %-10s %-14s %-24s %s\n' 레인 프로젝트 상태 주소 선행·비고
+    printf '%-24s %-10s %-14s %-24s %-8s %s\n' 레인 프로젝트 상태 주소 주인 선행·비고
     [ -f "$Q" ] || exit 0
-    while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply; do
+    while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply owner; do
       if [ "$state" = wait ]; then s=대기 a=-
       elif [ "$state" = sent ]; then s=되돌려줌 a=$addr
       else
@@ -115,7 +129,7 @@ case $cmd in
       note=; [ "$after" = - ] || note="선행 $after"; [ "$only" = - ] || note="$note 기계 $only"
       [ "$stuck" = - ] || note="$note 상태 안 잡힘 남김 $stuck"
       [ "${reply:--}" = - ] || note="$note 받은편지 ${reply%%:*}"
-      printf '%-24s %-10s %-14s %-24s %s\n' "$name" "$proj" "$s" "$a" "${note# }"
+      printf '%-24s %-10s %-14s %-24s %-8s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "${note# }"
     done 3<"$Q"
     exit 0 ;;
 
@@ -241,7 +255,7 @@ inbox_tick() {
         bf=$DATA/briefs/$im/$n.md
         mkdir -p "${bf%/*}" && onm "$im" 'cat "$d/$1.brief.md"' "$idir" "$n" >"$bf.tmp" && mv -f "$bf.tmp" "$bf" ||
           { echo "받은편지 $im $n: 지시문을 가져오지 못했다, 다음 바퀴에"; continue; }
-        qlock _add "$n" "$p" "$bf" "$a" "$o" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$im:$idir/done/$n.md" || continue
+        qlock _add "$n" "$p" "$bf" "$a" "$o" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$im:$idir/done/$n.md" - || continue
         echo "받음 $im $n → 대기열 ($p)"
       fi
       onm "$im" 'mkdir -p "$d/taken" && mv -f "$d/$1.req" "$d/taken/" && { [ ! -f "$d/$1.brief.md" ] || mv -f "$d/$1.brief.md" "$d/taken/"; }' "$idir" "$n" ||
@@ -255,7 +269,7 @@ inbox_tick() {
 # 레인 기계나 요청한 기계가 연결 안 됨이면 다음 바퀴로(연결 안 된 기계의 터미널은 hc ls에 없어 사라진 것으로 보이므로)
 reply_tick() {
   ICON=$CONN
-  while IFS=$'\t' read -r -u 6 n _ _ _ _ _ m a stuck _ rp; do
+  while IFS=$'\t' read -r -u 6 n _ _ _ _ _ m a stuck _ rp _; do
     [ -n "$n" ] || continue
     rq=${rp%%:*} rpath=${rp#*:}
     if ! up_ok "$m" || ! up_ok "$rq"; then echo "되돌려 주기 미룸 $n: $m 또는 $rq 연결 안 됨"; continue; fi
@@ -375,7 +389,7 @@ old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 �
   onm "$1" '[ ! -f "$d" ] || mv -f "$d" "$d.old-$1"' "~/.local/share/hc-fill/reports/$2.md" "$(date +%Y%m%d%H%M%S)"
 }
 
-launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> → ADDR. 실패면 1
+launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 실패면 1
   # 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다(종료 2 = 이 레인은 이번 바퀴에 그만)
   body=$(cat -- "$2" 2>&1) && [ -n "$body" ] || { body=${body##*: }; echo "실패 $1: 지시문을 읽지 못함(${body:-빈 파일}): $2"; return 2; }
   on=; [ "$3" = "$LOCAL" ] || on=$3
@@ -396,15 +410,26 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> �
       'd=$HOME/.local/share/hc-fill/runs && mkdir -p "$d" && cat >"$d/$1" && [ "$(wc -c <"$d/$1" | tr -d " ")" = "$2" ] && printf %s "$d/$1"' _ "$1-run.md" "$sz") && [ -n "$rf" ] ||
       { echo "실패 $1 @$3: run 지시문을 그 기계에 두지 못했다"; return 1; }
   fi
+  own=${6:--}; [ "$own" != - ] || own=
+  # 주인 지휘가 지금 살아 있나: 대기열 레인은 --after 사슬로 몇 시간 뒤에 뜬다 — 그 사이 지휘가 끝났으면 주인 없이(-, 사건은 모든 지휘에게)
+  # 띄우고 watch는 살아 있는 지휘(hc-lane coord)에게(감사 [중간] 1 — 죽은 주소를 넘겨 아무 watch도 안 떴다)
+  if [ -n "$own" ] && ! ce=$(hc-lane coord --check "$own" 2>&1 </dev/null); then
+    echo "알림: $1 의 주인 지휘 $own 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) ($(printf '%s\n' "$ce" | tail -n 1))"; own=
+  fi
   task=${TASK//\{run\}/$rf}
   eval "set -- \"\$1\" \"\$4\" ${LAUNCH//\{task\}/\"\$task\"}"   # 설정의 launch 틀을 인자로(설정 파일은 믿는다)
   lane=$1 repo=$2; shift 2
   # 지휘 주소를 넘겨 그 지휘의 hc-lane watch가 없으면 hc-lane이 띄우게 한다(launchd에는 $HC_TERMINAL_ID가 없다 — lane-push 감사 [중간] 1).
   # 주소는 설정 coord가 아니라 hc-lane coord(지휘마다 남긴 주소·pid·이름을 지금 hc get과 맞춰 본 것 가운데 가장 최근에 레인을 띄운 지휘 —
   # 2차 감사 [중간] B: 박힌 주소는 코어가 다시 뜨면 남의 터미널이 된다). 안 맞으면 넘기지 않고 한 줄 — 사건은 events에 남는다
-  wco=$(hc-lane coord 2>&1 </dev/null) || { echo "알림: 지휘 없음 — 감시(hc-lane watch)를 띄우지 않음, $lane 사건은 events에 남아 지휘가 wait/watch를 걸면 받는다 ($(printf %s "$wco" | tail -n 1))"; wco=; }
+  # 대기열에 주인 지휘가 있으면(add한 지휘) 그 지휘가 watch 대상이자 레인 주인(HC_LANE_OWNER → 레인 기록) — 사건은 그 지휘에게만.
+  # (2026-11-17 hcfill-owner: 주인 없이 띄운 레인 사건을 다른 지휘가 넘겨받아 넣은 지휘가 2시간 못 받음)
+  if [ -n "$own" ]; then wco=$own
+  else
+    wco=$(hc-lane coord 2>&1 </dev/null) || { echo "알림: 지휘 없음 — 감시(hc-lane watch)를 띄우지 않음, $lane 사건은 events에 남아 지휘가 wait/watch를 걸면 받는다 ($(printf %s "$wco" | tail -n 1))"; wco=; }
+  fi
   # HC_LANE_FILL=1: hc-lane이 레인 기록에 fill로 적는다(hc-lane wait가 「완료」를 마지막 보고로 봄)
-  out=$(HC_LANE_COORD=$wco HC_LANE_FILL=1 hc-lane ${on:+--on "$on"} --name "$lane" --repo "$repo" -- "$@" 2>&1); lr=$?
+  out=$(HC_LANE_COORD=$wco HC_LANE_OWNER=$own HC_LANE_FILL=1 hc-lane ${on:+--on "$on"} --name "$lane" --repo "$repo" -- "$@" 2>&1); lr=$?
   # 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로(stuck 기록, 그 기계 빼고 다음으로)
   case $lr in 0|5|6|7) ;; *) echo "실패 $lane @${on:-$LOCAL}: hc-lane: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"; return 1 ;; esac
   SWHY=; [ $lr = 0 ] || SWHY=$(printf '%s\n' "$out" | grep -m 1 '^hc-lane: 시작 안 됨' | cut -c 1-200)
@@ -412,15 +437,16 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> �
   [ -n "$ADDR" ] || { echo "실패 $lane @${on:-$LOCAL}: hc-lane 출력에서 주소를 못 읽음: $(printf '%s\n' "$out" | tail -n 1)"; return 1; }
   # 원격은 hc-lane이 맥 창의 그 기계 공간에 탭으로 붙인다(herdr-balance는 원격 터미널을 맥 탭에 못 넣는다). 못 붙였으면 그 알림 줄을 그대로
   printf '%s\n' "$out" | sed -n 's/^hc-lane: \(Herdr 창.*\)/알림: \1/p'
-  if [ -z "$on" ] && [ -n "$COORD" ] && command -v herdr-balance >/dev/null 2>&1; then
-    i=0; until herdr-balance --main "$COORD" --add "$ADDR" >/dev/null 2>&1; do
-      i=$((i + 1)); [ $i -lt 5 ] || { echo "알림: 분할 붙이기 실패 $ADDR (herdr-balance --main $COORD --add $ADDR)"; break; }; sleep 2
+  bco=${own:-$COORD}   # 로컬 레인은 주인 지휘 옆에(없으면 설정 coord)
+  if [ -z "$on" ] && [ -n "$bco" ] && command -v herdr-balance >/dev/null 2>&1; then
+    i=0; until herdr-balance --main "$bco" --add "$ADDR" >/dev/null 2>&1; do
+      i=$((i + 1)); [ $i -lt 5 ] || { echo "알림: 분할 붙이기 실패 $ADDR (herdr-balance --main $bco --add $ADDR)"; break; }; sleep 2
     done
   fi
   [ $lr = 0 ] || return 5
 }
 
-while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added reply; do
+while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added reply owner; do
   # 상태가 안 잡혀 남긴 터미널이 살아났으면 같은 레인이 둘 돈다: 알리고 그 레인은 더 띄우지 않는다(지휘가 정리)
   dupr=
   if [ "$stuck" != - ]; then
@@ -464,7 +490,7 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
       NOW=$(printf '%s\n%s' "$NOW" "$m") NOWL=$(printf '%s\n%s' "$NOWL" "$m") placed=1; break
     fi
     ADDR=
-    launch "$name" "$brief" "$m" "$repo" "${reply:--}"; lr=$?
+    launch "$name" "$brief" "$m" "$repo" "${reply:--}" "${owner:--}"; lr=$?
     [ $lr != 2 ] || { bad=1; break; }
     [ $lr = 0 ] || [ $lr = 5 ] || continue
     NOW=$(printf '%s\n%s' "$NOW" "$m")   # 상태가 안 잡혀도 자리는 차 있다
