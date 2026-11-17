@@ -520,15 +520,40 @@ t "land: herdr-verify.sh가 없으면 실패, push 안 함" '[ $rc = 1 ] && [ "$
 seed .claude/wt-verify.sh 'exit 0'
 lnd "$wt"
 t "land: 옛 wt-verify.sh만 있어도 실패(옛 이름 갈래 없음)" '[ $rc = 1 ] && [ "$(otop)" = .claude/wt-verify.sh ]'
-seed .claude/herdr-verify.sh 'echo "verify $(git log -1 --format=%s) HERDR_LAND=${HERDR_LAND-}" >>"$HOME/verify.log"'
+seed .claude/herdr-verify.sh 'echo "verify $(git log -1 --format=%s) HERDR_LAND=${HERDR_LAND-}" >>"$HOME/verify.log"; echo verify-said-hi'
 rm -f "$T/verify.log"
 lnd "$wt"
+t "land-log: 통과면 화면은 그대로(실패 줄·로그 경로 없음), 로그만 더 생김" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fxq verify-said-hi && ! grep -Fq "전체 로그" "$T/err" && grep -Fxq verify-said-hi "$(ls -t "$T/.local/state/hc-lane/land-logs/l-nov"-*.log | head -n 1)"'
 t "land: 검증이 있으면 rebase 뒤(그 HEAD로) 검증하고 push" '[ $rc = 0 ] && [ "$(otop)" = l-nov ] && [ "$(git -C "$D/origin.git" log -2 --format=%s main | tail -n 1)" = .claude/herdr-verify.sh ] && grep -Fxq "verify l-nov HERDR_LAND=" "$T/verify.log"'
 t "land: 착지 줄 출력" 'printf "%s" "$out" | grep -Fq "hc-lane land: 착지"'
 run --name l-vf --repo "$R" -- true; wt="$R.wt/l-vf"
 (cd "$wt" && printf 'echo vfail; exit 9\n' >.claude/herdr-verify.sh && git commit -qm vf -- .claude/herdr-verify.sh)
 lnd "$wt"
 t "land: 검증이 실패하면 멈추고 push 안 함" '[ $rc = 1 ] && [ "$(otop)" = l-nov ] && printf "%s" "$out" | grep -Fq vfail && grep -Fq "검증 실패" "$T/err"'
+# 15a. land-log(2026-11-17 senior-web: 끝 15줄에 패키지 없는 FAIL만 남아 어느 시험인지 몰랐다): 검증 출력을 화면 그대로 + 로그 파일,
+# 실패면 실패 줄(최대 40)과 로그 경로, 레인 안이면 「중간」 사건에도 로그 경로
+LL=$T/.local/state/hc-lane/land-logs tab=$(printf '\t')
+llog() { ls -t "$LL/$1"-*.log 2>/dev/null | head -n 1; }
+run --name l-vlog --repo "$R" -- true; wt="$R.wt/l-vlog"
+cat >"$wt/.claude/herdr-verify.sh" <<'EOF'
+i=0; while [ $i -lt 3000 ]; do echo "noise-a $i"; i=$((i + 1)); done
+echo '--- FAIL: TestFlaky (0.01s)'; printf 'FAIL\texample.com/pkg/x\t0.2s\n'
+i=0; while [ $i -lt 3000 ]; do echo "noise-b $i"; i=$((i + 1)); done
+echo '(fail) bun thing [3ms]'; echo 'not ok 4 - tap'; echo '✗ mocha it' >&2; echo 'panic: boom'; echo FAIL; exit 1
+EOF
+(cd "$wt" && git commit -qm vlog -- .claude/herdr-verify.sh)
+HC_LANE=l-vlog lnd "$wt"; lg=$(llog l-vlog)
+t "land-log: 검증 실패면 상태 폴더 land-logs/<레인>-*.log에 전체 출력(오류 출력 포함)" '[ $rc = 1 ] && [ -n "$lg" ] && grep -Fxq "noise-a 0" "$lg" && grep -Fxq "noise-b 2999" "$lg" && grep -Fxq "✗ mocha it" "$lg" || { ls -R "$T/.local/state" | head; false; }'
+t "land-log: 화면에도 그대로(로그 tee)" 'printf "%s\n" "$out" | grep -Fxq "noise-b 2999"'
+t "land-log: 긴 출력에서도 실패 줄을 뽑아 찍음(--- FAIL·FAIL<탭>패키지·(fail)·not ok·✗·panic)" 'grep -Fxq -- "--- FAIL: TestFlaky (0.01s)" "$T/err" && grep -Fxq "FAIL${tab}example.com/pkg/x${tab}0.2s" "$T/err" && grep -Fxq "(fail) bun thing [3ms]" "$T/err" && grep -Fxq "not ok 4 - tap" "$T/err" && grep -Fxq "✗ mocha it" "$T/err" && grep -Fxq "panic: boom" "$T/err" && ! grep -q noise "$T/err" || { cat "$T/err"; false; }'
+t "land-log: 실패면 로그 경로 한 줄, push 안 함" '[ "$(otop)" = l-nov ] && grep -Fq "전체 로그 $lg" "$T/err"'
+t "land-log: 레인 안(HC_LANE)이면 중간 사건에 로그 경로" 'tail -n 1 "$T/.local/state/hc-lane/events.tsv" | grep -F "${tab}l-vlog${tab}중간${tab}" | grep -Fq "$lg"'
+run --name l-vcap --repo "$R" -- true; wt="$R.wt/l-vcap"
+printf 'i=0; while [ $i -lt 100 ]; do echo "--- FAIL: TCap$i"; i=$((i + 1)); done; exit 1\n' >"$wt/.claude/herdr-verify.sh"
+(cd "$wt" && git commit -qm vcap -- .claude/herdr-verify.sh)
+lnd "$wt"
+t "land-log: 실패 줄은 최대 40줄, 사건은 레인 밖이면 안 적음" '[ $rc = 1 ] && [ "$(grep -c -- "^--- FAIL: TCap" "$T/err")" = 40 ] && ! tail -n 1 "$T/.local/state/hc-lane/events.tsv" | grep -Fq l-vcap'
+rm -f "$T/.local/state/hc-lane/events.tsv"   # 뒤 report 시험은 빈 events.tsv에서 시작한다
 mklane l-dirty
 echo more >>"$wt/l-dirty.txt"
 lnd "$wt"
@@ -570,6 +595,12 @@ seed .claude/herdr-land.sh 'echo "land-script $1 HERDR_LAND=${HERDR_LAND-} $(bas
 mklane l-ls
 lnd "$wt/.claude"
 t "land: herdr-land.sh에 기본 브랜치·HERDR_LAND=1을 주고 맡김(하위 폴더에서 불러도 작업 폴더 최상위, 종료 코드 그대로)" '[ $rc = 6 ] && printf "%s" "$out" | grep -Fxq "land-script main HERDR_LAND=1 l-ls" && ! printf "%s" "$out" | grep -Fq should-not-run'
+t "land-log: herdr-land.sh 출력도 로그로, 실패면 경로" 'lg=$(llog l-ls) && grep -Fxq "land-script main HERDR_LAND=1 l-ls" "$lg" && grep -Fq "전체 로그 $lg" "$T/err"'
+mk t15q   # herdr-land.sh가 자기 검증 로그(.qa/<날짜>/herdr-verify-*)를 남기는 저장소: 그 폴더와 그 안 실패 줄도
+seed .claude/herdr-land.sh 'd=.qa/$(date +%F)/herdr-verify-000000-1; mkdir -p "$d"; printf "x\n--- FAIL: TestQaDir (0.1s)\n" >"$d/go-test.log"; echo "──── go 로그 끝"; exit 1'
+mklane l-qa
+lnd "$wt"
+t "land-log: herdr-land.sh가 남긴 이번 검증 로그 폴더와 그 안 실패 줄도 찍음" '[ $rc = 1 ] && grep -Fq "검증 로그 폴더 $wt/.qa/" "$T/err" && grep -Fxq -- "--- FAIL: TestQaDir (0.1s)" "$T/err" || { cat "$T/err"; false; }'
 
 mk t15m master
 seed .claude/herdr-verify.sh 'exit 0'
@@ -1425,7 +1456,8 @@ rm -f "$HCLOG.sendfail"
 upto '[ "$(sends)" = 2 ]'
 t "watch: 다음 바퀴에 다시 보냄(한 번)" '[ "$(sends)" = 2 ] && grep -Fq "lane-w 막힘 막혔음" "$HCLOG.send" || cat "$HCLOG.send"'
 stopw $w1
-t "watch: 끄면 잠금을 지우고 프로세스를 안 남김" '! alive $w1 && [ ! -e "$WD/watch.t7cc" ] && [ -z "$(pgrep -f "watch --to t7cc")" ]'
+# 남은 프로세스는 이 시험의 출력 파일 $T/wo를 쥔 것으로 본다(pgrep -f "watch --to t7cc"는 같은 시험을 동시에 도는 다른 레인의 watch도 잡아 흔들렸다 — 2026-11-18 land-log 착지)
+t "watch: 끄면 잠금을 지우고 프로세스를 안 남김" '! alive $w1 && [ ! -e "$WD/watch.t7cc" ] && [ -z "$(lsof -t "$T/wo" 2>/dev/null)" ]'
 HC_LANE=lane-w "$LANE" report 중간 - 반쯤 >/dev/null
 HC_TERMINAL_ID=t7cc run wait --timeout 0
 t "watch 꺼진 사이 사건은 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 반쯤'
