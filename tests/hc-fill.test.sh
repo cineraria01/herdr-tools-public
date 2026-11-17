@@ -332,6 +332,7 @@ mj box-1 shared slow
 add dupl
 req "$IS" inq-a app - slow; req "$IS" nopr nope; req "$IS" Bad.X app; req "$IS" dupl app; req "$IS" badonly app - box-9
 req "$IS" nobrief app; rm "$IS/nobrief.brief.md"
+req "$IS" emptyb app; printf ' \n\n' >"$IS/emptyb.brief.md"
 req "$IH" inq-h app - box-1
 req "$IB" inq-off app
 run run --dry-run
@@ -341,7 +342,7 @@ t "받은편지: 받아 대기열에(되돌릴곳 = 요청 기계:폴더/done/�
 t "받은편지: 지시문을 briefs/<기계>/<이름>.md로 복사, 요청 쪽 둘은 taken/으로" 'grep -Fq "# 요청 inq-a" "$HOME/.local/share/hc-fill/briefs/slow/inq-a.md" && [ -f "$IS/taken/inq-a.req" ] && [ -f "$IS/taken/inq-a.brief.md" ] && [ ! -e "$IS/inq-a.req" ]'
 t "받은편지: run 지시문 끝에 결과 보고 절(보고 경로·결과 줄 꼴)" 'f=$HOME/.local/share/hc-fill/runs/inq-a-run.md; grep -Fq "# 요청 inq-a" "$f" && grep -Fq "~/.local/share/hc-fill/reports/inq-a.md" "$f" && grep -Fq "결과: 고침 <sha>" "$f"'
 t "받은편지 거절: 사유 한 줄 rejected/<이름>.why, 둘은 rejected/로" 'grep -Fxq "설정에 없는 project: nope" "$IS/rejected/nopr.why" && [ -f "$IS/rejected/nopr.req" ] && [ -f "$IS/rejected/nopr.brief.md" ] && [ ! -e "$IS/nopr.req" ] && [ -z "$(where nopr)" ]'
-t "받은편지 거절: 이름 글자·같은 이름·없는 only 기계·지시문 없음" 'grep -q "이름은" "$IS/rejected/Bad.X.why" && grep -Fxq "이미 대기열에 있는 이름" "$IS/rejected/dupl.why" && grep -Fq "box-9" "$IS/rejected/badonly.why" && grep -Fq "nobrief.brief.md가 없다" "$IS/rejected/nobrief.why" && [ "$(grep -c "^dupl	" "$Q")" = 1 ]'
+t "받은편지 거절: 이름 글자·같은 이름·없는 only 기계·지시문 없음·빈 지시문" 'grep -q "이름은" "$IS/rejected/Bad.X.why" && grep -Fxq "이미 대기열에 있는 이름" "$IS/rejected/dupl.why" && grep -Fq "box-9" "$IS/rejected/badonly.why" && grep -Fq "nobrief.brief.md가 없거나 비었다" "$IS/rejected/nobrief.why" && grep -Fq "emptyb.brief.md가 없거나 비었다" "$IS/rejected/emptyb.why" && [ -f "$IS/rejected/emptyb.req" ] && [ -z "$(where emptyb)" ] && [ "$(grep -c "^dupl	" "$Q")" = 1 ]'
 t "받은편지: ~/ 는 그 기계 HOME으로(shared)" '[ -f "$IH/taken/inq-h.req" ] && [ "$(awk -F"\t" "\$1==\"inq-h\" {print \$11}" "$Q")" = "shared:~/.local/share/hc-fill/inbox/done/inq-h.md" ]'
 t "받은편지: 연결 안 된 기계는 건너뜀, 요청은 그대로" 'printf "%s" "$out" | grep -Fq "받은편지 건너뜀 box-2: 연결 안 됨" && [ -f "$IB/inq-off.req" ] && [ -z "$(where inq-off)" ]'
 t "되돌려 주기: 손으로 넣은 레인(dupl)의 run 지시문에는 결과 보고 절 없음" '! grep -Fq "결과 보고" "$HOME/.local/share/hc-fill/runs/dupl-run.md"'
@@ -410,6 +411,28 @@ t "10칸 옛 줄: 띄우고 되돌려 주기 없음" '[ "$(where old1)" = "up bo
 lj
 run run
 t "10칸 옛 줄: 터미널이 사라져도 되돌려 주기 하지 않음" '[ "$(where old1 | cut -d" " -f1)" = up ] && ! printf "%s" "$out" | grep -q "되돌려"'
+
+# 10b. 지시문은 add 때 데이터 폴더로 복사, 못 읽는·빈 지시문은 add·run 모두 막는다(launchd가 ~/Documents를 못 읽어 빈 레인을 띄운 일)
+fresh
+run add --name cp1 --project app --brief "$(brief cp1)"
+CP1=$HOME/.local/share/hc-fill/briefs/added/cp1.md
+t "add: 지시문 내용을 briefs/added/<레인>.md로 복사, 대기열은 그 경로" '[ $rc = 0 ] && grep -Fq "# 지시문 cp1" "$CP1" && [ "$(awk -F"\t" "\$1==\"cp1\" {print \$3}" "$Q")" = "$CP1" ]'
+printf '# 바뀐 원본\n' >"$T/cp1.md"; run add --name cp1 --project app --brief "$T/cp1.md"
+t "add: 같은 이름 거절은 이미 넣은 사본을 덮지 않음" '[ $rc = 1 ] && grep -Fq "# 지시문 cp1" "$CP1" && [ -z "$(ls "${CP1%/*}" | grep -v "^cp1.md$")" ]'
+brief nr >/dev/null; chmod 000 "$T/nr.md"; run add --name nr --project app --brief "$T/nr.md"; chmod 600 "$T/nr.md"
+t "add: 읽지 못하는 지시문 거절(대기열·사본 없음)" '[ $rc = 1 ] && [ -z "$(where nr)" ] && [ ! -e "${CP1%/*}/nr.md" ] && printf "%s" "$out" | grep -q "지시문을 읽지 못함"'
+: >"$T/emp.md"; run add --name emp --project app --brief "$T/emp.md"
+t "add: 빈 지시문 거절" '[ $rc = 1 ] && [ -z "$(where emp)" ] && printf "%s" "$out" | grep -q "지시문을 읽지 못함(빈 파일)"'
+printf ' \n\t\n' >"$T/ws.md"; run add --name ws --project app --brief "$T/ws.md"
+t "add: 공백·줄바꿈만 든 지시문도 빈 것으로 거절" '[ $rc = 1 ] && [ -z "$(where ws)" ] && printf "%s" "$out" | grep -q "지시문을 읽지 못함(빈 파일)"'
+# 옛 꼴(데이터 폴더 밖 경로) 줄: 못 읽거나 비었으면 띄우지 않고 다음 레인으로
+fresh
+mkdir -p "$(dirname "$Q")"; brief ob1 >/dev/null; : >"$T/ob2.md"; brief ob3 >/dev/null; chmod 000 "$T/ob1.md"
+printf 'ob1\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\nob2\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\nob3\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\n' "$T/ob1.md" "$T/ob2.md" "$T/ob3.md" >"$Q"
+run run; chmod 600 "$T/ob1.md"
+t "run: 읽지 못하는 지시문은 띄우지 않고 실패로 남김" '[ "$(where ob1)" = "wait - -" ] && [ "$(launched ob1)" = 0 ] && printf "%s" "$out" | grep -q "실패 ob1: 지시문을 읽지 못함("'
+t "run: 빈 지시문도 띄우지 않음" '[ "$(where ob2)" = "wait - -" ] && [ "$(launched ob2)" = 0 ] && printf "%s" "$out" | grep -q "실패 ob2: 지시문을 읽지 못함(빈 파일)"'
+t "run: 다음 레인은 그대로 띄우고 run 지시문에 본문이 들어감" '[ "$(where ob3)" = "up box-1 box-1/ob3" ] && grep -Fq "# 지시문 ob3" "$HOME/.local/share/hc-fill/runs/ob3-run.md"'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

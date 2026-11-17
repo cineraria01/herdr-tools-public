@@ -18,6 +18,7 @@ usage() {
 사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]]
         hc-fill ls | rm <레인> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
+         지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
          대기 레인을 넣은 차례대로, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
          들어갔으면 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
@@ -44,6 +45,14 @@ AGENT=${AGENT:-claude-code}
 
 okname() { case $1 in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac; [ ${#1} -le 32 ]; }
 inlist() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }   # inlist <값> <쉼표 목록>
+# brief_bad <지시문>: 실제로 열어 읽어 본다(launchd 프로그램은 TCC로 ~/Documents가 stat은 되고 읽기만 막힌다).
+# 못 읽거나 비었으면 까닭을 찍고 0, 읽히면 1
+brief_bad() {
+  [ -f "$1" ] || { echo 없음; return 0; }
+  e=$(cat -- "$1" 2>&1 >/dev/null) || { e=${e##*: }; echo "${e:-읽기 실패}"; return 0; }
+  grep -q '[^[:space:]]' -- "$1" || { echo "빈 파일"; return 0; }   # 공백·줄바꿈만 든 것도 빈 것
+  return 1
+}
 
 # 대기열 쓰기는 모두 이 잠금 안에서(add·rm·run의 상태 바꿈이 서로 덮지 않게)
 qlock() { mkdir -p "$DATA" && HC_FILL_Q=1 lockf -k -t 30 "$DATA/queue.lock" "$0" "$@"; }
@@ -57,6 +66,7 @@ case $cmd in
   _set) qset "$@"; exit ;;
   _add)
     awk -F'\t' -v n="$1" '$1==n {f=1} END {exit !f}' "$Q" 2>/dev/null && die "이미 대기열에 있다: $1 (hc-fill ls)"
+    [ -z "${HC_FILL_BRIEF_TMP-}" ] || mv -f "$HC_FILL_BRIEF_TMP" "$3" || die "지시문 사본을 두지 못했다: $3"   # add: 이름이 새것일 때만 사본을 제자리에
     (IFS=$'\t'; printf '%s\n' "$*") >>"$Q"; exit ;;
   _rm)
     awk -F'\t' -v n="$1" '$1==n {f=1} END {exit !f}' "$Q" 2>/dev/null || die "대기열에 없다: $1"
@@ -74,11 +84,17 @@ case $cmd in
     case $brief in /*) ;; *) brief=$PWD/$brief ;; esac
     [ -f "$brief" ] || die "지시문이 없다: $brief"
     case $brief in *[[:space:]]*) die "지시문 경로에 공백을 쓰지 않는다: $brief" ;; esac
+    why=$(brief_bad "$brief") && die "지시문을 읽지 못함($why): $brief"
     [ "$after" = - ] || for a in $(printf %s "$after" | tr , ' '); do okname "$a" || die "--after 레인 이름: $a"; done
     [ "$only" = - ] || for m in $(printf %s "$only" | tr , ' '); do
       machines | awk -v m="$m" '$1==m {f=1} END {exit !f}' || die "설정에 machine 줄이 없는 기계: $m"
     done
-    qlock _add "$name" "$proj" "$brief" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - || exit 1
+    # 지시문은 내용을 데이터 폴더로 복사해 둔다(launchd의 run이 ~/Documents 같은 곳을 못 읽어도 띄울 수 있게)
+    bf=$DATA/briefs/added/$name.md
+    mkdir -p "${bf%/*}" && cat -- "$brief" >"$bf.tmp.$$" && [ -s "$bf.tmp.$$" ] ||
+      { rm -f "$bf.tmp.$$"; die "지시문을 복사하지 못했다: $brief → $bf"; }
+    HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - ||
+      { rm -f "$bf.tmp.$$"; exit 1; }
     note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"
     echo "더함 $name ($proj$note)"; exit 0 ;;
 
@@ -207,9 +223,9 @@ inbox_tick() {
         fi
       fi
       if [ -z "$why" ] && [ -z "$had" ]; then   # 없음(no)만 거절, 확인 못 함은 다음 바퀴에
-        case $(onm "$im" 'if [ -f "$d/$1.brief.md" ]; then echo yes; else echo no; fi' "$idir" "$n") in
+        case $(onm "$im" 'if grep -q "[^[:space:]]" "$d/$1.brief.md" 2>/dev/null; then echo yes; else echo no; fi' "$idir" "$n") in
           yes) ;;
-          no) why="지시문 $n.brief.md가 없다" ;;
+          no) why="지시문 $n.brief.md가 없거나 비었다" ;;
           *) echo "받은편지 $im $n: 지시문을 확인하지 못했다, 다음 바퀴에"; continue ;;
         esac
       fi
@@ -360,6 +376,8 @@ old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 �
 }
 
 launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> → ADDR. 실패면 1
+  # 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다(종료 2 = 이 레인은 이번 바퀴에 그만)
+  body=$(cat -- "$2" 2>&1) && [ -n "$body" ] || { body=${body##*: }; echo "실패 $1: 지시문을 읽지 못함(${body:-빈 파일}): $2"; return 2; }
   on=; [ "$3" = "$LOCAL" ] || on=$3
   rsec=; [ "${5:--}" = - ] || rsec="
 ## 결과 보고 (hc-fill 받은편지 레인)
@@ -368,12 +386,14 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> �
 "
   steps=$(hc-lane --print-steps ${on:+--on "$on"} --name "$1" --repo "$4") || { echo "실패 $1 @$3: hc-lane --print-steps"; return 1; }
   [ -z "$rsec" ] || old_report "$3" "$1" || { echo "실패 $1 @$3: 그 기계의 옛 보고를 비켜 두지 못했다"; return 1; }
+  runmd() { printf '%s\n\n%s\n' "$body" "$steps"; printf %s "$rsec"; }
+  sz=$(runmd | wc -c | tr -d ' ')   # 쓴 run 지시문의 크기가 이것과 같아야 한다(본문이 다 들어갔는지)
   if [ -z "$on" ]; then
     rf=$HOME/.local/share/hc-fill/runs/$1-run.md
-    mkdir -p "${rf%/*}" && { cat "$2"; echo; printf '%s\n' "$steps"; printf %s "$rsec"; } >"$rf" || { echo "실패 $1 @$3: run 지시문 쓰기"; return 1; }
+    mkdir -p "${rf%/*}" && runmd >"$rf" && [ "$(wc -c <"$rf" | tr -d ' ')" = "$sz" ] || { echo "실패 $1 @$3: run 지시문 쓰기"; return 1; }
   else
-    rf=$({ cat "$2"; echo; printf '%s\n' "$steps"; printf %s "$rsec"; } | hc exec -i --on "$on" -- sh -c \
-      'd=$HOME/.local/share/hc-fill/runs && mkdir -p "$d" && cat >"$d/$1" && printf %s "$d/$1"' _ "$1-run.md") && [ -n "$rf" ] ||
+    rf=$(runmd | hc exec -i --on "$on" -- sh -c \
+      'd=$HOME/.local/share/hc-fill/runs && mkdir -p "$d" && cat >"$d/$1" && [ "$(wc -c <"$d/$1" | tr -d " ")" = "$2" ] && printf %s "$d/$1"' _ "$1-run.md" "$sz") && [ -n "$rf" ] ||
       { echo "실패 $1 @$3: run 지시문을 그 기계에 두지 못했다"; return 1; }
   fi
   task=${TASK//\{run\}/$rf}
@@ -424,8 +444,8 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
     continue
   fi
   [ "$after" = - ] || after_ok "$name" "$proj" "$after" || continue
-  [ -f "$brief" ] || { echo "실패 $name: 지시문이 없다: $brief"; continue; }
-  placed=
+  why=$(brief_bad "$brief") && { echo "실패 $name: 지시문을 읽지 못함($why): $brief"; continue; }
+  placed= bad=
   while read -r -u 4 m cap lcap _; do
     [ "$only" = - ] || inlist "$m" "$only" || continue
     stk=$(printf '%s\n' "$stuck" | tr , '\n' | grep -c "^$m=")
@@ -443,6 +463,7 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
     fi
     ADDR=
     launch "$name" "$brief" "$m" "$repo" "${reply:--}"; lr=$?
+    [ $lr != 2 ] || { bad=1; break; }
     [ $lr = 0 ] || [ $lr = 5 ] || continue
     NOW=$(printf '%s\n%s' "$NOW" "$m")   # 상태가 안 잡혀도 자리는 차 있다
     if [ $lr = 0 ] && status_ok "$ADDR"; then
@@ -454,7 +475,7 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
     qset "$name" wait - - "$stuck"
     echo "상태 안 잡힘 $name @$m $ADDR: ${SWHY:-${WAIT}초 안에 hc get status 없음}. 그 레인에서 $m 빼고 다음 기계로(그 터미널은 남겨 둠, 확인 뒤 지휘가 정리)"
   done 4<<<"$(machines)"
-  [ -n "$placed" ] || echo "자리 없음 $name: 대기"
+  [ -n "$placed" ] || [ -n "$bad" ] || echo "자리 없음 $name: 대기"
 done 3<<<"$ROWS"
 gc_tick
 exit 0
