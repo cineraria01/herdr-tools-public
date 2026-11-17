@@ -170,15 +170,17 @@ printf '# 주석\n[이 맥] 예시 로그인 {M}:\n    ! ssh -t {M} 예시\n\n[�
 setup w1
 t "setup: worker-checklist.txt를 8번부터 붙임, {M}은 기계 이름" 'grep -Fxq " 8. [이 맥] 예시 로그인 w1:" "$T/out" && grep -Fxq "    ! ssh -t w1 예시" "$T/out" && grep -Fxq " 9. [그 맥] 둘째 단계" "$T/out"'
 t "setup: 설정이 다 있으면 설정 없음 줄 없음" '! has "설정 없음"'
+t "setup: worker.mesh에 없는 기계는 워커 연결을 건너뜀" 'has "워커 연결: w1 은(는) worker.mesh에 없어 건너뜀" && ! grep -Eq "^worker-[abc]$" "$T_LOG/ssh.log"'
 t "setup: 붙인 뒤 번호가 이어짐" 'grep -Eq "^10\. \[그 맥\] \(Xcode" "$T/out" && grep -Eq "^11\. \[이 맥\] 점검" "$T/out" && ! grep -Fq "# 주석" "$T/out"'
 t "setup: --slots 없으면 1" '[ "$(cat "$RHOME/.config/example-app/verify-slots" 2>/dev/null)" = 1 ]'
 
-newcfg; cfg_del worker.slots_file; cfg_del worker.trust; newhome
+newcfg; cfg_del worker.slots_file; cfg_del worker.trust; cfg_del worker.mesh; newhome
 setup w1 --slots 3
 t "setup: worker.slots_file 없음 + --slots → 종료 64, 접속 안 함" '[ $rc = 64 ] && [ ! -s "$T_LOG/ssh.log" ]'
 setup w1
 t "setup: worker.slots_file 없음 → slots 단계 없음" '[ $rc = 0 ] && ! has "verify-slots" && [ ! -d "$RHOME/.config" ]'
 t "setup: worker.slots_file 없음을 알림" 'has "설정 없음(worker.slots_file)"'
+t "setup: worker.mesh 없음 → 워커 연결 건너뜀을 알림" 'has "설정 없음(worker.mesh): 워커 연결 단계를 건너뜀"'
 t "setup: worker.trust 없음 → Documents/app" '[ "$(jq -c "(.projects|keys)" "$RHOME/.claude.json")" = "[\"$RHOME/Documents/app\"]" ]'
 
 newcfg; cfg_set worker.trust "it's src"; cfg_set worker.slots_file ".config/it's/slots"; newhome
