@@ -352,7 +352,7 @@ req "$IB" inq-off app
 run run --dry-run
 t "받은편지 dry-run: 받을·거절할만 찍고 아무것도 옮기지 않음" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "[dry-run] 받을 slow inq-a (app)" && printf "%s" "$out" | grep -Fq "[dry-run] 거절할 slow nopr: 설정에 없는 project: nope" && [ -f "$IS/inq-a.req" ] && [ ! -e "$IS/rejected" ] && [ -z "$(where inq-a)" ]'
 run run
-t "받은편지: 받아 대기열에(되돌릴곳 = 요청 기계:폴더/done/이름.md), 같은 바퀴에 띄움" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "받음 slow inq-a → 대기열 (app)" && [ "$(where inq-a)" = "up slow slow/inq-a" ] && [ "$(awk -F"\t" "\$1==\"inq-a\" {print \$11}" "$Q")" = "slow:$IS/done/inq-a.md" ]'
+t "받은편지: 받아 대기열에(되돌릴곳 = 요청 기계:폴더/done/이름.md), 같은 바퀴에 띄움" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "받음 slow inq-a → 대기열 (app, 우선 높음)" && [ "$(where inq-a)" = "up slow slow/inq-a" ] && [ "$(awk -F"\t" "\$1==\"inq-a\" {print \$11}" "$Q")" = "slow:$IS/done/inq-a.md" ]'
 t "받은편지: 지시문을 briefs/<기계>/<이름>.md로 복사, 요청 쪽 둘은 taken/으로" 'grep -Fq "# 요청 inq-a" "$HOME/.local/share/hc-fill/briefs/slow/inq-a.md" && [ -f "$IS/taken/inq-a.req" ] && [ -f "$IS/taken/inq-a.brief.md" ] && [ ! -e "$IS/inq-a.req" ]'
 t "받은편지: run 지시문 끝에 결과 보고 절(보고 경로·결과 줄 꼴)" 'f=$HOME/.local/share/hc-fill/runs/inq-a-run.md; grep -Fq "# 요청 inq-a" "$f" && grep -Fq "~/.local/share/hc-fill/reports/inq-a.md" "$f" && grep -Fq "결과: 고침 <sha>" "$f"'
 t "받은편지 거절: 사유 한 줄 rejected/<이름>.why, 둘은 rejected/로" 'grep -Fxq "설정에 없는 project: nope" "$IS/rejected/nopr.why" && [ -f "$IS/rejected/nopr.req" ] && [ -f "$IS/rejected/nopr.brief.md" ] && [ ! -e "$IS/nopr.req" ] && [ -z "$(where nopr)" ]'
@@ -481,6 +481,67 @@ fresh
 HC_TERMINAL_ID=tq1 run add --name ow8 --project app --brief "$(brief ow8)"
 HC_FAKE_COORD_GONE=tq1 run run
 t "주인 지휘가 띄우기 전에 사라지면 주인 없이(-) 띄우고 watch는 hc-lane coord 지휘에게, 한 줄 알림" '[ "$(where ow8)" = "up box-1 box-1/ow8" ] && [ "$(cat "$T/owner.log")" = 없음 ] && [ "$(cat "$T/coord.log")" = t8kk ] && [ "$(cat "$T/coordcheck.log")" = tq1 ] && printf "%s" "$out" | grep -Fq "주인 지휘 tq1 가 지금 없다" || { printf "%s\n" "$out"; paste "$T/owner.log" "$T/coord.log"; false; }'
+
+# 10e. 우선순위(2026-11-17 hcfill-priority): 대기열 열셋째 칸 urgent|high|normal|low. run은 선행이 풀린 대기 레인을
+#      높은 것부터, 같으면 넣은 차례로. 옛 줄(칸 없음)은 보통. 받은편지 요청은 기본 높음
+tail3() { awk -F'\t' -v n="$1" '$1==n {print NF, $12, $13}' "$Q"; }   # 칸 수 · 주인 · 우선
+prio_of() { awk -F'\t' -v n="$1" '$1==n {print ($13 == "" ? "-" : $13)}' "$Q"; }
+names() { awk 'p {print; p=0} $0=="--name" {p=1}' "$T/lane.log" | uniq | tr '\n' ' '; }   # 띄운 차례(--print-steps 줄과 겹치는 이름은 uniq)
+fresh
+add n1; add lo --priority 낮음; add h1 --priority high; add u1 --priority 긴급; add n2 --priority normal; add h2 --priority 높음
+t "우선순위 add: 한·영 값을 열셋째 칸에 urgent|high|normal|low로, 안 주면 normal" '[ "$(prio_of n1) $(prio_of lo) $(prio_of h1) $(prio_of u1) $(prio_of n2) $(prio_of h2)" = "normal low high urgent normal high" ] || { cat "$Q"; false; }'
+run run
+t "우선순위 차례: 긴급 > 높음 > 보통 > 낮음, 같은 값은 넣은 차례(가장 높은 것이 첫 기계)" '[ "$(names)" = "u1 h1 h2 n1 n2 lo " ] && [ "$(where u1)" = "up box-1 box-1/u1" ] || { echo "차례: $(names)"; false; }'
+run add --name bad --project app --brief "$(brief bad)" --priority 아주
+t "우선순위 add: 모르는 값 거절(대기열 없음)" '[ $rc != 0 ] && [ -z "$(where bad)" ]'
+run ls
+t "ls: 우선 칸(한국어)" '[ $rc = 0 ] && printf "%s\n" "$out" | head -n 1 | grep -q 우선 && printf "%s\n" "$out" | grep -q "^u1 .*긴급" && printf "%s\n" "$out" | grep -q "^lo .*낮음" || { printf "%s\n" "$out"; false; }'
+
+fresh
+add hb --priority high --only slow --after nope; add ll --priority low --only slow
+run run
+t "우선순위: 선행이 안 들어간 높은 것은 건너뛰고 들어간(없는) 낮은 것을 띄움" '[ "$(where hb | cut -d" " -f1)" = wait ] && [ "$(where ll)" = "up slow slow/ll" ] || { printf "%s\n" "$out"; false; }'
+
+fresh
+lj slow/x:claude-code:x
+add wn --only slow; add wu --only slow --priority urgent
+run run
+t "긴급: 자리가 없으면 기다림(돌던 것을 끊지 않음)" '[ "$(where wu | cut -d" " -f1)" = wait ] && [ "$(where wn | cut -d" " -f1)" = wait ] && ! grep -q "^kill\|^stop" "$T/hc.log" 2>/dev/null'
+lj
+run run
+t "긴급: 다음 빈자리를 먼저 넣은 보통보다 먼저 잡음" '[ "$(where wu)" = "up slow slow/wu" ] && [ "$(where wn | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+
+fresh
+mkdir -p "$(dirname "$Q")"; brief od1 >/dev/null; brief od2 >/dev/null
+printf 'od1\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\nod2\tapp\t%s\t-\t-\twait\t-\t-\t-\t2026-01-01T00:00\t-\ttq9\n' "$T/od1.md" "$T/od2.md" >"$Q"
+awk -F'\t' -v OFS='\t' '{$5="slow"} 1' "$Q" >"$Q.t" && mv "$Q.t" "$Q"   # 둘 다 --only slow(자리 1)
+add oh --only slow --priority high
+run ls
+t "옛 줄(11·12칸): ls에 보통" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -q "^od1 .*보통" && printf "%s\n" "$out" | grep -q "^od2 .*보통" || { printf "%s\n" "$out"; false; }'
+run run
+t "옛 줄(11·12칸)은 보통: 뒤에 넣은 높음이 먼저" '[ "$(where oh)" = "up slow slow/oh" ] && [ "$(where od1 | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run prio od2 urgent
+t "prio: 12칸 옛 줄도 열셋째 칸에 적고 주인은 그대로" '[ $rc = 0 ] && [ "$(prio_of od2)" = urgent ] && [ "$(awk -F"\t" "\$1==\"od2\" {print \$12}" "$Q")" = tq9 ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run prio od1 긴급
+t "prio: 11칸 옛 줄은 주인 칸을 -로 채우고 열셋째 칸에" '[ $rc = 0 ] && [ "$(tail3 od1)" = "13 - urgent" ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run prio oh low
+t "prio: 떠 있는(대기 아닌) 레인은 거절" '[ $rc = 1 ] && [ "$(prio_of oh)" = high ]'
+run prio nope high
+t "prio: 없는 레인은 종료 1" '[ $rc = 1 ]'
+run prio od1 아주
+t "prio: 모르는 값은 거절, 그대로" '[ $rc != 0 ] && [ "$(prio_of od1)" = urgent ]'
+
+fresh
+add pn1 --only slow; add pn2 --only slow
+run prio pn2 높음
+run run
+t "prio: 바꾼 레인이 먼저 뜸" '[ "$(where pn2)" = "up slow slow/pn2" ] && [ "$(where pn1 | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+
+ifresh
+mj box-1 shared slow
+req "$IS" iq-d app; req "$IS" iq-l app; printf 'priority\t낮음\n' >>"$IS/iq-l.req"; req "$IS" iq-b app; printf 'priority\t아주\n' >>"$IS/iq-b.req"
+run run
+t "받은편지: priority 없으면 높음, 적혀 있으면 그 값, 모르는 값은 거절" '[ "$(prio_of iq-d)" = high ] && [ "$(prio_of iq-l)" = low ] && [ -z "$(where iq-b)" ] && grep -Fq "priority" "$IS/rejected/iq-b.why" || { printf "%s\n" "$out"; cat "$Q"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

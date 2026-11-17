@@ -11,22 +11,25 @@ DATA=${HC_FILL_DATA:-$HOME/.local/share/hc-fill}
 Q=$DATA/queue.tsv   # 이름 프로젝트 지시문 선행 기계제한 상태(wait|up|sent) 기계 주소 남긴것(기계=주소,…) 더한시각 되돌릴곳 주인 — 빈 칸은 -
                     # 되돌릴곳: 받은편지에서 온 레인의 결과를 쓸 <기계>:<경로>. 손으로 넣은 줄·10칸 옛 줄은 -
                     # 주인: 넣은 지휘 주소(add의 $HC_TERMINAL_ID·--coord). 레인 사건은 그 지휘에게만. 받은편지 줄·11칸 옛 줄은 -(모든 지휘에)
+                    # 우선: urgent|high|normal|low(add --priority, 기본 normal. 받은편지는 기본 high). 12칸까지의 옛 줄은 normal
 WAIT=${HC_FILL_WAIT:-60} POLL=${HC_FILL_POLL:-5}
 
 die() { printf 'hc-fill: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
 사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
-        hc-fill ls | rm <레인> | run [--dry-run] | watch [--every <초, 기본 60>]
+               [--priority <긴급|높음|보통|낮음>]   (영어 urgent|high|normal|low도 받음, 기본 보통)
+        hc-fill ls | rm <레인> | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
          지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
          주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
          (HC_LANE_OWNER)으로 넘겨 그 레인의 사건(hc-lane report·멈춤)은 그 지휘 watch에게만 간다. 지휘 터미널이 아니면(레인 안·
          터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
-  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·선행·비고
+  prio   대기 중인 레인의 우선순위를 바꾼다(떠 있는 레인은 거절)
+  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
-         대기 레인을 넣은 차례대로, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
-         들어갔으면 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
+         대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 넣은 차례) 보며, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
+         들어갔으면(안 풀린 것은 건너뛰고 다음 것을 본다) 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
          hc get status가 안 잡히면 그 기계를 그 레인에서 빼고 다음 기계로 간다(그 터미널은 끄지 않고 ls 비고에 남긴다).
          남긴 터미널이 나중에 살아나면 「중복 위험」을 찍고 그 레인은 더 띄우지 않는다
   watch  run을 --every초마다(한 번에 하나만, 이미 돌면 종료 75)
@@ -48,6 +51,9 @@ LOCAL=$(conf local) AGENT=$(conf agent)
 AGENT=${AGENT:-claude-code}
 [ -n "$LOCAL" ] || die "설정에 local 줄이 없다: $CONF"
 
+# 우선순위: 한·영 값을 대기열 값으로(모르면 실패), 대기열 값을 ls 글로, 줄 정렬 순번(옛 줄·빈 칸은 보통)
+pnorm() { case $1 in 긴급 | urgent) echo urgent ;; 높음 | high) echo high ;; 보통 | normal) echo normal ;; 낮음 | low) echo low ;; *) return 1 ;; esac; }
+plabel() { case $1 in urgent) echo 긴급 ;; high) echo 높음 ;; low) echo 낮음 ;; *) echo 보통 ;; esac; }
 okname() { case $1 in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac; [ ${#1} -le 32 ]; }
 inlist() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }   # inlist <값> <쉼표 목록>
 # brief_bad <지시문>: 실제로 열어 읽어 본다(launchd 프로그램은 TCC로 ~/Documents가 stat은 되고 읽기만 막힌다).
@@ -76,12 +82,19 @@ case $cmd in
   _rm)
     awk -F'\t' -v n="$1" '$1==n {f=1} END {exit !f}' "$Q" 2>/dev/null || die "대기열에 없다: $1"
     awk -F'\t' -v n="$1" '$1!=n' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
+  _prio)
+    st=$(awk -F'\t' -v n="$1" '$1==n {print $6; exit}' "$Q" 2>/dev/null)
+    [ -n "$st" ] || die "대기열에 없다: $1"
+    [ "$st" = wait ] || die "대기 중이 아니다($st): $1 — 우선순위는 띄우기 전에만 바꾼다"
+    # 옛 줄(11·12칸)은 빈 칸을 -로 채워 열셋째 칸에
+    awk -F'\t' -v OFS='\t' -v n="$1" -v p="$2" '$1==n { for (i = NF + 1; i < 13; i++) $i = "-"; $13 = p } 1' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
 
   add)
-    name= proj= brief= after=- only=- coord= cx=
+    name= proj= brief= after=- only=- coord= cx= prio=normal
     while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || usage
-      case $1 in --name) name=$2 ;; --project) proj=$2 ;; --brief) brief=$2 ;; --after) after=$2 ;; --only) only=$2 ;; --coord) coord=$2 cx=1 ;; *) usage ;; esac
+      case $1 in --name) name=$2 ;; --project) proj=$2 ;; --brief) brief=$2 ;; --after) after=$2 ;; --only) only=$2 ;; --coord) coord=$2 cx=1 ;;
+        --priority) prio=$(pnorm "$2") || die "--priority는 긴급|높음|보통|낮음(urgent|high|normal|low): $2" ;; *) usage ;; esac
       shift 2
     done
     okname "$name" || die "--name은 a-z 0-9 - _ 32자까지: $name"
@@ -107,19 +120,23 @@ case $cmd in
     bf=$DATA/briefs/added/$name.md
     mkdir -p "${bf%/*}" && cat -- "$brief" >"$bf.tmp.$$" && [ -s "$bf.tmp.$$" ] ||
       { rm -f "$bf.tmp.$$"; die "지시문을 복사하지 못했다: $brief → $bf"; }
-    HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - "${coord:--}" ||
+    HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - "${coord:--}" "$prio" ||
       { rm -f "$bf.tmp.$$"; exit 1; }
-    note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"; note="$note, 주인 ${coord:-없음(모든 지휘)}"
+    note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"; note="$note, 주인 ${coord:-없음(모든 지휘)}, 우선 $(plabel "$prio")"
     echo "더함 $name ($proj$note)"; exit 0 ;;
 
   rm) [ $# = 1 ] || usage; qlock _rm "$1" || exit 1; echo "뺌 $1 (떠 있는 터미널은 그대로)"; exit 0 ;;
+  prio)
+    [ $# = 2 ] || usage
+    p=$(pnorm "$2") || die "우선순위는 긴급|높음|보통|낮음(urgent|high|normal|low): $2"
+    qlock _prio "$1" "$p" || exit 1; echo "우선 $1 → $(plabel "$p")"; exit 0 ;;
 
   ls)
     st=$(hc ls --json) || die "hc ls 실패"
     st=$(printf '%s\n' "$st" | jq -r '.terminals[] | [.address, (.status // "-" | tostring)] | @tsv') || die "hc ls --json 출력을 읽지 못했다"
-    printf '%-24s %-10s %-14s %-24s %-8s %s\n' 레인 프로젝트 상태 주소 주인 선행·비고
+    printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' 레인 프로젝트 상태 주소 주인 우선 선행·비고
     [ -f "$Q" ] || exit 0
-    while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply owner; do
+    while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply owner prio _; do
       if [ "$state" = wait ]; then s=대기 a=-
       elif [ "$state" = sent ]; then s=되돌려줌 a=$addr
       else
@@ -129,7 +146,7 @@ case $cmd in
       note=; [ "$after" = - ] || note="선행 $after"; [ "$only" = - ] || note="$note 기계 $only"
       [ "$stuck" = - ] || note="$note 상태 안 잡힘 남김 $stuck"
       [ "${reply:--}" = - ] || note="$note 받은편지 ${reply%%:*}"
-      printf '%-24s %-10s %-14s %-24s %-8s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "${note# }"
+      printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "$(plabel "${prio-}")" "${note# }"
     done 3<"$Q"
     exit 0 ;;
 
@@ -210,13 +227,16 @@ inbox_tick() {
       { echo "받은편지 건너뜀 $im: 목록을 읽지 못했다"; continue; }
     while IFS= read -r -u 7 n; do
       [ -n "$n" ] || continue
-      why= p= a=- o=-
+      why= p= a=- o=- pr=high
       if ! okname "$n"; then why="이름은 a-z 0-9 - _ 32자까지"
       elif ! req=$(onm "$im" 'cat "$d/$1.req"' "$idir" "$n"); then echo "받은편지 $im $n: .req를 읽지 못했다, 다음 바퀴에"; continue
       else
         p=$(printf '%s\n' "$req" | awk -F'\t' '$1=="project" {print $2; exit}')
         a=$(printf '%s\n' "$req" | awk -F'\t' '$1=="after" {print $2; exit}'); a=${a:--}
         o=$(printf '%s\n' "$req" | awk -F'\t' '$1=="only" {print $2; exit}'); o=${o:--}
+        # 우선순위: 적혀 있으면 그 값, 없으면 높음(회원이 겪는 오류 수정이 기능 개발보다 먼저 — 2026-11-17 지휘 결정)
+        x=$(printf '%s\n' "$req" | awk -F'\t' '$1=="priority" {print $2; f=1; exit} END {if (!f) print "-"}')
+        [ "$x" = - ] || pr=$(pnorm "$x") || { pr=high; why="모르는 priority: $x (긴급|높음|보통|낮음 또는 urgent|high|normal|low)"; }
         awk -v p="$p" '$1=="repo" && $2==p {f=1} END {exit !f}' "$CONF" || why="설정에 없는 project: ${p:-(없음)}"
         [ "$a" = - ] || for x in $(printf %s "$a" | tr , ' '); do okname "$x" || why="after 레인 이름: $x"; done
         [ "$o" = - ] || for x in $(printf %s "$o" | tr , ' '); do
@@ -255,8 +275,8 @@ inbox_tick() {
         bf=$DATA/briefs/$im/$n.md
         mkdir -p "${bf%/*}" && onm "$im" 'cat "$d/$1.brief.md"' "$idir" "$n" >"$bf.tmp" && mv -f "$bf.tmp" "$bf" ||
           { echo "받은편지 $im $n: 지시문을 가져오지 못했다, 다음 바퀴에"; continue; }
-        qlock _add "$n" "$p" "$bf" "$a" "$o" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$im:$idir/done/$n.md" - || continue
-        echo "받음 $im $n → 대기열 ($p)"
+        qlock _add "$n" "$p" "$bf" "$a" "$o" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$im:$idir/done/$n.md" - "$pr" || continue
+        echo "받음 $im $n → 대기열 ($p, 우선 $(plabel "$pr"))"
       fi
       onm "$im" 'mkdir -p "$d/taken" && mv -f "$d/$1.req" "$d/taken/" && { [ ! -f "$d/$1.brief.md" ] || mv -f "$d/$1.brief.md" "$d/taken/"; }' "$idir" "$n" ||
         echo "받은편지 $im $n: taken/으로 옮기지 못했다, 다음 바퀴에 다시"
@@ -315,7 +335,8 @@ printf '%s\n' "$TERMS" | awk -F'\t' -v g="$AGENT" '$3==g {f=1} END {exit !f}' ||
 CONN=$(printf '%s\n' "$raw" | jq -er '.machines | arrays | map(select(.state == "connected") | .name) | join("\n")') ||
   die "hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다"
 reply_tick
-ROWS=$(cat "$Q")
+# 우선순위 높은 것부터, 같으면 넣은 차례(정렬은 안정: 둘째 키가 줄 번호). 옛 줄·빈 칸은 보통
+ROWS=$(awk -F'\t' '{ r = ($13 == "urgent") ? 0 : ($13 == "high") ? 1 : ($13 == "low") ? 3 : 2; print r "\t" NR "\t" $0 }' "$Q" | sort -t "$(printf '\t')" -k1,1n -k2,2n | cut -f 3-)
 NOW=   # 이번 바퀴에 띄운 기계(한 줄에 하나)
 NOWL=  # 이번 바퀴에 띄운 레인의 기계(hc-fill 레인 수)
 OFF=   # 이번 바퀴에 연결 안 됨으로 알린 기계
@@ -446,7 +467,7 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
   [ $lr = 0 ] || return 5
 }
 
-while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added reply owner; do
+while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added reply owner _; do
   # 상태가 안 잡혀 남긴 터미널이 살아났으면 같은 레인이 둘 돈다: 알리고 그 레인은 더 띄우지 않는다(지휘가 정리)
   dupr=
   if [ "$stuck" != - ]; then

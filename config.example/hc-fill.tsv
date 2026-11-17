@@ -39,8 +39,9 @@ repo     app    here     /Users/me/src/app
 repo     tools  here     /Users/me/src/tools
 #
 # inbox  기계  그 기계의 폴더(~/ 는 그 기계 HOME). 여러 줄 가능, 없으면 받은편지를 보지 않는다(아래는 꺼 둔 예).
-#   run 바퀴 처음에 그 폴더의 <이름>.req(「키<TAB>값」 줄: project, after, only — 없으면 -)와 <이름>.brief.md를 걷어
-#   대기열에 넣고 둘을 taken/으로 옮긴다. 검사(이름·project·only·after·같은 이름)에 걸리면 rejected/로 옮기고
+#   run 바퀴 처음에 그 폴더의 <이름>.req(「키<TAB>값」 줄: project, after, only — 없으면 -, priority — 긴급|높음|보통|낮음
+#   또는 urgent|high|normal|low, 없으면 높음)와 <이름>.brief.md를 걷어
+#   대기열에 넣고 둘을 taken/으로 옮긴다. 검사(이름·project·only·after·priority·같은 이름)에 걸리면 rejected/로 옮기고
 #   rejected/<이름>.why에 사유 한 줄. 레인이 끝나면 그 기계 보고(~/.local/share/hc-fill/reports/<이름>.md)를
 #   요청한 기계 <폴더>/done/<이름>.md로 되돌려 쓴다. 요청 쪽은 .brief.md를 먼저 쓰고 .req를 마지막에 mv로 둔다
 #inbox   shared   ~/.local/share/hc-fill/inbox
