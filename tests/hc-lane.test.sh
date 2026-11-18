@@ -1457,7 +1457,11 @@ upto '[ "$(sends)" = 2 ]'
 t "watch: 다음 바퀴에 다시 보냄(한 번)" '[ "$(sends)" = 2 ] && grep -Fq "lane-w 막힘 막혔음" "$HCLOG.send" || cat "$HCLOG.send"'
 stopw $w1
 # 남은 프로세스는 이 시험의 출력 파일 $T/wo를 쥔 것으로 본다(pgrep -f "watch --to t7cc"는 같은 시험을 동시에 도는 다른 레인의 watch도 잡아 흔들렸다 — 2026-11-18 land-log 착지)
-t "watch: 끄면 잠금을 지우고 프로세스를 안 남김" '! alive $w1 && [ ! -e "$WD/watch.t7cc" ] && [ -z "$(lsof -t "$T/wo" 2>/dev/null)" ]'
+# 끈 watch의 자식(배경 sleep·hc 호출)도 $T/wo를 물려받아 TERM 뒤 끝나기까지 잠깐 걸린다 — 부하가 크면 바로 본 lsof에 잡혀 흔들렸다
+# (2026-11-18 hcfill-early 착지). 8초까지 기다리고, 그래도 남으면 무엇이 쥐었는지 찍는다. $T는 이 시험만의 폴더라 남의 watch는 안 셈
+wgone() { ! alive $w1 && [ ! -e "$WD/watch.t7cc" ] && [ -z "$(lsof -t "$T/wo" 2>/dev/null)" ]; }
+upto wgone
+t "watch: 끄면 잠금을 지우고 프로세스를 안 남김" 'wgone || { ls -d "$WD/watch.t7cc" 2>&1; lsof "$T/wo" 2>&1; false; }'
 HC_LANE=lane-w "$LANE" report 중간 - 반쯤 >/dev/null
 HC_TERMINAL_ID=t7cc run wait --timeout 0
 t "watch 꺼진 사이 사건은 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 반쯤'
@@ -1740,6 +1744,13 @@ upto 'grep -Fq 넣은지휘것 "$HCLOG.send" 2>/dev/null && [ "$(grep -c 주인�
 sleep 2.5
 t "대기열 레인: 넣은 지휘(ta1)만 받음 — 가장 최근 지휘(tb2)가 아님" '[ "$(grep -F 넣은지휘것 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send" "$T/wea" "$T/web"; false; }'
 t "주인 없는 옛 레인: 두 지휘 모두 한 번씩 받고 주인은 그대로 -" '[ "$(grep -F 주인없는것 "$HCLOG.send" | cut -f1 | sort | tr "\n" " ")" = "ta1 tb2 " ] && [ "$(awk -F"\t" "\$1 == \"t9ii\" { o = \$3 } END { print o }" "$WD/lanes.tsv")" = - ] || { cat "$HCLOG.send" "$WD/lanes.tsv"; false; }'
+# hcfill-early(2026-11-18): report --to <지휘>는 받을 지휘를 정한다(아홉째 칸) — 주인 없는 사건이어도 그 지휘 watch만(hc-fill 놀고 있음 알림)
+env -u HC_TERMINAL_ID -u HC_LANE "$LANE" report 중간 - 받는이정함 --name hc-fill-idle --to tb2 >/dev/null
+upto 'grep -Fq 받는이정함 "$HCLOG.send" 2>/dev/null'
+sleep 2.5
+t "report --to tb2: tb2 watch만 받음(주인 모르는 사건이어도 ta1은 안 받음)" '[ "$(grep -F 받는이정함 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "tb2 " ] || { cat "$HCLOG.send" "$T/wea" "$T/web"; false; }'
+run report 중간 - x --to 't1;rm'
+t "report --to: 주소 글자가 아니면 종료 2" '[ $rc = 2 ]'
 stopw $wa; stopw $wb
 # 감사 [중간] 1(b): 주인 지휘(ta1)가 레인이 뜬 뒤 사라지면 그 사건은 살아 있는 모든 지휘(tb2·tc3)가 한 번씩 받고, 누구도 넘겨받지
 # 않는다(가장 최근 지휘 한 곳이 영구 주인이 되던 판은 그 레인을 이어받은 다른 지휘가 못 받았다)

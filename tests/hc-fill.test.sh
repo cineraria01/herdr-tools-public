@@ -41,6 +41,7 @@ if [ "${1-}" = coord ] && [ "${2-}" = --check ]; then   # 지휘가 지금 살�
 if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기: $HC_FAKE_COORD_SET_FAIL(공백 목록)에 든 주소는 지휘가 아님
   echo "${3-}" >>"$T_LOG/coordset.log"; case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
+if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
@@ -86,7 +87,7 @@ Q=$HOME/.local/share/hc-fill/queue.tsv
 mj() { s='{"machines":['; c=; for m in box-1 box-2 shared slow; do st=disconnected; case " $* " in *" $m "*) st=connected ;; esac; s="$s$c{\"name\":\"$m\",\"state\":\"$st\"}"; c=,; done; export HC_FAKE_MACHINES="$s]}"; }
 # 터미널: lj <주소>:<agent>:<이름>[:<상태, 기본 working>[:<cwd>]] …
 lj() { s='{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"}'; c=,; for x in "$@"; do IFS=: read -r a g nm st cw <<<"$x"; s="$s$c{\"address\":\"$a\",\"agent\":\"$g\",\"name\":\"$nm\",\"state\":\"live\",\"status\":\"${st:-working}\",\"cwd\":\"${cw:-/}\"}"; c=,; done; export HC_FAKE_LS="$s]}"; }
-fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED; }
+fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/report.log" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED HC_FAKE_COORD_GONE HC_FAKE_REPORT_RC; }
 brief() { printf '# 지시문 %s\n본문\n' "$1" >"$T/$1.md"; echo "$T/$1.md"; }
 add() { "$FILL" add --name "$1" --project app --brief "$(brief "$1")" "${@:2}" >/dev/null 2>&1; }
 where() { awk -F'\t' -v n="$1" '$1==n {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소
@@ -188,7 +189,7 @@ t "자리: all 칸 기계는 done도 다 셈(shared 3개 → slow)" '[ "$(where 
 
 # 4. 선행 조건: origin/<기본>의 커밋 메시지에 레인 이름(단어 경계)
 fresh
-add pa; add pb --after pa,pc
+add pa; add pb --after pa,pc --no-early   # 선행 판정만 본다(먼저 띄움은 10f)
 printf '%s\n' "1111aaaa feat: pa-extra 다른 레인" "4444dddd docs(x): pz 문서 번호 (main에 pa가 먼저 착지)" "5555eeee test: 주입 (pa 감사 반영)" >"$T/commits"
 run run
 t "선행: 제목 머리가 아닌 언급(괄호·문장 안)은 안 셈" '[ "$(where pb | cut -d" " -f1)" = wait ] && printf "%s" "$out" | grep -q "선행 pb ← pa: 아직" && printf "%s" "$out" | grep -q "선행 pb ← pc: 아직"'
@@ -542,6 +543,144 @@ mj box-1 shared slow
 req "$IS" iq-d app; req "$IS" iq-l app; printf 'priority\t낮음\n' >>"$IS/iq-l.req"; req "$IS" iq-b app; printf 'priority\t아주\n' >>"$IS/iq-b.req"
 run run
 t "받은편지: priority 없으면 높음, 적혀 있으면 그 값, 모르는 값은 거절" '[ "$(prio_of iq-d)" = high ] && [ "$(prio_of iq-l)" = low ] && [ -z "$(where iq-b)" ] && grep -Fq "priority" "$IS/rejected/iq-b.why" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+
+# 10f. 먼저 띄움(2026-11-18 hcfill-early 사용자 「노는 워커 없이 … 자동으로 처리 되도록」): 큰 일을 쪼개 대기열이 한두 선행에
+# 묶이면 자리가 비어도 띄울 것이 없었다. 띄울 수 있는 것을 다 띄우고도 자리가 남으면 선행에만 묶인 레인을 「먼저 띄움」 절과 함께 띄운다
+col14() { awk -F'\t' -v n="$1" '$1==n {print $14}' "$Q"; }
+fresh
+add e1 --after pa,pc --only slow
+run run
+t "먼저 띄움: 선행이 안 들어간 레인을 빈 자리에 띄우고 대기열 먼저 칸 early" '[ "$(where e1)" = "up slow slow/e1" ] && [ "$(col14 e1)" = early ] && printf "%s" "$out" | grep -q "먼저 띄움 e1 → slow slow/e1" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+rf=$HOME/.local/share/hc-fill/runs/e1-run.md
+t "먼저 띄움 절: run 지시문 = 지시문 + 착지 줄 + 먼저 띄움 절(기다림·기한·rebase)" 'grep -Fq "# 지시문 e1" "$rf" && grep -Fq "### 착지 STEPS e1 slow" "$rf" && grep -q "^## 먼저 띄움" "$rf" && grep -Fq "선행 대기 초과" "$rf" && grep -Fq "git rebase origin/main" "$rf" && grep -Fq "선행 레인(pa, pc)" "$rf" || { cat "$rf"; false; }'
+t "먼저 띄움 절: 선행마다 판정 줄이 따로(두 선행을 한 줄로 이어 붙이지 않음)" '[ "$(grep -c "grep -Eq" "$rf")" = 2 ] && ! grep "grep -Eq" "$rf" | grep -Eq "pa.*pc|pc.*pa" || { cat "$rf"; false; }'
+# 기다림 블록의 조건을 그대로 돌려 본다: 가짜 git(fetch 성공, log는 $T/subjects)
+mkdir -p "$T/eg"; printf '#!/bin/sh\ncase $1 in fetch) exit 0 ;; log) cat "$T_LOG/subjects" ;; esac\n' >"$T/eg/git"; chmod +x "$T/eg/git"
+cond=$(awk '/^until /{f=1; sub(/^until /, "")} f && /^do /{exit} f' "$rf")
+eg() { printf '%s\n' "$@" >"$T/subjects"; PATH="$T/eg:$PATH" sh -c "if $cond
+then echo yes; else echo no; fi" 2>&1; }
+t "먼저 띄움 기다림: 하나만 들어가면 아직" '[ "$(eg "feat(x): pa 끝")" = no ]'
+t "먼저 띄움 기다림: 둘 다 제목 머리에 들어가면 풀림(after_ok와 같은 규칙)" '[ "$(eg "feat(x): pa 끝" "pc: 고침")" = yes ] || { eg "feat(x): pa 끝" "pc: 고침"; printf "%s\n" "$cond"; false; }'
+t "먼저 띄움 기다림: 문장 안 언급·이름 앞머리(pa-extra)는 안 셈" '[ "$(eg "feat: pa-extra" "docs: pa 와 pc 언급" "fix(y): 고침 (pc)")" = no ]'
+run ls
+t "ls: 먼저 띄움(선행 …)" 'printf "%s" "$out" | grep "^e1 " | grep -Fq "먼저 띄움(선행 pa,pc)" || { printf "%s\n" "$out"; false; }'
+fresh
+add e1 --after pa --only slow
+run run --dry-run
+t "먼저 띄움 dry-run: 찍기만" 'printf "%s" "$out" | grep -Fq "[dry-run] 먼저 띄울 e1 → slow" && [ "$(where e1 | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
+
+fresh
+run add --name e2 --project app --brief "$(brief e2)" --after pa --no-early --only slow
+t "add --no-early: 대기열 먼저 칸 no-early, 알림에 「먼저 띄움 끔」" '[ $rc = 0 ] && [ "$(col14 e2)" = no-early ] && printf "%s" "$out" | grep -Fq "먼저 띄움 끔"'
+run run
+t "--no-early: 자리가 비어도 먼저 띄우지 않음" '[ "$(where e2 | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
+run ls
+t "ls: --no-early 줄에 「먼저 띄움 끔」" 'printf "%s" "$out" | grep "^e2 " | grep -Fq "먼저 띄움 끔"'
+
+fresh   # 띄울 수 있는 것이 먼저, 먼저 띄움은 우선순위·넣은 차례
+add el --after pa --priority low --only slow; add n1 --only slow; add eh --after pa --priority high --only slow
+run run
+t "먼저 띄움은 띄울 수 있는 것(n1) 다음: slow 자리 1을 n1이 쓰고 먼저 띄움 없음" '[ "$(where n1)" = "up slow slow/n1" ] && [ "$(where eh | cut -d" " -f1)" = wait ] && [ "$(where el | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+fresh
+add el --after pa --priority low --only slow; add eh --after pa --priority high --only slow
+run run
+t "먼저 띄움 차례: 우선순위 높은 eh가 먼저" '[ "$(where eh)" = "up slow slow/eh" ] && [ "$(where el | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+fresh
+export HC_FAKE_FETCH_FAIL=1; add ef --after pa --only slow; run run; unset HC_FAKE_FETCH_FAIL
+t "선행 판정 못 함(fetch 실패)은 먼저 띄우지 않음" '[ "$(where ef | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
+
+fresh   # 상한: 설정 early = 살아 있는 먼저 띄움 레인 수
+sed -i.bak 's/^early$/early 1/' "$T/conf/hc-fill.tsv"
+add ea --after pa --only box-1; add eb --after pa --only box-1
+run run
+t "먼저 띄움 상한 1: 하나만 띄우고 나머지는 대기, 한 줄" '[ "$(where ea)" = "up box-1 box-1/ea" ] && [ "$(where eb | cut -d" " -f1)" = wait ] && printf "%s" "$out" | grep -Fq "먼저 띄움 상한 1개" || { printf "%s\n" "$out"; false; }'
+lj box-1/ea:claude-code:ea
+run run
+t "먼저 띄움 상한: 띄운 것이 살아 있으면 다음 바퀴에도 더 안 띄움" '[ "$(where eb | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+lj
+run run
+t "먼저 띄움 상한: 띄운 것이 끝나면 다음 것을 띄움" '[ "$(where eb)" = "up box-1 box-1/eb" ] || { printf "%s\n" "$out"; false; }'
+sed -i.bak 's/^early 1$/early 0/' "$T/conf/hc-fill.tsv"
+fresh; add ez --after pa --only slow; run run
+t "설정 early 0: 먼저 띄움 끔" '[ "$(where ez | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ]'
+cp "$EX" "$T/conf/hc-fill.tsv"
+
+# 감사 [중간] 1: 선행이 대기열에 wait로 남아 있으면 뒤 레인을 먼저 띄우지 않는다(뒤 레인이 자리를 다 먹어 선행이 기한까지 못 뜨는 교착)
+fresh   # 시나리오 1: 뒤 레인 b1이 우선순위가 높아도 선행 a1이 먼저 자리를 잡는다
+add a1 --after z1 --only slow; add b1 --after a1 --only slow --priority high
+run run
+t "교착 1: 선행 a1(대기열 wait)을 기다리는 b1은 먼저 띄우지 않고 a1을 먼저 띄움" '[ "$(where a1)" = "up slow slow/a1" ] && [ "$(where b1 | cut -d" " -f1)" = wait ] && printf "%s" "$out" | grep -Fq "먼저 띄움 건너뜀 b1: 선행 a1" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+fresh   # 시나리오 2: 선행 a2가 --no-early면 b2도 먼저 띄우지 않고, z2가 들어가면 a2가 뜬다
+add a2 --after z2 --only slow --no-early; add b2 --after a2 --only slow
+run run
+t "교착 2: --no-early 선행 a2가 대기열 wait면 b2를 먼저 띄우지 않음(자리 비움)" '[ "$(where b2 | cut -d" " -f1)" = wait ] && [ "$(where a2 | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
+echo "7777aaaa feat: z2 끝" >"$T/commits"; run run
+t "교착 2: z2가 들어가면 a2가 자리를 잡음(b2는 그 뒤)" '[ "$(where a2)" = "up slow slow/a2" ] && [ "$(where b2 | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+fresh   # 같은 바퀴에 선행이 먼저 띄움으로 떴으면 뒤 레인도 후보(자리 2인 box-1)
+add c1 --after z3 --only box-1 --priority high; add d1 --after c1 --only box-1
+run run
+t "같은 바퀴에 선행 c1이 먼저 띄움으로 뜨면 d1도 먼저 띄움" '[ "$(where c1)" = "up box-1 box-1/c1" ] && [ "$(where d1)" = "up box-1 box-1/d1" ] || { printf "%s\n" "$out"; false; }'
+
+# 감사 [낮음] 6: 먼저 띄운 레인은 선행이 들어간 뒤에도 다시 뜨지 않는다(살아 있을 때·끝난 뒤), 옛 10·12칸 줄은 14칸으로 채움
+fresh
+mkdir -p "$(dirname "$Q")"; brief o10 >/dev/null; brief o12 >/dev/null
+printf 'o10\tapp\t%s\tz4\tslow\twait\t-\t-\t-\t2026-01-01T00:00\n' "$T/o10.md" >"$Q"
+printf 'o12\tapp\t%s\tz4\tbox-1\twait\t-\t-\t-\t2026-01-01T00:00\t-\t-\n' "$T/o12.md" >>"$Q"
+nf14() { awk -F'\t' -v n="$1" '$1==n {print NF, $12, $13, $14}' "$Q"; }
+run run
+t "옛 10·12칸 줄도 먼저 띄우고 14칸(우선 normal, 먼저 early)으로 채움" '[ "$(where o10)" = "up slow slow/o10" ] && [ "$(where o12)" = "up box-1 box-1/o12" ] && [ "$(nf14 o10)" = "14 - normal early" ] && [ "$(nf14 o12)" = "14 - normal early" ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+echo "8888bbbb fix: z4 끝" >"$T/commits"; : >"$T/lane.log"
+lj slow/o10:claude-code:o10 box-1/o12:claude-code:o12; run run
+t "먼저 띄운 레인: 선행이 들어가도(터미널 살아 있음) 다시 안 띄움" '[ "$(launched --name)" = 0 ] || { printf "%s\n" "$out"; false; }'
+lj; run run
+t "먼저 띄운 레인: 터미널이 끝난 뒤에도 다시 안 띄움" '[ "$(launched --name)" = 0 ] && [ "$(where o10 | cut -d" " -f1)" = up ] || { printf "%s\n" "$out"; false; }'
+
+# 10g. 놀고 있음 알림: 바퀴 끝에도 자리가 남은 기계가 설정 idle분(예시 10) 넘게 이어지면 hc-lane report 사건(watch가 지휘에 보냄)
+IT=$HOME/.local/share/hc-fill/idle.tsv
+back() { awk -F'\t' -v OFS='\t' -v c="$1" -v d="$2" '{$c -= d} 1' "$IT" >"$IT.x" && mv "$IT.x" "$IT"; }   # back <칸> <초>: 시각을 앞당김
+fresh
+run run
+t "놀고 있음: 처음 빈 것은 시각만 적고 알리지 않음(대기열이 비어도 자리를 봄)" '[ $rc = 0 ] && [ ! -e "$T/report.log" ] && grep -q "^box-1	" "$IT" && grep -q "^here	" "$IT" || { printf "%s\n" "$out"; cat "$IT"; false; }'
+back 2 660; run run
+t "놀고 있음: idle분 넘으면 사건 한 번 — 기계·자리 수·분, 레인 이름 hc-fill-idle, 터미널 밖으로" '[ "$(grep -c . "$T/report.log")" = 1 ] && grep -Fq "report 중간 - box-1 자리 2개 11분째 빔" "$T/report.log" && grep -Fq "here 자리 4개 11분째 빔" "$T/report.log" && grep -Fq "대기열에 띄울 것 없음 --name hc-fill-idle" "$T/report.log" && grep -Fq "(터미널 없음)" "$T/report.log" || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+t "놀고 있음: 대기 줄이 없으면 모든 지휘(--to 없음)" '! grep -q -- --to "$T/report.log"'
+run run
+t "놀고 있음: 30분 안에는 다시 안 보냄" '[ "$(grep -c . "$T/report.log")" = 1 ]'
+back 3 1860; run run
+t "놀고 있음: 계속 비면 30분 뒤 다시" '[ "$(grep -c . "$T/report.log")" = 2 ] && grep -Fq "box-1 자리 2개" "$T/report.log"'
+lj box-1/x1:claude-code:a box-1/x2:claude-code:b; run run
+t "놀고 있음: 자리가 차면 그 기계 기록을 지움(다시 비면 처음부터)" '! grep -q "^box-1	" "$IT" && grep -q "^box-2	" "$IT"'
+fresh
+add w1 --after pa --no-early --only slow --coord tq1; add w2 --after pa --no-early --only slow --coord tq2
+run run; back 2 700; rm -f "$T/report.log"; run run
+t "놀고 있음: 대기 줄 주인 지휘들에게만(--to tq1,tq2)" 'grep -Fq -- "--to tq1,tq2" "$T/report.log" || { cat "$T/report.log"; false; }'
+export HC_FAKE_COORD_GONE=tq1; back 3 7300; rm -f "$T/report.log"; run run
+t "놀고 있음: 사라진 주인은 빼고(--to tq2)" 'grep -Fq -- "--to tq2 " "$T/report.log" || { cat "$T/report.log"; false; }'
+export HC_FAKE_COORD_GONE="tq1 tq2"; back 3 7300; rm -f "$T/report.log"; run run
+t "놀고 있음: 살아 있는 주인이 없으면 모든 지휘" '[ -s "$T/report.log" ] && ! grep -q -- --to "$T/report.log" || { cat "$T/report.log"; false; }'
+unset HC_FAKE_COORD_GONE
+add w3 --after pa --no-early --only slow; back 3 7300; rm -f "$T/report.log"; run run
+t "놀고 있음: 주인 없는 대기 줄이 있으면 모든 지휘" '[ -s "$T/report.log" ] && ! grep -q -- --to "$T/report.log" || { cat "$T/report.log"; false; }'
+export HC_FAKE_REPORT_RC=1; back 3 7300; rm -f "$T/report.log"; run run
+t "놀고 있음: 보내기(report) 실패면 한 줄, 보낸 시각을 안 적어 다음 바퀴에 다시" 'printf "%s" "$out" | grep -Fq "놀고 있음 알림 실패" && unset HC_FAKE_REPORT_RC && run run && [ "$(grep -c . "$T/report.log")" = 2 ] || { cat "$T/report.log"; false; }'
+unset HC_FAKE_REPORT_RC
+fresh   # 감사 [낮음] 3: 세 번 보낸 뒤로는 2시간마다
+run run; back 2 700; run run; back 3 1900; run run; back 3 1900; run run
+t "되풀이 상한: 30분마다 세 번" '[ "$(grep -c . "$T/report.log")" = 3 ] || { cat "$T/report.log"; cat "$IT"; false; }'
+back 3 1900; run run
+t "되풀이 상한: 세 번 뒤로는 30분 지나도 안 보냄" '[ "$(grep -c . "$T/report.log")" = 3 ]'
+back 3 7300; run run
+t "되풀이 상한: 2시간 지나면 다시" '[ "$(grep -c . "$T/report.log")" = 4 ] || { cat "$IT"; false; }'
+fresh   # 사유: 먼저 띄움 상한에 걸려 남긴 자리면 그렇게
+sed -i.bak 's/^early$/early 0/' "$T/conf/hc-fill.tsv"
+run run; back 2 700; run run
+t "사유: 먼저 띄움 상한에 안 걸렸으면 「대기열에 띄울 것 없음」" 'grep -Fq "대기열에 띄울 것 없음" "$T/report.log"'
+sed -i.bak 's/^early 0$/early 1/' "$T/conf/hc-fill.tsv"
+add ca --after pa --only box-1; add cb --after pa --only box-1; back 3 7300; rm -f "$T/report.log"; run run
+t "사유: 먼저 띄움 상한에 걸려 남겼으면 「먼저 띄움 상한(early 1)에 걸려 남김」" 'grep -Fq "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log" && ! grep -Fq "대기열에 띄울 것 없음" "$T/report.log" || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
+fresh; run run --dry-run
+t "놀고 있음: dry-run은 기록·알림 없음" '[ ! -e "$IT" ] && [ ! -e "$T/report.log" ]'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

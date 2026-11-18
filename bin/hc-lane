@@ -77,11 +77,12 @@ usage() {
                 push는 HERDR_LAND=1일 때만 받고, 아니면 새 착지 줄을 알리고 거절한다. 다른 브랜치·참조는 통과.
                 다른 pre-push 훅이 있거나 core.hooksPath가 있으면 건드리지 않고 멈춘다. remove는 자기가 넣은 것만 지운다.
                 status 종료: 0 깔림, 1 없음, 3 다른 훅. 원격이 하나도 없는 저장소는 push가 없어 「설치할 것 없음」(종료 0)
-       hc-lane report <중간|완료|착지|막힘|판정> [<sha>|-] [<한 줄>…] [--name <레인>]   (레인 안에서)
+       hc-lane report <중간|완료|착지|막힘|판정> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]]   (레인 안에서)
   report        이 기계 ${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv에 한 줄을 더한다(지우지 않음):
                 시각(UTC)·기계(HC_LANE_MACHINE, 없으면 hostname)·터미널($HC_TERMINAL_ID)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·
                 그때의 hc turn(터미널 밖이면 -). 옛 7칸 줄도 읽는다.
                 레인 이름은 --name → $HC_LANE(hc-lane이 띄울 때 넣음) → hc 터미널 이름 → 작업 트리 가지(기본 가지면 -) 순. sha 자리가 sha가 아니면 한 줄로 본다
+                --to: 받을 지휘를 정한다(아홉째 칸) — 그 지휘들의 watch만 보낸다(레인 주인 판정 대신. hc-fill 「놀고 있음」 알림)
        hc-lane watch --to <지휘 주소> [--all | --on <기계>…] [--state <상태,…>] [--since <시각>] [--mine]
   watch         늘 도는 감시: wait와 같은 판정·같은 커서(seen.<지휘 주소> — wait와 겹쳐 두 번 알리지 않음)로 새 사건이 생기면
                 지휘 터미널에 hc send <지휘> "hc-lane: <레인> <상태> <sha> <한 줄> (<터미널>) ‖ …" 한 번(보낸 뒤에만 커서에 적음,
@@ -174,13 +175,14 @@ jrec() {
       print o }'
 }
 report_cmd() {
-  rn= st= sha= msg= k=0
+  rn= st= sha= msg= k=0 to_=
   while [ $# -gt 0 ]; do
-    case $1 in --name) val "$@"; rn=$2; shift 2; continue ;; -h|--help) usage ;; esac
+    case $1 in --name) val "$@"; rn=$2; shift 2; continue ;; --to) val "$@"; to_=$2; shift 2; continue ;; -h|--help) usage ;; esac
     k=$((k + 1)); case $k in 1) st=$1 ;; 2) sha=$1 ;; 3) msg=$1 ;; *) msg="$msg $1" ;; esac; shift
   done
   case " $evstates " in *" $st "*) [ -n "$st" ] ;; *) false ;; esac ||
     { echo "hc-lane report: 상태는 $evstates 가운데 하나: ${st:-(없음)}" >&2; exit 2; }
+  case $to_ in *[!A-Za-z0-9_.,/-]*) echo "hc-lane report: --to 지휘 주소 글자: $to_" >&2; exit 2 ;; esac
   # 대문자 sha도 sha로(소문자로 적음). 7~40자가 아닌 16진 낱말(DB·CAFE)은 한 줄 칸으로 그대로
   case $sha in
     ''|-) sha=- ;;
@@ -204,7 +206,7 @@ report_cmd() {
     ob=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); ob=${ob#origin/}
     case " main master ${ob:-main} " in *" $lane "*) lane= ;; esac
   fi
-  tail_="$tab${tn:--}"
+  tail_="$tab${tn:--}${to_:+$tab$to_}"
   line="$(utc)$tab$(bcut 64 "$(flat "${m:--}")")$tab$(bcut 64 "$(flat "${HC_TERMINAL_ID:--}")")$tab$(bcut 64 "$(flat "${lane:--}")")$tab$st$tab$(flat "$sha")$tab"
   line=$(bcut $((1000 - ${#tail_})) "$line$(flat "${msg:--}")")$tail_
   mkdir -p "$evdir" || die "report: 폴더를 만들지 못했다: $evdir"
@@ -642,6 +644,9 @@ wfilter() {
     [ -n "$l_" ] || continue
     a_=$(printf '%s\n' "$l_" | cut -f3) n_=$(printf '%s\n' "$l_" | cut -f4)
     [ "$n_" != hc-lane-wait ] || { printf '%s\n' "$l_"; continue; }
+    # 아홉째 칸(report --to): 받을 지휘를 정한 사건은 그 지휘들의 watch만(주인 판정 안 함)
+    t_=$(printf '%s\n' "$l_" | cut -f9)
+    if [ -n "$t_" ] && [ "$t_" != - ]; then case ",$t_," in *",$w0_,"* | *"/$w0_,"*) printf '%s\n' "$l_" ;; esac; continue; fi
     o_=$(owner "$a_")
     [ "$o_" != - ] || { printf '%s\n' "$l_"; continue; }
     [ "$o_" != "$w0_" ] || { prevseen "$a_" "$l_" "$o_" || printf '%s\n' "$l_"; continue; }
