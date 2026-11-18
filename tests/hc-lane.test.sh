@@ -20,6 +20,8 @@ cat >"$T/bin/hc" <<'EOF'
 if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널로 답한다(report의 turn 칸)
   echo "$2" >>"$HCLOG.get"
   [ ! -e "$HCLOG.getdown" ] || { echo "error: cannot reach the core" >&2; exit 1; }   # 코어 연결 실패(「없음」이 아님)
+  # 주소가 $HC_FAKE_GET_ADDR이면 $HC_FAKE_GET_BODY(JSON 한 줄)를 그대로(메인 폴더 앞당김의 status 없는 터미널 판정 시험)
+  [ -z "${HC_FAKE_GET_ADDR-}" ] || [ "$2" != "$HC_FAKE_GET_ADDR" ] || { printf '%s\n' "$HC_FAKE_GET_BODY"; exit 0; }
   # $HC_FAKE_STATUS_AGE초 전에 status가 바뀐 쉬는 터미널(wait 유예 시험)
   # $HC_FAKE_PID가 있으면 그 터미널 프로그램 pid도(배경 작업 프로세스 판정 시험). 앞의 foreground pid는 다른 값
   [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
@@ -401,12 +403,15 @@ rm -f "$R.wt/c-arch/dirt.txt"
 run clean --repo "$R" --branch c-arch --archive
 t "clean --archive: 원격 refs/archive/<가지>-<sha8>에 보관하고 정리" '[ $rc = 0 ] && gone c-arch && [ "$(git -C "$D/origin.git" rev-parse "refs/archive/c-arch-$(printf %.8s "$ca")" 2>/dev/null)" = "$ca" ] || { cat "$T/err"; printf "%s\n" "$out"; false; }'
 
+# 메인 폴더 뒤처짐: 레인을 띄우면 메인 폴더가 앞당겨지니(main-folder-ff), 앞당김을 건너뛰는 꼴(다른 가지 — .gitignore 전 첫 커밋)로 만든다
+git -C "$R" checkout -q -b behind "$(git -C "$R" rev-list --max-parents=0 HEAD)"
 land c-left   # 오늘 상황: remove가 등록은 지웠고 무시 폴더(와 지워진 등록을 가리키는 .git 파일)만 남음
 git -C "$R" worktree remove --force "$R.wt/c-left"
 mkdir -p "$R.wt/c-left/.omc/state" && echo s >"$R.wt/c-left/.omc/state/s.json"
 printf 'gitdir: %s\n' "$R/.git/worktrees/c-left" >"$R.wt/c-left/.git"
 run clean --repo "$R" --branch c-left
 t "clean: 메인 폴더에 그 .gitignore가 아직 없으면(뒤처짐) 남은 폴더는 멈추고 그대로(안전 쪽)" '[ $rc != 0 ] && [ -f "$R.wt/c-left/.omc/state/s.json" ] && git -C "$R" show-ref -q --verify refs/heads/c-left'
+git -C "$R" checkout -q main && git -C "$R" branch -q -D behind
 git -C "$R" pull -q --ff-only
 run clean --repo "$R" --branch c-left
 t "clean: 등록 없이 무시 폴더만 남은 폴더 → 폴더·브랜치 정리" '[ $rc = 0 ] && gone c-left || { cat "$T/err"; false; }'
@@ -1959,6 +1964,115 @@ race 1
 GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" run clean --repo "$R" --branch fr-land
 t "fetch 경합: clean의 fetch도 다시 해 정리" '[ $rc = 0 ] && [ ! -e "$R.wt/fr-land" ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
 unset HC_LANE_FETCH_WAITS
+
+# 메인 폴더 앞당김(2026-11-18 main-folder-ff: 워커 기계 메인 폴더가 이틀 동안 main보다 375~497커밋 뒤라 --read 감사가 옛
+# CLAUDE.md·계약을 읽음): 레인·읽기 레인 띄울 때 fetch 뒤와 land 착지 뒤, 메인 폴더가 깨끗한 기본 브랜치일 때만 --ff-only
+mhead() { git -C "$R" rev-parse HEAD; }
+otip() { git -C "$D/origin.git" rev-parse "${1:-main}"; }
+mk t-ff
+run --name ff-ok --repo "$R" -- true
+t "메인 폴더: 깨끗한 main이면 fetch 뒤 origin/main으로 앞당김" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] && printf "%s" "$out" | grep -Fq "메인 폴더 앞당김" || { cat "$T/err"; false; }'
+seed f1 f1
+run --name ff-rd --read --repo "$R" -- true
+t "메인 폴더: 읽기 레인도 fetch 뒤 앞당김" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] && printf "%s" "$out" | grep -Fq "메인 폴더 앞당김" || { cat "$T/err"; false; }'
+seed f2 f2
+h0=$(mhead); echo dirty >>"$R/a"
+run --name ff-dirty --repo "$R" -- true
+t "메인 폴더: 추적 파일 변경이 있으면 건너뜀·변경 보존, 레인은 뜸" '[ $rc = 0 ] && [ "$(mhead)" = "$h0" ] && grep -Fxq dirty "$R/a" && grep -Fq "메인 폴더 앞당김 건너뜀" "$T/err" && pair --name ff-dirty'
+git -C "$R" checkout -q -- a
+git -C "$R" checkout -qb side
+run --name ff-side --repo "$R" -- true
+t "메인 폴더: 기본 브랜치가 아니면 건너뜀" '[ $rc = 0 ] && [ "$(mhead)" = "$h0" ] && [ "$(git -C "$R" symbolic-ref --short HEAD)" = side ] && grep -Fq "메인 폴더 앞당김 건너뜀" "$T/err"'
+git -C "$R" checkout -q main
+seed u from-origin
+echo mine-untracked >"$R/u"
+run --name ff-ut --repo "$R" -- true
+t "메인 폴더: 추적 안 된 파일이 앞당김과 부딪히면 git이 거절 → 건너뜀·파일 보존" '[ $rc = 0 ] && [ "$(mhead)" = "$h0" ] && grep -Fxq mine-untracked "$R/u" && grep -Fq "메인 폴더 앞당김 건너뜀" "$T/err"'
+rm -f "$R/u"; echo other >"$R/keep-untracked"
+run --name ff-ut2 --on box --repo "$R" -- true
+t "메인 폴더: 부딪히지 않는 추적 안 된 파일은 괜찮음(--on도 hc exec로 그 기계에서)" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] && grep -Fxq other "$R/keep-untracked" && printf "%s" "$out" | grep -Fq "메인 폴더 앞당김 " && grep -Fq -- "--ff-only" "$HCLOG.exec"'
+run --name ff-dry --dry-run --repo "$R" -- true
+t "메인 폴더: dry-run은 할 일만 찍고 건드리지 않음" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "[dry-run] 메인 폴더 앞당김"'
+seed .claude/herdr-verify.sh 'exit 0'
+mklane ff-land
+h1=$(mhead)
+seedp f3 f3
+lnd "$wt"
+t "메인 폴더: land 착지 뒤 앞당김(착지 커밋까지)" '[ $rc = 0 ] && [ "$(otop)" = ff-land ] && [ "$(mhead)" = "$(otip)" ] && [ "$(mhead)" != "$h1" ] && printf "%s" "$out" | grep -Fq "메인 폴더 앞당김" || { cat "$T/err"; false; }'
+echo dirty >>"$R/a"
+mklane ff-land2
+lnd "$wt"
+t "메인 폴더: land 착지 뒤에도 더러우면 건너뜀(착지는 성공)" '[ $rc = 0 ] && [ "$(otop)" = ff-land2 ] && [ "$(mhead)" != "$(otip)" ] && grep -Fxq dirty "$R/a" && grep -Fq "메인 폴더 앞당김 건너뜀" "$T/err"'
+git -C "$R" checkout -q -- a
+seedp .claude/herdr-land.sh 'HERDR_LAND=1 git push -q origin HEAD:main && echo land-script-ok'
+mklane ff-land3
+lnd "$wt"
+t "메인 폴더: herdr-land.sh 착지 뒤에도 앞당김" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq land-script-ok && [ "$(otop)" = ff-land3 ] && [ "$(mhead)" = "$(otip)" ] && printf "%s" "$out" | grep -Fq "메인 폴더 앞당김" || { cat "$T/err"; false; }'
+mk t-ffr   # rebase 중인 메인 폴더(따로 된 클론 — 내 커밋을 지우지 않고 끝낸다)
+seed a a2
+(cd "$R" && echo mine >a && git commit -qm mine -- a && git fetch -q origin && ! git rebase -q origin/main >/dev/null 2>&1)
+run --name ff-rb --repo "$R" -- true
+t "메인 폴더: rebase 중이면 건너뜀(진행 중 표시 그대로)" '[ $rc = 0 ] && [ -d "$R/.git/rebase-merge" ] && grep -Fq "메인 폴더 앞당김 건너뜀" "$T/err" && grep -Fq "진행 중" "$T/err" || { echo "rc=$rc"; cat "$T/err"; false; }'
+git -C "$R" rebase --abort
+# 재감사 고침(audit-main-folder-ff): M1 무시된 파일 덮지 않음, M2 메인 폴더에서 일하는 세션이면 건너뜀, L1 빈 갈래, L4 skip-worktree
+mk t-ffi
+seed .gitignore .env
+run --name ffi-0 --repo "$R" -- true
+echo mine >"$R/.env"
+(cd "$D/seed" && git pull -q --rebase origin main && git rm -q .gitignore && git commit -qm unignore && HERDR_LAND=1 git push -q origin HEAD:main)
+seed .env upstream
+h2=$(mhead)
+run --name ffi-1 --repo "$R" -- true
+t "메인 폴더(M1): 무시된 로컬 파일을 앞당김이 추적하게 되면 덮지 않고 건너뜀·파일 보존" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fxq mine "$R/.env" && grep -Fq "메인 폴더 앞당김 건너뜀: git이 거절" "$T/err" || { cat "$T/err"; false; }'
+rm -f "$R/.env"
+seed m1 m1
+h2=$(mhead)
+ls1() { printf '{"terminals":[{"address":"%s","agent":"claude-code","cwd":"%s","state":"live","status":"%s","turn":3}]}' "$1" "$2" "$3"; }
+HC_FAKE_LS=$(ls1 t5aa "$R/sub" working) run --name ffb-1 --repo "$R" -- true
+t "메인 폴더(M2): 그 폴더(아래)를 cwd로 쓰는 working 터미널이 있으면 건너뜀(주소를 알림)" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "메인 폴더 앞당김 건너뜀: 메인 폴더에서 일하는 세션 t5aa" "$T/err" || { cat "$T/err"; false; }'
+HC_FAKE_LS=$(ls1 t5aa "$R" blocked) run --name ffb-2 --read --repo "$R" -- true
+t "메인 폴더(M2): blocked도 일하는 중(읽기 레인)" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "일하는 세션 t5aa" "$T/err"'
+HC_FAKE_LS=$(ls1 t5aa "$R.wt/other" working) run --name ffb-3 --repo "$R" -- true
+t "메인 폴더(M2): 레인 작업 트리(<저장소>.wt/…)의 working은 상관없음" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] || { cat "$T/err"; false; }'
+seed m2 m2
+HC_FAKE_LS=$(ls1 t5aa "$R" idle) run --name ffb-4 --repo "$R" -- true
+t "메인 폴더(M2): 쉬는(idle) 세션 밑에서는 앞당김" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] || { cat "$T/err"; false; }'
+seed m3 m3
+HC_TERMINAL_ID=t5aa HC_FAKE_LS=$(ls1 t5aa "$R" working) run --name ffb-5 --repo "$R" -- true
+t "메인 폴더(M2): 부른 터미널 자신은 빼고 앞당김" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] || { cat "$T/err"; false; }'
+seed m4 m4; h2=$(mhead)
+HC_TERMINAL_ID=t5aa HC_FAKE_LS=$(ls1 box/t5aa "$R" working) run --name ffb-6 --on box --repo "$R" -- true
+t "메인 폴더(M2): --on이면 그 기계 터미널(<기계>/<주소>)로 판정, 부른 쪽 주소와 같아도 뺌 없음" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "일하는 세션 box/t5aa" "$T/err" || { cat "$T/err"; false; }'
+HC_FAKE_LS_FAIL=1 run --name ffb-7 --repo "$R" -- true
+t "메인 폴더(M2): hc ls 실패면 건너뜀(모르면 안 건드림)" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "건너뜀: hc ls 실패" "$T/err"'
+# 재감사 R-M1: 셸에서 실행기로 띄운 대화형 지휘는 hc ls에 status가 없다(agent zsh) — hc get foreground가 셸이 아니면 일하는 중
+lsz='{"terminals":[{"address":"t5bb","agent":"zsh","cwd":"'"$R"'","state":"live","turn":9}]}'
+fgj() { printf '{"address":"t5bb","foreground":{"argv":["%s"],"name":"%s","pid":%s},"pid":1045,"state":"live","status":null}' "$1" "$1" "$2"; }
+HC_FAKE_LS=$lsz HC_FAKE_GET_ADDR=t5bb HC_FAKE_GET_BODY=$(fgj Python 12534) run --name ffz-1 --repo "$R" -- true
+t "메인 폴더(R-M1): status 없는 터미널이 셸 위에서 무언가 돌리면(하단 줄 지휘) 건너뜀" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "일하는 세션 t5bb" "$T/err" || { cat "$T/err"; false; }'
+HC_FAKE_LS=$lsz HC_FAKE_GET_ADDR=t5bb HC_FAKE_GET_BODY='{"error":{"kind":"not_found"}}' run --name ffz-2 --repo "$R" -- true
+t "메인 폴더(R-M1): status 없는 터미널을 판정 못 하면 일하는 중(건너뜀)" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "일하는 세션 t5bb" "$T/err"'
+HC_FAKE_LS='{"error":"bad"}' run --name ffz-3 --repo "$R" -- true
+t "메인 폴더(R-L1): hc ls 꼴을 못 읽으면 건너뜀" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "건너뜀: hc ls 실패" "$T/err"'
+HC_FAKE_LS=$lsz HC_FAKE_GET_ADDR=t5bb HC_FAKE_GET_BODY=$(fgj zsh 1045) run --name ffz-4 --repo "$R" -- true
+t "메인 폴더(R-M1): status 없는 터미널이 셸만 떠 있으면 앞당김" '[ $rc = 0 ] && [ "$(mhead)" = "$(otip)" ] || { cat "$T/err"; false; }'
+seed m5 m5; h2=$(mhead)
+git -C "$R" checkout -q --detach
+run --name ffl-1 --repo "$R" -- true
+t "메인 폴더(L1): 분리된 HEAD면 건너뜀" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fq "분리된 HEAD" "$T/err"'
+git -C "$R" checkout -q main
+git -C "$R" update-index --skip-worktree a; echo local >"$R/a"
+run --name ffl-2 --repo "$R" -- true
+t "메인 폴더(L4): skip-worktree 표시 파일이 있으면 건너뜀·파일 보존" '[ $rc = 0 ] && [ "$(mhead)" = "$h2" ] && grep -Fxq local "$R/a" && grep -Fq skip-worktree "$T/err"'
+git -C "$R" update-index --no-skip-worktree a; git -C "$R" checkout -q -- a
+ou=$(git -C "$R" remote get-url origin)
+git -C "$R" remote set-url origin "$T/없는 원격.git"
+run --name ffl-3 --read --repo "$R" -- true
+git -C "$R" remote set-url origin "$ou"
+t "메인 폴더(L1): 읽기 레인 fetch 실패면 경고만, 레인은 뜸" '[ $rc = 0 ] && pair --name ffl-3 && grep -Fq "건너뜀: git fetch 실패" "$T/err"'
+(cd "$R" && echo own >own && git add -- own && git commit -qm own -- own)
+run --name ffl-4 --repo "$R" -- true
+t "메인 폴더(L1): 로컬에만 있는 커밋이 있으면 건너뜀" '[ $rc = 0 ] && [ "$(git -C "$R" log -1 --format=%s)" = own ] && grep -Fq "origin/main 에 없는 커밋" "$T/err"'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]
