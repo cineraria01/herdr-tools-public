@@ -42,8 +42,9 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
   if [ -f "$HCLOG.live" ]; then p_=$(awk -v a="$2" '$1 == a { print $2 }' "$HCLOG.live"); [ -z "$p_" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":$p_,\"state\":\"live\"}"; exit 0; }; fi
   # 「mac/…」는 이 기계 자신의 이름이 붙은 주소 꼴: 진짜 hc처럼 machine_unknown
   case $2 in mac/*) echo "{\"error\":{\"kind\":\"machine_unknown\",\"message\":\"unknown machine \\\"mac\\\"\"}}" >&2; exit 4 ;; esac
-  # 살아 있는 터미널(앞의 foreground pid·name은 다른 값 — 진짜 hc 꼴). pid는 $HC_FAKE_LIVE_PID(기본 4242)
-  [ "$2" = "${HC_FAKE_LIVE-}" ] && { echo "{\"address\":\"t1aa\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":${HC_FAKE_LIVE_PID:-4242},\"state\":\"live\",\"status\":{\"state\":\"idle\"}}"; exit 0; }
+  # 살아 있는 터미널(앞의 foreground pid·name은 다른 값 — 진짜 hc 꼴). pid는 $HC_FAKE_LIVE_PID(기본 4242).
+  # status는 $HCLOG.cstat 파일의 JSON 값(배경 watch가 도중에 바뀌게 파일로 — watch-hold), 없으면 idle
+  [ "$2" = "${HC_FAKE_LIVE-}" ] && { s_=$(cat "$HCLOG.cstat" 2>/dev/null) || s_='{"state":"idle"}'; echo "{\"address\":\"t1aa\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":${HC_FAKE_LIVE_PID:-4242},\"state\":\"live\",\"status\":$s_}"; exit 0; }
   # 레인 터미널(라벨 hc-lane=1): 지휘 정보로 적지 않아야 한다
   [ "$2" = "${HC_FAKE_LANETERM-}" ] && { echo "{\"address\":\"$2\",\"labels\":{\"hc-lane\":\"1\"},\"name\":\"lane-x\",\"pid\":5555,\"state\":\"live\"}"; exit 0; }
   # 감시 터미널(라벨 hc-lane-watch=1): 지휘로 보지 않아야 한다
@@ -1644,6 +1645,93 @@ wait $w10; wrc=$?
 t "watch: 그 주소의 pid가 coord와 다르면 hc send 0번, 「지휘 없음」 남기고 종료 0" '[ $wrc = 0 ] && [ ! -s "$HCLOG.send" ] && grep -Fq "지휘 없음" "$T/we" && grep -Fq "지휘 없음" "$WD/watch.log" || { cat "$T/we" "$HCLOG.send"; false; }'
 HC_TERMINAL_ID=t7cc HC_FAKE_LIVE=t7cc run wait --timeout 0
 t "watch가 못 보낸 사건은 커서에 안 적혀 지휘의 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 남의터미널 || { printf "%s\n" "$out"; false; }'
+# watch-hold(2026-11-19 지휘 질문 창에 watch 알림이 답으로 제출됨): 지휘가 질문·권한 창을 띄운 동안(status blocked, 또는 status를
+# 안 알리는 하단 줄 지휘의 화면에 그 창 글자) 보내지 않고 커서에도 안 적는다. 창이 닫히면 쌓인 사건을 한 번에(‖).
+# 상태를 못 읽으면 보낸다(놓치지 않는 쪽), lane.watch_hold_max분(시험은 HC_LANE_WATCH_HOLD_MAX초) 넘게 막혀 있으면 보낸다
+HC_TERMINAL_ID=t7cc HC_FAKE_LIVE=t7cc run wait --timeout 0   # 앞 시험의 남은 사건은 커서로
+rm -f "$HCLOG.send"
+: >"$T/dlg.txt"; export HC_FAKE_SCREEN=$T/dlg.txt   # 지휘 화면(배경 watch가 도중에 바뀐 화면을 보게 파일로)
+echo '{"app":"claude-code","msg":"a } b","state":"blocked"}' >"$HCLOG.cstat"   # msg가 state보다 앞(실제 hc 꼴), 그 안의 「}」(감사 L4)
+HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+wh=$!
+upto '[ -s "$WD/watch.t7cc/pid" ]'
+HC_LANE=lane-h "$LANE" report 완료 abcd1111 창중하나 >/dev/null
+HC_LANE=lane-h2 "$LANE" report 중간 - 창중둘 >/dev/null
+sleep 3
+t "watch-hold: 지휘 status가 blocked면 hc send 0번, 커서에 안 적음" '[ ! -s "$HCLOG.send" ] && ! grep -Fq 창중 "$WD/seen.t7cc" && grep -Fq "질문·권한 창" "$T/we" || { cat "$HCLOG.send" "$T/we"; false; }'
+rm -f "$HCLOG.cstat"
+upto '[ -s "$HCLOG.send" ]'
+sleep 1.5
+t "watch-hold: 창이 닫히면(idle) 쌓인 사건을 한 번에 보냄" '[ "$(sends)" = 1 ] && grep -F 창중하나 "$HCLOG.send" | grep -Fq 창중둘 && grep -Fq 창중하나 "$WD/seen.t7cc" || { cat "$HCLOG.send" "$T/we"; false; }'
+# status를 안 알리는 지휘(하단 줄 실행기 — status null): 화면 맨 아래 덩어리가 질문·권한 창이면 막힘(감사 M2).
+# 표본은 Claude Code 2.1.328 실제 화면(hc read, 가로줄만 줄임): 질문 하나·질문 둘·여러 개 고르기, 권한 창(감사 터미널 실측)
+hr=$(printf '─%.0s' $(seq 1 60))
+ask1() { printf '%s\n' '❯ 질문 하나를 띄워라' "$hr" ' ☐ 색' '' '색을 고르세요?' '' '❯ 1. 빨강' '     빨간색을 고릅니다' '  2. 파랑' '     파란색을 고릅니다' \
+  '  3. Type something.' "$hr" '  4. Chat about this' '' 'Enter to select · ↑/↓ to navigate · Esc to cancel'; }
+ask2() { printf '%s\n' "$hr" '←  ☐ 색  ☐ 맛  ✔ Submit  →' '' '색?' '' '❯ 1. 빨강' '     빨간색' '  2. 파랑' '     파란색' '  3. Type something.' "$hr" '  4. Chat about this' '' \
+  'Enter to select · Tab/Arrow keys to navigate · Esc to cancel'; }
+askm() { printf '%s\n' "$hr" '←  ☐ 과일  ✔ Submit  →' '' '과일?' '' '❯ 1. [ ] 사과' '         사과' '  2. [ ] 배' '         배' '  4. [ ] Type something' '     Submit' "$hr" \
+  '  5. Chat about this' '' 'Enter to select · ↑/↓ to navigate · Esc to cancel'; }
+perm() { printf '%s\n' "$hr" '⏺ Bash(rm -rf x)' " $(printf '╌%.0s' $(seq 1 60))" ' This shell -c script runs rm and could not be checked' \
+  ' ⚠ Claude Code will automatically block this request in 1:41, to avoid holding up an unattended session' ' Do you want to proceed?' ' ❯ 1. Yes' '   2. No' ' Esc to cancel · Tab to amend'; }
+# 평소 화면(지휘 꼴: 입력 칸 위 가로줄에 제목, 아래 하단 줄 실행기 줄들). 대화 글에 창 글자를 인용해도 창이 아니다
+idle() { printf '%s\n' "⏺ $1" '' '✻ Baked for 34s · done 오전 11:49' "$(printf '─%.0s' $(seq 1 40)) 레인 착지 확인 ─" '❯ ' "$hr" '  branch:main | ⇣7' '  [OMC] | Model: Opus 5.5' '  ... (+2 lines)' '  ⏵⏵ auto mode on (shift+tab to cycle)'; }
+# 재감사 R-M1: 화면 위쪽에 남의 입력 칸(지휘가 hc read로 본 레인 화면 — 들여쓰기 5칸)이나 답 끝 가로줄 + 사용자 말 ❯ 줄이 있어도 맨 아래 창은 창
+toolask() { printf '%s\n' '⏺ Bash(hc read t34x | tail -n 4)' "     $hr" '     ❯ ' "     $hr" '     branch:x' '' '⏺ 묻겠습니다.' '' && ask1; }
+mdperm() { printf '%s\n' '⏺ 끝났습니다.' "$hr" '❯ 다음 진행해' '' && perm; }
+rm -f "$HCLOG.send"; echo null >"$HCLOG.cstat"
+HC_LANE=lane-h "$LANE" report 중간 - 화면창 >/dev/null
+for s_ in ask1 ask2 askm perm toolask mdperm; do $s_ >"$T/dlg.txt"; sleep 2.5
+  t "watch-hold: status 없는 지휘 화면이 실제 창($s_)이면 보내지 않음" '[ ! -s "$HCLOG.send" ] && ! grep -Fq 화면창 "$WD/seen.t7cc" || { cat "$HCLOG.send" "$T/we"; false; }'
+done
+idle '끝났습니다.' >"$T/dlg.txt"
+upto '[ -s "$HCLOG.send" ]'
+t "watch-hold: 화면에서 창이 사라지면 보냄" 'grep -Fq 화면창 "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+# 거짓 양성(감사 M2 재현 둘): 지휘 대화 글에 창 글자를 인용하고 평소 입력 칸·하단 줄이 보이면 창이 아니다
+rm -f "$HCLOG.send"; idle '기본 글자는 「Type something」·「Chat about this」·「Tab/Arrow keys to navigate」입니다.' >"$T/dlg.txt"
+HC_LANE=lane-h "$LANE" report 중간 - 인용하나 >/dev/null
+upto '[ -s "$HCLOG.send" ]'
+t "watch-hold: 대화 글에 질문 창 글자 인용 + 입력 칸이면 창 아님(보냄)" 'grep -Fq 인용하나 "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+rm -f "$HCLOG.send"; idle 't34x가 「Do you want to proceed?」 창에 걸림 — tell Claude what to do differently' >"$T/dlg.txt"
+HC_LANE=lane-h "$LANE" report 중간 - 인용둘 >/dev/null
+upto '[ -s "$HCLOG.send" ]'
+t "watch-hold: 대화 글에 권한 창 글자 인용 + 입력 칸이면 창 아님(보냄)" 'grep -Fq 인용둘 "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+stopw $wh
+# status 없음 + hc read 실패: 판정 못 함 → 보냄
+rm -f "$HCLOG.send"
+perm >"$T/dlg.txt"   # 읽혔다면 창
+HC_FAKE_READ_FAIL=1 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+wh=$!
+upto '[ -s "$WD/watch.t7cc/pid" ]'
+HC_LANE=lane-h "$LANE" report 중간 - 못읽음 >/dev/null
+upto '[ -s "$HCLOG.send" ]'
+t "watch-hold: 화면을 못 읽으면(판정 실패) 보냄" 'grep -Fq 못읽음 "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+stopw $wh
+# 오래 막힘(감사 M1): status null + 화면으로 잡은 창은 상한이 지나도 보내지 않고 「보류 중」 한 줄만(바퀴마다 되풀이 안 함)
+rm -f "$HCLOG.send" "$WD/watch.log"; echo null >"$HCLOG.cstat"; ask1 >"$T/dlg.txt"
+HC_LANE_WATCH_HOLD_MAX=2 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+wh=$!
+upto '[ -s "$WD/watch.t7cc/pid" ]'
+HC_LANE=lane-h "$LANE" report 중간 - 화면오래 >/dev/null
+upto 'grep -Fq "보류 중" "$WD/watch.log" 2>/dev/null'
+sleep 3
+t "watch-hold: status null + 창 + 상한 넘음이면 send 0회, 「보류 중」 한 줄(watch.log·stderr)" '[ ! -s "$HCLOG.send" ] && [ "$(grep -c "t7cc 질문 창 .*보류 중" "$WD/watch.log")" = 1 ] && [ "$(grep -c "보류 중" "$T/we")" = 1 ] || { cat "$HCLOG.send" "$WD/watch.log" "$T/we"; false; }'
+stopw $wh
+HC_TERMINAL_ID=t7cc HC_FAKE_LIVE=t7cc run wait --timeout 0
+t "watch-hold: 보류한 사건은 커서에 없어 지휘의 wait가 받음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq 화면오래 || { printf "%s\n" "$out"; false; }'
+# status blocked는 상한(lane.watch_hold_max)이 넘으면 보냄(진짜 hc는 blocked에 안 쳐 창이 닫힐 때까지 미뤄진다)
+rm -f "$HCLOG.send"; echo '{"state":"blocked"}' >"$HCLOG.cstat"
+HC_LANE_WATCH_HOLD_MAX=3 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
+wh=$!
+upto '[ -s "$WD/watch.t7cc/pid" ]'
+HC_LANE=lane-h "$LANE" report 중간 - 오래막힘 >/dev/null
+sleep 1.5
+t "watch-hold: 상한 전에는 안 보냄" '[ ! -s "$HCLOG.send" ] || { cat "$HCLOG.send"; false; }'
+upto '[ -s "$HCLOG.send" ]'
+sleep 2.5
+t "watch-hold: status blocked가 lane.watch_hold_max 넘으면 보냄, 「넘게」 한 줄만" 'grep -Fq 오래막힘 "$HCLOG.send" && [ "$(grep -c "넘게" "$T/we")" = 1 ] || { cat "$HCLOG.send" "$T/we"; false; }'
+stopw $wh
+unset HC_FAKE_SCREEN; rm -f "$HCLOG.cstat" "$HCLOG.send"
 rm -f "$WD/coord.t7cc"
 HC_FAKE_LIVE=t7cc "$LANE" watch --to t7cc >"$T/wo" 2>"$T/we" &
 w11=$!
