@@ -40,6 +40,7 @@ herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 �
 - 저장소 위치: 범용 `HERDR_TOOLS_REPO`(기본 `~/Documents/app/herdr-tools`), 개인 `HERDR_TOOLS_CONFIG`(기본 `~/.config/herdr-tools`). 둘 다 git·main 브랜치·깨끗함이어야 한다. 개인 저장소(`sync.list`)가 없으면 종료 2, 아무것도 쓰지 않는다.
 - 대상 이름: `all`(모든 기계) · `macos`(uname이 Darwin) · `local`(맥만) · 기계 이름을 쉼표로. 옛 이름 `all9`·`mac7`·`mac-only`가 보이면 새 이름을 알리고 종료 2(옛 판은 그것을 기계 이름으로 읽어 아무 데도 안 깔고 「같음」으로 보였다).
 - 순서: 두 저장소 `git pull --ff-only` → `sync.list` 읽기 → `--pull` 처리 → 개인 설정 `sync.prebuild`(있으면 `sh -c`로, 예: 맥 지침에서 Codex 공통 구역 다시 만들기. 실패하면 멈춤) → 맥 ↔ 두 저장소 → 기계마다 파일·설정(`~/.local/bin/herdr-settings-merge`)·지울 것 → 마지막에 기계마다 한 줄 `같음` / `다름 (묶음…)` / `충돌 n건`. 저장소에서 지침 본문을 깔았으면 prebuild와 맥 ↔ 저장소를 한 번 더 돈다.
+- sh를 못 띄우는 기계(Windows 등, hc 오류 `spawn_failed`·`cannot start `)는 `<기계>: 건너뜀 (sh 없음 — Windows 등)`, uname이 Darwin·Linux가 아닌 기계(Git sh의 `MINGW64_NT-…`·`MSYS_NT-…` 등)는 `<기계>: 건너뜀 (OS <uname>)` 한 줄만 찍고 아무것도 쓰지 않는다(`--take`·`--pull`로 집어도). 둘 다 종료 코드에 넣지 않는다. 진짜 연결 실패·시간 초과는 지금처럼 `다름 (연결)`·종료 1이다.
 - 다른 herdr-sync가 돌고 있으면 바로 끝난다(종료 75). 맥이 아닌 곳(`~/Applications/Herdr.app`·`/Applications/Herdr.app`이 없거나 `hc machine ls`에 기계가 없는 곳)에서는 종료 2.
 - 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다. 그 도구가 판정 줄 없이 실패하면 `다름 (도구문제:설정)`으로 보인다(충돌과 다르다).
 - 저장소에 커밋하지 않은 변경이 있으면 아무것도 하지 않고 멈춘다. 표식 없는 `~/.codex/AGENTS.md`는 충돌로 보이고, `--take`하면 codebase-memory-mcp 블록만 남기고 구역을 넣는다(백업).

@@ -25,6 +25,8 @@ case $1 in
     h=$HCT/m/$m
     echo "$m" >> "$HCT/calls"   # 기계마다 hc 호출 수를 센다
     { [ -d "$h" ] && [ ! -e "$h/OFFLINE" ]; } || { echo "connect failed: $m" >&2; exit 1; }
+    # NOSH: PATH에 sh가 없는 기계(Windows 등) — 진짜 hc의 오류 글 그대로
+    [ ! -e "$h/NOSH" ] || { echo '{"error":{"hint":"","kind":"spawn_failed","message":"cannot start sh: program not found"}}' >&2; exit 1; }
     [ $in = 1 ] || exec < /dev/null
     if [ $in = 1 ]; then   # 진짜 hc처럼 입력은 8MB까지만 받는다
       cat > "$HCT/in.$$"
@@ -289,6 +291,35 @@ touch "$W1/OFFLINE"
 run --check
 t "연결 실패: 그 기계는 다름, 종료 1" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -qx "w1: 다름 (연결)" && printf "%s\n" "$out" | grep -qx "lx: 같음"'
 rm -f "$W1/OFFLINE"
+
+# 10-2. sh를 못 띄우는 기계(Windows 등)는 건너뛰고 종료 코드에 넣지 않는다.
+# uname이 Darwin·Linux가 아닌 기계(Git sh의 MINGW64_NT 등)에는 --take·--pull로 집어도 아무것도 쓰지 않는다
+NS=$T/m/ns WG=$T/m/wg
+mkdir -p "$NS" "$WG/.fakebin" && touch "$NS/NOSH"
+printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$WG/.fakebin/uname" && chmod +x "$WG/.fakebin/uname"
+put "$WG/.claude/docs/a.md" 'wg-own\n'
+wgsnap() { (cd "$WG" && find . \( -type f -o -type l \) -exec cksum {} + 2> /dev/null | sort); }
+wg0=$(wgsnap) mac0=$(cat "$MAC/.claude/docs/a.md")
+put "$MAC/.claude/docs/a.md" 'a6\n'
+export HC_FAKE_MACHINES='{"name":"w1"},{"name":"lx"},{"name":"ns"},{"name":"wg"}'
+run --check
+t "--check: sh 없는 기계·다른 OS는 건너뜀 한 줄씩" 'has "ns: 건너뜀 (sh 없음 — Windows 등)" && has "wg: 건너뜀 (OS MINGW64_NT-10.0)" && ! printf "%s" "$out" | grep -q "spawn_failed"'
+run
+t "sh 없는 기계: 건너뜀 한 줄, 종료 0, 다른 기계는 맞춘다" '[ $rc = 0 ] && has "ns: 건너뜀 (sh 없음 — Windows 등)" && ! printf "%s" "$out" | grep -q "ns 연결 실패" && is "$W1/.claude/docs/a.md" "a6\n" && is "$LX/.claude/docs/a.md" "a6\n"'
+t "uname MINGW64_NT: 건너뜀 한 줄, 아무 파일도 안 씀" 'has "wg: 건너뜀 (OS MINGW64_NT-10.0)" && [ "$(wgsnap)" = "$wg0" ]'
+run --check
+t "--check: 다른 기계가 같으면 건너뛴 기계가 있어도 종료 0" '[ $rc = 0 ] && has "ns: 건너뜀 (sh 없음 — Windows 등)" && has "wg: 건너뜀 (OS MINGW64_NT-10.0)" && printf "%s\n" "$out" | grep -qx "w1: 같음"'
+run --take 'wg:*'
+t "다른 OS: --take로 집어도 쓰지 않는다" '[ $rc = 0 ] && [ "$(wgsnap)" = "$wg0" ]'
+run --pull wg:.claude/docs/a.md
+t "다른 OS: --pull로 집어도 가져오지 않는다" '[ $rc = 0 ] && is "$MAC/.claude/docs/a.md" "a6\n" && [ "$(wgsnap)" = "$wg0" ]'
+run --pull ns:.claude/docs/a.md
+t "sh 없는 기계: --pull은 건너뛰고 종료 0" '[ $rc = 0 ] && is "$MAC/.claude/docs/a.md" "a6\n"'
+export HC_FAKE_MACHINES='{"name":"w1"},{"name":"lx"}'
+rm -rf "$NS" "$WG"
+put "$MAC/.claude/docs/a.md" "$mac0\n"
+run
+t "10-2 뒤 되돌림: 다시 같음" '[ $rc = 0 ] && is "$W1/.claude/docs/a.md" "$mac0\n"'
 
 # 11. 설정: 그 기계에서 따로 고친 키는 충돌, --take <기계>:<키>, 도구 문제는 충돌과 구분
 jq '.model = "sonnet"' "$LX/.claude/settings.json" > "$T/s" && mv "$T/s" "$LX/.claude/settings.json"

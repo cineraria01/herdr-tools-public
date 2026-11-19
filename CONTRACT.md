@@ -2,6 +2,7 @@
 
 ## 목표
 1. **명령 하나**: 맥에서 고치고 `herdr-sync`를 돌리면 모든 기계가 맞는다. `herdr-sync --check`는 고치지 않고 모든 기계를 한 표로 보인다. 다름이나 충돌이 하나라도 있으면 종료 1이다. 표의 첫 줄은 맥 ↔ 두 저장소의 방향(`맥: 저장소가 새로움 n개 (…) — herdr-sync로 깐다` · `맥: 저장소보다 새로움 n개 (…) — 커밋 안 됨?` · `맥: 저장소와 같음`)이고, 둘 다 다름이다(종료 1). 기계 줄은 맥 실제 파일과 견주므로, 맥이 저장소보다 뒤면 기계 줄마다 끝에 `(맥 판 기준 — 저장소 새 판은 아직)`을 붙인다.
+   - 맞추는 기계는 sh가 있고 uname이 Darwin·Linux인 곳뿐이다. sh를 못 띄우는 기계(hc 오류 `spawn_failed`·`cannot start `, Windows 등)와 그 밖의 OS(`MINGW64_NT-…`·`MSYS_NT-…` 등)는 `<기계>: 건너뜀 (…)` 한 줄이고, 쓰기·지움·링크·base·설정을 하나도 하지 않으며(`--take`·`--pull`도) 종료 코드에 넣지 않는다.
 2. **정본은 맥의 실제 파일**이고, 두 저장소는 그 기록이다.
    - 범용 저장소(이 저장소, `HERDR_TOOLS_REPO`): 도구·훅·시험·`config.example/`. 개인 값이 0줄이다.
    - 개인 저장소(`HERDR_TOOLS_CONFIG`, 기본 `~/.config/herdr-tools`, 비공개): `sync.list`·`settings/keys.json`·`config`·`hc-fill.tsv`·`private-patterns.txt`·지침 본문·개인 도구.
