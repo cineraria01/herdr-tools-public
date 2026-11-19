@@ -87,5 +87,6 @@
 ## 시험·착지
 - 시험은 네트워크와 실제 기계 없이 돈다. 임시 HOME·임시 저장소와 가짜 `hc`·`ssh`·`git`(PATH 앞), 설정은 `config.example`.
 - 검증은 `bash .claude/herdr-verify.sh`(문법 검사 + 개인 값 검사 + `tests/*.test.sh`), 착지는 `hc-lane land main`이다.
+- 쓰기 레인은 대기열(`hc-fill add`)로 넣는다. 지휘 터미널이 `hc-lane`으로 쓰기 레인을 직접 띄우면(`HC_LANE_FILL=1`·`--direct`·`--read`·`--print-steps`·`--dry-run` 없이) 아무것도 만들지 않고 종료 2다. 꼭 그 자리에 띄울 때만 `--direct`(레인 기록 종류 `direct`). 레인 안·터미널 밖·판정 못 함은 막지 않는다.
 - 끝난 레인 정리는 `hc-lane gc`(main에 다 들어갔고 깨끗하고 쓰는 터미널이 없는 작업 폴더·가지, `--integ`면 들어갔고 하루 지난 `refs/integ/*`만 지운다)이고, hc-fill이 설정 `gc` 분마다 부른다.
 - 레인 폴더의 무시된 보관물 `.qa/`는 손으로 지우지 않는다. `hc-lane clean`이 메인 폴더의 같은 자리로 복사(덮지 않음)하고 모두 같을 때만 지운다(같은 이름의 다른 파일·복사 실패면 멈춤).

@@ -140,11 +140,13 @@ herdr-tools-publish             # 검사 → 공개 main 위에 커밋 하나 �
 ## hc-lane 띄우기 (지시문 사본·신뢰 질문·시작 확인·fetch)
 
 ```sh
-hc-lane --on <기계> --brief <지시문> --name <레인> --repo <그 기계 저장소> -- claude … "{brief} 를 읽고 진행하라"
+hc-fill add --name <레인> --project <프로젝트> --brief <지시문>                            # 쓰기 레인은 대기열로(아래)
+hc-lane --direct --on <기계> --brief <지시문> --name <레인> --repo <그 기계 저장소> -- claude … "{brief} 를 읽고 진행하라"
 hc-lane --on <기계> --read --brief <감사 지시문> --name <레인> --repo <그 기계 저장소>   # -- 뒤가 없으면 설정 lane.run 틀
 hc-lane fetch --on <기계> --repo <그 기계 저장소> [<참조…>]                               # 감사 대상 커밋 받기
 ```
 
+- 쓰기 레인은 대기열로(2026-11-19 — 지휘가 쓰기 레인을 직접 띄워 hc-fill 대기열이 비고, 자리가 나도 이어 뜰 것이 없었다): 지휘 터미널(`$HC_TERMINAL_ID`가 살아 있고 레인·감시 터미널이 아님 — 레인 주인을 정하는 것과 같은 판정)이 쓰기 레인(`--read`·`--print-steps`·`--dry-run` 아님)을 `HC_LANE_FILL=1`(hc-fill이 띄울 때) 없이 띄우면 아무것도 만들기 전에 `hc-lane: 쓰기 레인은 hc-fill add로 대기열에 넣는다 …` 한 줄과 종료 2. 지금 꼭 이 자리에 띄워야 하면 `--direct`(오류 출력 `대기열 밖에서 띄움(--direct)`, 레인 기록 `lanes.tsv` 넷째 칸 `direct` — 직접 띄운 비율을 셀 수 있게. wait·send는 구현 레인과 같게 본다). 레인 안(`HC_LANE`)·터미널 밖(launchd·cron)·레인·감시 터미널·판정 못 함(`hc get` 실패)은 그대로 띄운다.
 - `--brief`: 지시문에 `--print-steps` 착지·정리 절차를 붙인 사본(`--read`는 판정 알림 줄)을 대상 기계에 두고 실행 명령의 `{brief}`를 그 경로로 바꾼다. 자리는 설정 `lane.brief_dir`(그 기계 경로, `~`는 그 기계 집)의 `<레인>-run.md`, 없으면 지시문과 같은 폴더의 `<이름>-run.md`(그 기계에 같은 경로를 쓸 수 없으면 실패하고 `lane.brief_dir`을 알린다). `{brief}`가 없거나 `--brief` 없이 `{brief}`가 있으면 아무것도 만들기 전에 오류.
 - 띄운 직후: 화면에 Claude 폴더 신뢰 질문(`❯ No, exit` / `Yes, I trust this folder`)이 보이면 그 터미널에만 신뢰를 고른다(`lane.auto_trust off`면 안 함). 질문 글자가 다르거나 커서(`❯`)가 어느 줄에도 안 보이면 건드리지 않고 `모름 — 시작 화면 확인`. 외부 가져오기 질문(`Allow external CLAUDE.md file imports?` — 작업 폴더 밖 파일을 `@`로 가져오는 CLAUDE.md)은 `External imports:` 목록 경로가 모두 작업 폴더의 git 저장소(`git -C <작업 폴더> rev-parse --show-toplevel`) 안일 때만 그 터미널에 `Yes, allow external imports`를 고른다(`lane.auto_trust off`면 안 함). 밖이거나 읽을 수 없는 줄(가운데 `…` 생략·`… +N imports not shown.`)이 하나라도 있으면 고르지 않고 `모름 — 외부 가져오기 질문(<경로>)`, 종료 5. 커밋하지 않는 일을 저장소 안 하위 폴더(`.qa/…`)나 저장소가 아닌 폴더에서 띄울 때도 맨 `hc run` 대신 `hc-lane --read --repo <그 폴더>`를 쓰면 이 시작 확인을 받는다(`--read`는 준 폴더 그대로에서 띄우고, 저장소가 아니면 `LANE_BASE`가 빈 값).
 - 시작 확인: `--start-wait <초>`(이 호출만) 또는 `lane.start_wait`초(기본 60, `0`이면 신뢰 질문·시작 확인 끔) 안에 `hc get` status가 안 잡히면 화면 끝 15줄에서 막힘 낱말을 찾아 한 줄로 알린다. 종료 5 시작 안 됨(원인 모름·신뢰 질문·터미널 끝남), 6 로그인·인증(`Login expired`·`/login` 등), 7 키체인. 터미널은 남기고, 마지막 JSON 줄에 `lane` 주소와 `start`(`ok`·`off`·`no_status`·`login`·`keychain`)가 있다. hc status를 내는 에이전트(Claude 등)용이다 — status를 내지 않는 명령·CLI는 `--start-wait 0`으로 띄운다. hc-fill은 5·6·7을 「상태 안 잡힘」으로 받아 그 터미널을 남긴 것으로 적고 그 기계를 빼고 다음 기계로 간다.
@@ -178,6 +180,7 @@ hc-lane fetch --on <기계> --repo <그 기계 저장소> [<참조…>]         
 - 설정 키: `sweep.wt_suffix`(기본 `.wt`), `sweep.orphan_keep`(보지 않을 실행 파일 이름 — `ps comm`(argv[0])으로 견주어 `…/Herdr Core.app/…/herdr-core`처럼 공백 든 경로도 맞음, 기본 `codebase-memory-mcp herdr-core`), `sweep.orphan_kill`(`on`·`off`, 기본 `off` = 찍고 closed.log에 pid·명령마다 「고아 관찰」 한 줄 — 기록을 며칠 보고 `on`). 설정 도구(`herdr-tools-config`, sync.list mac-only)가 곁에 없는 기계는 늘 기본값이라 off(관찰만)다. 켜려면 그 기계에 도구가 있어야 한다.
 - **색인 쓸기**: `hc-sweep`은 매 바퀴 먼저(hc ls 실패와 상관없이) codebase-memory 색인 폴더(`${XDG_CACHE_HOME:-~/.cache}/codebase-memory-mcp`)의 `<이름>.db`(`_config.db` 빼고) 가운데 projects 표의 root_path가 모두 지워진 것을 `-wal`·`-shm`·`-journal`과 함께 지우고 closed.log에 `색인:<이름>`·root·크기를 남긴다. `--min-age`분 안(색인 중)·못 읽음·root가 `/Volumes/` 아래(링크를 풀어서도)·root 읽기 오류면 남긴다. 지운 것이 없으면 요약 줄도 없다. teardown이 돌지 않은 워크트리(옛 워크트리·손으로 지움·rollback)의 색인이 기계마다 수십 GB 쌓였다(2026-11-18).
 - 레인 지시문(`hc-lane --print-steps`) 끝 단계에 「끝내기 전 `pgrep -fl <작업 트리>/`로 확인, 자기 셸·에이전트는 빼고 정확한 pid로 kill」 줄이 붙는다.
+- 쓰기·읽기 레인 지시문(`--print-steps`, `--read` 포함 — hc-fill run 지시문도 이것을 쓴다) 머리에 「임시 파일은 `mktemp -d` 새 폴더, `rm -rf`·`rm -f`에 변수·와일드카드 경로 금지(꼭 지우면 글자 그대로나 `"${X:?}"`)」 줄이 붙는다. 그런 rm은 Claude Code가 권한 창을 띄워 무인 레인을 멈춘다.
 
 ## hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)
 
