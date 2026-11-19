@@ -87,3 +87,4 @@
 - 시험은 네트워크와 실제 기계 없이 돈다. 임시 HOME·임시 저장소와 가짜 `hc`·`ssh`·`git`(PATH 앞), 설정은 `config.example`.
 - 검증은 `bash .claude/herdr-verify.sh`(문법 검사 + 개인 값 검사 + `tests/*.test.sh`), 착지는 `hc-lane land main`이다.
 - 끝난 레인 정리는 `hc-lane gc`(main에 다 들어갔고 깨끗하고 쓰는 터미널이 없는 작업 폴더·가지, `--integ`면 들어갔고 하루 지난 `refs/integ/*`만 지운다)이고, hc-fill이 설정 `gc` 분마다 부른다.
+- 레인 폴더의 무시된 보관물 `.qa/`는 손으로 지우지 않는다. `hc-lane clean`이 메인 폴더의 같은 자리로 복사(덮지 않음)하고 모두 같을 때만 지운다(같은 이름의 다른 파일·복사 실패면 멈춤).

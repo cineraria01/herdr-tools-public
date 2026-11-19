@@ -48,6 +48,8 @@ usage() {
                 들어갔는지 → 추적 변경·무시되지 않은 untracked가 없는지(등록이 지워지고 폴더만 남았으면 저장소
                 .gitignore로) 확인하고, 하나라도 걸리면 아무것도 지우지 않고 멈춘다(종료 1) → .claude/herdr-teardown.sh
                 (있으면, 실패해도 계속) → worktree remove → 남은 무시 파일 폴더 삭제 → branch -d
+                무시된 보관물 .qa/(어느 깊이든)는 teardown 전에 메인 폴더(첫 작업 트리)의 같은 자리로 복사(덮지 않음)하고
+                「옮김 <워크트리>/.qa → <메인>/.qa」 한 줄. 같은 이름의 다른 파일·복사 실패·메인 폴더 없음이면 멈춤(안 지움)
                 --archive(명시할 때만): 다른 곳에서 rebase돼 착지해 안 들어간 것으로 보이는 가지도, 작업 폴더가 깨끗하면 안 들어간
                 커밋을 원격 refs/archive/<가지>-<sha8>에 push해 보관한 뒤 같은 절차로 지운다(가지는 보관한 값일 때만 지움).
                 push가 하나라도 실패하면 아무것도 지우지 않는다. 되살리기: git fetch origin refs/archive/<가지>-<sha8>
@@ -925,14 +927,16 @@ zx() {
 # fetchr <명령…>: git fetch(그대로 또는 x·zx로)를 돌리고, 같은 클론에서 다른 레인의 착지·fetch가 원격 참조를 함께 고쳐 난
 # 참조 잠금 경합(cannot lock ref·unable to update local ref·is at … but expected, 한국어 git 메시지 포함)이면 1·2·4초 쉬고
 # 최대 3번 다시 한다(2026-11-18 워커 기계의 레인 시작 실패 실측). 다른 실패는 바로 그 종료 코드로. 쉬는 간격은
-# HC_LANE_FETCH_WAITS(시험용)
+# HC_LANE_FETCH_WAITS(시험용). 한국어 git(2.56.1 ko 카탈로그, 2026-11-19 mini-m4 실측): 「cannot lock ref」·「is at … but
+# expected」는 번역이 없어 영어 그대로, 「unable to update local ref」→「로컬 레퍼런스를 업데이트할 수 없습니다」,
+# 「Unable to create '….lock': …」→「'….lock'을 만들 수 없습니다: …」
 fetchr() {
   fr_e=$(mktemp "${TMPDIR:-/tmp}/hc-lane-fetch.XXXXXX") || { "$@"; return; }
   for fr_w in ${HC_LANE_FETCH_WAITS:-1 2 4} -; do
     "$@" 2>"$fr_e"; fr_rc=$?
     cat "$fr_e" >&2
     [ $fr_rc != 0 ] && [ "$fr_w" != - ] &&
-      grep -Eq "cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다" "$fr_e" || break
+      grep -Eq "cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다|\.lock'을 만들 수 없습니다" "$fr_e" || break
     echo "hc-lane: git fetch 참조 잠금 경합(같은 클론의 다른 fetch·착지) — ${fr_w}초 뒤 다시" >&2
     sleep "$fr_w"
   done
@@ -1374,6 +1378,43 @@ clean_cmd() {
     echo "보관 $ar ($s_) — 되살리기: git fetch origin $ar"
   done
 
+  # 2.7) 무시된 보관물 .qa: 지우기 전 메인 폴더(첫 작업 트리)의 같은 자리로 복사(덮지 않음)하고, 모든 파일이 메인 쪽과 같을 때만
+  #      지운다(2026-11-19 — 한 레인이 gc의 「무시된 보관물 .qa」를 보고 손으로 지우다 무료 실행 출력을 잃었다). 같은 이름의
+  #      다른 파일이 있거나 복사 실패·메인 폴더 못 찾음이면 아무것도 안 지우고 멈춘다. --on이면 그 기계 안 복사
+  if [ $dir = 1 ]; then
+    mw=$(printf '%s\n' "$wl" | awk 'NR == 1 { p = substr($0, 10) } /^bare/ { p = "" } /^$/ { exit } END { print p }')
+    [ "$mw" != "$wt" ] || mw=
+    gd=$repo; [ $reg = 0 ] || gd=$wt
+    qa=$(x sh -c 'cd "$1" || exit 2
+      r=$(find . -path ./.git -prune -o -type d -name .qa -print -prune) || exit 2
+      [ -n "$r" ] || exit 0
+      f=$(printf "%s\n" "$r" | while IFS= read -r d; do find "$d" ! -type d; done | sed "s|^\./||") || exit 2
+      [ -n "$f" ] || exit 0
+      i=$(printf "%s\n" "$f" | git -C "$3" check-ignore --stdin); [ $? -le 1 ] || exit 2
+      [ -n "$i" ] || exit 0
+      [ -n "$2" ] && [ -d "$2" ] || exit 3
+      [ "$4" = 0 ] || { printf "%s\n" "$i" | sed "s/^/n /"; exit 0; }
+      printf "%s\n" "$i" | while IFS= read -r p; do
+        if [ -e "$2/$p" ] || [ -L "$2/$p" ]; then k=s; cmp -s "$p" "$2/$p" || k=d
+        else k=c; { mkdir -p "$2/$(dirname "$p")" && cp -pP "$p" "$2/$p" && cmp -s "$p" "$2/$p"; } || k=f; fi
+        echo "$k $p"
+      done' hc-lane "$wt" "$mw" "$gd" "$dry")
+    case $? in 0) ;; 3) stop "메인 폴더를 찾지 못해 무시된 .qa를 옮길 수 없다(손으로 옮긴 뒤 다시): $wt" ;;
+      *) stop "무시된 .qa를 메인 폴더로 옮기지 못했다: $wt → ${mw:-?}" ;; esac
+    if [ -n "$qa" ]; then
+      qp=$(printf '%s\n' "$qa" | sed 's/^. //; s|^\(.*\.qa\)/.*|\1|' | sort -u |
+        awk -v w="$wt" -v m="$mw" '{ printf "%s%s/%s → %s/%s", (NR > 1 ? ", " : ""), w, $0, m, $0 }')
+      nf=$(printf '%s\n' "$qa" | grep -c .)
+      if [ $dry = 1 ]; then echo "[dry-run] 무시된 보관물 복사(덮지 않음) 뒤 지움: $qp (파일 ${nf}개)"
+      else
+        dq=$(printf '%s\n' "$qa" | sed -n 's/^d /다름(메인 것 둠) /p; s/^f /복사 실패 /p')
+        [ -z "$dq" ] || stop "무시된 .qa 파일 일부를 메인 폴더로 옮기지 못했다(같은 이름의 다른 파일은 덮지 않는다) — 비교·정리한 뒤 다시. 아무것도 안 지웠다: $wt" "$dq"
+        echo "옮김 $qp (파일 ${nf}개 — 새로 $(printf '%s\n' "$qa" | grep -c '^c '), 이미 같음 $(printf '%s\n' "$qa" | grep -c '^s '))"
+        did="${did:+$did, }.qa 메인 폴더로 복사"
+      fi
+    fi
+  fi
+
   # 3) teardown(있으면, 실패해도 계속 — herdr-teardown.sh의 약속) → worktree remove → 남은 무시 파일 폴더 → branch -d
   if [ $reg = 1 ] && [ $dir = 1 ] && x test -f "$wt/.claude/herdr-teardown.sh"; then
     if [ $dry = 1 ]; then echo "[dry-run] 워크트리에서 bash .claude/herdr-teardown.sh"; td=dry-run
@@ -1530,7 +1571,7 @@ gc_cmd() {
         { keep "$wt" "git status --ignored 실패"; err=1; continue; }
       # ponytail: 보관물은 .qa/ 하나(QA 증거 폴더 관례). 다른 저장소에 보관 폴더가 생기면 여기에 더한다
       qa=$(printf '%s\n' "$ig" | sed -n 's/^!! //p' | grep -E '(^|/)\.qa(/|$)' | tr '\n' ' ')
-      [ -z "$qa" ] || { keep "$wt" "무시된 보관물 ${qa% } (옮긴 뒤 hc-lane clean)"; continue; }
+      [ -z "$qa" ] || { keep "$wt" "무시된 보관물 ${qa% } (hc-lane clean이 메인 폴더로 옮기고 정리 — 손으로 지우지 말 것)"; continue; }
     fi
     what="${branch:+가지 $branch }$(printf %.12s "$h")"
     [ $dry = 0 ] || { gone_ "$wt" "$what"; continue; }

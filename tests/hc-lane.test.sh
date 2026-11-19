@@ -505,6 +505,28 @@ rm -rf "$R.wt/c-det"
 run clean --repo "$R" --branch c-det
 t "clean: 폴더가 없어도 등록의 분리 HEAD가 origin에 없으면 멈춤" '[ $rc != 0 ] && grep -Fq "워크트리 HEAD" "$T/err" && reg c-det'
 
+# clean-qa(2026-11-19): 무시된 보관물 .qa는 메인 폴더의 같은 자리로 복사(덮지 않음)한 뒤 지운다 — 한 레인이 손으로 지우다 출력을 잃었다
+mkdir -p "$R/.git/info" && echo '.qa/' >>"$R/.git/info/exclude"
+land c-qa
+mkdir -p "$R.wt/c-qa/.qa/d1/run" "$R.wt/c-qa/sub/.qa" "$R/.qa/d1"
+echo new >"$R.wt/c-qa/.qa/d1/run/out 1.txt"; echo same >"$R.wt/c-qa/.qa/d1/s.txt"; echo same >"$R/.qa/d1/s.txt"; echo deep >"$R.wt/c-qa/sub/.qa/x"
+run clean --dry-run --repo "$R" --branch c-qa
+t "clean .qa --dry-run: 옮길 것만 알리고 복사·삭제 없음" '[ $rc = 0 ] && [ ! -e "$R/.qa/d1/run" ] && kept c-qa && printf "%s" "$out" | grep -Fq "[dry-run] 무시된 보관물" || { cat "$T/err"; printf "%s\n" "$out"; false; }'
+run clean --repo "$R" --branch c-qa
+t "clean .qa: 메인 폴더 같은 자리로 복사하고 정리(하위 폴더 .qa도)" '[ $rc = 0 ] && gone c-qa && [ "$(cat "$R/.qa/d1/run/out 1.txt")" = new ] && [ "$(cat "$R/sub/.qa/x")" = deep ] || { cat "$T/err"; printf "%s\n" "$out"; false; }'
+t "clean .qa: 옮긴 경로를 한 줄로" 'printf "%s\n" "$out" | grep -F "옮김 $R.wt/c-qa/.qa → $R/.qa" | grep -Fq "파일 3개"'
+land c-qa2
+mkdir -p "$R.wt/c-qa2/.qa/d1" && echo mine >"$R.wt/c-qa2/.qa/d1/s.txt" && echo extra >"$R.wt/c-qa2/.qa/d1/e.txt"
+run clean --repo "$R" --branch c-qa2
+t "clean .qa: 메인에 같은 이름의 다른 파일 → 덮지 않고 그 파일을 알리고 멈춤(안 지움)" '[ $rc != 0 ] && [ "$(cat "$R/.qa/d1/s.txt")" = same ] && [ "$(cat "$R.wt/c-qa2/.qa/d1/s.txt")" = mine ] && kept c-qa2 && reg c-qa2 && grep -Fq "다름(메인 것 둠) .qa/d1/s.txt" "$T/err" || { cat "$T/err"; false; }'
+rm "$R/.qa/d1/s.txt"
+run clean --repo "$R" --branch c-qa2
+t "clean .qa: 비교·정리한 뒤 다시 돌리면 옮기고 정리" '[ $rc = 0 ] && gone c-qa2 && [ "$(cat "$R/.qa/d1/s.txt")" = mine ] && [ "$(cat "$R/.qa/d1/e.txt")" = extra ] || { cat "$T/err"; false; }'
+land c-qa3
+mkdir -p "$R.wt/c-qa3/.qa/on" && echo far >"$R.wt/c-qa3/.qa/on/f"
+run clean --on box --repo "$R" --branch c-qa3
+t "clean --on .qa: 그 기계 안에서 메인 폴더로 복사하고 정리" '[ $rc = 0 ] && gone c-qa3 && [ "$(cat "$R/.qa/on/f")" = far ] || { cat "$T/err"; false; }'
+
 mk t14
 seed .gitignore '.omc/'
 seed .claude/herdr-teardown.sh 'echo td-boom; exit 3'
@@ -1948,6 +1970,10 @@ t "fetch 경합: hc-lane fetch도 unable to update local ref면 다시" '[ $rc =
 race 1
 GITRACE=$T/race GITRACE_MSG="error: 로컬 레퍼런스를 업데이트할 수 없습니다" PATH="$T/racebin:$PATH" run fetch --repo "$R"
 t "fetch 경합: 한국어 git 메시지(로컬 레퍼런스를 업데이트할 수 없습니다)도 다시" '[ $rc = 0 ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+# 한국어 git 카탈로그(git 2.56.1 ko): "Unable to create '%s.lock': %s" → "'%s.lock'을 만들 수 없습니다: %s"
+race 1
+GITRACE=$T/race GITRACE_MSG="error: '$R/.git/refs/remotes/origin/main.lock'을 만들 수 없습니다: File exists." PATH="$T/racebin:$PATH" run fetch --repo "$R"
+t "fetch 경합: 한국어 .lock 만들기 실패('….lock'을 만들 수 없습니다)도 다시" '[ $rc = 0 ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
 race 1
 GITRACE=$T/race GITRACE_MSG="fatal: could not read Username for 'https://github.com'" PATH="$T/racebin:$PATH" run --name fr-auth --repo "$R" -- true
 t "fetch 경합: 다른 실패는 다시 하지 않고 그대로 실패" '[ $rc != 0 ] && [ ! -d "$R.wt/fr-auth" ] && [ "$(fn)" = 1 ] && grep -Fq "could not read Username" "$T/err" || { cat "$T/err"; fn; false; }'
