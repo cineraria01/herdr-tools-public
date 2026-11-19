@@ -75,6 +75,7 @@ echo "$*" >>"$T_LOG/balance.log"
 EOF
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0 HC_FAKE_COORD=t8kk
+unset XDG_STATE_HOME   # hc-lane 레인 기록(lanes.tsv)을 가짜 HOME 아래에서 읽게
 unset HC_TERMINAL_ID   # 시험을 지휘 터미널에서 돌려도 add가 그 주소를 주인으로 잡지 않게(주인 시험은 따로 준다)
 mkdir -p "$HOME"
 : >"$T/commits"
@@ -186,6 +187,88 @@ lj box-1/a:claude-code:a box-1/b:claude-code:b box-2/a:claude-code:a2 box-2/b:cl
 add f3
 run run
 t "자리: all 칸 기계는 done도 다 셈(shared 3개 → slow)" '[ "$(where f3)" = "up slow slow/f3" ]'
+
+# 3b-2. 끝난 레인이 자리를 붙잡지 않게(2026-11-19 fill-seat-free — 착지한 레인·지휘를 몇 시간 기다리는 레인이 444바퀴 자리를 막음).
+#   done·idle + 작업 트리라도 ① 레인 이름이 그 프로젝트 local 저장소 origin/<기본> 커밋 제목 머리에 있으면(선행 판정과 같은 규칙) 안 셈
+#   ② 쉰 지 설정 hold분(기본 60, 0이면 끔)이 넘으면 안 셈. 쉬기 시작한 때는 $DATA/held.tsv(주소<TAB>처음 본 시각)
+HELD=$HOME/.local/share/hc-fill/held.tsv
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+printf '%s\n' "9999ffff fix(x): k1-extra 다른 레인" "aaaa1111 feat(x): k1 끝" >"$T/commits"
+add f4
+run run
+t "자리 ①: done + 작업 트리 + 착지 커밋 → 안 셈(box-1에 1개 → box-1에 뜸)" '[ "$(where f4)" = "up box-1 box-1/f4" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 k1: done, 착지함(aaaa1111) → 안 셈" && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k2 k2: idle, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+t "자리 ①: fetch는 바퀴에 한 번(자리 판정과 선행 판정이 같이 씀)" '[ "$(grep -c "fetch -q origin" "$T/git.log")" = 1 ]'
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+echo "aaaa1111 k1: 끝" >"$T/commits"
+add f4b
+HC_FAKE_FETCH_FAIL=1 run run
+t "자리 ①: fetch 실패면 판정 못 함 → 셈(box-1 꽉 참 → box-2)" '[ "$(where f4b)" = "up box-2 box-2/f4b" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 k1: done, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/k2\t%s\n' $((now - 61 * 60 - 5)) $((now - 10 * 60)) >"$HELD"
+add f5
+run run
+t "자리 ②: 착지 없음 + 쉰 지 hold(60분) 넘음 → 안 셈, hold 안 → 셈(box-1에 뜸)" '[ "$(where f5)" = "up box-1 box-1/f5" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 k1: done, 쉰 지 61분(hold 60) → 안 셈" && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k2 k2: idle, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+t "자리 ②: held.tsv의 처음 본 시각은 그대로 둔다" '[ "$(awk -F"\t" "\$1==\"box-1/k1\" {print \$2}" "$HELD")" = $((now - 61 * 60 - 5)) ]'
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/k2\t%s\n' $((now - 30 * 60)) $((now - 10 * 60)) >"$HELD"
+add f6
+run run
+t "자리 ③: 쉰 지 hold 안(30분) → 셈(box-1 꽉 참 → box-2)" '[ "$(where f6)" = "up box-2 box-2/f6" ]'
+fresh
+sed -i '' 's/^hold .*/hold     0/' "$T/conf/hc-fill.tsv"
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/k2\t%s\n' $((now - 600 * 60)) $((now - 600 * 60)) >"$HELD"
+add f7
+run run
+t "자리 ④: hold 0이면 끔 — 오래 쉬어도 셈(box-2)" '[ "$(where f7)" = "up box-2 box-2/f7" ] && grep -q "^hold *0$" "$T/conf/hc-fill.tsv"'
+cp "$EX" "$T/conf/hc-fill.tsv"
+fresh
+lj "box-1/k1:claude-code:k1:working:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/gone\t%s\n' $((now - 90 * 60)) $((now - 90 * 60)) >"$HELD"
+add f8
+run run
+t "자리 ⑤: working으로 바뀌거나 사라진 주소는 held.tsv에서 빠지고, 새로 쉰 주소는 들어감" '! grep -q "^box-1/k1	" "$HELD" && ! grep -q "^box-1/gone	" "$HELD" && grep -q "^box-1/k2	[0-9][0-9]*$" "$HELD" || { cat "$HELD"; false; }'
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1"
+add f9
+run run --dry-run
+t "자리: dry-run은 held.tsv를 쓰지 않음" '[ ! -e "$HELD" ]'
+# 감사 [낮음] 2: 0으로 시작하는 분 값(08·09)도 십진수로 — $((…))가 8진수로 읽다 죽지 않게(hold·gc·idle·early_wait)
+fresh
+sed -i '' 's/^hold .*/hold     08/; s/^gc .*/gc       09/; s/^idle .*/idle     08/; s/^early_wait .*/early_wait 09/' "$T/conf/hc-fill.tsv"
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/k2\t%s\n' $((now - 9 * 60)) $((now - 2 * 60)) >"$HELD"
+add fb
+run run
+t "설정: hold 08·gc 09·idle 08·early_wait 09도 십진수 — 종료 0, 쉰 지 9분(hold 8) → 안 셈" '[ $rc = 0 ] && [ "$(where fb)" = "up box-1 box-1/fb" ] && printf "%s" "$out" | grep -Fq "쉰 지 9분(hold 8) → 안 셈" || { printf "%s\n" "$out"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
+# 감사 [낮음] 4: 감사·조사 같은 읽기 레인이 레인 작업 트리를 cwd로 써도, hc-lane 레인 기록(lanes.tsv)의 그 주소 마지막 종류가 read면 안 셈
+LT=$HOME/.local/state/hc-lane/lanes.tsv
+fresh
+lj "box-1/k1:claude-code:audit-k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${LT%/*}"; printf 'box-1/k1\told-lane\tt0\nbox-1/k1\taudit-k1\tt0\tread\nbox-1/k2\tk2\tt0\tfill\n' >"$LT"
+add fc
+run run
+t "자리: 레인 기록 종류 read(작업 트리 cwd 감사) → 읽기 레인 → 안 셈, fill은 지금처럼 셈(box-1에 뜸)" '[ "$(where fc)" = "up box-1 box-1/fc" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 audit-k1: done, 읽기 레인(레인 기록) → 안 셈" && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k2 k2: idle, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+rm -f "$LT"
+# 감사 [낮음] 1: 자리 세기 전에 끝나는 바퀴(빈 대기열 + idle 0)는 held.tsv를 비운다 — 묵은 시각을 물려받지 않게. dry-run은 그대로
+fresh
+sed -i '' 's/^idle .*/idle     0/' "$T/conf/hc-fill.tsv"
+mkdir -p "${HELD%/*}"; printf 'box-1/k1\t1\n' >"$HELD"
+run run --dry-run
+t "일찍 끝나는 바퀴: dry-run은 held.tsv를 그대로 둠" '[ $rc = 0 ] && grep -q "^box-1/k1	1$" "$HELD"'
+run run
+t "일찍 끝나는 바퀴(빈 대기열 + idle 0): held.tsv를 비움" '[ $rc = 0 ] && [ -f "$HELD" ] && [ ! -s "$HELD" ] || { printf "%s\n" "$out"; cat "$HELD"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
+cp "$EX" "$T/conf/hc-fill.tsv"; echo "hold     5" >>"$T/conf/hc-fill.tsv"
+fresh; add fa
+run run
+t "설정: hold 줄 두 번이면 종료 1" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "hold 줄이 두 번"'
+cp "$EX" "$T/conf/hc-fill.tsv"
 
 # 4. 선행 조건: origin/<기본>의 커밋 메시지에 레인 이름(단어 경계)
 fresh

@@ -34,6 +34,8 @@ usage() {
          들어갔으면(안 풀린 것은 건너뛰고 다음 것을 본다) 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
          hc get status가 안 잡히면 그 기계를 그 레인에서 빼고 다음 기계로 간다(그 터미널은 끄지 않고 ls 비고에 남긴다).
          남긴 터미널이 나중에 살아나면 「중복 위험」을 찍고 그 레인은 더 띄우지 않는다.
+         자리: working·blocked는 늘 셈. done·idle은 작업 트리(<저장소>.wt/…)가 남은 쓰기 레인만 세되, 레인 이름이 그 프로젝트
+         origin/<기본> 커밋 제목 머리에 있으면(착지함) 또는 설정 hold분(기본 60, 0이면 끔) 넘게 쉬었으면 안 센다(셈 all 기계는 다 셈)
          먼저 띄움: 그러고도 자리가 남으면 --after에만 묶인 대기 레인(--no-early 빼고, 선행 가운데 대기열에서 아직 안 뜬 레인이
          있는 것도 빼고 — 그 선행이 자리를 먼저)을 같은 차례로 띄운다 — run 지시문 끝에
          「먼저 띄움」 절(준비만 → 선행마다 판정 줄로 기다림, 상한 설정 early_wait시간 → 착지 뒤 rebase·본 작업)을 붙이고
@@ -52,7 +54,7 @@ EOF
 
 [ -f "$CONF" ] || die "설정 파일이 없다: $CONF (저장소 config.example/hc-fill.tsv를 복사해 값을 고친다)"
 # 한 값 키: 키 혼자면 빈 값, 같은 키가 두 줄이면 멈춘다
-dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
+dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
 [ -z "$dup" ] || die "설정에 $(echo $dup) 줄이 두 번 있다: $CONF"
 conf() { awk -v k="$1" '$1==k { sub(/^[ \t]*[^ \t]+[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$CONF"; }
 machines() { awk '$1=="machine" { print $2, $3, ($4 == "" ? "-" : $4), ($5 == "" ? "-" : $5) }' "$CONF"; }   # 차례대로: 이름 상한 레인상한 셈
@@ -196,6 +198,7 @@ P=; [ $dry = 1 ] && P='[dry-run] '
 gc_tick() {
   gm=$(conf gc); gm=${gm:-60}
   case $gm in *[!0-9]*) echo "알림: 설정 gc는 분(숫자)이다, 정리 건너뜀: $gm"; return ;; esac
+  gm=$((10#$gm))   # 08·09도 십진수로(감사 [낮음] 2)
   [ "$gm" != 0 ] || return 0
   gl=$(cat "$DATA/gc.last" 2>/dev/null); gn=$(date +%s)
   case $gl in '' | *[!0-9]*) gl=0 ;; esac
@@ -327,9 +330,14 @@ reply_tick() {
   done 6<<<"$(awk -F'\t' '$6=="up" && $11!="" && $11!="-"' "$Q" 2>/dev/null)"
 }
 
+# 자리 세기 전에 끝나는 바퀴(빈 대기열 + idle 0, die 등)는 held.tsv를 비운다 — 그동안 못 본 레인이 묵은 시각을 물려받지 않게
+# (감사 [낮음] 1). 다 세면 HELDW=1. dry-run은 건드리지 않는다
+HELDW=
+trap '[ $dry = 1 ] || [ -n "$HELDW" ] || : 2>/dev/null >"$DATA/held.tsv"' EXIT
 inbox_tick
 IDLE=$(conf idle); IDLE=${IDLE:-10}
 case $IDLE in *[!0-9]*) echo "알림: 설정 idle은 분(숫자)이다, 놀고 있음 알림 끔: $IDLE"; IDLE=0 ;; esac
+IDLE=$((10#$IDLE))
 # 대기열이 비어도 놀고 있음 알림은 자리를 봐야 한다(그때가 「띄울 것 없음」의 바로 그 꼴)
 [ -s "$Q" ] || { echo "대기열 비었음"; [ "$IDLE" != 0 ] || { gc_tick; exit 0; }; }
 
@@ -359,6 +367,44 @@ OFF=   # 이번 바퀴에 연결 안 됨으로 알린 기계
 
 cnt() { printf '%s\n' "$1" | grep -Fxc -- "$2" || true; }
 
+# 선행·착지 판정: local 기계의 프로젝트 저장소에서 fetch(프로젝트마다 바퀴에 한 번) → origin/<기본> 커밋 제목 머리가 레인 이름인 커밋
+# (제목이 「<레인>…」 또는 「<종류>(<범위>): <레인>…」, 단어 경계). 괄호·문장 안 언급과 본문은 세지 않는다
+FETCHED= FETCHBAD=
+fetch_proj() {  # fetch_proj <프로젝트>: FR(local 저장소)·FB(기본 가지)를 둔다. 0 됨, 1 설정에 local repo 줄 없음, 2 fetch 실패
+  FR=$(repo_of "$1" "$LOCAL"); [ -n "$FR" ] || return 1
+  if ! inlist "$1" "$FETCHED"; then
+    FETCHED="$FETCHED,$1"
+    if [ $dry = 1 ]; then echo "${P}fetch 건너뜀: 지금 있는 origin 참조로 판정 ($FR)"
+    elif ! git -C "$FR" fetch -q origin; then FETCHBAD="$FETCHBAD,$1"; fi
+  fi
+  inlist "$1" "$FETCHBAD" && return 2
+  FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
+}
+landed() { git -C "$FR" log "origin/$FB" --format='%h %s' | grep -E -m 1 "^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?$1([^a-z0-9_-]|\$)"; }   # fetch_proj 뒤
+after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 b), 2 판정 못 함
+  fetch_proj "$2"
+  case $? in
+    1) echo "선행 $1: 판정 못 함(설정에 $2 의 $LOCAL repo 줄이 없다)"; return 2 ;;
+    2) echo "선행 $1: 판정 못 함(git fetch 실패: $FR)"; return 2 ;;
+  esac
+  b=$FB ok=0
+  for a in $(printf %s "$3" | tr , ' '); do
+    hit=$(landed "$a")
+    if [ -n "$hit" ]; then echo "선행 $1 ← $a: 들어감 ($hit)"; else echo "선행 $1 ← $a: 아직 (origin/$b)"; ok=1; fi
+  done
+  return $ok
+}
+# lane_landed <레인 이름> <cwd>: cwd의 <저장소>.wt/… 앞 폴더 이름과 repo 줄 경로의 이름이 같은 프로젝트에서 착지했으면 0(LHIT=커밋 줄).
+# 이름이 레인 꼴이 아니거나 프로젝트를 못 찾거나 fetch 실패면 1(판정 못 함 = 셈). 하위 셸로 부르지 않는다(FETCHED가 바퀴에 남게)
+lane_landed() {
+  LHIT=; okname "$1" || return 1
+  lp=${2%%.wt/*}; lp=${lp##*/}
+  lp=$(awk -v n="$lp" '$1=="repo" { x = $0; sub(/^[ \t]*repo[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+/, "", x); sub(/[ \t]+$/, "", x); sub(/\/+$/, "", x); sub(/.*\//, "", x)
+    if (x == n) { print $2; exit } }' "$CONF")
+  [ -n "$lp" ] && fetch_proj "$lp" || return 1
+  LHIT=$(landed "$1"); [ -n "$LHIT" ]
+}
+
 # 자리를 차지한 에이전트(기계 한 줄에 하나). working·blocked 등은 늘 차지. done·idle은 hc-lane 작업 트리(<저장소>.wt/…)가
 # 그 기계에 남은 쓰기 레인(감사·착지를 기다림)만. 읽기 전용(--read)·작업 트리가 정리된 레인은 아니다. 셈 칸이 all인 기계는 다 센다.
 wt_there() {  # wt_there <기계> <폴더> → yes|no|? (확인 못 하면 ?)
@@ -368,21 +414,39 @@ wt_there() {  # wt_there <기계> <폴더> → yes|no|? (확인 못 하면 ?)
   case $v in yes | no) echo "$v" ;; *) echo '?' ;; esac
 }
 ALLM=$(machines | awk '$4 == "all" {print $1}')
+HOLD=$(conf hold); HOLD=${HOLD:-60}
+case $HOLD in *[!0-9]*) echo "알림: 설정 hold는 분(숫자)이다, 쉰 레인도 셈: $HOLD"; HOLD=0 ;; esac
+HOLD=$((10#$HOLD))
+# hc-lane 레인 기록(이 기계 lanes.tsv: 주소 이름 지휘 [종류]): 주소마다 마지막 줄의 종류. read면 작업 트리를 cwd로 써도 읽기 레인
+LKIND=$(awk -F'\t' '{ k[$1] = $4 } END { for (a in k) if (k[a] == "read") print a }' "${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane/lanes.tsv" 2>/dev/null)
+HELD=$(cat "$DATA/held.tsv" 2>/dev/null) HNEW= HNOW=$(date +%s)
 SEATS=
 while IFS=$'\t' read -r -u 5 tm ta tg tn ts tc; do
   [ "$tg" = "$AGENT" ] || continue
   case $ts in done | idle) ;; *) SEATS=$(printf '%s\n%s' "$SEATS" "$tm"); continue ;; esac
+  # 쉬기 시작한 때(held.tsv): 이번 바퀴 done·idle만 이어 적는다 — working·blocked로 바뀌거나 사라진 주소는 빠진다
+  hs=$(printf '%s\n' "$HELD" | awk -F'\t' -v a="$ta" '$1==a {print $2; exit}')
+  case $hs in '' | *[!0-9]*) hs=$HNOW ;; esac
+  HNEW="$HNEW$ta	$hs
+"
   printf '%s\n' "$ALLM" | grep -Fxq -- "$tm" && { SEATS=$(printf '%s\n%s' "$SEATS" "$tm"); continue; }
   case $tc in
     *.wt/*)
+      # 감사·조사(hc-lane --read)가 레인 작업 트리에서 돈 것(감사 [낮음] 4). 기록이 없으면 아래처럼 판정
+      printf '%s\n' "$LKIND" | grep -Fxq -- "$ta" && { echo "자리 $tm $ta $tn: $ts, 읽기 레인(레인 기록) → 안 셈"; continue; }
       case $(wt_there "$tm" "$tc") in
-        yes) echo "자리 $tm $ta $tn: $ts, 작업 트리 있음 → 셈"; SEATS=$(printf '%s\n%s' "$SEATS" "$tm") ;;
-        no) echo "자리 $tm $ta $tn: $ts, 작업 트리 없음 → 안 셈" ;;
-        *) echo "자리 $tm $ta $tn: $ts, 작업 트리 확인 못 함 → 셈"; SEATS=$(printf '%s\n%s' "$SEATS" "$tm") ;;
-      esac ;;
+        yes) tw="작업 트리 있음" ;;
+        no) echo "자리 $tm $ta $tn: $ts, 작업 트리 없음 → 안 셈"; continue ;;
+        *) tw="작업 트리 확인 못 함" ;;
+      esac
+      if lane_landed "$tn" "$tc"; then echo "자리 $tm $ta $tn: $ts, 착지함(${LHIT%% *}) → 안 셈"
+      elif [ "$HOLD" != 0 ] && [ $((HNOW - hs)) -ge $((HOLD * 60)) ]; then echo "자리 $tm $ta $tn: $ts, 쉰 지 $(((HNOW - hs) / 60))분(hold $HOLD) → 안 셈"
+      else echo "자리 $tm $ta $tn: $ts, $tw → 셈"; SEATS=$(printf '%s\n%s' "$SEATS" "$tm"); fi ;;
     *) echo "자리 $tm $ta $tn: $ts, 읽기 전용(작업 트리 아님) → 안 셈" ;;
   esac
 done 5<<<"$TERMS"
+[ $dry = 1 ] || { printf '%s' "$HNEW" >"$DATA/held.tsv.tmp" && mv -f "$DATA/held.tsv.tmp" "$DATA/held.tsv"; }
+HELDW=1
 agents_on() { echo $(( $(cnt "$SEATS" "$1") + $(cnt "$NOW" "$1") )); }
 lanes_on() {  # hc-fill이 그 기계에 띄워 살아 있는 레인 수
   k=0
@@ -390,27 +454,6 @@ lanes_on() {  # hc-fill이 그 기계에 띄워 살아 있는 레인 수
     printf '%s\n' "$TERMS" | awk -F'\t' -v a="$a" '$2==a {f=1} END {exit !f}' && k=$((k + 1))
   done
   echo $((k + $(cnt "$NOWL" "$1")))
-}
-
-# 선행 판정: local 기계의 프로젝트 저장소에서 fetch(프로젝트마다 한 번) → origin/<기본> 커밋 제목 머리가 레인 이름인 커밋
-# (제목이 「<레인>…」 또는 「<종류>(<범위>): <레인>…」, 단어 경계). 괄호·문장 안 언급과 본문은 세지 않는다
-FETCHED= FETCHBAD=
-after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 b), 2 판정 못 함
-  r=$(repo_of "$2" "$LOCAL")
-  [ -n "$r" ] || { echo "선행 $1: 판정 못 함(설정에 $2 의 $LOCAL repo 줄이 없다)"; return 2; }
-  if ! inlist "$2" "$FETCHED"; then
-    FETCHED="$FETCHED,$2"
-    if [ $dry = 1 ]; then echo "${P}fetch 건너뜀: 지금 있는 origin 참조로 판정 ($r)"
-    elif ! git -C "$r" fetch -q origin; then FETCHBAD="$FETCHBAD,$2"; fi
-  fi
-  inlist "$2" "$FETCHBAD" && { echo "선행 $1: 판정 못 함(git fetch 실패: $r)"; return 2; }
-  b=$(git -C "$r" symbolic-ref --short -q refs/remotes/origin/HEAD); b=${b#origin/}; b=${b:-main}
-  ok=0
-  for a in $(printf %s "$3" | tr , ' '); do
-    hit=$(git -C "$r" log "origin/$b" --format='%h %s' | grep -E -m 1 "^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?$a([^a-z0-9_-]|\$)")
-    if [ -n "$hit" ]; then echo "선행 $1 ← $a: 들어감 ($hit)"; else echo "선행 $1 ← $a: 아직 (origin/$b)"; ok=1; fi
-  done
-  return $ok
 }
 
 status_ok() {  # 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지
@@ -584,6 +627,7 @@ done 3<<<"$ROWS"
 # 먼저 띄움: 띄울 수 있는 것을 다 띄우고도 자리가 남으면 선행에만 묶인 레인을 같은 차례(우선순위·넣은 차례)로.
 # 설정 early = 살아 있는 먼저 띄움 레인 수 상한(빈 값이면 남은 자리 전부, 0이면 끔), early_wait = 기다림 기한(시간, 기본 5)
 ECAP=$(conf early) EWAIT=$(conf early_wait); EWAIT=${EWAIT:-5}
+case $EWAIT in *[!0-9]*) ;; *) EWAIT=$((10#$EWAIT)) ;; esac   # 08·09도 십진수로(감사 [낮음] 2), 00은 아래에서 0으로 걸림
 case $ECAP in *[!0-9]*) echo "알림: 설정 early는 개수(숫자)다, 먼저 띄움 끔: $ECAP"; ECAP=0 ;; esac
 case $EWAIT in '' | *[!0-9]* | 0) echo "알림: 설정 early_wait는 1 이상 시간(숫자)이다, 5로: $EWAIT"; EWAIT=5 ;; esac
 if [ -n "$ELIST" ] && [ "$ECAP" != 0 ]; then
