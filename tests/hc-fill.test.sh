@@ -1130,6 +1130,133 @@ t "dry-run은 last.tsv를 쓰지 않음" 'cmp -s "$LR" "$T/lr.before" || { cat "
 TZ=UTC run run; run ls
 t "막힘은 sha 없이 「막힘 09:00 <앞부분>」" 'lrl lr2 | grep -Fq "막힘 09:00 테스트 실패" || { printf "%s\n" "$out"; false; }'
 
+# 10j. 겹침(2026-11-19 lane-overlap-guard 사용자 「rebase 충돌을 근본적으로」, 지휘 검토 반영): 같은 프로젝트의 쓰기 소유 레인(대기열에서
+#      띄운 쓰기 줄 — 터미널이 살아 있고 착지 전)과 겹치는 대기 줄. 예약 = 지시문의 「파일:」·「쓰기:」 줄의 경로(아직 없는 새 파일도)·FR ID,
+#      언급 = 본문의 저장소 경로·FR ID. 설정 overlap: warn(기본 — 띄우고 경고만) · block(예약끼리 겹치면 대기, 언급은 경고) · off
+OR=$T/orepo; mkdir -p "$OR/bin" "$OR/lib" "$OR/docs/frag" "$OR.wt/o1"; : >"$OR/bin/tool"; : >"$OR/lib/b.sh"; : >"$OR/docs/frag/x.md"; : >"$OR/docs/a.md"
+# ofresh [warn|block|off|none]: 저장소 경로를 $OR로, overlap 줄을 그 값으로(none이면 줄을 뺌 — 설정을 안 적은 기존 설치). 사건 파일도 비움
+ofresh() { fresh; rm -f "$T/events"; oe_="s|^overlap[[:space:]].*|overlap  ${1:-warn}|"; [ "${1-}" != none ] || oe_='/^overlap[[:space:]]/d'
+  sed -E -e "s|^(repo[[:space:]]+app[[:space:]]+here[[:space:]]+).*|\1$OR|" -e "$oe_" "$EX" >"$T/conf/hc-fill.tsv"; }
+t "겹침: 예시 설정의 overlap은 warn(처음엔 막지 않음)" 'grep -Eq "^overlap[[:space:]]+warn$" "$EX"'
+oadd() { on_=$1 ob_=$2; shift 2; printf '# 지시문 %s\n%s\n' "$on_" "$ob_" >"$T/$on_.md"; "$FILL" add --name "$on_" --project app --brief "$T/$on_.md" "$@" >/dev/null 2>&1; }
+up() { [ "$(where "$1" | cut -d" " -f1)" = up ]; }
+OW=$HOME/.local/share/hc-fill/overlap-warn.log
+ofresh
+oadd o1 '파일: `bin/tool`'; oadd o2 '- 파일: bin/tool, docs/a.md'
+run run
+t "겹침 warn(기본): 예약이 겹쳐도 띄우고 경고 한 줄·경고 기록" 'up o1 && up o2 && printf "%s" "$out" | grep -Fq "겹침 경고 o2: o1 예약 (bin/tool)" && grep -q "	o2	o1	예약	bin/tool" "$OW" || { printf "%s\n" "$out"; cat "$OW"; false; }'
+ofresh off
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'
+run run
+t "겹침 off: 경고도 없음" 'up o2 && ! printf "%s" "$out" | grep -Fq "겹침" && [ ! -e "$OW" ]'
+ofresh none
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'
+run run
+t "겹침: 설정에 overlap 줄이 없으면(기존 설치) warn — 띄우고 경고" '! grep -q "^overlap" "$T/conf/hc-fill.tsv" && up o1 && up o2 && printf "%s" "$out" | grep -Fq "겹침 경고 o2: o1 예약 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: `bin/tool`을 고친다'; oadd o2 '- 파일: bin/tool, docs/a.md'
+run run
+t "겹침 block: 같은 바퀴에 예약이 겹치는 두 줄은 앞 줄만 뜨고 뒤 줄은 대기, 사유 한 줄" 'up o1 && [ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 o2: o1 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+run ls
+t "겹침 ls: 비고에 「겹침 대기(<앞 레인>: <파일>)」" 'printf "%s\n" "$out" | grep "^o2 " | grep -Fq "겹침 대기(o1: bin/tool)" || { printf "%s\n" "$out"; false; }'
+lj box-1/o1:claude-code:o1; echo "abc1234 o1: 옛 같은 이름 일" >"$T/commits"; run run
+t "겹침 block: 앞 레인이 떠 있는 동안 다음 바퀴에도 대기 — 옛 같은 이름 커밋 제목은 소유를 풀지 않음(아스트라 높음 4)" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+printf '2026-11-19T08:38:00Z\tm\tbox-1/o1\to1\t착지\tabc12345\tmain에 넣음\t2\n' >"$T/events"; run run
+t "겹침 block: 앞 레인 터미널이 그 이름으로 착지 사건을 적으면(터미널이 남아도) 쓰기 소유를 풀어 뜸" 'up o2 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+t "겹침 block(해제 시험 앞): 앞 레인 터미널이 있으면 대기" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+mj box-2 shared slow; lj; run run
+t "겹침 block: 앞 레인 기계가 연결 안 됨이면(끝났는지 모름) 소유 유지 — 대기(아스트라 높음 2)" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow; run run
+t "겹침 block: 연결된 기계에서 앞 레인 터미널이 사라지면 같은 줄이 wait → up" 'up o2 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1; run run
+lj; run run   # 연결된 동안 사라져 풀림(대기열 줄은 「끝남」 up 그대로)
+mj box-2 shared slow; oadd o2 '파일: bin/tool'; run run
+t "겹침 block: 연결된 동안 사라져 풀린 옛 up 줄은 기계가 끊겨도 소유로 안 되살아남(hc-fill 감사 중간 1)" '[ "$(where o1 | cut -d" " -f1)" = up ] && up o2 && ! printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run
+lj box-1/o1:claude-code:other-lane; oadd o2 '파일: bin/tool'; run run
+t "겹침 block: 대기열 주소를 다른 이름 터미널이 쓰면(주소 재사용) 그 레인은 끝남 — 소유 풂" '[ "$(where o1 | cut -d" " -f3)" = box-1/o1 ] && up o2 || { printf "%s\n" "$out"; cat "$Q"; false; }'
+ofresh block
+lj box-2/w1:claude-code:w1; oadd w1 '파일: bin/tool'; oadd w2 '파일: bin/tool'
+run run
+t "겹침 block: 대기열이 wait인데 같은 이름 터미널이 이미 일하면 그 예약도 소유(아스트라 높음 3)" 'printf "%s" "$out" | grep -Fq "이미 떠 있음 w1" && [ "$(where w2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 w2: w1" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run
+lj "box-1/o1:claude-code:o1:idle:$OR.wt/o1"; printf 'box-1/o1\t%s\n' $(( $(date +%s) - 7200 )) >"$HOME/.local/share/hc-fill/held.tsv"
+oadd o2 '파일: bin/tool'; run run
+t "겹침 block: 자리의 hold 만료(쉰 지 오래 — 자리는 안 셈)와 쓰기 소유는 따로 — 소유는 그대로라 대기" 'printf "%s" "$out" | grep -Fq "자리 box-1 box-1/o1 o1: idle, 쉰 지" && [ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o3 '파일: lib/b.sh'
+run run
+t "겹침 block: 안 겹치는 예약은 함께 뜸" 'up o1 && up o3 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd m1 'bin/tool 을 고친다'; oadd m2 '`bin/tool`과 docs/a.md를 본다'
+run run
+t "겹침 block: 본문 언급끼리는 막지 않고 경고(언급)" 'up m1 && up m2 && printf "%s" "$out" | grep -Fq "겹침 경고 m2: m1 언급 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd n1 '파일: bin/new-tool, FR-TRV-005'; oadd n2 '파일: ./bin/./new-tool'; oadd n3 "- 쓰기: \`FR-TRV-005\` 문장"; oadd n4 "파일: $OR/bin/new-tool"
+oadd n5 '파일: /home/me/src/app.wt/other-lane/bin/new-tool'; oadd n6 '파일: lib/../bin//new-tool'; oadd n7 '파일: /home/me/src/app/bin/new-tool'
+oadd r1 '파일: /Users/x/other.wt/l/bin/new-tool, ../bin/new-tool, /srv/elsewhere/bin/new-tool'
+run run
+t "겹침 block: 새 파일·FR ID도 예약, ./ · .. · 겹 / · local·원격 repo 줄 절대 경로 · 그 .wt 경로는 저장소 상대로(아스트라 중간 2)" 'up n1 && [ "$(for x in n2 n3 n4 n5 n6 n7; do where $x; done | sort -u)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 n3: n1 (FR-TRV-005)" || { printf "%s\n" "$out"; false; }'
+t "겹침 block: 다른 프로젝트 .wt·저장소 밖(..)·모르는 절대 경로는 버림" 'up r1 || { printf "%s\n" "$out"; false; }'
+ofresh block; : >"$OR/docs/안내.md"; : >"$OR/Makefile"
+oadd k1 '파일: docs/안내.md (new), lib/c.sh (new)'; oadd k2 '파일: docs/a.md, lib/d.sh (new)'; oadd k3 '파일: `docs/안내.md`'
+run run
+t "겹침 block: 한글 파일명은 통째로, 뒤 설명 「(new)」은 키가 아님(아스트라 중간 3)" 'up k1 && up k2 && [ "$(where k3)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 k3: k1 (docs/안내.md)" || { printf "%s\n" "$out"; false; }'
+oadd sx1 '- 파일: `bin/tool` (the run section only, see README), e.g. new docs'; oadd sx2 '쓰기: lib/b.sh (only new docs, see README)'
+run run
+t "겹침 block: 「파일:」 항목의 설명 낱말(see·only·docs·e.g)은 예약 키가 아님(hc-fill 감사 낮음 1)" 'up sx1 && up sx2 && ! printf "%s" "$out" | grep -Fq "겹침 대기 sx2" || { printf "%s\n" "$out"; false; }'
+: >"$OR/README.md"; oadd rd1 '- 파일: lib/e.sh, README'; oadd rd2 '파일: `README.md`'
+run run
+t "겹침 block: 「파일:」의 맨 이름 README는 확장자 붙은 맨 위 파일 README.md로(2차 낮음 1)" 'up rd1 && [ "$(where rd2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 rd2: rd1 (README.md)" || { printf "%s\n" "$out"; false; }'
+oadd mk1 'Makefile를 고친다'; oadd mk2 '`Makefile` 을 본다'
+run run
+t "겹침 언급: 확장자 없는 맨 위 실제 파일(Makefile)도, 끝 조사는 뗌" 'up mk1 && up mk2 && printf "%s" "$out" | grep -Fq "겹침 경고 mk2: mk1 언급 (Makefile)" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd d1 '파일: `docs/`'; oadd d2 '파일: docs/a.md'
+run run
+t "겹침 block: 폴더 예약은 그 아래 파일과 겹침" 'up d1 && [ "$(where d2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block; echo "overlap_ignore app docs/frag/* CHANGELOG.md" >>"$T/conf/hc-fill.tsv"
+oadd g1 '파일: docs/frag/x.md'; oadd g2 '파일: docs/frag/x.md, CHANGELOG.md'
+run run
+t "겹침: 설정 overlap_ignore의 glob은 겹침으로 안 셈" 'up g1 && up g2 && ! printf "%s" "$out" | grep -Fq 겹침 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1
+oadd hi '파일: bin/tool' --priority high; oadd lo '파일: lib/b.sh' --priority low
+run run
+t "겹침 block: 우선 높은 겹침 대기 줄이 낮은 안 겹치는 줄을 막지 않음" '[ "$(where hi)" = "wait - -" ] && up lo || { printf "%s\n" "$out"; false; }'
+run add --name ok --project app --brief "$T/hi.md" --overlap-ok
+t "add --overlap-ok: 알림에 「겹침 봄 끔」" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "겹침 봄 끔"'
+run run
+t "--overlap-ok: 겹쳐도 뜸" 'up ok && [ "$(where hi)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+oadd a1 '파일: bin/tool' --after o1 --only slow; oadd a2 '파일: bin/tool' --after pz --only box-2
+run run
+t "겹침+먼저 띄움: 선행(--after)이 떠 있으면 그 선행 예약도 막음(선행이 먼저 — 아스트라 높음 1), 다른 소유 레인과도" '[ "$(where a1)" = "wait - -" ] && [ "$(where a2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 a1: o1" && printf "%s" "$out" | grep -Fq "겹침 대기 a2: o1" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd e1 '파일: bin/tool' --after p9 --only slow; run run; lj slow/e1:claude-code:e1
+t "겹침+먼저 띄움(앞): 선행이 대기열에 없으면 후속을 먼저 띄움" 'up e1 && [ "$(col14 e1)" = early ] || { printf "%s\n" "$out"; false; }'
+oadd p9 '파일: bin/tool' --only box-1; run run
+t "겹침+먼저 띄움: 나중에 넣은 선행은 그 선행을 기다리는 후속 예약에 막히지 않음(교착 없음)" 'up p9 && ! printf "%s" "$out" | grep -Fq "겹침 대기 p9" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+printf '# 감사\n파일: bin/tool, lib/b.sh\n' >"$T/aud.md"
+printf 'audit-o1\tapp\t%s\t-\tbox-1\twait\t-\t-\t-\t2026-11-19T00:00\t-\t-\turgent\tno-early\taudit=o1\n' "$T/aud.md" >>"$Q"
+oadd x1 '파일: lib/b.sh'
+run run
+t "겹침: 읽기 감사 줄은 겹침을 안 보고(그대로 뜸) 같은 바퀴의 쓰기 소유도 아님(아스트라 중간 4)" 'up audit-o1 && up x1 && ! printf "%s" "$out" | grep -Fq "겹침 대기" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; oadd o2 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+run run; back 2 700; rm -f "$T/report.log"; run run
+t "놀고 있음: 「겹침 대기 n줄」 사유는 그 줄을 받을 수 있는 기계(box-1)에만, 다른 기계는 「띄울 것 없음」(아스트라 중간 5)" 'grep -F "box-1 자리 1개" "$T/report.log" | grep -Fq "(겹침 대기 1줄) — 겹침 대기" && grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-2 자리 2개" && ! grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-1 " && ! grep -F "겹침 대기" "$T/report.log" | grep -Fq "box-2 " || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
+
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh
 ln -s "$FILL" "$T/hc-fill"

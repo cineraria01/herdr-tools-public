@@ -24,6 +24,10 @@
 #          높음·중간이 0이면 레인에 「감사 통과」, 아니면 「감사 지적」을 hc send. 틀 자리: {lane} {machine} {worktree} {branch}
 #          {sha} {base} {brief}(그 기계의 레인 run 지시문) {report}(그 기계 ~/.local/share/hc-fill/reports/audit-<레인>.md)
 # audit_max  감사 지적 뒤 고침 바퀴 상한(빼면 2). 넘으면 그 레인 주인 지휘에 hc-lane report 막힘 「… 지휘 판단」
+# overlap  겹침: warn|block|off(빼거나 키 혼자면 warn). 대기 줄을 띄우기 전에 같은 프로젝트의 쓰기 소유 레인(대기열에서 띄운
+#          쓰기 줄 — 터미널이 살아 있고 착지 전)과 견준다. 예약 = 지시문 「파일:」·「쓰기:」 줄의 경로(새 파일도)·FR ID, 언급 = 본문의
+#          저장소 경로·FR ID. warn은 띄우고 경고만(~/.local/share/hc-fill/overlap-warn.log), block은 예약끼리 겹치면 대기(언급은 경고)
+# overlap_ignore  <프로젝트> <glob>…  겹침으로 안 셀 저장소 상대 경로(문서 조각 폴더 등). 여러 줄 가능, 빼면 없음
 local    here
 agent    claude-code
 coord    t0
@@ -36,6 +40,8 @@ idle     10
 hold     60
 #audit   ~/.config/herdr-tools/hc-fill-audit.md
 audit_max 2
+overlap  warn
+#overlap_ignore app docs/fragments/*
 #
 # machine  이름  상한  레인상한  셈     (위에서부터 차례대로 빈 자리를 찾는다)
 #   상한     그 기계의 자리를 차지한 에이전트(agent 종류) 수가 이 값 미만일 때만 띄운다. 다른 사람·루프가 띄운 것도 센다.

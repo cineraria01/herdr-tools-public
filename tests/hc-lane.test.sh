@@ -626,6 +626,74 @@ lnd "$wt" main
 t "land: rebase 충돌이면 종료 3, push 안 함" '[ $rc = 3 ] && [ "$(otop)" = x ] && grep -Fq "rebase --continue" "$T/err"'
 git -C "$wt" rebase --abort 2>/dev/null
 
+# 15r. rerere(2026-11-19 lane-overlap-guard 사용자 「rebase 충돌이거 계속 일어나서 … 근본적으로」): 쓰기 레인 작업 트리를 만들 때
+#      저장소에 rerere.enabled·rerere.autoUpdate가 정해져 있지 않으면 true로. land는 rerere가 다 푼 rebase를 이어 간다
+mk t15rr
+t "rerere: 처음엔 저장소에 값이 없다(시험 전제)" '! git -C "$R" config --get rerere.enabled >/dev/null'
+run --read --name l-rd --repo "$R" -- true
+t "rerere: 읽기 레인(--read)은 켜지 않음" '[ $rc = 0 ] && ! git -C "$R" config --get rerere.enabled >/dev/null'
+git -C "$R" config rerere.enabled false
+run --name l-rf --repo "$R" -- true
+t "rerere: 이미 false면 그대로(사용자가 끈 것), 정하지 않은 autoUpdate만 true" '[ $rc = 0 ] && [ "$(git -C "$R" config --get rerere.enabled)" = false ] && [ "$(git -C "$R" config --get rerere.autoUpdate)" = true ]'
+mk t15rc
+seed x base
+seed .claude/herdr-verify.sh 'exit 0'
+run --name l-rr --repo "$R" -- true; wt="$R.wt/l-rr"
+t "rerere: 쓰기 레인 작업 트리를 만들면 저장소에 rerere.enabled·autoUpdate true" '[ "$(git -C "$R" config --get rerere.enabled)" = true ] && [ "$(git -C "$R" config --get rerere.autoUpdate)" = true ]'
+(cd "$wt" && echo lane >x && git commit -qm l-rr -- x); l0=$(git -C "$wt" rev-parse HEAD)
+seed x other
+lnd "$wt" main
+t "rerere: 처음 충돌은 그대로 종료 3" '[ $rc = 3 ] && [ "$(otop)" = x ]'
+(cd "$wt" && printf 'lane\nother\n' >x && git add -- x && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$wt" reset -q --hard "$l0"   # 착지 전으로(다시 서는 착지가 같은 충돌을 다시 만나는 꼴)
+lnd "$wt" main
+t "rerere: 같은 충돌은 rerere가 풀고 land가 rebase를 이어 가 착지" '[ $rc = 0 ] && [ "$(otop)" = l-rr ] && [ "$(git -C "$D/origin.git" show main:x | paste -sd , -)" = lane,other ] && grep -Fq rerere "$T/err" || { cat "$T/err"; false; }'
+# 지휘 검토 ④: 미병합(U)이 비었다는 것만으로 --continue 하지 않는다 — 일부만 풀렸거나 충돌이 아닌 중단이면 멈춤 그대로
+mk t15rp
+seed x base; seed y base
+seed .claude/herdr-verify.sh 'exit 0'
+run --name l-rp --repo "$R" -- true; wt="$R.wt/l-rp"
+(cd "$wt" && echo lane >x && echo lane-y >y && git commit -qm l-rp -- x y); l0=$(git -C "$wt" rev-parse HEAD)
+seed x other
+lnd "$wt" main
+(cd "$wt" && printf 'lane\nother\n' >x && git add -- x && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$wt" reset -q --hard "$l0"
+seedp y other-y   # x와 다른 충돌 내용(rerere는 충돌 덩어리 내용으로 풀이를 찾는다 — 같으면 y도 x 풀이로 풀린다)
+lnd "$wt" main
+t "rerere: 기록 풀이가 일부(x)만 적용되면 종료 3, rebase 멈춤 그대로(y 미병합)" '[ $rc = 3 ] && git -C "$wt" rev-parse -q --verify REBASE_HEAD >/dev/null && [ "$(git -C "$wt" diff --name-only --diff-filter=U)" = y ] && ! grep -Fq "이어 간다" "$T/err" || { cat "$T/err"; false; }'
+git -C "$wt" rebase --abort 2>/dev/null
+mk t15rh
+seed .claude/herdr-verify.sh 'exit 0'
+run --name l-rh --repo "$R" -- true; wt="$R.wt/l-rh"
+(cd "$wt" && echo lane >z && git add -- z && git commit -qm l-rh -- z)
+seed x other
+printf '#!/bin/sh\necho pre-rebase-refused >&2\nexit 1\n' >"$R/.git/hooks/pre-rebase"; chmod +x "$R/.git/hooks/pre-rebase"
+lnd "$wt" main
+rm -f "$R/.git/hooks/pre-rebase"
+t "rerere: 충돌이 아닌 중단(훅 실패)은 이어 가지 않고 종료 3, push 안 함" '[ $rc = 3 ] && [ "$(otop)" = x ] && grep -Fq pre-rebase-refused "$T/err" && ! grep -Fq "이어 간다" "$T/err" || { cat "$T/err"; false; }'
+# 아스트라 감사 중간 1: 미병합 확인 명령(git rerere remaining)이 실패하면(빈 출력·128) 이어 가지 않는다
+mk t15rm
+seed x base
+seed .claude/herdr-verify.sh 'exit 0'
+run --name l-rm --repo "$R" -- true; wt="$R.wt/l-rm"
+(cd "$wt" && echo lane >x && git commit -qm l-rm -- x); l0=$(git -C "$wt" rev-parse HEAD)
+seed x other
+lnd "$wt" main
+(cd "$wt" && printf 'lane\nother\n' >x && git add -- x && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$wt" reset -q --hard "$l0"
+mkdir -p "$T/gitfail"; rg_=$(command -v git)
+printf '#!/bin/sh\n[ "$1 $2" = "rerere remaining" ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gitfail/git"; chmod +x "$T/gitfail/git"
+PATH="$T/gitfail:$PATH" lnd "$wt" main
+t "rerere: 확인 명령(rerere remaining)이 실패하면 이어 가지 않고 종료 3, rebase 멈춤 그대로" '[ $rc = 3 ] && [ "$(otop)" = x ] && git -C "$wt" rev-parse -q --verify REBASE_HEAD >/dev/null && ! grep -Fq "이어 간다" "$T/err" || { cat "$T/err"; false; }'
+git -C "$wt" rebase --abort 2>/dev/null
+# 아스트라 감사 중간 6: 값은 새 작업 트리(레인 가지)의 유효 값 — 전역 includeIf onbranch로 그 가지에만 준 false는 그대로(저장소에 true를 안 씀)
+mk t15ri
+printf '[rerere]\n\tenabled = false\n' >"$T/rr-off.gitconfig"
+printf '[includeIf "onbranch:l-ri"]\n\tpath = %s\n' "$T/rr-off.gitconfig" >"$T/.gitconfig"
+run --name l-ri --repo "$R" -- true; wt="$R.wt/l-ri"
+rm -f "$T/.gitconfig"
+t "rerere: 조건부(includeIf onbranch) false는 보존 — 저장소 설정에 enabled를 안 씀, autoUpdate만" '[ $rc = 0 ] && ! git -C "$R" config --local --get rerere.enabled >/dev/null && [ "$(git -C "$R" config --local --get rerere.autoUpdate)" = true ] || { cat "$T/err"; git -C "$R" config --local --list; false; }'
+
 mk t15l   # .claude/herdr-land.sh가 있으면 그것에 맡긴다
 seed .claude/herdr-verify.sh 'echo should-not-run; exit 9'
 seed .claude/herdr-land.sh 'echo "land-script $1 HERDR_LAND=${HERDR_LAND-} $(basename "$PWD")"; exit 6'

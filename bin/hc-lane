@@ -69,6 +69,9 @@ usage() {
                 HERDR_LAND=1 git push origin HEAD:<기본>(fast-forward만, 거절이면 fetch부터 HERDR_LAND_TRIES번, 기본 5)
                 origin이 없으면 fetch·push 대신 로컬 <기본> 기준으로 rebase하고, 메인 클론의 로컬 <기본>을 fast-forward로 올린다
                 (<기본>이 체크아웃된 폴더면 그 폴더에서 merge --ff-only, 아니면 update-ref. 앞서 나갔으면 처음부터 다시)
+                rebase가 내용 충돌로 멈췄는데 rerere가 기록한 풀이로 그 충돌 경로를 모두 풀었으면(미병합·rerere remaining 없음)
+                GIT_EDITOR=true git rebase --continue로 이어 간다. 일부만 풀렸거나 충돌이 아닌 중단(훅 등)이면 멈춘 그대로 종료 3
+                (쓰기 레인 작업 트리를 만들 때 저장소에 rerere.enabled·rerere.autoUpdate가 정해져 있지 않으면 true로 켠다)
                 종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음
                 검증(herdr-land.sh면 그 전체) 출력은 화면 그대로 + ${XDG_STATE_HOME:-~/.local/state}/hc-lane/land-logs/<레인>-<시각>-<pid>.log
                 (14일 지난 것은 지움). 실패면 실패 줄(--- FAIL·FAIL <패키지>·panic·(fail)·✗·✖·not ok, 최대 40줄 — 이번에 생긴
@@ -1118,6 +1121,19 @@ lfail() {
   [ -z "${HC_LANE-}" ] || (report_cmd 중간 - "land 실패(종료 $1) — 전체 로그 $llog") >/dev/null 2>&1 || true
 }
 mainwt() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }   # 메인 폴더(첫 작업 트리)
+rr_paths() { printf '%s\n' "$1" | sed -n 's/^CONFLICT ([^)]*): Merge conflict in //p'; }   # LC_ALL=C rebase 출력의 내용 충돌 경로
+# rr_ok <rebase 출력>: 멈춘 rebase를 rerere가 다 풀었나(2026-11-19 lane-overlap-guard, 지휘 검토 ④ — 미병합이 비었다는 것만으로는
+# 이어 가지 않는다). 커밋 적용 중 멈췄고(REBASE_HEAD), 충돌 줄이 모두 내용 충돌(지움·이름 바꿈 충돌은 rerere가 못 푼다)이며, 그 경로가
+# 모두 「Staged '<경로>' using previous resolution」이고, 미병합·rerere remaining이 비었을 때만 0. 훅 실패 등 다른 중단은 1(멈춤 그대로)
+rr_ok() {
+  git rev-parse -q --verify REBASE_HEAD >/dev/null || return 1
+  rp_=$(rr_paths "$1")
+  [ -n "$rp_" ] && [ "$(printf '%s\n' "$1" | grep -c '^CONFLICT ')" = "$(printf '%s\n' "$rp_" | grep -c .)" ] || return 1
+  rs_=$(printf '%s\n' "$1" | sed -n "s/^Staged '\\(.*\\)' using previous resolution\\.\$/\\1/p")
+  printf '%s\n' "$rp_" | RS_="$rs_" awk 'BEGIN { n = split(ENVIRON["RS_"], a, "\n"); for (i = 1; i <= n; i++) ok[a[i]] = 1 } !($0 in ok) { f = 1 } END { exit f }' || return 1
+  # 두 확인 명령이 각각 성공했고 결과가 빌 때만(명령이 실패해 빈 출력이면 이어 가지 않는다 — 아스트라 감사 중간 1)
+  u_=$(git diff --name-only --diff-filter=U) && [ -z "$u_" ] && u_=$(git rerere remaining) && [ -z "$u_" ]
+}
 land_cmd() {
   top=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$top" || die "land: git 작업 폴더 안에서 부른다(레인 워크트리): $PWD"
   base=${lbase:-$(origin_base .)}
@@ -1141,7 +1157,14 @@ land_cmd() {
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
     [ $remote = 0 ] || fetchr git fetch -q origin || die "land: git fetch 실패"
     git rev-parse -q --verify "$bref^{commit}" >/dev/null || die "land: $blab 가 없다"
-    if ! git rebase -q "$bref"; then
+    ro=$(LC_ALL=C git rebase -q "$bref" 2>&1); rr=$?
+    [ -z "$ro" ] || printf '%s\n' "$ro" >&2
+    while [ $rr != 0 ] && rr_ok "$ro"; do
+      echo "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다" >&2
+      ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
+      [ -z "$ro" ] || printf '%s\n' "$ro" >&2
+    done
+    if [ $rr != 0 ]; then
       echo "hc-lane land: rebase 충돌. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 같은 줄(hc-lane land $base)을 다시" >&2
       exit 3
     fi
@@ -1976,6 +1999,11 @@ else
   if [ $read = 0 ]; then
     # --track: branch.autoSetupMerge 설정과 무관하게 upstream을 붙여 착지 뒤 branch -d가 통한다.
     x git -C "$repo" worktree add -q --track -b "$branch" "$wt" "$bref" || die "워크트리를 만들지 못했다: $wt"
+    # rerere(2026-11-19 lane-overlap-guard): 정하지 않은 저장소면 켠다 — 착지를 다시 설 때 같은 충돌을 다시 풀지 않게(land가 이어 감).
+    # 정해 둔 값(사용자가 끈 false 포함, 전역·조건부 includeIf onbranch도)은 그대로 — 값은 새 작업 트리(레인 가지)에서 본 유효 값.
+    # git config --get이 1(없음)일 때만 쓴다. 다른 실패(설정 파일 깨짐 등)면 쓰지 않는다
+    x sh -c 'for k in rerere.enabled rerere.autoUpdate; do git -C "$2" config --get "$k" >/dev/null; r=$?; [ $r != 1 ] || git -C "$1" config "$k" true || exit 1; [ $r -le 1 ] || exit 1; done' _ "$repo" "$wt" ||
+      echo "hc-lane: rerere 설정을 쓰지 못했다(착지는 그대로 된다): $repo" >&2
     if x test -f "$wt/.claude/herdr-setup.sh"; then
       if ! hook setup; then
         x tail -n 20 "$log" >&2
