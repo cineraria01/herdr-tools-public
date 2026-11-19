@@ -84,6 +84,8 @@ echo "$*" >>"$T_LOG/balance.log"
 EOF
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0 HC_FAKE_COORD=t8kk
+# macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 unset XDG_STATE_HOME   # hc-lane 레인 기록(lanes.tsv)을 가짜 HOME 아래에서 읽게
 unset HC_TERMINAL_ID   # 시험을 지휘 터미널에서 돌려도 add가 그 주소를 주인으로 잡지 않게(주인 시험은 따로 준다)
 mkdir -p "$HOME"
@@ -997,6 +999,70 @@ cp "$EX" "$T/conf/hc-fill.tsv"
 afresh; echo "audit    $T/없는틀.md" >>"$T/conf/hc-fill.tsv"; sed -i '' "/^audit    ${EXA//\//\\/}\$/d" "$T/conf/hc-fill.tsv"; add w8; run run
 t "설정 audit 틀을 못 읽으면 종료 1, 띄우지 않음" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "설정 audit 틀을 읽지 못함" && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
+
+# 10i. --then(2026-11-19 fill-then 사용자 「--then 추가 (추천)」): 같은 일의 다음 단계는 새 줄 없이 대기 중인 선행 줄 지시문에 이어 붙임
+fresh
+add p1
+pb=$HOME/.local/share/hc-fill/briefs/added/p1.md
+run add --name n1 --project app --brief "$(brief n1)" --then p1
+t "--then: 종료 0, 대기열 줄 수 그대로, 출력 한 줄" '[ $rc = 0 ] && [ "$(grep -c . "$Q")" = 1 ] && printf "%s" "$out" | grep -Fxq "이어 붙임 n1 → p1 (새 레인 없음, 선행 지시문 $pb)" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+t "--then: 선행 지시문 = 원래 본문 + 「## 이어서: n1」 절·커밋 머리 약속·본문" 'head -n 2 "$pb" | grep -Fq "# 지시문 p1" && grep -Eq "^## 이어서: n1 \(hc-fill add --then, 20[0-9-]+T[0-9:]+\)$" "$pb" && grep -Fq "커밋 제목 머리는 \`n1:\`" "$pb" && grep -Fq "위 일의 완료 보고·착지는 하지 않는다 — 이 절까지 끝낸 뒤 한 번만 report 완료" "$pb" && [ "$(tail -n 2 "$pb" | head -n 1)" = "# 지시문 n1" ] && [ "$(tail -n 1 "$pb")" = 본문 ] || { cat "$pb"; false; }'
+qsum() { cat "$Q" "$HOME/.local/share/hc-fill/briefs/added/"*.md 2>/dev/null | cksum; }
+s0=$(qsum)
+run add --name n1 --project app --brief "$T/n1.md" --then p1
+t "--then: 같은 이름 두 번 → 종료 2, 그대로" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "n1은 이미 p1에 이어 붙였다" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+run add --name n2 --project app --brief "$(brief n2)" --then n1
+t "--then: 이어 붙인 이름을 선행으로 → 종료 2 + 실제 줄 안내" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "n1은 p1에 이어 붙였다 — --then p1" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+run add --name n2 --project app --brief "$T/n2.md" --then nope
+t "--then: 선행이 대기열에 없음 → 종료 2" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "선행이 대기열에 없다: nope" && [ "$(qsum)" = "$s0" ]'
+run add --name n1 --project app --brief "$T/n2.md"
+t "add: 이어 붙인 이름을 새 줄로 → 거절, 그대로" '[ $rc != 0 ] && printf "%s" "$out" | grep -Fq "n1은 이미 p1에 이어 붙였다(--then)" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+for o in "--after p1" "--only box-1" "--priority 높음" "--no-early" "--no-audit" "--coord t0"; do
+  run add --name n3 --project app --brief "$(brief n3)" --then p1 $o
+  t "--then과 $o 함께 → 종료 2, 그대로" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq -- "--then은 ${o%% *}와 함께 쓰지 않는다" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+done
+: >"$T/empty.md"
+run add --name n3 --project app --brief "$T/empty.md" --then p1
+t "--then: 빈 지시문 → 종료 2" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "지시문을 읽지 못함(빈 파일)" && [ "$(qsum)" = "$s0" ]'
+# 감사 [낮음] 2: 사본 폴더 밖 지시문(사본 기능 전에 넣은 옛 줄)은 원본을 고치지 않게 거절
+cp "$Q" "$Q.keep"; awk -F'\t' -v OFS='\t' -v b="$T/p1.md" '$1=="p1" {$3 = b} 1' "$Q.keep" >"$Q"; s1=$(cksum <"$T/p1.md")
+run add --name n3 --project app --brief "$T/n3.md" --then p1
+t "--then: 선행 지시문이 사본 폴더 밖 → 종료 2, 원본 그대로" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "p1: 지시문이 사본이 아니다($T/p1.md) — rm 뒤 다시 add" && [ "$(cksum <"$T/p1.md")" = "$s1" ] || { printf "%s\n" "$out"; false; }'
+mv "$Q.keep" "$Q"
+qb=${pb%/*}/q1.md; cp "$T/n1.md" "$qb"   # 다른 프로젝트(tools)의 대기 줄 q1
+awk -F'\t' -v OFS='\t' -v b="$qb" '$1=="p1" {print "q1", "tools", b, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15} 1' "$Q" >"$Q.x" && mv "$Q.x" "$Q"
+s0=$(qsum)
+run add --name n3 --project app --brief "$T/n3.md" --then q1
+t "--then: 프로젝트가 다름 → 종료 2" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "q1: 프로젝트가 다르다(tools)" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+for k in "up|6|이미 떴다(up)" "sent|6|이미 떴다(sent)" "box-1|inbox11|받은편지 줄에는" "audit=p9|15|자동 감사 줄에는" "box-1=box-1/p1|9|상태 안 잡힘으로 남긴 터미널이 있다"; do
+  IFS='|' read -r v c why <<<"$k"
+  cp "$Q" "$Q.keep"; awk -F'\t' -v OFS='\t' -v v="$v" -v c="$c" '$1=="p1" { if (c == 6) $6 = v; else if (c == 9) $9 = v; else if (c == "inbox11") $11 = v ":/in/done/p1.md"; else $15 = v } 1' "$Q.keep" >"$Q"
+  s0=$(qsum)
+  run add --name n4 --project app --brief "$(brief n4)" --then p1
+  t "--then: 선행이 ${v}(${c}) → 종료 2 「${why}」, 그대로" '[ $rc = 2 ] && printf "%s" "$out" | grep -Fq "p1: ${why}" && [ "$(qsum)" = "$s0" ] || { printf "%s\n" "$out"; false; }'
+  mv "$Q.keep" "$Q"
+done
+awk -F'\t' -v OFS='\t' '$1=="p1" {$6="up"} 1' "$Q" >"$Q.x" && mv "$Q.x" "$Q"
+run add --name n4 --project app --brief "$T/n4.md" --then p1
+t "--then: 떠 있는 선행 → 「이미 떴다(up) — --after p1」" 'printf "%s" "$out" | grep -Fq "이미 떴다(up) — --after p1으로 넣거나 그 레인에 hc send"'
+awk -F'\t' -v OFS='\t' '$1=="p1" {$6="wait"} 1' "$Q" >"$Q.x" && mv "$Q.x" "$Q"
+run ls
+t "ls: 선행 줄 비고에 「이어서 n1」" 'printf "%s" "$out" | grep -E "^p1 .*이어서 n1" >/dev/null || { printf "%s\n" "$out"; false; }'
+run add --name a1 --project app --brief "$(brief a1)" --after p1,q1
+t "--after에 대기 중 같은 프로젝트 레인 → 알림 한 줄 + 정상 추가, 다른 프로젝트는 알림 없음" '[ $rc = 0 ] && [ -n "$(where a1)" ] && printf "%s" "$out" | grep -Fxq "알림: p1가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then p1로 한 레인에 이어 붙인다" && ! printf "%s" "$out" | grep -Fq "q1가 아직" || { printf "%s\n" "$out"; false; }'
+awk -F'\t' -v OFS='\t' '$1=="p1" {$6="up"} 1' "$Q" >"$Q.x" && mv "$Q.x" "$Q"
+run add --name a2 --project app --brief "$(brief a2)" --after p1
+t "--after에 떠 있는 레인 → 알림 없음" '[ $rc = 0 ] && ! printf "%s" "$out" | grep -Fq "아직 대기 중"'
+fresh; add p2; run add --name n5 --project app --brief "$(brief n5)" --then p2; run run
+rf=$HOME/.local/share/hc-fill/runs/p2-run.md
+t "run: 선행을 띄울 때 run 지시문에 이어 붙인 절이 들어감" '[ "$(where p2 | cut -d" " -f1)" = up ] && grep -Fq "## 이어서: n5 (hc-fill add --then" "$rf" && grep -Fq "# 지시문 n5" "$rf" && [ -z "$(where n5)" ] || { printf "%s\n" "$out"; cat "$rf"; false; }'
+fresh; add p3
+# 감사 [낮음] 5: 시간 비교 없이 순서로 — 배경이 run.lock을 잡은 뒤(표식) --then을 부르고, 배경이 잠금 안에서 남긴 줄이 --then 줄보다 먼저
+mark=$T/then.mark ord=$T/then.ord; : >"$ord"
+lockf -k "$HOME/.local/share/hc-fill/run.lock" sh -c ': >"$1"; sleep 1; echo run >>"$2"' _ "$mark" "$ord" &
+lp=$!; i=0; while [ ! -e "$mark" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+run add --name n6 --project app --brief "$(brief n6)" --then p3; echo then >>"$ord"; wait $lp
+t "--then: 도는 run(run.lock)이 끝난 뒤에 붙인다 — run이 지시문을 읽고 up으로 바꾸는 사이에 끼지 않게" '[ -e "$mark" ] && [ $rc = 0 ] && [ "$(paste -sd , "$ord")" = run,then ] || { printf "%s\n" "$out"; cat "$ord"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

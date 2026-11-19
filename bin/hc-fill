@@ -6,6 +6,8 @@
 # (하나 예외: 자동 감사가 판정을 레인에 보낸 뒤의 그 감사 터미널 — audit_reap).
 set -u
 shopt -u patsub_replacement 2>/dev/null   # bash 5.2+: ${x//a/b}의 b 안 & 를 글자 그대로
+# 문자열 비교는 바이트로: macOS awk의 ==는 strcoll이라 en_US.UTF-8에서 "판정"=="완료"가 참(2026-11-19 fill-then 작업 중 발견)
+[ -z "${LC_ALL-}" ] || export LC_CTYPE=$LC_ALL; unset LC_ALL; export LC_COLLATE=C
 
 CONF=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}/hc-fill.tsv
 DATA=${HC_FILL_DATA:-$HOME/.local/share/hc-fill}
@@ -18,11 +20,13 @@ Q=$DATA/queue.tsv   # 이름 프로젝트 지시문 선행 기계제한 상태(w
                     #       audit=<레인>(그 레인의 자동 감사 줄). 14칸까지의 옛 줄은 -
 WAIT=${HC_FILL_WAIT:-60} POLL=${HC_FILL_POLL:-5}
 
-die() { printf 'hc-fill: %s\n' "$*" >&2; exit 1; }
+die() { printf 'hc-fill: %s\n' "$*" >&2; exit "${DRC:-1}"; }   # add --then은 DRC=2(거절)
+refuse() { printf 'hc-fill: %s\n' "$*" >&2; exit 2; }
 usage() {
   cat >&2 <<'EOF'
 사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
                [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit]   (우선은 영어 urgent|high|normal|low도 받음, 기본 보통)
+        hc-fill add --name <이름> --project <프로젝트> --brief <지시문 경로> --then <대기 중인 선행>
         hc-fill ls | rm <레인> | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
          지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
@@ -31,8 +35,13 @@ usage() {
          터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
          --no-early: 선행 착지 전 「먼저 띄움」을 끈다(선행의 산출물 없이는 준비조차 못 하는 레인)
          --no-audit: 자동 감사(설정 audit)를 붙이지 않는다(지시문이 자기 감사를 정한 레인)
+         --then <선행>: 같은 일의 다음 단계는 새 줄 없이 대기(wait) 중인 선행 줄 지시문 끝에 「## 이어서: <이름>」 절로 붙인다
+         (넘길 때마다 맥락이 새고 숨은 결정이 부딪힌다 — 한 레인이 이어서). 그 절의 커밋 제목 머리는 <이름>: 이라 --after <이름>도 풀린다.
+         선행이 없음·떠 있음·받은편지·감사 줄·다른 프로젝트, --after·--only·--priority·--no-early·--no-audit·--coord와 함께면 거절(종료 2).
+         도는 run이 끝나기를 기다렸다가(run.lock) 붙인다. 겹치는 파일 때문에 순서만 필요한 일은 그대로 --after
+         --after에 대기 중인 같은 프로젝트 레인을 주면 넣기는 그대로 하고 --then을 알리는 한 줄
   prio   대기 중인 레인의 우선순위를 바꾼다(떠 있는 레인은 거절)
-  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(자동 감사: 감사 중·감사 통과 보냄·감사 지적 n번째·지휘로 넘김)
+  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과 보냄·감사 지적 n번째·지휘로 넘김)
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
          대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 넣은 차례) 보며, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
          들어갔으면(안 풀린 것은 건너뛰고 다음 것을 본다) 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
@@ -94,9 +103,42 @@ qset() {  # qset <레인> <상태> <기계> <주소> <남긴것> [<먼저>] [<�
     if (u != "") { for (i = NF + 1; i < 15; i++) $i = (i == 13 ? "normal" : "-"); $15 = u } } 1' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"
 }
 
+# thenof <이름>: 그 이름이 「## 이어서: <이름> 」으로 붙은 대기열 줄 이름(없으면 빈 줄)
+thenof() {
+  awk -F'\t' '{print $1 "\t" $3}' "$Q" 2>/dev/null | while IFS=$'\t' read -r tn tb; do
+    grep -q "^## 이어서: $1 " -- "$tb" 2>/dev/null && { echo "$tn"; break; }
+  done
+}
+
 cmd=${1-}; [ $# = 0 ] || shift
 case $cmd in
   _set) qset "$@"; exit ;;
+  _then)   # _then <이름> <선행> <프로젝트> <지시문>: add --then이 run.lock·qlock 둘 다 쥐고 부른다
+    # run은 지시문을 잠금 밖(launch의 cat)에서 읽고 hc-lane 띄우기·status 확인 뒤에야 up으로 바꾼다 — qlock만으로는 그 사이에
+    # 붙인 절이 레인에 안 들어가고 사라진다. 그래서 run.lock(run 한 바퀴 내내)도 쥔다
+    tl=$1 pre=$2
+    row=$(awk -F'\t' -v n="$pre" '$1==n {print; exit}' "$Q" 2>/dev/null)
+    if [ -z "$row" ]; then
+      x=$(thenof "$pre"); [ -z "$x" ] || refuse "${pre}은 ${x}에 이어 붙였다 — --then $x"
+      refuse "선행이 대기열에 없다: $pre"
+    fi
+    IFS=$'\t' read -r _ pp pb _ _ ps _ _ pst _ pr _ _ _ pk _ <<<"$row"
+    [ "$ps" = wait ] || refuse "$pre: 이미 떴다($ps) — --after ${pre}으로 넣거나 그 레인에 hc send"
+    # 상태 안 잡힘으로 남긴 터미널은 옛 run 지시문으로 돌 수 있다(살아나면 run은 다시 띄우지 않음 — 감사 [낮음] 1)
+    [ "${pst:--}" = - ] || refuse "$pre: 상태 안 잡힘으로 남긴 터미널이 있다($pst) — 정리하고 rm 뒤 다시 add, 또는 --after $pre"
+    # 사본 기능(add 때 복사) 전에 넣은 옛 줄은 원본을 가리킨다 — 원본은 고치지 않는다(감사 [낮음] 2)
+    case $pb in "$DATA"/briefs/added/*) ;; *) refuse "$pre: 지시문이 사본이 아니다($pb) — rm 뒤 다시 add" ;; esac
+    [ "${pr:--}" = - ] || refuse "$pre: 받은편지 줄에는 이어 붙이지 않는다"
+    case ${pk:--} in audit=*) refuse "$pre: 자동 감사 줄에는 이어 붙이지 않는다" ;; esac
+    [ "$pp" = "$3" ] || refuse "$pre: 프로젝트가 다르다($pp)"
+    awk -F'\t' -v n="$tl" '$1==n {f=1} END {exit !f}' "$Q" && refuse "이미 대기열에 있다: $tl"
+    x=$(thenof "$tl"); [ -z "$x" ] || refuse "${tl}은 이미 ${x}에 이어 붙였다"
+    why=$(brief_bad "$4") && refuse "지시문을 읽지 못함($why): $4"
+    # 임시 파일에 다 쓴 뒤 mv(반만 든 지시문이 보이지 않게)
+    { cat -- "$pb" && printf '\n## 이어서: %s (hc-fill add --then, %s)\n위 일을 끝내 커밋한 뒤 같은 작업 트리에서 이어서 한다. 이 절의 커밋 제목 머리는 `%s:`으로 쓴다(이 이름을 --after로 기다리는 레인이 풀리게).\n위 일의 완료 보고·착지는 하지 않는다 — 이 절까지 끝낸 뒤 한 번만 report 완료.\n' \
+      "$tl" "$(date +%Y-%m-%dT%H:%M)" "$tl" && cat -- "$4"; } >"$pb.then.$$" && mv -f "$pb.then.$$" "$pb" ||
+      { rm -f "$pb.then.$$"; die "선행 지시문에 붙이지 못했다: $pb"; }
+    echo "이어 붙임 $tl → $pre (새 레인 없음, 선행 지시문 $pb)"; exit 0 ;;
   _add)
     awk -F'\t' -v n="$1" '$1==n {f=1} END {exit !f}' "$Q" 2>/dev/null && die "이미 대기열에 있다: $1 (hc-fill ls)"
     [ -z "${HC_FILL_BRIEF_TMP-}" ] || mv -f "$HC_FILL_BRIEF_TMP" "$3" || die "지시문 사본을 두지 못했다: $3"   # add: 이름이 새것일 때만 사본을 제자리에
@@ -114,15 +156,22 @@ case $cmd in
     awk -F'\t' -v OFS='\t' -v n="$1" -v p="$2" '$1==n { for (i = NF + 1; i < 13; i++) $i = "-"; $13 = p } 1' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
 
   add)
-    name= proj= brief= after=- only=- coord= cx= prio=normal early=- aud=-
+    name= proj= brief= after=- only=- coord= cx= prio=normal early=- aud=- thn= xo=
     while [ $# -gt 0 ]; do
+      case $1 in --no-early | --no-audit | --after | --only | --priority | --coord) xo="$xo $1" ;; esac   # --then과 함께 못 씀
       [ "$1" != --no-early ] || { early=no-early; shift; continue; }
       [ "$1" != --no-audit ] || { aud=no-audit; shift; continue; }
       [ $# -ge 2 ] || usage
       case $1 in --name) name=$2 ;; --project) proj=$2 ;; --brief) brief=$2 ;; --after) after=$2 ;; --only) only=$2 ;; --coord) coord=$2 cx=1 ;;
+        --then) thn=$2 ;;
         --priority) prio=$(pnorm "$2") || die "--priority는 긴급|높음|보통|낮음(urgent|high|normal|low): $2" ;; *) usage ;; esac
       shift 2
     done
+    if [ -n "$thn" ]; then
+      DRC=2   # 아래 검사에 걸리면 거절(종료 2), 아무것도 바꾸지 않음
+      [ -z "$xo" ] || die "--then은${xo}와 함께 쓰지 않는다 — 이어 붙인 일은 선행 줄의 설정·주인을 따른다"
+      okname "$thn" || die "--then 레인 이름: $thn"
+    fi
     okname "$name" || die "--name은 a-z 0-9 - _ 32자까지: $name"
     case $name in audit-*) die "--name은 audit- 로 시작하지 않는다(자동 감사 줄 이름 자리): $name" ;; esac
     awk -v p="$proj" '$1=="repo" && $2==p {f=1} END {exit !f}' "$CONF" || die "설정에 repo 줄이 없는 프로젝트: $proj"
@@ -130,6 +179,12 @@ case $cmd in
     [ -f "$brief" ] || die "지시문이 없다: $brief"
     case $brief in *[[:space:]]*) die "지시문 경로에 공백을 쓰지 않는다: $brief" ;; esac
     why=$(brief_bad "$brief") && die "지시문을 읽지 못함($why): $brief"
+    if [ -n "$thn" ]; then
+      mkdir -p "$DATA" && lockf -k -t "${HC_FILL_THEN_WAIT:-600}" "$DATA/run.lock" env HC_FILL_Q=1 lockf -k -t 30 "$DATA/queue.lock" "$0" _then "$name" "$thn" "$proj" "$brief"
+      rc=$?; [ $rc != 75 ] || echo "hc-fill: run 바퀴나 대기열 잠금이 끝나지 않아 그만뒀다, 다시 부른다" >&2
+      exit $rc
+    fi
+    x=$(thenof "$name"); [ -z "$x" ] || die "${name}은 이미 ${x}에 이어 붙였다(--then) — 다른 이름으로"
     [ "$after" = - ] || for a in $(printf %s "$after" | tr , ' '); do okname "$a" || die "--after 레인 이름: $a"; done
     [ "$only" = - ] || for m in $(printf %s "$only" | tr , ' '); do
       machines | awk -v m="$m" '$1==m {f=1} END {exit !f}' || die "설정에 machine 줄이 없는 기계: $m"
@@ -150,7 +205,12 @@ case $cmd in
     HC_FILL_BRIEF_TMP=$bf.tmp.$$ qlock _add "$name" "$proj" "$bf" "$after" "$only" wait - - - "$(date +%Y-%m-%dT%H:%M)" - "${coord:--}" "$prio" "$early" "$aud" ||
       { rm -f "$bf.tmp.$$"; exit 1; }
     note=; [ "$after" = - ] || note=", 선행 $after"; [ "$only" = - ] || note="$note, 기계 $only"; note="$note, 주인 ${coord:-없음(모든 지휘)}, 우선 $(plabel "$prio")"; [ "$early" = - ] || note="$note, 먼저 띄움 끔"; [ "$aud" = - ] || note="$note, 자동 감사 끔"
-    echo "더함 $name ($proj$note)"; exit 0 ;;
+    echo "더함 $name ($proj$note)"
+    [ "$after" = - ] || for a in $(printf %s "$after" | tr , ' '); do
+      awk -F'\t' -v n="$a" -v p="$proj" '$1==n && $6=="wait" && $2==p && ($11=="" || $11=="-") && $15 !~ /^audit=/ {f=1} END {exit !f}' "$Q" &&
+        echo "알림: ${a}가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then ${a}로 한 레인에 이어 붙인다"
+    done
+    exit 0 ;;
 
   rm) [ $# = 1 ] || usage; qlock _rm "$1" || exit 1; echo "뺌 $1 (떠 있는 터미널은 그대로)"; exit 0 ;;
   prio)
@@ -174,6 +234,8 @@ case $cmd in
       case ${early-} in early) note="먼저 띄움(선행 $after)${note#"선행 $after"}" ;; no-early) note="$note 먼저 띄움 끔" ;; esac
       [ "$stuck" = - ] || note="$note 상태 안 잡힘 남김 $stuck"
       [ "${reply:--}" = - ] || note="$note 받은편지 ${reply%%:*}"
+      tn=$(sed -n 's/^## 이어서: \([a-z0-9_-]*\) .*/\1/p' "$brief" 2>/dev/null | paste -sd , -)
+      [ -z "$tn" ] || note="$note 이어서 $tn"
       case ${ak:--} in
         no-audit) note="$note 자동 감사 끔" ;;
         audit=*) note="$note 감사 대상 ${ak#audit=}" ;;
