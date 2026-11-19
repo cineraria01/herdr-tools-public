@@ -2226,8 +2226,18 @@ t "대기열만: 지휘 터미널 + 쓰기 레인 → 종료 2, hc-fill add 안�
 t "대기열만: 거절이면 워크트리·브랜치·hc run 없음" '[ ! -e "$R.wt/q-coord" ] && ! git -C "$R" show-ref -q --verify refs/heads/q-coord && ! has run'
 HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc HC_FAKE_RUN_ADDR=tq2 run --start-wait 0 --direct --name q-direct --repo "$R" -- claude
 t "대기열만: --direct → 띄움, 「대기열 밖에서 띄움(--direct)」, 레인 기록 종류 direct" '[ $rc = 0 ] && [ -d "$R.wt/q-direct" ] && grep -Fq "대기열 밖에서 띄움(--direct)" "$T/err" && grep -Fxq "tq2${tab}q-direct${tab}tQc${tab}direct" "$SD/lanes.tsv" || { echo "rc=$rc"; cat "$T/err" "$SD/lanes.tsv"; false; }'
+t "직접 띄운 레인(--direct)은 부모를 그대로(--no-parent 없음)" '! has --no-parent'
+rm -f "$HCLOG"
 HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc HC_LANE_FILL=1 HC_FAKE_RUN_ADDR=tq3 run --start-wait 0 --name q-fill --repo "$R" -- claude
 t "대기열만: HC_LANE_FILL=1(hc-fill) → 띄움, 종류 fill" '[ $rc = 0 ] && grep -Fxq "tq3${tab}q-fill${tab}tQc${tab}fill" "$SD/lanes.tsv" && ! grep -Fq "대기열 밖" "$T/err" || { cat "$T/err"; false; }'
+# 2026-11-19 fill-no-parent: 지휘 터미널에서 돈 hc-fill이 띄운 레인이 그 지휘를 부모로 물려받아, 지휘 세션이 닫히자 미커밋 일을 둔 채 함께 꺼졌다
+t "대기열 레인(HC_LANE_FILL=1)은 부모 없이(hc run --no-parent) — 대기열이 주인" 'has run && has --no-parent || { cat "$HCLOG"; false; }'
+rm -f "$HCLOG"
+HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc HC_LANE_FILL=1 HC_FAKE_RUN_ADDR=tq3a run --start-wait 0 --read --name q-fill-audit --repo "$R" -- claude
+t "대기열 감사 줄(HC_LANE_FILL=1 --read)도 --no-parent" '[ $rc = 0 ] && has --no-parent || { cat "$T/err" "$HCLOG"; false; }'
+rm -f "$HCLOG"
+HC_TERMINAL_ID=tQc HC_LANE_FILL=1 run --dry-run --on box --name q-fill-on --repo "$R" -- claude
+t "대기열 레인 --on(원격)·--dry-run 줄에도 --no-parent" '[ $rc = 0 ] && printf "%s\n" "$out" | grep "hc run --bg" | grep -F -- "--on box" | grep -Fq -- --no-parent || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc HC_FAKE_RUN_ADDR=tq4 run --start-wait 0 --read --name q-read --repo "$R" -- claude
 t "대기열만: --read → 띄움(종류 read)" '[ $rc = 0 ] && grep -Fxq "tq4${tab}q-read${tab}tQc${tab}read" "$SD/lanes.tsv" || { cat "$T/err"; false; }'
 HC_LANE=lane-up HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc HC_FAKE_RUN_ADDR=tq5 run --start-wait 0 --name q-inlane --repo "$R" -- claude

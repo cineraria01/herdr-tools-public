@@ -40,6 +40,7 @@ usage() {
                 자리에 그 경로를 넣는다. 사본 자리: 설정 lane.brief_dir(그 기계 경로, ~ 는 그 기계 집)/<레인>-run.md,
                 없으면 지시문과 같은 폴더의 <이름>-run.md. -- 뒤 명령이 없으면 설정 lane.run 틀(셸 문법)
   설정 lane.notify no면 hc run --no-notify(hc가 지휘 입력에 종료·막힘을 넣지 않음 — 지휘가 hc-lane wait를 늘 걸 때만)
+  HC_LANE_FILL=1(hc-fill)이면 hc run --no-parent(대기열 레인·감사 줄은 부른 터미널이 끝나도 함께 꺼지지 않게)
   띄운 뒤       화면에 Claude 폴더 신뢰 질문(「❯ No, exit」·「Yes, I trust this folder」)이 보이면 그 터미널에만 신뢰를 고른다
                 (설정 lane.auto_trust off면 안 함). 글자가 다르면 건드리지 않고 「모름 — 시작 화면 확인」.
                 외부 가져오기 질문(「Allow external CLAUDE.md file imports?」)은 목록 경로가 모두 작업 폴더의 git 저장소
@@ -1739,6 +1740,9 @@ case $strust in on|off) ;; *) die "설정 lane.auto_trust는 on·off: $strust" ;
 # lane.notify no: hc가 레인 종료·막힘을 지휘 입력에 넣지 않게(--no-notify). 알림은 hc-lane wait가 다 맡는다
 notify=$(cfg lane.notify yes) || exit 1
 case $notify in yes) nn= ;; no) nn=--no-notify ;; *) die "설정 lane.notify는 yes·no: $notify" ;; esac
+# 대기열(hc-fill, HC_LANE_FILL=1)이 띄우는 레인·감사 줄은 부모 없이 — 대기열이 주인. 지휘 터미널에서 돈 hc-fill이 띄우면 hc run 기본값으로
+# 그 지휘를 부모로 물려받아, 지휘 세션이 닫히면(업데이트 재시작 등) 미커밋 일을 둔 채 함께 꺼졌다(2026-11-19 idle-once 레인)
+[ "${HC_LANE_FILL-}" != 1 ] || nn="${nn:+$nn }--no-parent"
 poll=${HC_LANE_POLL:-2}
 if [ -n "$brief" ]; then
   [ -f "$brief" ] || die "지시문 파일이 없다: $brief"

@@ -741,6 +741,7 @@ t "먼저 띄운 레인: 터미널이 끝난 뒤에도 다시 안 띄움" '[ "$(
 # 10g. 놀고 있음 알림: 바퀴 끝에도 자리가 남은 기계가 설정 idle분(예시 10) 넘게 이어지면 hc-lane report 사건(watch가 지휘에 보냄)
 IT=$HOME/.local/share/hc-fill/idle.tsv
 back() { awk -F'\t' -v OFS='\t' -v c="$1" -v d="$2" '{$c -= d} 1' "$IT" >"$IT.x" && mv "$IT.x" "$IT"; }   # back <칸> <초>: 시각을 앞당김
+unsent() { awk -F'\t' -v OFS='\t' '{$3 = 0} 1' "$IT" >"$IT.x" && mv "$IT.x" "$IT"; }   # 보낸 적 없는 것으로(받는 쪽 시험을 바퀴마다 다시 보내려고)
 fresh
 run run
 t "놀고 있음: 처음 빈 것은 시각만 적고 알리지 않음(대기열이 비어도 자리를 봄)" '[ $rc = 0 ] && [ ! -e "$T/report.log" ] && grep -q "^box-1	" "$IT" && grep -q "^here	" "$IT" || { printf "%s\n" "$out"; cat "$IT"; false; }'
@@ -749,10 +750,21 @@ t "놀고 있음: idle분 넘으면 사건 한 번 — 기계·자리 수·분, 
 t "놀고 있음: 대기 줄이 없으면 모든 지휘(--to 없음)" '! grep -q -- --to "$T/report.log"'
 run run
 t "놀고 있음: 30분 안에는 다시 안 보냄" '[ "$(grep -c . "$T/report.log")" = 1 ]'
+# 2026-11-19 idle-once(사용자 「알림 대기열 빌 때 한 번만 오게 해줘」): 사유가 「대기열에 띄울 것 없음」이면 비기 시작한 뒤 한 번만
 back 3 1860; run run
-t "놀고 있음: 계속 비면 30분 뒤 다시" '[ "$(grep -c . "$T/report.log")" = 2 ] && grep -Fq "box-1 자리 2개" "$T/report.log"'
+t "놀고 있음(대기열 빔): 계속 비어도 30분 뒤 다시 안 보냄" '[ "$(grep -c . "$T/report.log")" = 1 ] || { cat "$T/report.log"; cat "$IT"; false; }'
+back 3 7300; run run
+t "놀고 있음(대기열 빔): 2시간 뒤에도 안 보냄" '[ "$(grep -c . "$T/report.log")" = 1 ] || { cat "$T/report.log"; cat "$IT"; false; }'
 lj box-1/x1:claude-code:a box-1/x2:claude-code:b; run run
 t "놀고 있음: 자리가 차면 그 기계 기록을 지움(다시 비면 처음부터)" '! grep -q "^box-1	" "$IT" && grep -q "^box-2	" "$IT"'
+lj; run run; back 2 660; rm -f "$T/report.log"; run run
+t "놀고 있음(대기열 빔): 자리가 찼다가 다시 비면 그 기계만 다시 한 번" '[ "$(grep -c . "$T/report.log")" = 1 ] && grep -Fq "box-1 자리 2개 11분째 빔" "$T/report.log" && ! grep -Fq "box-2 자리" "$T/report.log" || { cat "$T/report.log"; cat "$IT"; false; }'
+back 3 7300; rm -f "$T/report.log"; run run
+t "놀고 있음(대기열 빔): 다시 보낸 뒤로도 한 번만" '[ ! -s "$T/report.log" ] || { cat "$T/report.log"; false; }'
+idlek() { awk -F'\t' -v m="$1" '$1==m {print NF, $6}' "$IT"; }   # 칸 수 · 보낸 사유(eval 안의 "{a, b}"는 bash 3.2가 깨뜨려 함수로)
+t "idle.tsv: 보낸 줄 여섯째 칸에 보낸 사유 none" '[ "$(idlek box-1)" = "6 none" ] || { cat "$IT"; false; }'
+awk -F'\t' -v OFS='\t' '{NF = 5} 1' "$IT" >"$IT.x" && mv "$IT.x" "$IT"; back 3 7300; rm -f "$T/report.log"; run run
+t "idle.tsv: 옛 5칸 줄(보낸 적 있음)도 대기열 빔을 다시 안 보냄, 6칸으로 채움" '[ ! -s "$T/report.log" ] && [ "$(idlek box-1)" = "6 none" ] || { cat "$T/report.log"; cat "$IT"; false; }'
 # 2026-11-19 hcfill-idle-seats: 자리가 하나라도 차면(빈 자리 수가 줄면) 그 순간부터 다시 셈 — 레인이 떠 있는 기계를 새벽부터 553분째 빔으로 셌다
 fresh
 run run; back 2 660; lj box-1/y1:claude-code:a; rm -f "$T/report.log"; run run
@@ -765,30 +777,35 @@ fresh
 add w1 --after pa --no-early --only slow --coord tq1; add w2 --after pa --no-early --only slow --coord tq2
 run run; back 2 700; rm -f "$T/report.log"; run run
 t "놀고 있음: 대기 줄 주인 지휘들에게만(--to tq1,tq2)" 'grep -Fq -- "--to tq1,tq2" "$T/report.log" || { cat "$T/report.log"; false; }'
-export HC_FAKE_COORD_GONE=tq1; back 3 7300; rm -f "$T/report.log"; run run
+export HC_FAKE_COORD_GONE=tq1; unsent; rm -f "$T/report.log"; run run
 t "놀고 있음: 사라진 주인은 빼고(--to tq2)" 'grep -Fq -- "--to tq2 " "$T/report.log" || { cat "$T/report.log"; false; }'
-export HC_FAKE_COORD_GONE="tq1 tq2"; back 3 7300; rm -f "$T/report.log"; run run
+export HC_FAKE_COORD_GONE="tq1 tq2"; unsent; rm -f "$T/report.log"; run run
 t "놀고 있음: 살아 있는 주인이 없으면 모든 지휘" '[ -s "$T/report.log" ] && ! grep -q -- --to "$T/report.log" || { cat "$T/report.log"; false; }'
 unset HC_FAKE_COORD_GONE
-add w3 --after pa --no-early --only slow; back 3 7300; rm -f "$T/report.log"; run run
+add w3 --after pa --no-early --only slow; unsent; rm -f "$T/report.log"; run run
 t "놀고 있음: 주인 없는 대기 줄이 있으면 모든 지휘" '[ -s "$T/report.log" ] && ! grep -q -- --to "$T/report.log" || { cat "$T/report.log"; false; }'
-export HC_FAKE_REPORT_RC=1; back 3 7300; rm -f "$T/report.log"; run run
+export HC_FAKE_REPORT_RC=1; unsent; rm -f "$T/report.log"; run run
 t "놀고 있음: 보내기(report) 실패면 한 줄, 보낸 시각을 안 적어 다음 바퀴에 다시" 'printf "%s" "$out" | grep -Fq "놀고 있음 알림 실패" && unset HC_FAKE_REPORT_RC && run run && [ "$(grep -c . "$T/report.log")" = 2 ] || { cat "$T/report.log"; false; }'
 unset HC_FAKE_REPORT_RC
-fresh   # 감사 [낮음] 3: 세 번 보낸 뒤로는 2시간마다
-run run; back 2 700; run run; back 3 1900; run run; back 3 1900; run run
+fresh   # 감사 [낮음] 3: 세 번 보낸 뒤로는 2시간마다 — 되풀이는 사유가 먼저 띄움 상한일 때만(idle-once). ca가 살아 있어 바퀴마다 상한에 걸림
+sed -i.bak 's/^early$/early 1/' "$T/conf/hc-fill.tsv"; add ca --after pa --only box-2; add cb --after pa --only box-2
+run run; lj box-2/ca:claude-code:ca; back 2 700; run run; back 3 1900; run run; back 3 1900; run run
 t "되풀이 상한: 30분마다 세 번" '[ "$(grep -c . "$T/report.log")" = 3 ] || { cat "$T/report.log"; cat "$IT"; false; }'
 back 3 1900; run run
 t "되풀이 상한: 세 번 뒤로는 30분 지나도 안 보냄" '[ "$(grep -c . "$T/report.log")" = 3 ]'
 back 3 7300; run run
 t "되풀이 상한: 2시간 지나면 다시" '[ "$(grep -c . "$T/report.log")" = 4 ] || { cat "$IT"; false; }'
+t "되풀이 상한: 넷 다 먼저 띄움 상한 사유" '[ "$(grep -c "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log")" = 4 ] || { cat "$T/report.log"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
 fresh   # 사유: 먼저 띄움 상한에 걸려 남긴 자리면 그렇게
 sed -i.bak 's/^early$/early 0/' "$T/conf/hc-fill.tsv"
 run run; back 2 700; run run
 t "사유: 먼저 띄움 상한에 안 걸렸으면 「대기열에 띄울 것 없음」" 'grep -Fq "대기열에 띄울 것 없음" "$T/report.log"'
 sed -i.bak 's/^early 0$/early 1/' "$T/conf/hc-fill.tsv"
-add ca --after pa --only box-1; add cb --after pa --only box-1; back 3 7300; rm -f "$T/report.log"; run run
-t "사유: 먼저 띄움 상한에 걸려 남겼으면 「먼저 띄움 상한(early 1)에 걸려 남김」" 'grep -Fq "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log" && ! grep -Fq "대기열에 띄울 것 없음" "$T/report.log" || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+add ca --after pa --only box-1; add cb --after pa --only box-1; rm -f "$T/report.log"; run run
+t "사유: 대기열 빔으로 한 번 보낸 뒤 상한으로 바뀌면 30분 안이어도 그 사유로 다시 — 「먼저 띄움 상한(early 1)에 걸려 남김」" 'grep -Fq "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log" && ! grep -Fq "대기열에 띄울 것 없음" "$T/report.log" || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+capn() { awk -F'\t' '$6=="cap" {n++; if ($4 != 1) bad++} END {print n + 0, bad + 0}' "$IT"; }   # 상한 사유 줄 수 · 보낸 횟수가 1이 아닌 줄 수
+t "사유가 바뀌어 보내면 보낸 횟수는 1부터(감사 낮음 1 — 상한 사유도 30분 간격 세 번을 다 받게)" '[ "$(capn | cut -d" " -f2)" = 0 ] && [ "$(capn | cut -d" " -f1)" -ge 1 ] || { cat "$IT"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
 fresh; run run --dry-run
 t "놀고 있음: dry-run은 기록·알림 없음" '[ ! -e "$IT" ] && [ ! -e "$T/report.log" ]'
