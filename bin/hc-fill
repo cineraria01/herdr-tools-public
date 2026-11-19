@@ -77,6 +77,8 @@ dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold|a
 conf() { awk -v k="$1" '$1==k { sub(/^[ \t]*[^ \t]+[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$CONF"; }
 machines() { awk '$1=="machine" { print $2, $3, ($4 == "" ? "-" : $4), ($5 == "" ? "-" : $5) }' "$CONF"; }   # 차례대로: 이름 상한 레인상한 셈
 repo_of() { awk -v p="$1" -v m="$2" '$1=="repo" && $2==p && $3==m { sub(/^[ \t]*repo[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit }' "$CONF"; }
+# landed <레인>: FR 저장소 origin/<FB>에서 제목 머리가 그 레인인 커밋 줄(아래 「선행·착지 판정」 규칙). fetch_proj 뒤, ls는 fetch 없이
+landed() { git -C "$FR" log "origin/$FB" --format='%h %s' | grep -E -m 1 "^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?$1([^a-z0-9_-]|\$)"; }
 LOCAL=$(conf local) AGENT=$(conf agent)
 AGENT=${AGENT:-claude-code}
 [ -n "$LOCAL" ] || die "설정에 local 줄이 없다: $CONF"
@@ -230,15 +232,29 @@ case $cmd in
     st=$(printf '%s\n' "$st" | jq -r '.terminals[] | [.address, (.status // "-" | tostring)] | @tsv') || die "hc ls --json 출력을 읽지 못했다"
     printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' 레인 프로젝트 상태 주소 주인 우선 선행·비고
     [ -f "$Q" ] || exit 0
+    # 먼저 띄움 레인의 선행: local 저장소의 지금 있는 origin/<기본>으로(fetch 없이 — ls는 빠르게). 판정 못 하면 1
+    els() {
+      FR=$(repo_of "$1" "$LOCAL"); [ -n "$FR" ] || return 1
+      FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
+      git -C "$FR" log -1 "origin/$FB" >/dev/null 2>&1 || return 1
+      ew= ed=
+      for x in $(printf %s "$2" | tr , ' '); do if [ -n "$(landed "$x")" ]; then ed="$ed,$x"; else ew="$ew,$x"; fi; done
+      if [ -z "$ew" ]; then echo "선행 들어감 — 본 작업"; else echo "선행 기다림 ${ew#,}${ed:+ · 들어감 ${ed#,}}"; fi
+    }
     while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply owner prio early ak _; do
+      live= lr=
       if [ "$state" = wait ]; then s=대기 a=-
       elif [ "$state" = sent ]; then s=되돌려줌 a=$addr
       else
         live=$(printf '%s\n' "$st" | awk -F'\t' -v a="$addr" '$1==a {print $2; exit}')
         if [ -n "$live" ]; then s="떠 있음($live)"; else s=끝남; fi; a=$addr
+        # 마지막 보고: run이 바퀴마다 적은 last.tsv(레인 상태 sha8 사건시각 한줄 읽은시각 fresh|old)
+        lr=$(awk -F'\t' -v n="$name" '$1==n { if ($2 == "-") r = "보고 없음"; else { r = $2; if ($3 != "-") r = r " " $3; r = r " " $4; if ($5 != "-") r = r " " $5 }
+          if ($7 == "old") r = r " (옛 값 " $6 ")"; print r; exit }' "$DATA/last.tsv" 2>/dev/null)
       fi
       note=; [ "$after" = - ] || note="선행 $after"; [ "$only" = - ] || note="$note 기계 $only"
-      case ${early-} in early) note="먼저 띄움(선행 $after)${note#"선행 $after"}" ;; no-early) note="$note 먼저 띄움 끔" ;; esac
+      ew="선행 $after"; [ "${early-}" != early ] || [ -z "$live" ] || ew=$(els "$proj" "$after") || ew="선행 $after"
+      case ${early-} in early) note="먼저 띄움($ew)${note#"선행 $after"}" ;; no-early) note="$note 먼저 띄움 끔" ;; esac
       [ "$stuck" = - ] || note="$note 상태 안 잡힘 남김 $stuck"
       [ "${reply:--}" = - ] || note="$note 받은편지 ${reply%%:*}"
       tn=$(sed -n 's/^## 이어서: \([a-z0-9_-]*\) .*/\1/p' "$brief" 2>/dev/null | paste -sd , -)
@@ -250,7 +266,8 @@ case $cmd in
             if (s == "queued") print "감사 중(" r "번째)"; else if (s == "pass") print "감사 통과 보냄"
             else if (s == "fix") print "감사 지적 " f "번째"; else if (s == "coord") print "지휘로 넘김"; else if (s == "nosha") print "지휘로 넘김(완료에 sha 없음)"; else print "자동 감사(완료 기다림)" }')" ;;
       esac
-      printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "$(plabel "${prio-}")" "${note# }"
+      note=${note# }; note=${lr:+$lr${note:+ · }}$note
+      printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "$(plabel "${prio-}")" "$note"
     done 3<"$Q"
     exit 0 ;;
 
@@ -506,10 +523,8 @@ audit_tick() {
     [ "$m" = "$LOCAL" ] || inlist "$m" "$ams" || ams="$ams,$m"
   done 6<<<"$(awk -F'\t' '$6=="up" && ($15=="auto" || $15 ~ /^audit=/)' "$Q")"
   [ -n "$LROWS$AROWS" ] || return 0
-  set --; for m in $(printf %s "$ams" | tr , ' '); do
-    if printf '%s\n' "$CONN" | grep -Fxq -- "$m"; then set -- "$@" --on "$m"; else echo "자동 감사 미룸 @$m: 연결 안 됨"; fi
-  done
-  EV=$(hc-lane events "$@" 2>/dev/null </dev/null) || { echo "자동 감사 미룸: hc-lane events 실패, 다음 바퀴에"; return 0; }
+  for m in $(printf %s "$ams" | tr , ' '); do printf '%s\n' "$CONN" | grep -Fxq -- "$m" || echo "자동 감사 미룸 @$m: 연결 안 됨"; done
+  [ -z "$EVBAD" ] || { echo "자동 감사 미룸: hc-lane events 실패, 다음 바퀴에"; return 0; }   # 사건은 ev_tick이 읽었다
   AUNK=$(printf '%s\n' "$EV" | sed -n 's/^모름 //p')
   aok() { [ "$1" = "$LOCAL" ] || { printf '%s\n' "$CONN" | grep -Fxq -- "$1" && ! printf '%s\n' "$AUNK" | grep -Fxq -- "$1"; }; }
   qrow() { awk -F'\t' -v n="$1" '$1==n {print; exit}' "$Q"; }
@@ -628,6 +643,34 @@ audit_reap() {
     done
   done 6<<<"$(awk -F'\t' -v OFS='\t' '$15 ~ /^audit=/ {print $1, $5, $8, $15}' "$Q")"
 }
+# 레인 사건은 바퀴에 한 번(2026-11-19 fill-ls-early-state): up 줄의 기계(local과 연결된 원격)를 hc-lane events --on 하나로 묶어 읽고
+# 자동 감사(EV)와 마지막 보고가 함께 쓴다. 마지막 보고 $DATA/last.tsv(레인 상태 sha8 사건시각 한줄앞부분 읽은시각 fresh|old — 시각은
+# 이 기계 HH:MM): up 레인마다 그 터미널이 그 이름으로 적은 마지막 사건, 없으면 상태 -(보고 없음). 연결 안 됨·못 읽은(모름) 기계의
+# 레인은 지난 줄을 old로 남긴다. ls는 이 파일만 읽는다(원격 호출 없이 「끝남」이 착지인지 막힘인지 보이게). dry-run은 안 씀
+EV= EVBAD=
+ev_tick() {
+  [ -s "$Q" ] || return 0
+  eups=$(awk -F'\t' -v OFS='\t' '$6=="up" {print $1, $7, $8}' "$Q"); [ -n "$eups" ] || return 0
+  set --
+  for m in $(printf '%s\n' "$eups" | cut -f 2 | sort -u); do
+    [ "$m" != "$LOCAL" ] && printf '%s\n' "$CONN" | grep -Fxq -- "$m" && set -- "$@" --on "$m"
+  done
+  EV=$(hc-lane events "$@" 2>/dev/null </dev/null) || { EVBAD=1; echo "레인 사건 읽기 실패(hc-lane events) — 다음 바퀴에"; return 0; }
+  [ $dry = 0 ] || return 0
+  eunk=$(printf '%s\n' "$EV" | sed -n 's/^모름 //p') enow=$(date +%H:%M) LRT=$DATA/last.tsv
+  while IFS=$'\t' read -r n m a; do
+    if [ "$m" != "$LOCAL" ] && { ! printf '%s\n' "$CONN" | grep -Fxq -- "$m" || printf '%s\n' "$eunk" | grep -Fxq -- "$m"; }; then
+      awk -F'\t' -v OFS='\t' -v n="$n" '$1==n { $7 = "old"; print; exit }' "$LRT" 2>/dev/null; continue
+    fi
+    l=$(lastev "$n" "$a")
+    if [ -z "$l" ]; then printf '%s\t-\t-\t-\t-\t%s\tfresh\n' "$n" "$enow"; continue; fi
+    es=$(date -j -u -f %Y-%m-%dT%H:%M:%SZ "$(printf %s "$l" | cut -f 1)" +%s 2>/dev/null) && eh=$(date -r "$es" +%H:%M) || eh=?
+    est=$(printf %s "$l" | cut -f 5) esha=$(printf %s "$l" | cut -f 6 | cut -c 1-8)
+    emsg=$(printf %s "$l" | cut -f 7 | LC_ALL=en_US.UTF-8 cut -c 1-40)   # UTF-8 글자 단위(launchd처럼 LANG이 없어도 글자를 쪼개지 않게)
+    printf '%s\t%s\t%s\t%s\t%s\t%s\tfresh\n' "$n" "${est:--}" "${esha:--}" "$eh" "${emsg:--}" "$enow"
+  done <<<"$eups" >"$LRT.tmp" && mv -f "$LRT.tmp" "$LRT"
+}
+ev_tick
 audit_tick
 audit_reap
 # 자리에서 뺄 done·idle 터미널: 자동 감사 레인(이름이 감사 줄 — 판정 뒤, 지난 바퀴 것 포함) · 감사에 넘겨진 쓰기 레인 가운데 그 감사
@@ -671,7 +714,6 @@ fetch_proj() {  # fetch_proj <프로젝트>: FR(local 저장소)·FB(기본 가�
   inlist "$1" "$FETCHBAD" && return 2
   FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
 }
-landed() { git -C "$FR" log "origin/$FB" --format='%h %s' | grep -E -m 1 "^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?$1([^a-z0-9_-]|\$)"; }   # fetch_proj 뒤
 after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 b), 2 판정 못 함
   fetch_proj "$2"
   case $? in

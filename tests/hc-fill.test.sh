@@ -76,7 +76,7 @@ for a in "$@"; do case $a in
   symbolic-ref) echo origin/main; exit 0 ;;
   --grep=*) grep -E -- "${a#--grep=}" "$T_LOG/commits" 2>/dev/null | head -n 1; exit 0 ;;
 esac; done
-case " $* " in *" log "*) cat "$T_LOG/commits" ;; esac
+case " $* " in *" log "*) [ -z "${HC_FAKE_LOG_FAIL-}" ] || exit 128; cat "$T_LOG/commits" ;; esac   # LOG_FAIL: origin/<기본> 참조 없음
 EOF
 cat >"$T/bin/herdr-balance" <<'EOF'
 #!/bin/bash
@@ -667,6 +667,21 @@ t "먼저 띄움 기다림: 둘 다 제목 머리에 들어가면 풀림(after_o
 t "먼저 띄움 기다림: 문장 안 언급·이름 앞머리(pa-extra)는 안 셈" '[ "$(eg "feat: pa-extra" "docs: pa 와 pc 언급" "fix(y): 고침 (pc)")" = no ]'
 run ls
 t "ls: 먼저 띄움(선행 …)" 'printf "%s" "$out" | grep "^e1 " | grep -Fq "먼저 띄움(선행 pa,pc)" || { printf "%s\n" "$out"; false; }'
+# 2026-11-19 fill-ls-early-state: 띄울 때 적힌 비고 그대로라 선행이 들어가 본 작업 중인 레인도 「선행을 기다리는」 것처럼 보여
+# 지휘가 두 번 틀리게 보고했다. 떠 있는 먼저 띄움 레인은 local 저장소의 지금 있는 origin/<기본>으로(ls는 fetch 안 함) 선행을 본다
+eln() { printf "%s\n" "$out" | grep "^e1 "; }
+lj slow/e1:claude-code:e1; rm -f "$T/git.log"; run ls
+t "ls 먼저 띄움: 떠 있고 선행 모두 아직 → 「선행 기다림 pa,pc」, fetch 안 함" 'eln | grep -Fq "먼저 띄움(선행 기다림 pa,pc)" && ! grep -q fetch "$T/git.log" || { printf "%s\n" "$out"; cat "$T/git.log"; false; }'
+echo "aaaa1111 feat(x): pa 끝" >"$T/commits"; run ls
+t "ls 먼저 띄움: 일부 → 「선행 기다림 pc · 들어감 pa」" 'eln | grep -Fq "먼저 띄움(선행 기다림 pc · 들어감 pa)" || { printf "%s\n" "$out"; false; }'
+echo "bbbb2222 pc: 고침" >>"$T/commits"; rm -f "$T/git.log"; run ls
+t "ls 먼저 띄움: 모두 들어감 → 「선행 들어감 — 본 작업」, fetch 안 함" 'eln | grep -Fq "먼저 띄움(선행 들어감 — 본 작업)" && ! grep -q fetch "$T/git.log" || { printf "%s\n" "$out"; cat "$T/git.log"; false; }'
+sed -i.bak '/^repo  *app  *here /d' "$T/conf/hc-fill.tsv"; run ls; mv "$T/conf/hc-fill.tsv.bak" "$T/conf/hc-fill.tsv"
+t "ls 먼저 띄움: 판정 못 함(local 저장소 줄 없음) → 지금처럼 「선행 pa,pc」" 'eln | grep -Fq "먼저 띄움(선행 pa,pc)" || { printf "%s\n" "$out"; false; }'
+export HC_FAKE_LOG_FAIL=1; run ls; unset HC_FAKE_LOG_FAIL
+t "ls 먼저 띄움: 판정 못 함(origin/<기본> 없음 — git log 실패) → 「선행 pa,pc」" 'eln | grep -Fq "먼저 띄움(선행 pa,pc)" || { printf "%s\n" "$out"; false; }'
+lj; run ls
+t "ls 먼저 띄움: 끝난 레인은 선행이 들어갔어도 그대로 「선행 pa,pc」" 'eln | grep "끝남" | grep -Fq "먼저 띄움(선행 pa,pc)" || { printf "%s\n" "$out"; false; }'
 fresh
 add e1 --after pa --only slow
 run run --dry-run
@@ -918,7 +933,7 @@ lj "slow/inq-z:claude-code:inq-z:done:/"; printf '2026-11-19T01:00:00Z\tm\tslow/
 t "받은편지 줄: 감사·착지 절 없음, 완료해도 감사 줄 없음" '[ "$(where inq-z | cut -d" " -f1)" = up ] && ! grep -Fq "감사·착지" "$HOME/.local/share/hc-fill/runs/inq-z-run.md" && [ -z "$(where audit-inq-z)" ] || { printf "%s\n" "$out"; false; }'
 fresh; rm -f "$T/events" "$T/events.log"; cp "$EX" "$T/conf/hc-fill.tsv"
 add nk --only box-1; run run; lj "box-1/nk:claude-code:nk:done:/"; printf '2026-11-19T01:00:00Z\tm\tbox-1/nk\tnk\t완료\t1234abc\t끝\t1\n' >"$T/events"; run run
-t "audit 키 없음: 절 없음, events 안 봄, 감사 줄·기록 없음" '! grep -Fq "감사·착지" "$HOME/.local/share/hc-fill/runs/nk-run.md" && [ ! -e "$T/events.log" ] && [ -z "$(where audit-nk)" ] && [ ! -e "$AT" ] && [ "$(col15 nk)" != auto ]'
+t "audit 키 없음: 절 없음, 감사 줄·기록 없음(events는 마지막 보고로 읽음)" '! grep -Fq "감사·착지" "$HOME/.local/share/hc-fill/runs/nk-run.md" && [ -z "$(where audit-nk)" ] && [ ! -e "$AT" ] && [ "$(col15 nk)" != auto ]'
 
 # 긴 이름 · 지난 감사가 도는 중의 새 완료 · dry-run · 틀 못 읽음
 afresh; ln=abcdefghijklmnopqrstuvwxyz0123; add $ln --only box-1; run run
@@ -1090,6 +1105,30 @@ lockf -k "$HOME/.local/share/hc-fill/run.lock" sh -c ': >"$1"; sleep 1; echo run
 lp=$!; i=0; while [ ! -e "$mark" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 run add --name n6 --project app --brief "$(brief n6)" --then p3; echo then >>"$ord"; wait $lp
 t "--then: 도는 run(run.lock)이 끝난 뒤에 붙인다 — run이 지시문을 읽고 up으로 바꾸는 사이에 끼지 않게" '[ -e "$mark" ] && [ $rc = 0 ] && [ "$(paste -sd , "$ord")" = run,then ] || { printf "%s\n" "$out"; cat "$ord"; false; }'
+
+# 10h. 마지막 보고(2026-11-19 fill-ls-early-state, 사용자 「이제 이런 문제 없나?」): ls가 터미널 상태와 띄울 때 적은 글만 보여
+# 「끝남」이 착지인지 실패인지, 「떠 있음(done)」이 감사 기다림인지 착지 뒤 쉼인지 몰랐다. run이 바퀴마다 레인 사건(hc-lane events,
+# 자동 감사와 같은 한 번)에서 대기열 레인마다 마지막 사건을 $DATA/last.tsv에 적고, ls는 그 파일만 읽는다(원격 호출 없음)
+LR=$HOME/.local/share/hc-fill/last.tsv
+lrl() { printf "%s\n" "$out" | grep "^$1 "; }
+fresh; rm -f "$T/events" "$T/events.log"; cp "$EX" "$T/conf/hc-fill.tsv"
+add lr1 --only box-1; add lr2 --only slow; run run
+lj "box-1/lr1:claude-code:lr1:done:/" "slow/lr2:claude-code:lr2:working:/"
+printf '2026-11-19T08:30:00Z\tm\tbox-1/lr1\tlr1\t완료\t1372684aa\t다 됨\t1\n2026-11-19T08:38:00Z\tm\tbox-1/lr1\tlr1\t착지\t8bccc0d11\tmain에 넣음\t2\n2026-11-19T08:39:00Z\tm\tbox-1/other\tlr1\t막힘\t-\t남의 터미널\t1\n' >"$T/events"
+rm -f "$T/events.log"; TZ=UTC run run
+t "마지막 보고: run이 hc-lane events를 한 번만(기계마다 --on 묶어) 읽음" '[ "$(grep -c . "$T/events.log")" = 1 ] && grep -Fq -- "--on box-1" "$T/events.log" && grep -Fq -- "--on slow" "$T/events.log" || { cat "$T/events.log"; printf "%s\n" "$out"; false; }'
+rm -f "$T/events.log" "$T/hc.log"; run ls
+t "ls 마지막 보고: 그 터미널의 마지막 사건 착지 sha 8자·시각(남의 터미널 사건은 안 셈)" 'lrl lr1 | grep -Fq "착지 8bccc0d1 08:38 main에 넣음" || { printf "%s\n" "$out"; cat "$LR"; false; }'
+t "ls 마지막 보고: 사건 없는 레인은 「보고 없음」" 'lrl lr2 | grep -Fq "보고 없음" || { printf "%s\n" "$out"; false; }'
+t "ls는 원격 호출 안 함(hc-lane events·hc exec 없음)" '[ ! -e "$T/events.log" ] && ! grep -q "^exec" "$T/hc.log" 2>/dev/null || { cat "$T/events.log" "$T/hc.log" 2>/dev/null; false; }'
+mj box-2 shared slow; rm -f "$T/events.log"; run run; run ls
+t "연결 끊긴 기계: 지난 값을 두고 「(옛 값 HH:MM)」, 그 기계는 events에 --on 안 함" 'lrl lr1 | grep -Fq "착지 8bccc0d1 08:38" && lrl lr1 | grep -Eq "\(옛 값 [0-9]{2}:[0-9]{2}\)" && ! lrl lr2 | grep -Fq "옛 값" && ! grep -Fq -- "--on box-1" "$T/events.log" || { printf "%s\n" "$out"; cat "$LR" "$T/events.log"; false; }'
+mj box-1 box-2 shared slow; run run; run ls
+t "다시 연결되면 옛 값 표시 없음" 'lrl lr1 | grep -Fq "착지 8bccc0d1" && ! lrl lr1 | grep -Fq "옛 값" || { printf "%s\n" "$out"; false; }'
+cp "$LR" "$T/lr.before"; printf '2026-11-19T09:00:00Z\tm\tslow/lr2\tlr2\t막힘\t-\t테스트 실패\t1\n' >>"$T/events"; run run --dry-run
+t "dry-run은 last.tsv를 쓰지 않음" 'cmp -s "$LR" "$T/lr.before" || { cat "$LR"; false; }'
+TZ=UTC run run; run ls
+t "막힘은 sha 없이 「막힘 09:00 <앞부분>」" 'lrl lr2 | grep -Fq "막힘 09:00 테스트 실패" || { printf "%s\n" "$out"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh
