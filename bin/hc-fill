@@ -84,6 +84,11 @@ AGENT=${AGENT:-claude-code}
 pnorm() { case $1 in 긴급 | urgent) echo urgent ;; 높음 | high) echo high ;; 보통 | normal) echo normal ;; 낮음 | low) echo low ;; *) return 1 ;; esac; }
 plabel() { case $1 in urgent) echo 긴급 ;; high) echo 높음 ;; low) echo 낮음 ;; *) echo 보통 ;; esac; }
 okname() { case $1 in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac; [ ${#1} -le 32 ]; }
+# kindwhy <이름>: 커밋 종류 낱말과 같은 이름이면 사유를 찍고 0 — 착지·선행 판정의 「<종류>(<범위>): 」 머리가 이름이 빈 채로도 맞아서
+kindwhy() {
+  case $1 in feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert) ;; *) return 1 ;; esac
+  printf '레인 이름이 커밋 종류(%s)와 같으면 착지·선행 판정이 아무 %s: 커밋에나 맞는다 — 다른 이름을 쓴다' "$1" "$1"
+}
 inlist() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }   # inlist <값> <쉼표 목록>
 # brief_bad <지시문>: 실제로 열어 읽어 본다(launchd 프로그램은 TCC로 ~/Documents가 stat은 되고 읽기만 막힌다).
 # 못 읽거나 비었으면 까닭을 찍고 0, 읽히면 1
@@ -174,6 +179,7 @@ case $cmd in
     fi
     okname "$name" || die "--name은 a-z 0-9 - _ 32자까지: $name"
     case $name in audit-*) die "--name은 audit- 로 시작하지 않는다(자동 감사 줄 이름 자리): $name" ;; esac
+    w=$(kindwhy "$name") && die "$w"
     awk -v p="$proj" '$1=="repo" && $2==p {f=1} END {exit !f}' "$CONF" || die "설정에 repo 줄이 없는 프로젝트: $proj"
     case $brief in /*) ;; *) brief=$PWD/$brief ;; esac
     [ -f "$brief" ] || die "지시문이 없다: $brief"
@@ -185,7 +191,7 @@ case $cmd in
       exit $rc
     fi
     x=$(thenof "$name"); [ -z "$x" ] || die "${name}은 이미 ${x}에 이어 붙였다(--then) — 다른 이름으로"
-    [ "$after" = - ] || for a in $(printf %s "$after" | tr , ' '); do okname "$a" || die "--after 레인 이름: $a"; done
+    [ "$after" = - ] || for a in $(printf %s "$after" | tr , ' '); do okname "$a" || die "--after 레인 이름: $a"; w=$(kindwhy "$a") && die "--after: $w"; done
     [ "$only" = - ] || for m in $(printf %s "$only" | tr , ' '); do
       machines | awk -v m="$m" '$1==m {f=1} END {exit !f}' || die "설정에 machine 줄이 없는 기계: $m"
     done
@@ -328,6 +334,7 @@ inbox_tick() {
       why= p= a=- o=- pr=high
       if ! okname "$n"; then why="이름은 a-z 0-9 - _ 32자까지"
       elif case $n in audit-*) true ;; *) false ;; esac; then why="이름은 audit- 로 시작하지 않는다(자동 감사 줄 이름 자리)"
+      elif why=$(kindwhy "$n"); then :
       elif ! req=$(onm "$im" 'cat "$d/$1.req"' "$idir" "$n"); then echo "받은편지 $im $n: .req를 읽지 못했다, 다음 바퀴에"; continue
       else
         p=$(printf '%s\n' "$req" | awk -F'\t' '$1=="project" {print $2; exit}')
@@ -337,7 +344,7 @@ inbox_tick() {
         x=$(printf '%s\n' "$req" | awk -F'\t' '$1=="priority" {print $2; f=1; exit} END {if (!f) print "-"}')
         [ "$x" = - ] || pr=$(pnorm "$x") || { pr=high; why="모르는 priority: $x (긴급|높음|보통|낮음 또는 urgent|high|normal|low)"; }
         awk -v p="$p" '$1=="repo" && $2==p {f=1} END {exit !f}' "$CONF" || why="설정에 없는 project: ${p:-(없음)}"
-        [ "$a" = - ] || for x in $(printf %s "$a" | tr , ' '); do okname "$x" || why="after 레인 이름: $x"; done
+        [ "$a" = - ] || for x in $(printf %s "$a" | tr , ' '); do okname "$x" || why="after 레인 이름: $x"; w=$(kindwhy "$x") && why="after: $w"; done
         [ "$o" = - ] || for x in $(printf %s "$o" | tr , ' '); do
           machines | awk -v m="$x" '$1==m {f=1} END {exit !f}' || why="설정에 없는 only 기계: $x"
         done

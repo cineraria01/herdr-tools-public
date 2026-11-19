@@ -995,6 +995,16 @@ t "add: 감사 꺼짐(audit 키 없음)에서도 audit- 머리 이름 거절" '[
 ifresh; mj box-1 shared slow; req "$IS" audit-zz app; run run
 t "받은편지: audit- 머리 이름은 거절(rejected/<이름>.why, 감사 꺼짐에서도)" 'grep -Fq "audit-" "$IS/rejected/audit-zz.why" && [ -z "$(where audit-zz)" ] || { printf "%s\n" "$out"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
+# 커밋 종류와 같은 이름(fix·docs…)은 착지·선행 판정이 아무 「fix: …」 커밋에나 맞으니 거절, 그 낱말로 시작하는 이름은 받음
+fresh; run add --name fix --project app --brief "$(brief kf)"
+t "add: 커밋 종류와 같은 이름(fix) 거절" '[ $rc = 1 ] && [ -z "$(where fix)" ] && printf "%s" "$out" | grep -Fq "레인 이름이 커밋 종류(fix)와 같으면" || { printf "%s\n" "$out"; false; }'
+run add --name fix-login --project app --brief "$(brief kl)"
+t "add: 커밋 종류로 시작하는 이름(fix-login)은 받음" '[ $rc = 0 ] && [ "$(where fix-login | cut -d" " -f1)" = wait ] || { printf "%s\n" "$out"; false; }'
+run add --name kd --project app --brief "$(brief kd)" --after fix-login,docs
+t "add: --after에 커밋 종류 이름(docs) 거절" '[ $rc = 1 ] && [ -z "$(where kd)" ] && printf "%s" "$out" | grep -Fq "커밋 종류(docs)" || { printf "%s\n" "$out"; false; }'
+ifresh; mj box-1 shared slow; req "$IS" fix app; req "$IS" kfa app docs; run run
+t "받은편지: 커밋 종류 이름(fix)·after(docs) 거절, why에 사유" 'grep -Fq "레인 이름이 커밋 종류(fix)와 같으면 착지·선행 판정이 아무 fix: 커밋에나 맞는다" "$IS/rejected/fix.why" && grep -Fq "커밋 종류(docs)" "$IS/rejected/kfa.why" && [ -z "$(where fix)" ] && [ -z "$(where kfa)" ] || { printf "%s\n" "$out"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
 
 afresh; echo "audit    $T/없는틀.md" >>"$T/conf/hc-fill.tsv"; sed -i '' "/^audit    ${EXA//\//\\/}\$/d" "$T/conf/hc-fill.tsv"; add w8; run run
 t "설정 audit 틀을 못 읽으면 종료 1, 띄우지 않음" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "설정 audit 틀을 읽지 못함" && [ ! -e "$T/lane.log" ] || { printf "%s\n" "$out"; false; }'
