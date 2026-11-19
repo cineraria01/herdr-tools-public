@@ -21,7 +21,9 @@ cp "$EX" "$T/conf/hc-fill.tsv" || { echo "FAIL - 예시 설정이 없다: $EX"; 
 cat >"$T/bin/hc" <<'EOF'
 #!/bin/bash
 case $1 in
-  ls) [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3; printf '%s\n' "${HC_FAKE_LS:-{\"terminals\":[]\}}" ;;
+  ls) [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3
+      case " $* " in *" --label hc-lane=1 "*) e='{"terminals":[]}'; printf '%s\n' "${HC_FAKE_LS_LANE:-$e}"; exit 0 ;; esac   # 라벨 hc-lane=1 터미널만
+      printf '%s\n' "${HC_FAKE_LS:-{\"terminals\":[]\}}" ;;
   machine) printf '%s\n' "$HC_FAKE_MACHINES" ;;
   get) case " ${HC_FAKE_GONE-} " in *" $2 "*) echo '{"error":{"kind":"not_found"}}'; exit 3 ;; esac
        case " ${HC_FAKE_FINISHED-} " in *" $2 "*) echo "{\"address\":\"$2\",\"state\":\"finished\",\"status\":null}"; exit 0 ;; esac
@@ -88,7 +90,7 @@ Q=$HOME/.local/share/hc-fill/queue.tsv
 mj() { s='{"machines":['; c=; for m in box-1 box-2 shared slow; do st=disconnected; case " $* " in *" $m "*) st=connected ;; esac; s="$s$c{\"name\":\"$m\",\"state\":\"$st\"}"; c=,; done; export HC_FAKE_MACHINES="$s]}"; }
 # 터미널: lj <주소>:<agent>:<이름>[:<상태, 기본 working>[:<cwd>]] …
 lj() { s='{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"}'; c=,; for x in "$@"; do IFS=: read -r a g nm st cw <<<"$x"; s="$s$c{\"address\":\"$a\",\"agent\":\"$g\",\"name\":\"$nm\",\"state\":\"live\",\"status\":\"${st:-working}\",\"cwd\":\"${cw:-/}\"}"; c=,; done; export HC_FAKE_LS="$s]}"; }
-fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/report.log" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED HC_FAKE_COORD_GONE HC_FAKE_REPORT_RC; }
+fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/report.log" "$T/lane.log" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_LS_LANE HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED HC_FAKE_COORD_GONE HC_FAKE_REPORT_RC; }
 brief() { printf '# 지시문 %s\n본문\n' "$1" >"$T/$1.md"; echo "$T/$1.md"; }
 add() { "$FILL" add --name "$1" --project app --brief "$(brief "$1")" "${@:2}" >/dev/null 2>&1; }
 where() { awk -F'\t' -v n="$1" '$1==n {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소
@@ -187,6 +189,15 @@ lj box-1/a:claude-code:a box-1/b:claude-code:b box-2/a:claude-code:a2 box-2/b:cl
 add f3
 run run
 t "자리: all 칸 기계는 done도 다 셈(shared 3개 → slow)" '[ "$(where f3)" = "up slow slow/f3" ]'
+# 2026-11-19 hcfill-idle-seats: hc-lane 레인이 상태 훅을 아직 안 보내면 hc ls가 agent를 argv 첫 낱말(env)로, status를 null로 준다.
+# 그 레인도 살아 있는 에이전트라 자리를 차지한다(워커 기계 감사 레인 둘을 안 세어 「자리 빔」 알림). 라벨 없는 env(프록시 등)는 안 셈
+fresh
+lane_env='{"address":"box-1/e1","agent":"env","name":"audit-e1","state":"live","cwd":"/"}'
+export HC_FAKE_LS="{\"terminals\":[{\"address\":\"t0\",\"agent\":\"claude-code\",\"name\":\"coord\",\"state\":\"live\",\"status\":\"working\",\"cwd\":\"/\"},$lane_env,{\"address\":\"box-1/a\",\"agent\":\"claude-code\",\"name\":\"a\",\"state\":\"live\",\"status\":\"working\",\"cwd\":\"/\"},{\"address\":\"box-1/px\",\"agent\":\"env\",\"name\":\"proxy\",\"state\":\"live\",\"cwd\":\"/\"}]}"
+export HC_FAKE_LS_LANE="{\"terminals\":[$lane_env]}"
+add f4
+run run
+t "자리: 상태 없는 hc-lane 레인(agent env)도 셈, 라벨 없는 env는 안 셈(box-1 꽉 참 → box-2)" '[ "$(where f4)" = "up box-2 box-2/f4" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/e1 audit-e1: env, 상태 모름(hc-lane 레인) → 셈" && ! printf "%s" "$out" | grep -Fq "box-1/px" || { printf "%s\n" "$out"; false; }'
 
 # 3b-2. 끝난 레인이 자리를 붙잡지 않게(2026-11-19 fill-seat-free — 착지한 레인·지휘를 몇 시간 기다리는 레인이 444바퀴 자리를 막음).
 #   done·idle + 작업 트리라도 ① 레인 이름이 그 프로젝트 local 저장소 origin/<기본> 커밋 제목 머리에 있으면(선행 판정과 같은 규칙) 안 셈
@@ -733,6 +744,14 @@ back 3 1860; run run
 t "놀고 있음: 계속 비면 30분 뒤 다시" '[ "$(grep -c . "$T/report.log")" = 2 ] && grep -Fq "box-1 자리 2개" "$T/report.log"'
 lj box-1/x1:claude-code:a box-1/x2:claude-code:b; run run
 t "놀고 있음: 자리가 차면 그 기계 기록을 지움(다시 비면 처음부터)" '! grep -q "^box-1	" "$IT" && grep -q "^box-2	" "$IT"'
+# 2026-11-19 hcfill-idle-seats: 자리가 하나라도 차면(빈 자리 수가 줄면) 그 순간부터 다시 셈 — 레인이 떠 있는 기계를 새벽부터 553분째 빔으로 셌다
+fresh
+run run; back 2 660; lj box-1/y1:claude-code:a; rm -f "$T/report.log"; run run
+t "놀고 있음: 빈 자리 수가 줄면(레인이 뜸) 처음부터 다시 셈 — 그 바퀴엔 알리지 않음" '! grep -Fq "box-1 자리" "$T/report.log" && grep -Fq "box-2 자리 2개 11분째 빔" "$T/report.log" && [ "$(awk -F"\t" "\$1==\"box-1\" {print \$5}" "$IT")" = 1 ] || { cat "$T/report.log"; cat "$IT"; printf "%s\n" "$out"; false; }'
+back 2 660; rm -f "$T/report.log"; run run
+t "놀고 있음: 다시 센 뒤 idle분 넘으면 그때 알림(box-1 자리 1개 11분째)" 'grep -Fq "box-1 자리 1개 11분째 빔" "$T/report.log" || { cat "$T/report.log"; cat "$IT"; false; }'
+s1=$(awk -F'\t' '$1=="box-1" {print $2}' "$IT"); lj; run run
+t "놀고 있음: 빈 자리 수가 늘면(레인이 끝남) 시작 시각은 그대로" '[ "$(awk -F"\t" "\$1==\"box-1\" {print \$2}" "$IT")" = "$s1" ] && [ "$(awk -F"\t" "\$1==\"box-1\" {print \$5}" "$IT")" = 2 ] || { cat "$IT"; false; }'
 fresh
 add w1 --after pa --no-early --only slow --coord tq1; add w2 --after pa --no-early --only slow --coord tq2
 run run; back 2 700; rm -f "$T/report.log"; run run
