@@ -4,7 +4,7 @@
 #
 #   herdr-sync                      저장소 ↔ 맥, 그다음 hc machine ls의 모든 기계에 맞춘다
 #   herdr-sync <기계>…              고른 기계만
-#   herdr-sync --check [<기계>…]    고치지 않고 비교만 한다 (다름·충돌이 있으면 종료 1)
+#   herdr-sync --check [<기계>…]    고치지 않고 비교만 한다 (다름·충돌이 있으면 종료 1, 첫 줄 「맥:」은 맥 ↔ 저장소 방향)
 #   herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다)
 #   herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
 #
@@ -388,7 +388,19 @@ row() {   # row <이름> <다름 묶음 목록> <충돌 수>
   [ -n "$d" ] && s="다름 ($d)"
   [ "$3" -gt 0 ] && s="${s:+$s · }충돌 $3건"
   [ -n "$s" ] && rc=1
-  rows="$rows$1: ${s:-같음}"$'\n'
+  rows="$rows$1: ${s:-같음}$RSUF"$'\n'
+}
+# --check의 맥 줄: 맥 ↔ 두 저장소의 방향. 맥이 뒤면 기계 줄 「같음」은 맥 옛 판과 같다는 뜻이라 RSUF를 붙인다
+RBH=() RAH=() RSUF=""
+few() { local s="${*:1:3}"; [ $# -gt 3 ] && s="$s …"; echo "$s"; }
+macrow() {
+  local s=""
+  [ ${#RBH[@]} -gt 0 ] && s="저장소가 새로움 ${#RBH[@]}개 ($(few "${RBH[@]}")) — herdr-sync로 깐다"
+  [ ${#RAH[@]} -gt 0 ] && s="${s:+$s · }저장소보다 새로움 ${#RAH[@]}개 ($(few "${RAH[@]}")) — 커밋 안 됨?"
+  case " $rdiff " in *" 지움 "*) s="${s:+$s · }다름 (지움)" ;; esac
+  [ $rconf -gt 0 ] && s="${s:+$s · }충돌 ${rconf}건"
+  [ -n "$s" ] && rc=1
+  rows="맥: ${s:-저장소와 같음}"$'\n'
 }
 
 # --pull <기계>:<경로|*|<뿌리>/**> — 그 기계 값을 맥 실제 파일로 가져온다 (저장소 쪽은 아래 repo_sync가 한다).
@@ -515,7 +527,13 @@ repo_sync() {
     acts[i]=$act idx="$idx $i"
     rdiff="$rdiff ${UB[i]}"
   done
-  [ $check = 1 ] && { for i in $idx; do if [ "${acts[i]}${RS[i]}" = 깖- ]; then echo "저장소 다름:지움 ${UK[i]}"; else echo "저장소 다름:${acts[i]} ${UK[i]}"; fi; done; return 0; }
+  if [ $check = 1 ]; then   # 깖 = 저장소가 새로움(RBH), 모음 = 맥이 새로움(RAH). 맥 줄과 기계 줄 끝 표시에 쓴다
+    for i in $idx; do
+      if [ "${acts[i]}" = 깖 ]; then RBH+=("${UR[i]}"); else RAH+=("${UR[i]}"); fi
+      if [ "${acts[i]}${RS[i]}" = 깖- ]; then echo "저장소 다름:지움 ${UK[i]}"; else echo "저장소 다름:${acts[i]} ${UK[i]}"; fi
+    done
+    return 0
+  fi
   [ $rconf -gt 0 ] && { row 맥 "$rdiff" $rconf; printf '%s' "$rows"; echo "herdr-sync: 저장소와 충돌이 있어 멈춘다. --take repo:<경로>(맥 값) 또는 --pull repo:<경로>(저장소 값)로 푼다. 개인 값이면 맥 파일에서 빼거나 그 줄을 개인 저장소로 옮긴다" >&2; exit 1; }
   # 모음을 먼저 커밋·push하고 base를 쓴 뒤에 깐다. 깔다 멈춰도 모은 것이 스테이징에만 남지 않는다.
   # 나무 파일은 나무마다 tar 한 묶음으로 옮기고(실행 권한 포함) git add·rm도 한 번씩 한다.
@@ -619,6 +637,7 @@ body=0
 build
 repo_sync
 [ $body = 1 ] && build && repo_sync
+[ ${#RBH[@]} -gt 0 ] && RSUF=" (맥 판 기준 — 저장소 새 판은 아직)"
 query mac || die "맥 값을 읽지 못했다"
 MS=("${QC[@]}") MRM=$QRM
 
@@ -761,7 +780,7 @@ for ((j = 0; j < ${#RMK[@]}; j++)); do
   else echo "herdr-sync: 맥 ${RMK[j]} 지우기 실패" >&2; rdiff="$rdiff 지움"; fi
 done
 saved=$rows rows=""
-row 맥 "$rdiff" $rconf
+if [ $check = 1 ]; then macrow; else row 맥 "$rdiff" $rconf; fi
 printf '%s%s' "$rows" "$saved"
 
 # 다 맞춘 뒤, 설정 publish.repo가 있으면 범용 저장소를 공개 저장소로 내보낸다(herdr-tools-publish, 기록 없이·검사 뒤).

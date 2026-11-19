@@ -165,7 +165,7 @@ t "처음 --check: 기계·맥·저장소 그대로" '[ "$(snap)" = "$before" ] 
 t "처음 --check: 저장소로 모을 것" 'has "저장소 다름:모음 .claude/docs/a.md" && has "저장소 다름:깖 .local/bin/hc-lane"'
 t "처음 --check: base 없이 다르면 충돌" 'has "충돌 w1 .claude/docs/b.md (2줄 다름)" && has "충돌 lx .claude/CLAUDE.md#body (2줄 다름)"'
 t "처음 --check: 표식 없는 Codex 지침도 충돌" 'printf "%s\n" "$out" | grep -q "^충돌 lx .codex/AGENTS.md#codex-shared "'
-t "처음 --check: 기계마다 한 줄" 'printf "%s\n" "$out" | grep -q "^w1: .*충돌 1건" && printf "%s\n" "$out" | grep -q "^lx: .*충돌 2건" && printf "%s\n" "$out" | grep -q "^맥: 다름"'
+t "처음 --check: 기계마다 한 줄" 'printf "%s\n" "$out" | grep -q "^w1: .*충돌 1건" && printf "%s\n" "$out" | grep -q "^lx: .*충돌 2건" && printf "%s\n" "$out" | grep -q "^맥: 저장소가 새로움 3개 (bin/hc-lane bin/herdr-settings-merge settings/keys.json) — herdr-sync로 깐다 · 저장소보다 새로움 7개 (claude/CLAUDE.body.md claude/docs/a.md claude/docs/b.md …) — 커밋 안 됨? · 다름 (지움)$"'
 
 # 3. 처음 맞추기
 run
@@ -205,7 +205,7 @@ t "--pull: 종료 0" '[ $rc = 0 ]'
 t "--pull: 맥 본문이 lx 값, 맥 OMC는 그대로" 'is "$MAC/.claude/CLAUDE.md" "OMC mac\n<!-- User customizations -->\n본문 0\n"'
 t "--pull: 저장소와 w1까지" '[ "$(corigin show main:claude/CLAUDE.body.md)" = "본문 0" ] && is "$W1/.claude/CLAUDE.md" "OMC w1\n<!-- User customizations -->\n본문 0\n"'
 run --check
-t "다 맞은 뒤 --check: 종료 0, 모두 같음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -qx "w1: 같음" && printf "%s\n" "$out" | grep -qx "lx: 같음" && printf "%s\n" "$out" | grep -qx "맥: 같음"'
+t "다 맞은 뒤 --check: 종료 0, 모두 같음" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -qx "w1: 같음" && printf "%s\n" "$out" | grep -qx "lx: 같음" && printf "%s\n" "$out" | grep -qx "맥: 저장소와 같음"'
 
 # 6. base가 있는 뒤 그 기계에서 따로 고치면 충돌, --take <기계>:*
 put "$W1/.claude/docs/a.md" 'w1이 고침\n'
@@ -243,6 +243,10 @@ t "실행 권한: 맥에서 뺀 x가 저장소·기계로" '[ $rc = 0 ] && origi
 # 7-2. 범용 저장소만 바뀜(범용 레인 착지) → tools: 줄을 맥에 깖
 git clone -q "$T/origin.git" "$T/tlane" 2> /dev/null
 (cd "$T/tlane" && printf '#!/bin/sh\necho lane2\n' > bin/hc-lane && git commit -qam tlane && git push -q origin main)
+# 착지 직후 --check: 맥이 저장소보다 뒤인 것을 보인다. 기계 줄 「같음」은 맥 옛 판과 같다는 뜻이다 (2026-11-19 「이미 퍼졌다」 오판)
+run --check
+t "맥이 저장소보다 뒤 --check: 맥 줄에 보이고 종료 1" '[ $rc = 1 ] && has "맥: 저장소가 새로움 1개 (bin/hc-lane) — herdr-sync로 깐다" && is "$MAC/.local/bin/hc-lane" "#!/bin/sh\necho lane\n"'
+t "맥이 저장소보다 뒤 --check: 기계 줄 같음은 맥 판 기준" 'has "w1: 같음 (맥 판 기준 — 저장소 새 판은 아직)" && has "lx: 같음 (맥 판 기준 — 저장소 새 판은 아직)" && [ "$(printf "%s\n" "$out" | grep -n "^맥: " | cut -d: -f1)" -lt "$(printf "%s\n" "$out" | grep -n "^w1: " | cut -d: -f1)" ]'
 run
 t "범용 저장소만 바뀜: 맥에 깖·기계에 씀" '[ $rc = 0 ] && has "맥 깖 .local/bin/hc-lane" && is "$MAC/.local/bin/hc-lane" "#!/bin/sh\necho lane2\n" && is "$W1/.local/bin/hc-lane" "#!/bin/sh\necho lane2\n"'
 
@@ -322,6 +326,7 @@ put "$MAC/.claude/docs/d.md" 'secret-word 는 개인 저장소엔 괜찮다\n'
 before=$(snap) h0=$(heads)
 run --check
 t "개인 값 --check: 충돌로 보인다" '[ $rc = 1 ] && has "충돌 저장소 .local/bin/herdr-balance (개인 값)" && has "저장소 다름:모음 .claude/docs/d.md"'
+t "맥이 저장소보다 새로움 --check: 맥 줄에 보이고, 기계 줄에 맥 판 표시 없음" 'has "맥: 저장소보다 새로움 1개 (claude/docs/d.md) — 커밋 안 됨? · 충돌 1건" && printf "%s\n" "$out" | grep -q "^w1: " && ! printf "%s" "$out" | grep -Fq "맥 판 기준"'
 run
 t "개인 값: 종료 1, 두 저장소·맥·기계 그대로" '[ $rc = 1 ] && has "충돌 저장소 .local/bin/herdr-balance (개인 값)" && [ "$(heads)" = "$h0" ] && [ "$(snap)" = "$before" ]'
 run --take repo:.local/bin/herdr-balance
@@ -389,7 +394,7 @@ t "링크: 가리킬 곳을 이번에 썼으면 같은 실행에서 만든다" '
 t "링크: 가리킬 곳이 없으면 만들지 않고 건너뜀" 'has "건너뜀 lx .claude/skills-alias/gone@ (가리킬 곳 없음)" && [ ! -L "$LX/.claude/skills-alias/gone" ] && [ ! -L "$W1/.claude/skills-alias/gone" ]'
 t "나무 base: 파일마다 남는다" 'grep -q "^.agents/skills/alpha/ref/deep/er/notes.md	" "$W1/.local/state/herdr-sync/base.tsv" && grep -q "^.agents/skills/alpha/ref/deep/er/notes.md	" "$MAC/.local/state/herdr-sync/repo-base.tsv"'
 run --check
-t "나무 --check: 남은 것은 그 충돌 하나" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -qx "w1: 충돌 1건" && printf "%s\n" "$out" | grep -qx "lx: 같음" && printf "%s\n" "$out" | grep -qx "맥: 같음"'
+t "나무 --check: 남은 것은 그 충돌 하나" '[ $rc = 1 ] && printf "%s\n" "$out" | grep -qx "w1: 충돌 1건" && printf "%s\n" "$out" | grep -qx "lx: 같음" && printf "%s\n" "$out" | grep -qx "맥: 저장소와 같음"'
 
 # 15-2. 기계당 hc 호출 수는 나무 파일 수와 상관없다
 put "$C/few/a.md" 'a\n' && put "$C/few/b/c.md" 'c\n'

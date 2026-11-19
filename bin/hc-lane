@@ -1390,7 +1390,7 @@ clean_cmd() {
       [ -n "$r" ] || exit 0
       f=$(printf "%s\n" "$r" | while IFS= read -r d; do find "$d" ! -type d; done | sed "s|^\./||") || exit 2
       [ -n "$f" ] || exit 0
-      i=$(printf "%s\n" "$f" | git -C "$3" check-ignore --stdin); [ $? -le 1 ] || exit 2
+      i=$(printf "%s\n" "$f" | git -c core.quotePath=false -C "$3" check-ignore --stdin); [ $? -le 1 ] || exit 2
       [ -n "$i" ] || exit 0
       [ -n "$2" ] && [ -d "$2" ] || exit 3
       [ "$4" = 0 ] || { printf "%s\n" "$i" | sed "s/^/n /"; exit 0; }

@@ -526,6 +526,11 @@ land c-qa3
 mkdir -p "$R.wt/c-qa3/.qa/on" && echo far >"$R.wt/c-qa3/.qa/on/f"
 run clean --on box --repo "$R" --branch c-qa3
 t "clean --on .qa: 그 기계 안에서 메인 폴더로 복사하고 정리" '[ $rc = 0 ] && gone c-qa3 && [ "$(cat "$R/.qa/on/f")" = far ] || { cat "$T/err"; false; }'
+# clean-qa-quotepath(2026-11-19): 한글·공백 이름도 옮김 — 기본 core.quotePath=true면 check-ignore가 "\354…"로 찍어 복사 실패로 멈췄다
+land c-qa4
+mkdir -p "$R.wt/c-qa4/.qa/전체 검증" && echo ko >"$R.wt/c-qa4/.qa/전체 검증/결과 1.txt"
+run clean --repo "$R" --branch c-qa4
+t "clean .qa: 한글·공백 이름 파일도 메인 폴더로 옮기고 정리" '[ $rc = 0 ] && gone c-qa4 && [ "$(cat "$R/.qa/전체 검증/결과 1.txt")" = ko ] || { cat "$T/err"; printf "%s\n" "$out"; false; }'
 
 mk t14
 seed .gitignore '.omc/'
