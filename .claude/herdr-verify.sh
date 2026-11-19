@@ -1,8 +1,9 @@
 #!/bin/bash
 # herdr-tools 검증: 문법 검사 + tests/*.test.sh·claude/hooks/tests/*.test.sh 전부. hc-lane land가 이것을 부른다.
 # 고아 검사: 시험마다 따로 프로세스 무리(pgid)로 돌린다. 시험이 끝난 뒤 그 무리에 남은 프로세스, 또는 검증 중 새로 생겨
-# 부모가 1이 된 프로세스 가운데 명령 줄이나 cwd에 이 폴더 경로가 든 것(과 그 자손)은 고아다: 목록을 찍고 끄고(TERM, 3초 뒤 KILL)
-# 검증 실패. 그래서 배경 프로세스를 남기는 시험은 착지 전에 걸린다(2026-11-16 hc-fill 시험이 watch 고아 18개를 남김).
+# 부모가 1이 된 프로세스 가운데 명령 줄이나 cwd에 이 폴더 경로가 든 것(과 그 자손)은 고아다: 목록(pid·cwd·명령)을 찍고
+# 끄고(TERM, 3초 뒤 KILL) 검증 실패. 단 cwd로만 걸리고 명령 줄에 /.claude/가 든 것(이 폴더에서 도는 Claude 세션의
+# 훅·플러그인이 떼어 띄운 것)은 뺀다. 그래서 배경 프로세스를 남기는 시험은 착지 전에 걸린다(2026-11-16 hc-fill 시험이 watch 고아 18개를 남김).
 set -u
 cd "$(dirname "$0")/.." || exit 1
 fail=0
@@ -45,16 +46,24 @@ for line in subprocess.run(["ps", "-x", "-o", "pid=,pgid=,ppid=,command="], capt
     if len(f) >= 3 and f[0].isdigit():
         procs[int(f[0])] = (int(f[1]), int(f[2]), f[3] if len(f) > 3 else "")
 new = [p for p, (g, pp, cmd) in procs.items() if pp == 1 and str(p) not in before]
-cwd, pid = {}, None  # 새 PPID 1 프로세스의 cwd
-if new:
-    for line in subprocess.run(["lsof", "-a", "-d", "cwd", "-p", ",".join(map(str, new)), "-Fpn"],
-                               capture_output=True, text=True).stdout.splitlines():
-        if line[:1] == "p":
-            pid = int(line[1:])
-        elif line[:1] == "n" and pid:
-            cwd[pid] = line[1:] + "/"
+cwd = {}  # pid -> cwd + "/"
+def getcwd(pids):
+    pid = None
+    if pids:
+        for line in subprocess.run(["lsof", "-a", "-d", "cwd", "-p", ",".join(map(str, pids)), "-Fpn"],
+                                   capture_output=True, text=True).stdout.splitlines():
+            if line[:1] == "p":
+                pid = int(line[1:])
+            elif line[:1] == "n" and pid:
+                cwd[pid] = line[1:] + "/"
+getcwd(new)
+# cwd로만 걸린 것 가운데 명령 줄에 /.claude/(plugins·hooks·shell-snapshots)가 든 것은 이 폴더에서 도는
+# Claude 세션의 훅·플러그인이 떼어 띄운 것이라 뺀다(2026-11-19 mini-m4 레인 착지가 OMC node를 잡아 끔).
+# 명령 줄에 이 폴더 경로가 들면 /.claude/가 있어도 잡는다(저장소 .claude/ 스크립트)
+def stray(cmd, c):
+    return any(h + "/" in cmd or (c.startswith(h + "/") and "/.claude/" not in cmd) for h in here)
 bad = {p for p, (g, pp, cmd) in procs.items() if p != me and (g == pg or (
-    p in new and any(h + "/" in cmd or cwd.get(p, "").startswith(h + "/") for h in here)))}
+    p in new and stray(cmd, cwd.get(p, ""))))}
 while True:  # 자손도 함께
     kids = {p for p, (g, pp, cmd) in procs.items() if pp in bad and p != me} - bad
     if not kids:
@@ -62,8 +71,9 @@ while True:  # 자손도 함께
     bad |= kids
 if not bad:
     sys.exit(0)
-for p in sorted(bad):
-    print("  고아 pid %d: %s" % (p, procs[p][2][:120]))
+getcwd([p for p in bad if p not in cwd])
+for p in sorted(bad):  # cwd도 찍는다: 이 폴더의 다른 Claude 세션 소속인지 사람이 가리게
+    print("  고아 pid %d (cwd %s): %s" % (p, cwd.get(p, "?/")[:-1], procs[p][2][:120]))
 def send(pids, sig):
     for p in pids:
         try:

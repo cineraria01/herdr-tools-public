@@ -52,6 +52,27 @@ mk sid "python3 -c 'import os,sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1
 verify
 t "setsid로 빠진 저장소 경로 프로세스: 실패·끔" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "고아 pid $(cat "$P/sid")" && gone "$(cat "$P/sid")"'
 
+# 3b. 명령 줄에 저장소 경로가 없고 cwd로만 저장소에 있는 떼어 띄운 프로세스(sleep): 여전히 잡음, 고아 줄에 cwd
+mk cwdonly "cd \"\$(dirname \"\$0\")/..\" && python3 -c 'import os,sys; os.setsid(); os.execvp(\"sleep\", [\"sleep\", \"300\"])' </dev/null >/dev/null 2>&1 & echo \$! >'$P/cwdonly'"
+verify
+t "cwd로만 저장소인 떼어 띄운 sleep: 실패·끔, 줄에 cwd" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "고아 pid $(cat "$P/cwdonly") (cwd $R)" && gone "$(cat "$P/cwdonly")"'
+
+# 3c. 저장소를 cwd로 떼어 띄운 Claude Code 플러그인·훅 프로세스(명령 줄에 /.claude/, 저장소 경로 없음):
+# 레인의 Claude 세션 소속이라 고아가 아니다 — 안 잡고 안 끔(2026-11-19 mini-m4 fill-name-guard 착지가 OMC node를 잡음)
+mkdir -p "$T/home/.claude/plugins/fake"
+printf '#!/usr/bin/env python3\nimport time\ntime.sleep(300)\n' >"$T/home/.claude/plugins/fake/idle"
+chmod +x "$T/home/.claude/plugins/fake/idle"
+mk plug "python3 -c 'import os,sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' '$T/home/.claude/plugins/fake/idle' </dev/null >/dev/null 2>&1 & echo \$! >'$P/plug'"
+verify
+t "cwd가 저장소인 /.claude/ 플러그인 프로세스: 통과, 그대로 삶" '[ $rc = 0 ] && ! printf "%s" "$out" | grep -q "고아 pid" && alive "$(cat "$P/plug")"'
+kill "$(cat "$P/plug")"
+
+# 3d. 명령 줄에 /.claude/가 들어도 저장소 경로가 같이 들면(저장소의 .claude/ 스크립트) 여전히 잡음
+printf '#!/usr/bin/env python3\nimport time\ntime.sleep(300)\n' >"$T/dot-idle"
+mk dot "cp '$T/dot-idle' .claude/idle && chmod +x .claude/idle && python3 -c 'import os,sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' \"\$PWD/.claude/idle\" </dev/null >/dev/null 2>&1 & echo \$! >'$P/dot'"
+verify
+t "저장소 .claude/ 아래 프로세스: 실패·끔" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "고아 pid $(cat "$P/dot")" && gone "$(cat "$P/dot")"'
+
 # 4. 검증 전부터 돌던 저장소 경로 프로세스(부모 1)는 건드리지 않음
 mk pre 'exit 0'
 ( "$R/bin/idle" </dev/null >/dev/null 2>&1 & echo $! >"$P/pre" )
