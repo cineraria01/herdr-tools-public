@@ -18,6 +18,12 @@
 #          hc-lane watch에 「<기계> 자리 n개 m분째 빔 — 대기열에 띄울 것 없음」 사건을 보낸다(계속 비면 처음 알림 포함 30분 간격으로 세 번, 그 뒤 2시간마다). 0이면 끔, 빼면 10
 # hold     쉰 레인 자리 풀기, 분: 작업 트리가 남은 done·idle 레인도 이만큼 이어서 쉬면(지휘를 기다리는 등) 자리를 안 센다.
 #          쉬기 시작한 때는 ~/.local/share/hc-fill/held.tsv. 0이면 끔(늘 셈), 빼면 60. 착지한 레인은 이 값과 상관없이 안 센다
+# audit    자동 감사 지시문 틀 파일(맥 경로, ~ 펼침. 예시 config.example/hc-fill-audit.md). 키가 없거나 빈 값이면 끔(지휘가 감사를 띄운다).
+#          켜면 쓰기 레인(받은편지·add --no-audit 줄 빼고)의 run 지시문 끝에 「감사·착지 (hc-fill 자동)」 절을 붙이고, 레인의
+#          hc-lane report 완료 <sha> 뒤 그 기계에 긴급 감사 줄 audit-<레인>(hc-lane --read, 레인 작업 트리)을 넣어, 판정의
+#          높음·중간이 0이면 레인에 「감사 통과」, 아니면 「감사 지적」을 hc send. 틀 자리: {lane} {machine} {worktree} {branch}
+#          {sha} {base} {brief}(그 기계의 레인 run 지시문) {report}(그 기계 ~/.local/share/hc-fill/reports/audit-<레인>.md)
+# audit_max  감사 지적 뒤 고침 바퀴 상한(빼면 2). 넘으면 그 레인 주인 지휘에 hc-lane report 막힘 「… 지휘 판단」
 local    here
 agent    claude-code
 coord    t0
@@ -28,6 +34,8 @@ early
 early_wait 5
 idle     10
 hold     60
+#audit   ~/.config/herdr-tools/hc-fill-audit.md
+audit_max 2
 #
 # machine  이름  상한  레인상한  셈     (위에서부터 차례대로 빈 자리를 찾는다)
 #   상한     그 기계의 자리를 차지한 에이전트(agent 종류) 수가 이 값 미만일 때만 띄운다. 다른 사람·루프가 띄운 것도 센다.
