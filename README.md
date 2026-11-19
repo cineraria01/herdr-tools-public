@@ -243,17 +243,18 @@ hc-fill rm <레인>               # 대기열에서만 뺀다(떠 있는 터미�
 ```sh
 herdr-tools-config get balance.remote ""   # 값. 키가 없으면 기본값, 기본값도 없으면 종료 3
 herdr-tools-config file hc-fill.tsv        # 설정 폴더의 그 파일 절대 경로. 없으면 종료 3
-herdr-tools-config lint [<파일>…]          # git ls-files(또는 준 파일)에서 개인 값 패턴(private-patterns.txt)에 걸린 줄. 걸리면 종료 1
+herdr-tools-config lint [--strict] [<파일>…]  # git ls-files(또는 준 파일)에서 개인 값 패턴(private-patterns.txt)에 걸린 줄. 걸리면 종료 1
 ```
 
 - `config`는 한 줄에 `<키> <값>`(값은 줄 끝까지), 키 혼자면 빈 값, `#` 줄은 주석. 같은 키 두 번·잘못 부름은 종료 2.
-- lint 패턴은 `$HERDR_TOOLS_CONFIG/private-patterns.txt`, 없으면 `~/.local/share/herdr-tools/private-patterns.txt`. 둘 다 없으면 건너뛴다(종료 0).
+- lint 패턴은 `$HERDR_TOOLS_CONFIG/private-patterns.txt`, 없으면 `~/.local/share/herdr-tools/private-patterns.txt`. 둘 다 없으면 건너뛴다(종료 0). `--strict`면 패턴 파일이 없거나 패턴 줄이 없을 때 종료 3(`get`·`file`의 「설정 없음」과 같은 코드).
+- 검증(`.claude/herdr-verify.sh`)은 `lint --strict`를 부른다: 패턴 파일이 빠진 기계에서는 「실패 개인 값 검사」로 착지하지 않는다(herdr-sync로 패턴 파일을 맞춘다). 패턴이 없는 게 정당한 곳(공개 사본을 받아 검증을 돌리는 쪽 — 공개 트리는 이 저장소 트리와 같아 같은 검증이 들어 있다)만 `HERDR_VERIFY_NO_LINT=1`로 건너뛴다(「건너뜀 개인 값 검사」). 레인 안(`HC_LANE`이 있을 때)에서는 이 값을 무시하고 strict로 돈다(「레인 안이라 HERDR_VERIFY_NO_LINT 무시」).
 - lint는 이진·UTF-8 아닌 파일도 바이트로 본다(`LC_ALL=C grep -a` — macOS grep `-I`는 그런 파일을 통째로 건너뛰었다). 상대 경로로 받은 파일(인자 없을 때의 `git ls-files` 포함)은 경로 글자도 보고 `파일:0: 경로 <패턴>`으로 찍는다(절대 경로는 임시 파일 자리라 내용만). 못 읽는 파일이 있으면 종료 2(검사 못 함). `git ls-files`에 있지만 작업 트리에서 지운 파일은 뺀다. 패턴은 바이트 단위다(`LC_ALL=C` — 한글 같은 비ASCII 글자에서 `.`은 글자 하나가 아니라 바이트 하나). 대소문자는 무시한다(`-i`, ASCII만 접힘).
 
 ## 시험
 
 ```sh
-bash .claude/herdr-verify.sh                             # 문법 검사 + tests/*.test.sh 전부 (hc-lane land가 부른다)
+bash .claude/herdr-verify.sh                             # 문법 검사 + 개인 값 검사(lint --strict) + tests/*.test.sh 전부 (hc-lane land가 부른다)
 HC_LANE_BIN="$PWD/bin/hc-lane" bash tests/hc-lane.test.sh   # 절대 경로로 준다(HC_LANE은 레인 이름)
 bash tests/herdr-sync.test.sh                            # 임시 HOME 셋·가짜 hc·임시 범용·개인 저장소. 실제 기계에 쓰지 않는다
 bash tests/hc-fill.test.sh                               # 가짜 hc·hc-lane·git과 config.example 설정. 실제 레인을 띄우지 않는다

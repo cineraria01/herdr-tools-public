@@ -105,6 +105,16 @@ t "lint: 파일을 주면 그 파일만(패턴 파일도 준 대로 검사)" '[ 
 t "lint: 안 걸리면 종료 0, 출력 없음" '[ $rc = 0 ] && [ -z "$out" ]'
 (cd "$R" && HERDR_TOOLS_CONFIG=$T/c2 bash "$TOOL" lint >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
 t "lint: 패턴 파일이 둘 다 없으면 종료 0 + 표준 오류 한 줄" '[ $rc = 0 ] && [ -z "$out" ] && err1'
+(cd "$R" && HERDR_TOOLS_CONFIG=$T/c2 bash "$TOOL" lint --strict >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
+t "lint --strict: 패턴 파일이 둘 다 없으면 종료 3 + 표준 오류 한 줄" '[ $rc = 3 ] && [ -z "$out" ] && err1 && grep -Fq "패턴 파일 없음" "$T/err"'
+printf '# 주석만\n\n' >"$T/c2/private-patterns.txt"
+(cd "$R" && HERDR_TOOLS_CONFIG=$T/c2 bash "$TOOL" lint --strict >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
+t "lint --strict: 패턴 줄이 없으면 종료 3 + 표준 오류 한 줄" '[ $rc = 3 ] && [ -z "$out" ] && err1'
+(cd "$R" && HERDR_TOOLS_CONFIG=$T/c2 bash "$TOOL" lint >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
+t "lint: strict 아니면 패턴 줄이 없어도 종료 0" '[ $rc = 0 ] && [ -z "$out" ]'
+rm -f "$T/c2/private-patterns.txt"
+(cd "$R" && HERDR_TOOLS_CONFIG=$T/c1 bash "$TOOL" lint --strict clean.txt sub/private-patterns.txt >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
+t "lint --strict: 패턴이 있으면 strict 아닌 것과 같음(파일 인자도)" '[ $rc = 1 ] && [ "$out" = "sub/private-patterns.txt:2: secret-host-[0-9]+" ]'
 mkdir -p "$HOME/.local/share/herdr-tools"; printf 'clean\n' >"$HOME/.local/share/herdr-tools/private-patterns.txt"
 (cd "$R" && HERDR_TOOLS_CONFIG=$T/c2 bash "$TOOL" lint >"$T/out" 2>"$T/err"); rc=$?; out=$(cat "$T/out")
 t "lint: 설정 폴더에 없으면 ~/.local/share/herdr-tools 패턴" '[ $rc = 1 ] && [ "$out" = "$(printf "clean.txt:0: 경로 clean\nclean.txt:1: clean")" ]'

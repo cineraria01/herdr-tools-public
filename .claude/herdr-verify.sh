@@ -14,9 +14,13 @@ for f in bin/* install.sh .claude/*.sh; do
   esac
 done
 # 개인 값 검사: git ls-files에서 개인 값 패턴(개인 설정 private-patterns.txt, 없으면 ~/.local/share/herdr-tools/)에 걸린 줄.
-# 패턴 파일이 둘 다 없는 기계는 건너뛴다(도우미가 한 줄 알림). 걸리면 실패
-if bash bin/herdr-tools-config lint; then echo "통과 개인 값 검사"
-else echo "실패 개인 값 검사 (위 줄을 범용 값으로 바꾸거나 그 파일을 개인 저장소로)"; fail=1; fi
+# --strict: 패턴 파일·패턴 줄이 없으면 실패(검사 없이 착지하지 않게). 걸려도 실패.
+# 패턴이 없는 게 정당한 곳(공개 사본을 받아 돌리는 쪽)은 HERDR_VERIFY_NO_LINT=1로만 건너뛴다.
+# 레인 안(HC_LANE)에서는 무시한다: 무인 레인이 그 값으로 막힘을 우회해 착지하지 않게
+if [ "${HERDR_VERIFY_NO_LINT-}" = 1 ] && [ -n "${HC_LANE-}" ]; then echo "레인 안이라 HERDR_VERIFY_NO_LINT 무시 (HC_LANE=$HC_LANE)"; fi
+if [ "${HERDR_VERIFY_NO_LINT-}" = 1 ] && [ -z "${HC_LANE-}" ]; then echo "건너뜀 개인 값 검사 (HERDR_VERIFY_NO_LINT=1)"
+elif bash bin/herdr-tools-config lint --strict; then echo "통과 개인 값 검사"
+else echo "실패 개인 값 검사 (위 줄을 범용 값으로 바꾸거나 그 파일을 개인 저장소로. 패턴 파일 없음이면 herdr-sync로 맞춘다)"; fail=1; fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/herdr-tools-verify.XXXXXX") || exit 1
 ps -x -o pid= >"$tmp/before"
 pg=

@@ -2,14 +2,15 @@
 # herdr-tools-config: 개인 설정 폴더($HERDR_TOOLS_CONFIG, 기본 ~/.config/herdr-tools)를 읽는 도우미.
 #   get <키> [<기본값>]  config의 값을 찍는다. 키가 없으면 기본값, 기본값도 없으면 종료 3
 #   file <이름>          그 폴더의 <이름> 파일 절대 경로. 없으면 종료 3
-#   lint [<파일>…]       개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
+#   lint [--strict] [<파일>…]  개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
+#                        패턴 파일이 없으면 경고 뒤 건너뜀(종료 0), --strict면 패턴 파일·패턴 줄이 없을 때 종료 3
 #                        이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
 # config 꼴: 한 줄에 「<키> <값>」(값은 줄 끝까지, 앞뒤 빈칸 뺌), 「<키>」 혼자면 빈 값, # 줄은 주석.
 # 키는 <영역>.<이름>(^[a-z]+\.[a-z0-9_]+$). 같은 키 두 번·잘못 부름은 종료 2. 예시는 저장소 config.example/.
 set -u
 me=herdr-tools-config
 dir=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
-usage() { sed -n '2,7s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '2,8s/^# \{0,1\}//p' "$0"; }
 die2() { echo "$me: $*" >&2; exit 2; }
 
 cmd_get() {
@@ -44,10 +45,13 @@ cmd_file() {
 }
 
 cmd_lint() {
-  local pf=$dir/private-patterns.txt p f out self here files=() regs=() links=() pats=()
+  local pf=$dir/private-patterns.txt p f out self here strict=0 files=() regs=() links=() pats=()
+  [ "${1-}" = --strict ] && { strict=1; shift; }
   [ -f "$pf" ] || pf=$HOME/.local/share/herdr-tools/private-patterns.txt
   if [ ! -f "$pf" ]; then
-    echo "$me: 개인 값 패턴 파일 없음($dir/private-patterns.txt, ~/.local/share/herdr-tools/private-patterns.txt) — 검사 건너뜀" >&2
+    p="검사 건너뜀"; [ $strict = 1 ] && p="검사 못 함(--strict)"
+    echo "$me: 개인 값 패턴 파일 없음($dir/private-patterns.txt, ~/.local/share/herdr-tools/private-patterns.txt) — $p" >&2
+    [ $strict = 1 ] && exit 3
     return 0
   fi
   while IFS= read -r p || [ -n "$p" ]; do
@@ -57,6 +61,7 @@ cmd_lint() {
     [ $? = 2 ] && die2 "틀린 패턴 $p ($pf)"
     pats+=("$p")
   done <"$pf"
+  if [ $strict = 1 ] && [ ${#pats[@]} = 0 ]; then echo "$me: 개인 값 패턴 줄 없음($pf) — 검사 못 함" >&2; exit 3; fi
   if [ $# -gt 0 ]; then files=("$@")
   else
     git rev-parse --git-dir >/dev/null 2>&1 || die2 "lint: 파일을 주거나 git 저장소 안에서 부른다"

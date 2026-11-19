@@ -80,6 +80,16 @@ mk leak 'echo secret-word'
 verify
 t "개인 값 있음: 검증 실패, 걸린 줄" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "실패 개인 값 검사" && printf "%s" "$out" | grep -q "tests/x.test.sh:2: secret-word"'
 
+# 7. 패턴 파일이 없는 기계: 건너뛰지 않고 실패(검사 없이 착지 못 하게). 명시적 HERDR_VERIFY_NO_LINT=1만 건너뜀
+mk nopat 'exit 0'
+out=$(HOME=$T/home HERDR_TOOLS_CONFIG=$T/없음 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "패턴 파일 없음: 실패 개인 값 검사, herdr-sync 안내" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "실패 개인 값 검사" && printf "%s" "$out" | grep -q "herdr-sync"'
+out=$(HC_LANE= HOME=$T/home HERDR_TOOLS_CONFIG=$T/없음 HERDR_VERIFY_NO_LINT=1 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "패턴 파일 없음 + HERDR_VERIFY_NO_LINT=1: 건너뜀 줄, 통과" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "건너뜀 개인 값 검사" && ! printf "%s" "$out" | grep -q "통과 개인 값 검사"'
+# 레인 안(HC_LANE)에서는 끌 수 없다: 무인 레인이 막힘을 우회해 착지하지 않게
+out=$(HC_LANE=x HOME=$T/home HERDR_TOOLS_CONFIG=$T/없음 HERDR_VERIFY_NO_LINT=1 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "레인 안 + HERDR_VERIFY_NO_LINT=1: 무시 줄, 실패 개인 값 검사" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "레인 안이라 HERDR_VERIFY_NO_LINT 무시" && printf "%s" "$out" | grep -q "실패 개인 값 검사" && ! printf "%s" "$out" | grep -q "건너뜀 개인 값 검사"'
+
 # 끝: 이 시험이 띄운 것 0
 t "이 시험의 고아 0" allgone
 
