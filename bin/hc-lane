@@ -93,7 +93,8 @@ usage() {
   watch         늘 도는 감시: wait와 같은 판정·같은 커서(seen.<지휘 주소> — wait와 겹쳐 두 번 알리지 않음)로 새 사건이 생기면
                 지휘 터미널에 hc send <지휘> "hc-lane: <레인> <상태> <sha> <한 줄> (<터미널>) ‖ …" 한 번(보낸 뒤에만 커서에 적음,
                 실패면 다음 바퀴에 다시). 바퀴는 설정 lane.watch_tick초(기본 30). 같은 지휘로 하나만(뒤 것은 종료 75).
-                못 읽은 기계는 「연결 안 됨 <기계>」 한 번 보내고 다음 바퀴에 다시 본다. hc ls 실패는 시작·회복 때 한 번씩.
+                못 읽은 기계는 「연결 안 됨 <기계>」 한 번 보내고 다음 바퀴에 다시 본다(sh를 띄울 수 없는 기계 — 예: Windows — 는
+                레인 기록이 없는 것으로 보고 건너뛴다). hc ls 실패는 시작·회복 때 한 번씩.
                 끝남(종료 0): 지휘 터미널이 3바퀴 이어 hc get에 없거나 끝남(연결 실패는 세지 않음), 또는 그 지휘의 살아 있는
                 레인(라벨 hc-lane=1, parent 모르면 그 지휘 것)도 hc-fill 대기열의 wait 요청도 새 사건도 없이
                 lane.watch_idle분(기본 60). 레인·감사를 띄울 때 hc-lane이 지휘(HC_LANE_COORD — hc-fill이 대기열 주인 지휘, 없으면
@@ -115,6 +116,7 @@ usage() {
        hc-lane events [--all | --on <기계>…] [--since <시각|30m·2h·1d>]
   events        이 기계(와 --all이면 hc machine ls의 연결된 기계마다 hc exec --on 한 번)의 events.tsv를 시각 순으로.
                 원격 줄의 기계·터미널은 hc 이름(<기계>/<t…>)으로 바꿔 찍는다. 읽지 못한 기계는 「모름 <기계>」 한 줄
+                sh를 띄울 수 없는 기계(예: Windows)는 레인 기록이 없는 것으로 보고 건너뛴다(events·wait·watch 모두)
        hc-lane wait [--all | --on <기계>…] [--timeout <분>(기본 110)] [--state <상태,…>] [--since <시각>] [--mine]
   wait          아직 본 적 없는 사건이 생길 때까지 HC_LANE_WAIT_TICK초(기본 60)마다 보고, 생기면 그 줄(들)을 찍고 종료 0.
                 상한이면 종료 75. 찍은 사건은 이 기계 …/hc-lane/seen.<$HC_TERMINAL_ID>(지휘마다, 터미널 밖이면 seen)에
@@ -138,6 +140,7 @@ usage() {
                 그대로 알림)의 끝남은 알리지 않는다. 쉬는 레인은 그 작업 트리 경로가 명령 줄에 든 프로세스가 살아 있어도 바쁨으로 본다.
                 커서·보냄 열쇠는 기계 이름을 뺀 꼴(주소는 끝의 t…)이라 hc 기계 이름을 바꿔도 본 사건이 다시 안 나온다(옛 꼴 줄도 읽음).
                 hc ls가 3바퀴 이어 실패하면 「hc ls 실패 n바퀴」 멈춤 한 줄로 끝낸다.
+                sh를 띄울 수 없는 기계(예: Windows)는 레인 기록이 없는 것으로 보고 건너뛴다(「모름」·「연결 안 됨」 없음).
                 못 읽은 기계의 레인은 그 바퀴에 blocked·error만 그대로, 쉼·끝남은 「연결 안 됨 <기계> <날짜>」(하루 한 번). 원격은 바퀴마다 기계당 한 번(쉬는 레인 확인만 그 터미널에 hc get·read)
 준비·정리 훅: .claude/herdr-setup.sh(환경 LANE_*: LANE_REPO=메인 폴더, LANE_BASE=기본 브랜치), .claude/herdr-teardown.sh
 실행 명령은 env K=V 로 감싸므로 hc 템플릿 이름은 쓸 수 없다. 마지막 줄은 JSON 한 줄.
@@ -234,14 +237,25 @@ pick() {
 $recs
 EOF
 }
+# nosh <hc exec 오류 글>: 그 기계가 프로그램을 띄우지 못함(spawn_failed + 「cannot start <프로그램>」 — sh·ps가 없는 Windows 등)이면 0.
+# 연결은 멀쩡하고 레인 기록도 있을 수 없는 기계다(lane-nosh). 연결 실패·시간 초과·그 밖의 오류는 1
+nosh() { case $1 in *'"spawn_failed"'*) case $1 in *'cannot start '*) return 0 ;; esac ;; esac; return 1; }
+# rexec <기계> <명령…>: hc exec --on(60초)으로 돌려 표준 출력을 낸다. 실패했는데 nosh면 종료 9(부른 쪽이 조용히 건너뜀)
+rexec() {
+  rx_m=$1; shift
+  rx_e=$(mktemp "${TMPDIR:-/tmp}/hc-lane-rx.XXXXXX") || { hc exec --on "$rx_m" --timeout 60 -- "$@" </dev/null 2>/dev/null; return; }
+  hc exec --on "$rx_m" --timeout 60 -- "$@" </dev/null 2>"$rx_e"; rx_r=$?
+  [ $rx_r = 0 ] || ! nosh "$(cat "$rx_e")" || rx_r=9
+  rm -f "$rx_e"; return $rx_r
+}
 # evread <끝 줄 수(0이면 전부)>: 이 기계와 ems 기계의 events.tsv(7칸 이상 줄만 — 옛 줄은 turn 칸이 없다). 원격 줄은 기계·터미널 칸을 hc 이름으로.
-# 원격은 기계마다 hc exec 한 번. 못 읽은 기계는 「모름 <기계>」
+# 원격은 기계마다 hc exec 한 번. 못 읽은 기계는 「모름 <기계>」, sh를 못 띄우는 기계(nosh)는 레인 기록이 없는 것으로 보고 0줄
 evread() {
   rd='f=${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane/events.tsv; [ -f "$f" ] || exit 0; if [ "$1" = 0 ]; then cat "$f"; else tail -n "$1" "$f"; fi'
   sh -c "$rd" hc-lane "$1" | awk -F'\t' 'NF >= 7'
   for mn in $unk; do echo "모름 $mn"; done
   for mn in $ems; do
-    o=$(hc exec --on "$mn" --timeout 60 -- sh -c "$rd" hc-lane "$1" </dev/null 2>/dev/null) || { echo "모름 $mn"; continue; }
+    o=$(rexec "$mn" sh -c "$rd" hc-lane "$1") || { [ $? = 9 ] || echo "모름 $mn"; continue; }
     printf '%s\n' "$o" | M=$mn awk -F'\t' -v OFS='\t' 'NF >= 7 { $2 = ENVIRON["M"]; if ($3 != "-" && index($3, "/") == 0) $3 = ENVIRON["M"] "/" $3; print }'
   done
 }
@@ -273,8 +287,10 @@ psget() {
   case " $psbad " in *" $pm "*) return 2 ;; esac
   case " $psok " in *" $pm "*) return 0 ;; esac
   if [ "$pm" = . ]; then o_=$(capt 20 ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null)
-  else o_=$(hc exec --on "$pm" --timeout 60 -- ps -A -o pid=,ppid=,command= </dev/null 2>/dev/null); fi
-  if [ $? != 0 ] || [ -z "$o_" ]; then psbad="$psbad $pm"; return 2; fi
+  else o_=$(rexec "$pm" ps -A -o pid=,ppid=,command=); fi
+  pr_=$?
+  [ $pr_ != 9 ] || { psok="$psok $pm"; return 0; }   # ps를 못 띄우는 기계(nosh): 레인 프로세스가 없는 것으로
+  if [ $pr_ != 0 ] || [ -z "$o_" ]; then psbad="$psbad $pm"; return 2; fi
   psc=$psc$(printf '\n%s' "$o_" | sed "s|^|$pm$tab|")
   psok="$psok $pm"
 }

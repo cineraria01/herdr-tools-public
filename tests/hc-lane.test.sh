@@ -78,6 +78,8 @@ case $1 in
         # $HC_FAKE_MACH_HOME가 있으면 기계마다 HOME을 <그 폴더>/<기계>로(폴더가 없으면 모르는 기계, 종료 4)
         if [ -n "$on" ] && [ -n "${HC_FAKE_MACH_HOME-}" ]; then
           [ -d "$HC_FAKE_MACH_HOME/$on" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; }
+          # <기계>/.nosh: 프로그램을 띄우지 못하는 기계(Windows의 진짜 꼴 — 연결은 되고 sh·ps가 없음)
+          [ ! -e "$HC_FAKE_MACH_HOME/$on/.nosh" ] || { echo "{\"error\":{\"hint\":\"\",\"kind\":\"spawn_failed\",\"message\":\"cannot start $1: program not found\"}}" >&2; exit 1; }
           HOME=$HC_FAKE_MACH_HOME/$on exec env -u XDG_STATE_HOME "$@"   # 그 기계 집의 상태 폴더(이 기계 XDG_STATE_HOME 말고)
         fi
         exec "$@" ;;
@@ -986,6 +988,12 @@ t "events --all: 종료 0, 네 줄" '[ $rc = 0 ] && [ "$(printf "%s\n" "$evs" | 
 t "events --all: 시각 순" '[ "$(printf "%s\n" "$evs" | cut -f4 | tr "\n" " ")" = "lane-l lane-b lane-c lane-a " ]'
 t "events --all: 원격 줄은 hc 기계 이름과 <기계>/<터미널> 주소" 'printf "%s\n" "$evs" | grep -Fq "${tab}m1${tab}m1/t7${tab}lane-a${tab}" && printf "%s\n" "$evs" | grep -Fq "${tab}m2${tab}m2/t9${tab}"'
 t "events --all: 연결 안 된 기계·exec 실패는 「모름 <기계>」 한 줄" 'printf "%s\n" "$out" | grep -Fxq "모름 m3" && printf "%s\n" "$out" | grep -Fxq "모름 m4"'
+# lane-nosh: sh를 띄우지 못하는 기계(Windows — hc exec가 spawn_failed·「cannot start sh」, 종료 1)는 레인 기록이 없는 기계로 보고
+# 조용히 건너뛴다. 그 밖의 오류(machine_unknown 등)는 그대로 「모름」
+mkdir -p "$MH/m5"; : >"$MH/m5/.nosh"
+HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"connected"},{"name":"m3","state":"connected"},{"name":"m5","state":"connected"}]}' run events --all
+t "events --all: sh 없는 기계는 「모름」 없이 0줄, 다른 오류는 그대로 「모름」(lane-nosh)" '[ $rc = 0 ] && ! printf "%s\n" "$out" | grep -Fq m5 && printf "%s\n" "$out" | grep -Fxq "모름 m3" && printf "%s\n" "$out" | grep -Fq "${tab}m1${tab}m1/t7${tab}" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+rm -rf "$MH/m5"
 run events --on m2
 t "events --on: 이 기계와 그 기계만" '[ $rc = 0 ] && [ "$(printf "%s\n" "$out" | cut -f4 | tr "\n" " ")" = "lane-l lane-c " ]'
 run events --all --since 2026-11-16T02:00:02Z
@@ -1078,6 +1086,12 @@ HC_FAKE_MACH_HOME=$T/mh2 HC_FAKE_MACHINES='{"machines":[{"name":"m1","state":"co
   run wait --all --timeout 0
 t "멈춤: 읽은 기계 레인은 알리고, 모름 기계 레인은 판정 대신 「연결 안 됨」(하루 한 번)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m1/t91${tab}lane-r1${tab}멈춤" && printf "%s\n" "$out" | grep -Fq "m3/t92${tab}lane-r3${tab}멈춤${tab}-${tab}연결 안 됨 m3" && printf "%s\n" "$out" | grep -Fq "m4/t93${tab}lane-r4${tab}멈춤${tab}-${tab}연결 안 됨 m4" && ! printf "%s\n" "$out" | grep -Eq "lane-r[34]${tab}멈춤${tab}-${tab}(done|뜻밖)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 t "멈춤: 모름 기계 레인이라도 blocked는 그대로 알림(감사 4차 [낮음] 1)" 'printf "%s\n" "$out" | grep -Fq "m3/t94${tab}lane-r5${tab}멈춤${tab}-${tab}blocked turn 3"'
+# lane-nosh: sh·ps를 못 띄우는 기계는 「모름」이 아니라 사건 없는 기계 — 그 기계 레인은 「연결 안 됨」 대신 정상 판정
+mkdir -p "$T/mh3/m5"; : >"$T/mh3/m5/.nosh"
+HC_FAKE_MACH_HOME=$T/mh3 HC_FAKE_MACHINES='{"machines":[{"name":"m5","state":"connected"}]}' \
+  HC_FAKE_LS='{"terminals":[{"address":"m5/t95","name":"lane-r6","state":"live","status":"done","turn":2}]}' \
+  run wait --all --timeout 0
+t "멈춤: sh 없는 기계 레인은 「연결 안 됨」 없이 정상 판정(lane-nosh)" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "m5/t95${tab}lane-r6${tab}멈춤${tab}-${tab}done turn 2" && ! printf "%s\n" "$out" | grep -Fq "연결 안 됨" && ! grep -Fq "모름 m5" "$T/err" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 
 # 작업 중 발견해 함께 고침: macOS awk는 UTF-8 로캘에서 문자열 비교가 strcoll이라 "착지" == "멈춤"이 참이었다
 # — 같은 한 줄로 완료→착지를 알리면 착지가 삼켜지고, --state 한 상태 거름이 꺼졌다. 비교는 LC_ALL=C로 한다
@@ -1511,13 +1525,14 @@ upto '! alive $w3'
 wait $w3; wrc=$?
 t "watch: 지휘 터미널이 사라지면 스스로 종료 0, 잠금 지움" '[ $wrc = 0 ] && grep -Fq 사라짐 "$T/we" && [ ! -e "$WD/watch.t7cc" ] || { cat "$T/we"; false; }'
 # 원격 기계 연결 실패: 「연결 안 됨」 한 번, 다음 바퀴에 다시 보고 붙으면 그 사건
-export HC_FAKE_MACHINES='{"machines":[{"name":"m9","state":"connected"}]}' HC_FAKE_MACH_HOME=$MH
-rm -rf "$MH/m9"
+export HC_FAKE_MACHINES='{"machines":[{"name":"m9","state":"connected"},{"name":"m8","state":"connected"}]}' HC_FAKE_MACH_HOME=$MH
+rm -rf "$MH/m9"; mkdir -p "$MH/m8"; : >"$MH/m8/.nosh"   # m8: sh 없는 기계(lane-nosh) — 「연결 안 됨」을 보내지 않는다
 HC_FAKE_LIVE=t7cc "$LANE" watch --all --to t7cc >"$T/wo" 2>"$T/we" &
 w4=$!
 upto 'grep -Fq "연결 안 됨 m9" "$HCLOG.send" 2>/dev/null'
 sleep 2.5
 t "watch: 원격 연결 실패는 「연결 안 됨」 한 번만" '[ "$(grep -c "연결 안 됨 m9" "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send" "$T/we"; false; }'
+t "watch: sh 없는 기계는 「연결 안 됨」·「모름」 없음(lane-nosh)" '! grep -Fq m8 "$HCLOG.send" && ! grep -Fq "모름 m8" "$T/we" || { cat "$HCLOG.send" "$T/we"; false; }'
 mkdir -p "$MH/m9/.local/state/hc-lane"
 ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" h9 t3 lane-r 완료 eeee9999 원격 >"$MH/m9/.local/state/hc-lane/events.tsv"
 upto 'grep -Fq "lane-r 완료 eeee9999" "$HCLOG.send" 2>/dev/null'
