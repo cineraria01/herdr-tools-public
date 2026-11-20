@@ -110,7 +110,7 @@ submit_cmd() {
   # 큐 표식은 병합기의 main push가 lease로 먼저 지우니 보지 않는다(2차 중간 1 — 그 틈에 부르면 접수를 실패로 냈다, 1차 중간 1)
   saccepted "$e_-$ln_" "$mc_" || { printf '%s\n' "$po_" >&2; die "land(제출): push 실패(위 git 출력, 종료 $pr_) — 같은 줄을 다시"; }
   srecord "$e_-$ln_" "$mc_" "$sh_"
-  echo "hc-lane land: 제출 $(git rev-parse --short "$sh_") → $q_ (lane/$ln_) — 병합기(${mg_})가 $base 에 넣고 결과를 사건(착지·막힘 --name $ln_)으로 알린다. 이 레인은 여기서 끝(report 착지는 부르지 않아도 된다 — 불러도 적히지 않음)"
+  echo "hc-lane land: 제출 $(git rev-parse --short "$sh_") → $q_ (lane/$ln_) — 병합기(${mg_})가 $base 에 넣고 결과를 사건(착지·막힘 --name $ln_)으로 알린다. 이 레인은 여기서 끝(report 착지는 부르지 않아도 된다 — 불러도 적히지 않음). 다음은 지시문의 hc-lane clean 줄(작업 트리 정리)을 돌리고 턴을 끝낸다"
   exit 0
 }
 # merger --repo <병합기 전용 클론> [--once] [--tick <초>] [<기본 브랜치>]: 큐를 이름(초) 순으로 하나씩 처리한다. 한 클론에 하나만(잠금).

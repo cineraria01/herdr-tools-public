@@ -267,6 +267,19 @@ mkdir -p "${HELD%/*}"; now=$(date +%s); printf 'box-1/k1\t%s\nbox-1/k2\t%s\n' $(
 add f6
 run run
 t "자리 ③: 쉰 지 hold 안(30분) → 셈(box-1 꽉 참 → box-2)" '[ "$(where f6)" = "up box-2 box-2/f6" ]'
+# 자리 ③-2(2026-11-21 fill-submit-release): 마지막 사건이 「제출」(병합기 큐에 넣고 끝남)인 done·idle 레인은 hold 유예 없이 안 셈.
+# 옛 판은 쉰 지 hold(60분)가 지나야 놓았다(제출 → 놓음 61~231분). 같은 레인이 다시 일하면(working) 그대로 셈
+fresh
+add k1; run run   # k1이 box-1/k1에 up — 사건은 up 줄 기계에서 읽는다
+lj "box-1/k1:claude-code:k1:idle:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+printf '2026-11-21T10:00:00Z\tbox-1\tbox-1/k1\tk1\t제출\tabc12345\tsub-1 → refs/merge-queue/1-k1\t3\n' >"$T/events"
+add f6s
+run run
+t "자리 ③-2: 제출 뒤 idle 레인은 쉰 지 hold 안이어도 안 셈(box-1에 뜸), 제출 없는 레인은 셈" '[ "$(where f6s)" = "up box-1 box-1/f6s" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 k1: idle, 제출함(병합기 큐 — 레인은 끝) → 안 셈" && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k2 k2: idle, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+lj "box-1/k1:claude-code:k1:working:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2" "box-1/f6s:claude-code:f6s"
+add f6t
+run run
+t "자리 ③-2: 제출 뒤 다시 일하는(working) 레인은 셈(box-1 꽉 참 → box-2)" '[ "$(where f6t)" = "up box-2 box-2/f6t" ] || { printf "%s\n" "$out"; false; }'
 fresh
 sed -i '' 's/^hold .*/hold     0/' "$T/conf/hc-fill.tsv"
 lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"

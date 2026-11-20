@@ -12,7 +12,7 @@ hc-sweep --self-test  가짜 기록으로 규칙 판정 확인(hc를 부르지 �
 worker = parent가 있거나 라벨 hc-lane=1(hc-fill이 띄운 레인은 parent가 없다 — 2026-11-17 원격 레인이 몇 시간 남음).
 where 라벨이 있어도 worker면 닫을 수 있다(herdr-balance가 붙이며 라벨을 단다).
 R1 안 쓴 세션: worker 아님, turn 0, 시작부터 줄곧 idle(status_ms-created_ms<60초), 만든 지 30분 이상
-R2 일 끝난 worker: 마지막 상태 변화(status_ms)로부터 30분 이상. 단 다음이면 닫지 않는다
+R2 일 끝난 worker: 마지막 상태 변화(status_ms)로부터 30분 이상(마지막 hc-lane 사건이 「제출」 — 병합기에 넣고 끝남 — 이면 바로). 단 다음이면 닫지 않는다
    (a) cwd가 git 작업 트리이고 git cherry origin/main HEAD에 + 커밋이 있음(착지 전 레인, fetch 안 함)
    (b) 화면 마지막 줄들에 배경 실행 흔적(BUSY: "still running", 상태 줄 "· N shell(s)"·"· N monitor(s)")
    (c) 이 기계 hc-fill 대기열(${HC_FILL_DATA:-~/.local/share/hc-fill}/queue.tsv)에 같은 이름·주소의 받은편지 레인이
@@ -64,6 +64,7 @@ SHELLS = {"zsh", "bash", "sh", "fish", "dash", "ksh"}
 SESSIONS = os.path.expanduser("~/.claude/sessions")
 MIN = 60 * 1000
 BUSY = re.compile(r"still running|·\s*\d+\s+(?:shell|monitor)s?\b")
+LANE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-lane")
 
 
 def hc(*args):
@@ -108,7 +109,7 @@ def rule(t, now, keep):
         return "R1"
     if t.get("worktree") is not False:  # 남은 워크트리이거나 모름
         return None
-    if (worker and now - changed >= 30 * MIN and t.get("unlanded") is False and t.get("fill") != "up"
+    if (worker and now - changed >= (0 if t.get("submitted") else 30 * MIN) and t.get("unlanded") is False and t.get("fill") != "up"
             and isinstance(t.get("tail"), str) and not BUSY.search(t["tail"])):
         return "R2"
     if now - changed >= 6 * 60 * MIN:
@@ -156,6 +157,18 @@ def fill_state(name, address, path=None):
         if len(r) >= 11 and r[0] == name and r[7] == address and r[10] not in ("", "-"):
             return r[5]
     return None
+
+
+def submitted(t, path=None):
+    """그 터미널(주소·이름, 실행 키 칸이 있으면 <주소>@<created_ms>)의 마지막 hc-lane 사건(정리됨 빼고)이 「제출」인가(못 읽으면 False).
+    제출 뒤 레인이 할 일은 없다 — 결과는 병합기 사건(2026-11-21 fill-submit-release, 유예가 자리를 61~231분 쥠)."""
+    try:
+        with open(path or os.path.join(LANE_DIR, "events.tsv")) as f:
+            ev = [r[4] for r in (x.rstrip("\n").split("\t") for x in f) if len(r) > 4 and r[2] == t["address"] and r[4] != "정리됨"
+                  and r[3] == (t.get("name") or "-") and (len(r) < 10 or r[9] in ("-", "%s@%s" % (t["address"], t.get("created_ms"))))]
+    except (OSError, UnicodeDecodeError):
+        return False
+    return ev[-1:] == ["제출"]
 
 
 def unlanded(cwd, run=subprocess.run):
@@ -230,13 +243,12 @@ def lane_event(t, why):
     if (t.get("labels") or {}).get("hc-lane") != "1":
         return True
     flat = lambda x: str(x).replace("\t", " ").replace("\r", " ").replace("\n", " ")
-    d = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-lane")
     fields = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               os.environ.get("HC_LANE_MACHINE") or socket.gethostname().split(".")[0] or "-",
               t["address"], t.get("name") or "-", "정리됨", "-", "hc-sweep " + why, "-" if t.get("turn") is None else t["turn"]]
     try:
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "events.tsv"), "a") as f:
+        os.makedirs(LANE_DIR, exist_ok=True)
+        with open(os.path.join(LANE_DIR, "events.tsv"), "a") as f:
             f.write("\t".join(flat(x) for x in fields) + "\n")
     except OSError:
         return False
@@ -578,8 +590,7 @@ def sweep_one(db, dry, min_age):
 
 
 def self_test():
-    assert index_gone(["/a/x.wt/gone"], exists=lambda p: False)
-    assert index_gone(["/a/x.wt/g1", "/a/x.wt/g2"], exists=lambda p: False)
+    assert index_gone(["/a/x.wt/gone"], exists=lambda p: False) and index_gone(["/a/x.wt/g1", "/a/x.wt/g2"], exists=lambda p: False)
     assert not index_gone([], exists=lambda p: False)  # 빈 root만 있던 색인
     assert not index_gone(["/a/x.wt/g1", "/a/live"], exists=lambda p: p == "/a/live")
     assert not index_gone(["/Volumes/usb/repo"], exists=lambda p: False)
@@ -588,9 +599,8 @@ def self_test():
         os.symlink("/Volumes/hc-sweep-self-test-없음", os.path.join(root, "usb"))
         assert not index_gone([os.path.join(root, "usb", "repo")], exists=lambda p: False)
         assert not index_gone([os.path.join(root, "usb", "repo")])
-    assert not index_gone(["rel/repo"], exists=lambda p: False)
+    assert not index_gone(["rel/repo"], exists=lambda p: False) and index_roots("/nonexistent/x.db") == []
     assert not index_gone(["/Users/u/Documents/app/x"], exists=lambda p: True)  # TCC 권한 거부 = exists() 「있음」
-    assert index_roots("/nonexistent/x.db") == []
     now, h = 1_000_000_000_000, 60 * MIN
     keep = {"keepme", "t9"}
 
@@ -605,41 +615,34 @@ def self_test():
     assert rule(t(created_ms=now - 20 * MIN, status_ms=now - 20 * MIN), now, keep) is None  # 아직 30분 안 됨
     assert rule(t(status_ms=now - 2 * h), now, keep) is None  # 한 번 일했다 쉰 지 2시간
     assert rule(t(turn=3, status_ms=now - 3 * h + 500), now, keep) is None
-    assert rule(t(parent="t0", turn=2, status_ms=now - 31 * MIN), now, keep) == "R2"
-    assert rule(t(parent="t0", turn=2, status_ms=now - 10 * MIN), now, keep) is None
+    assert rule(t(parent="t0", turn=2, status_ms=now - 31 * MIN), now, keep) == "R2" and rule(
+        t(parent="t0", turn=2, status_ms=now - 10 * MIN), now, keep) is None
     assert rule(t(parent="t0", status={"app": "claude-code", "state": "done"}, status_ms=now - h), now, keep) == "R2"
-    assert rule(t(turn=5, created_ms=now - 9 * h, status_ms=now - 7 * h), now, keep) == "R3"
-    assert rule(t(turn=5, created_ms=now - 9 * h, status_ms=now - 5 * h), now, keep) is None
+    assert rule(t(turn=5, created_ms=now - 9 * h, status_ms=now - 7 * h), now, keep) == "R3" and rule(
+        t(turn=5, created_ms=now - 9 * h, status_ms=now - 5 * h), now, keep) is None
     for state in ("working", "blocked", "error"):
         assert rule(t(status={"app": "claude-code", "state": state}), now, keep) is None
-    assert rule(t(status=None), now, keep) is None
-    assert rule(t(status={"state": "idle"}), now, keep) is None
-    assert rule(t(state="finished"), now, keep) is None
-    assert rule(t(address="w1/t4rn"), now, keep) is None
-    assert rule(t(name="d1-loop-w1"), now, keep) is None
-    assert rule(t(name="claude-proxy"), now, keep) is None
+    for kw in (dict(status=None), dict(status={"state": "idle"}), dict(state="finished"), dict(address="w1/t4rn"),
+               dict(name="d1-loop-w1"), dict(name="claude-proxy"), dict(name="keepme"), dict(address="t9"),
+               dict(labels={"where": "proj / 1"})):
+        assert rule(t(**kw), now, keep) is None, kw
     assert rule(t(name="lane-watch-t7cc", parent="t7cc", status_ms=now - 2 * h), now, keep) is None  # hc-lane 감시
     assert rule(t(name="w", labels={"hc-lane-watch": "1"}, parent="t7cc", status_ms=now - 7 * h), now, keep) is None
-    assert rule(t(name="keepme"), now, keep) is None
-    assert rule(t(address="t9"), now, keep) is None
-    assert rule(t(labels={"where": "proj / 1"}), now, keep) is None
     done = {"app": "claude-code", "state": "done"}
     lane = dict(parent="t0", turn=4, status=done, status_ms=now - 31 * MIN, labels={"where": "proj / Claude Code"})
     assert rule(t(**lane), now, keep) == "R2"  # 지휘가 띄워 탭에 붙인 worker
     assert rule(t(**dict(lane, parent=None)), now, keep) is None  # 사람이 연 칸(R3 시간 전)
     assert rule(t(**dict(lane, shell=True)), now, keep) is None
     assert rule(t(**dict(lane, unlanded=True)), now, keep) is None  # 착지 전 커밋
-    assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on · 2 shells")), now, keep) is None
-    assert rule(t(**dict(lane, tail="⎿ 1 monitor still running")), now, keep) is None
-    assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on · 1 shell · 1 monitor")), now, keep) is None
+    for tail in ("  ⏵⏵ bypass permissions on · 2 shells", "⎿ 1 monitor still running", "  ⏵⏵ bypass permissions on · 1 shell · 1 monitor"):
+        assert rule(t(**dict(lane, tail=tail)), now, keep) is None, tail
     assert rule(t(**dict(lane, tail="  ⏵⏵ bypass permissions on (shift+tab to cycle)")), now, keep) == "R2"
     assert rule(t(**dict(lane, unlanded=True, status_ms=now - 7 * h)), now, keep) == "R3"  # R3는 보호 없음
     assert rule(t(shell=True, labels={"herdr.space": "sp1", "herdr.tab": "tb1"}), now, keep) is None  # Ovis 새 탭 셸
     assert rule(t(shell=False, labels={"herdr.space": "sp1", "herdr.tab": "tb1", "ovis.tab": "지휘"}), now, keep) == "R1"
     assert rule(t(status_ms=None, created_ms=None), now, keep) is None
     # 남은 워크트리·모르는 값은 R2·R3 모두 닫지 않음
-    assert rule(t(**dict(lane, worktree=True)), now, keep) is None
-    assert rule(t(**dict(lane, worktree=True, status_ms=now - 7 * h)), now, keep) is None
+    assert rule(t(**dict(lane, worktree=True)), now, keep) is rule(t(**dict(lane, worktree=True, status_ms=now - 7 * h)), now, keep) is None
     for missing in ("worktree", "unlanded", "tail"):
         x = t(**lane)
         del x[missing]
@@ -656,7 +659,8 @@ def self_test():
     assert rule(t(**dict(fill, fill="up")), now, keep) is None  # hc-fill이 아직 결과를 안 되돌려 줌
     assert rule(t(**dict(fill, fill="sent")), now, keep) == "R2"
     assert rule(t(**dict(fill, turn=0, status_ms=now - 3 * h + 500)), now, keep) == "R2"  # 레인은 R1(안 쓴 세션) 아님
-    import tempfile
+    assert rule(t(**dict(fill, status_ms=now - MIN, submitted=True)), now, keep) == "R2"  # 병합기에 제출하고 끝남: 30분 안 기다림
+    assert rule(t(**dict(fill, status_ms=now - MIN, submitted=True, worktree=True)), now, keep) is None
     with tempfile.TemporaryDirectory() as root:
         q = os.path.join(root, "queue.tsv")
         assert fill_state("x", "t5", q) is None  # 대기열 없음
@@ -702,16 +706,13 @@ def self_test():
             return subprocess.CompletedProcess(a, rc, out, err)
         return run
 
-    assert unlanded("/x", fake(out="+ abc\n")) is True
-    assert unlanded("/x", fake(out="- abc\n")) is False
-    assert unlanded("/x", fake(out="")) is False
+    assert unlanded("/x", fake(out="+ abc\n")) is True and unlanded("/x", fake(out="- abc\n")) is unlanded("/x", fake(out="")) is False
     assert unlanded(None, fake(exc=AssertionError("부르면 안 됨"))) is False
     assert unlanded("/x", fake(rc=128, err="fatal: not a git repository (or any of the parent directories): .git")) is False
     assert unlanded("/x", fake(rc=1, err='{"error":{"message":"cannot start folder /x: No such file or directory"}}')) is False
-    assert unlanded("/x", fake(exc=subprocess.TimeoutExpired("hc", 40))) is True  # 판정 실패는 닫지 않음
-    assert unlanded("/x", fake(exc=OSError("hc 없음"))) is True
-    assert unlanded("/x", fake(rc=124, err="timed out")) is True
-    assert unlanded("/x", fake(rc=128, err="fatal: bad revision 'origin/main'")) is True
+    for bad in (fake(exc=subprocess.TimeoutExpired("hc", 40)), fake(exc=OSError("hc 없음")), fake(rc=124, err="timed out"),
+                fake(rc=128, err="fatal: bad revision 'origin/main'")):
+        assert unlanded("/x", bad) is True  # 판정 실패는 닫지 않음
     assert BUSY.search(screen_tail("t1", fake(rc=1)))
     assert BUSY.search(screen_tail("t1", fake(exc=subprocess.TimeoutExpired("hc", 40))))
     assert not BUSY.search(screen_tail("t1", fake(out="a\n\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n")))
@@ -721,8 +722,7 @@ def self_test():
                  ["env", "claude"], ["claude", "run"]):
         assert not is_shell_pane(argv), argv
     sfx = ".wt"
-    assert lane_root("/a/app.wt/l1/tests/../bin/x", sfx) == "/a/app.wt/l1"
-    assert lane_root("/a/app.wt/l1", sfx) == "/a/app.wt/l1"
+    assert lane_root("/a/app.wt/l1/tests/../bin/x", sfx) == "/a/app.wt/l1" == lane_root("/a/app.wt/l1", sfx)
     assert lane_root("/a/app.wt", sfx) is None and lane_root("/a/.wt/l1/x", sfx) is None
     assert lane_root("rel/app.wt/l1", sfx) is None and lane_root(None, sfx) is None
     assert lane_root("/a/app.lanes/l1/x", ".lanes") == "/a/app.lanes/l1"
@@ -806,7 +806,7 @@ def main():
         if is_worker(t) and not t["worktree"]:  # R2 보호에만 쓴다
             t["unlanded"] = unlanded(t.get("cwd"))
             t["tail"] = screen_tail(t["address"])
-            t["fill"] = fill_state(t.get("name") or "", t["address"])
+            t["fill"], t["submitted"] = fill_state(t.get("name") or "", t["address"]), submitted(t)
         why = rule(t, now, keep)
         if not why:
             continue

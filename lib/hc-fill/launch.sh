@@ -84,6 +84,10 @@ lane_landed() {
   [ -n "$lp" ] && fetch_proj "$lp" || return 1
   LHIT=$(landed "$1") && [ -n "$LHIT" ]
 }
+# submitted <레인 이름> <주소>: 그 터미널이 이번 실행에 그 이름으로 적은 마지막 사건이 「제출」(hc-lane land가 병합기 큐에 넣고 끝냄)이면 0.
+# 제출 뒤 레인이 할 일은 없다(결과는 병합기 사건, 반송이면 수정 레인) — done·idle이면 hold 유예 없이 자리를 비운다(2026-11-21
+# fill-submit-release, 제출 → 놓음 61~231분). 사건을 못 읽었거나(EVBAD) 그 기계 사건이 없으면 1(지금처럼 판정)
+submitted() { [ -z "$EVBAD" ] && [ "$(joblast "$1" "$2" | cut -f 5)" = 제출 ]; }
 
 # 자리를 차지한 에이전트(기계 한 줄에 하나). working·blocked 등은 늘 차지. done·idle은 hc-lane 작업 트리(<저장소>.wt/…)가
 # 그 기계에 남은 쓰기 레인(감사·착지를 기다림)만. 읽기 전용(--read)·작업 트리가 정리된 레인은 아니다. 셈 칸이 all인 기계는 다 센다.

@@ -220,6 +220,39 @@ t "정리됨 못 씀: 레인 터미널은 kill 안 함" '[ ! -e "$T/killed-t61" 
 t "정리됨 못 씀: 레인 아닌 터미널은 닫음" '[ -e "$T/killed-t62" ] && printf "%s" "$out" | grep -q "닫힘: R3 t62"'
 t "정리됨 못 씀: closed.log에 남김" 'grep -q "	t61	.*실패(정리됨 못 씀)" "$LOG"'
 
+# 2026-11-21 fill-submit-release: 마지막 hc-lane 사건이 「제출」(병합기 큐에 넣고 끝남)인 레인은 쉰 지 30분을 기다리지 않고 R2로 닫는다.
+# 옛 판은 30분(R2)·6시간(R3)을 기다렸다. 같은 주소의 다른 이름·다른 실행 키(옛 실행)의 제출, 제출 뒤 다른 사건이 오면 그대로 기다린다
+rm -f "$T"/killed-* "$EVT"
+mkdir -p "${EVT%/*}"
+recent=$(( ($(date +%s) - 60) * 1000 ))
+cat >"$T/ls.json" <<EOF
+{"terminals":[{"address":"t71","state":"live","status":"idle"},{"address":"t72","state":"live","status":"idle"},{"address":"t73","state":"live","status":"idle"},{"address":"t74","state":"live","status":"idle"}]}
+EOF
+for a in t71 t72 t73 t74; do
+  printf '{"address":"%s","name":"lane-%s","state":"live","status":{"app":"claude-code","state":"idle"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%s,"turn":3,"cwd":"%s"}\n' \
+    "$a" "$a" "$recent" "$T/gone-$a" >"$T/get-$a.json"
+done
+{ printf '2026-11-21T10:00:00Z\tm\tt71\tlane-t71\t제출\tabc1234\tsub-1 → 큐\t3\t-\tt71@1700000000000\n'
+  printf '2026-11-21T10:00:00Z\tm\tt72\tlane-zz\t제출\tabc1234\tsub-2 → 큐\t3\n'
+  printf '2026-11-21T10:00:00Z\tm\tt73\tlane-t73\t제출\tabc1234\tsub-3 → 큐\t3\t-\tt73@1600000000000\n'
+  printf '2026-11-21T10:00:00Z\tm\tt74\tlane-t74\t제출\tabc1234\tsub-4 → 큐\t3\n2026-11-21T10:01:00Z\tm\tt74\tlane-t74\t중간\t-\t다시 일함\t4\n'; } >"$EVT"
+cat >"$T/bin/hc" <<EOF
+#!/bin/bash
+case \$1 in
+  ls) exec cat "$T/ls.json" ;;
+  get) [ -e "$T/killed-\$2" ] && { echo "{\"address\":\"\$2\",\"state\":\"finished\"}"; exit 0; }
+       [ -f "$T/get-\$2.json" ] && exec cat "$T/get-\$2.json" ;;
+  exec) echo '{"error":{"message":"cannot start folder: No such file or directory"}}' >&2; exit 1 ;;
+  read) echo "  ⏵⏵ bypass permissions on (shift+tab to cycle)"; exit 0 ;;
+  kill) touch "$T/killed-\$2"; exit 0 ;;
+  rm) exit 0 ;;
+esac
+exit 1
+EOF
+sweep --min-age 0
+t "제출 뒤 쉰 지 1분 레인: R2로 바로 닫음" '[ -e "$T/killed-t71" ] && printf "%s" "$out" | grep -q "닫힘: R2 t71" || { printf "%s\n" "$out"; false; }'
+t "제출 뒤: 다른 이름·옛 실행의 제출, 제출 뒤 중간 사건이면 안 닫음" '[ ! -e "$T/killed-t72" ] && [ ! -e "$T/killed-t73" ] && [ ! -e "$T/killed-t74" ] || { printf "%s\n" "$out"; false; }'
+
 kill "$(pid a)" "$(pid b)" "$(pid k)" "$(pid o)" "$(pid s)" 2>/dev/null
 t "이 시험의 고아 0" allgone
 
