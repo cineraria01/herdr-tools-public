@@ -14,6 +14,10 @@ for f in bin/* install.sh .claude/*.sh; do
     *bash*|*/sh*) bash -n "$f" || { echo "문법 실패 $f"; fail=1; } ;;
   esac
 done
+for f in lib/*/*.sh; do   # 도구가 source하는 함수 파일(첫 줄이 #!가 아니다)
+  [ -f "$f" ] || continue
+  bash -n "$f" || { echo "문법 실패 $f"; fail=1; }
+done
 # 개인 값 검사: git ls-files에서 개인 값 패턴(개인 설정 private-patterns.txt, 없으면 ~/.local/share/herdr-tools/)에 걸린 줄.
 # --strict: 패턴 파일·패턴 줄이 없으면 실패(검사 없이 착지하지 않게). 걸려도 실패.
 # 패턴이 없는 게 정당한 곳(공개 사본을 받아 돌리는 쪽)은 HERDR_VERIFY_NO_LINT=1로만 건너뛴다.

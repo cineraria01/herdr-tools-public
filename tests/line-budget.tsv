@@ -1,0 +1,4 @@
+# 줄 수 예산(tests/line-budget.test.sh): 한도를 이미 넘은 파일만 「<줄 수> <경로>」. 레인은 늘리지 못한다 — 줄이기·지우기만
+828 bin/hc-sweep
+812 bin/herdr-sync
+798 claude/hooks/cotenant-guard.sh

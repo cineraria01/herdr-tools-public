@@ -556,6 +556,11 @@ if [ -f "$LIST" ]; then
     t "config.example/sync.list: tools:$p 있음" '[ -e "$here/../$p" ]'
   done
   for f in "$here"/../bin/*; do b=${f##*/}; t "config.example/sync.list: bin/$b" 'grep -q " tools:bin/$b " "$LIST"'; done
+  # lib/<도구>/(본체가 source하는 함수 파일)는 나무 줄로, 대상은 그 도구 줄과 같게(빠지면 그 기계의 도구가 종료 1)
+  for f in "$here"/../lib/*/; do [ -d "$f" ] || continue; b=$(basename "$f")
+    t "config.example/sync.list: lib/$b/ 나무 줄, 대상은 bin/${b}와 같음" \
+      '[ -n "$(awk -v b="$b" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ] && [ "$(awk -v b="$b" "\$3 == \"tools:lib/\" b \"/\" && \$2 ~ /\\/\\*\\*\$/ {print \$4}" "$LIST")" = "$(awk -v b="$b" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ]'
+  done
 fi
 
 # 15. 공개 내보내기: 설정 publish.repo가 있을 때만, --check는 안 부름, 실패해도 크게 경고만 하고 종료 코드는 그대로

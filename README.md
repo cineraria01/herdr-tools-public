@@ -320,6 +320,14 @@ bash tests/herdr-tools-config.test.sh                    # 가짜 설정 폴더�
 bash tests/hc-sweep.test.sh                              # --self-test + 진짜 짧은 고아와 가짜 hc(--only-under 시험 폴더)
 bash tests/herdr-verify.test.sh                          # 가짜 저장소에서 고아를 남기는 시험이 검증을 실패시키는지
 bash tests/herdr-tools-publish.test.sh                   # 임시 비공개·공개 bare 저장소로 내보내기·막기
+bash tests/line-budget.test.sh                           # 줄 수 톱니바퀴(아래 「파일 크기」)
 ```
+
+## 파일 크기: 기능별 lib와 줄 수 톱니바퀴
+
+- `hc-lane`·`hc-fill`의 함수는 기능별 파일 `lib/hc-lane/*.sh`·`lib/hc-fill/*.sh`에 있고, 본체(`bin/`)는 최상위 흐름(인자·갈래)만 두고 그 파일들을 정한 순서로 `source`한다(2026-11-20 — 2,044·1,271줄 한 파일을 여러 레인이 함께 고쳐 서로 기다리고 부딪혔다). 본체는 자기 실제 자리(링크면 따라간 곳) 옆 `../lib/<도구>/`를 읽는다: 저장소는 `bin/`↔`lib/`, 깔린 곳은 `~/.local/bin`↔`~/.local/lib`. 그래서 `sync.list`에 lib 나무 줄이 있어야 한다(꼴 `config.example/sync.list` 「도구 lib」). 없으면 `함수 파일을 못 읽었다`로 종료 1.
+- 새 함수는 맡은 기능 파일에, 새 기능이면 새 파일을 만들고 본체의 `for … in <모듈 목록>`에 더한다.
+- 처음 나눈 도구는 `dev/split/hc-split.py`(계획 `dev/split/plan.tsv`): `split`이 함수 단위로 옮기고 `check <원본 rev>`가 함수마다 정확히 한 번·본문 글자 그대로·`declare -f` 같음을 대조한다(나누기 전 한 파일 판에만 쓴다 — 이미 나눈 판에 `split`을 돌리면 lib를 덮는다).
+- `tests/line-budget.test.sh`: 시험(`tests/`)·문서(`*.md`) 아닌 추적 파일은 600줄을 넘지 않는다. 이미 넘은 파일은 `tests/line-budget.tsv`에 적힌 줄 수까지만(늘면 실패, 줄면 통과). 레인 안(`HC_LANE`)에서는 예산을 늘리거나 새 줄을 더하면 실패한다(줄이기·지우기만) — 예산 올림은 지휘·사람이 정한다.
 
 hc-lane 시험은 `HC_LANE_BIN`이 없으면 같은 폴더(`tests/`)나 그 위의 `hc-lane`을 찾는다. 이 저장소에서는 `bin/`에 있으니 `HC_LANE_BIN`을 준다(`HC_LANE`은 레인 이름이라 쓰지 않는다).
