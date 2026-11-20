@@ -75,8 +75,34 @@ EOF
 conf() { awk -v k="$1" '$1==k { sub(/^[ \t]*[^ \t]+[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$CONF"; }
 machines() { awk '$1=="machine" { print $2, $3, ($4 == "" ? "-" : $4), ($5 == "" ? "-" : $5) }' "$CONF"; }   # 차례대로: 이름 상한 레인상한 셈
 repo_of() { awk -v p="$1" -v m="$2" '$1=="repo" && $2==p && $3==m { sub(/^[ \t]*repo[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit }' "$CONF"; }
+# project_ref <저장소>: 기본 가지의 실제 참조. 원격 부재(2)와 Git 오류를 구분한다.
+project_ref() {
+  local ref rc
+  git -C "$1" remote get-url origin >/dev/null 2>&1; rc=$?
+  case $rc in
+    0) if ! ref=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); then
+         git -C "$1" show-ref --exists refs/remotes/origin/HEAD >/dev/null 2>&1
+         [ $? = 2 ] || return 1
+         ref=origin/main
+       fi ;;
+    2) for ref in refs/heads/main refs/heads/master; do
+         git -C "$1" show-ref --exists "$ref" >/dev/null 2>&1; rc=$?
+         [ $rc != 0 ] || break
+         [ $rc = 2 ] || return 1
+       done
+       [ $rc = 0 ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  case $ref in ''|*[!a-zA-Z0-9/_.-]*) return 1 ;; esac
+  printf '%s\n' "$ref"
+}
 # landed <레인>: FR 저장소 origin/<FB>에서 제목 머리가 그 레인인 커밋 줄(아래 「선행·착지 판정」 규칙). fetch_proj 뒤, ls는 fetch 없이
-landed() { git -C "$FR" log "origin/$FB" --format='%h %s' | grep -E -m 1 "^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?$1([^a-z0-9_-]|\$)"; }
+landed() (
+  set -o pipefail
+  git -C "$FR" log "$FB" --format='%h %s' | awk -v lane="$1" '
+    !hit && $0 ~ ("^[0-9a-f]+ ([a-z]+(\\([^)]*\\))?!?: *)?" lane "([^a-z0-9_-]|$)") {hit=$0}
+    END {if (hit) print hit}'
+)
 
 # 우선순위: 한·영 값을 대기열 값으로(모르면 실패), 대기열 값을 ls 글로, 줄 정렬 순번(옛 줄·빈 칸은 보통)
 pnorm() { case $1 in 긴급 | urgent) echo urgent ;; 높음 | high) echo high ;; 보통 | normal) echo normal ;; 낮음 | low) echo low ;; *) return 1 ;; esac; }
@@ -157,6 +183,13 @@ lset() {  # lset <요청ID> <칸> <값> [<칸> <값>…]
 # rmigrate: 옛 받은편지 줄(11칸에 #요청ID 없음)에 결정적 요청 ID(이름·되돌릴곳 해시)를 주고 장부 줄을 만든다(sent는 sent, 그 밖은 open —
 # 이미 떠 있던 줄은 legacy: 옛 보고 경로). 장부가 open이 아닌 대기(wait) 줄은 지운다(rm이 결과를 고정하고 줄을 지우기 전에 죽음). 잠금 안에서
 rmigrate() {
+  # 취소·결과를 고정하고 장부를 갱신하기 전에 죽을 수 있다. 대기 줄을 띄우기 전에 남은 고정본을 먼저 회수한다.
+  if [ -s "$LED" ]; then
+    while IFS= read -r -u 9 rr_; do
+      [ -f "$DATA/replies/$rr_.md" ] || continue
+      rfix "$rr_" - || return 1
+    done 9<<<"$(awk -F'\t' '$4=="open" {print $1}' "$LED")"
+  fi
   [ -s "$Q" ] || return 0
   awk -F'\t' '$11!="" && $11!="-" && !index($11, "#") {f=1} END {exit !f}' "$Q" && {
     while IFS=$'\t' read -r -u 9 rn_ rs_ rd_; do
@@ -166,22 +199,41 @@ rmigrate() {
       awk -F'\t' -v OFS='\t' -v n="$rn_" -v r="$rr_" '($1 "")==n && !index($11, "#") { $11 = $11 "#" r } 1' "$Q" >"$Q.tmp" && mv -f "$Q.tmp" "$Q" || return 1
     done 9<<<"$(awk -F'\t' -v OFS='\t' '$11!="" && $11!="-" && !index($11, "#") {print $1, $6, $11}' "$Q")"
   }
+  # _inadd가 대기열만 쓴 뒤 끊겼으면 rm도 그 요청을 취소할 수 있게 장부를 복원한다.
+  local ledger=/dev/null missing
+  [ ! -f "$LED" ] || ledger=$LED
+  missing=$(awk -F'\t' -v OFS='\t' 'FILENAME==ARGV[1] {seen[$1]=1; next} index($11,"#") {
+    d=$11; sub(/#[^#]*$/, "", d); r=substr($11,length(d)+2)
+    if (!(r in seen)) print r,$1,d,($6=="sent"?"sent":"open"),"-","-","-","-",$10
+  }' "$ledger" "$Q") || return 1
+  [ -z "$missing" ] || printf '%s\n' "$missing" >>"$LED" || return 1
   [ -s "$LED" ] || return 0
-  awk -F'\t' 'NR==FNR { if ($4 != "open") x[$1] = 1; next } $6=="wait" && index($11, "#") { r = $11; sub(/^.*#/, "", r); if (r in x) f = 1 } END {exit !f}' "$LED" "$Q" || return 0
-  awk -F'\t' 'NR==FNR { if ($4 != "open") x[$1] = 1; next } { r = $11; sub(/^.*#/, "", r) } !($6=="wait" && index($11, "#") && (r in x))' "$LED" "$Q" >"$Q.tmp" &&
-    mv -f "$Q.tmp" "$Q" && echo "대기열 복구: 결과를 고정한 받은편지 대기 줄을 뺐다(rm 중단 뒤)"
+  awk -F'\t' 'NR==FNR { if ($4 != "open") x[$1] = $5; next } { r = $11; sub(/^.*#/, "", r) }
+    !(index($11, "#") && (r in x) && ($6=="wait" || x[r]=="cancel"))' "$LED" "$Q" >"$Q.tmp" || return 1
+  if cmp -s "$Q" "$Q.tmp"; then rm -f "$Q.tmp"; return; fi
+  mv -f "$Q.tmp" "$Q" && echo "대기열 복구: 결과를 고정한 받은편지 줄을 뺐다(rm 중단 뒤)"
 }
 # rfix <요청 ID> <종류> <본문>: 고정본을 배타 생성(이미 있으면 그것이 확정본)하고 장부 deliver(종류·해시·크기). 0 됨
 rfix() {
+  if [ "${HC_FILL_Q-}" != 1 ]; then qlock _fix "$1" "$2" <<<"$3"; return; fi
+  local row kind sum size
+  row=$(lget "$1"); [ "$(printf %s "$row" | cut -f 4)" = open ] || return 0
   mkdir -p "$DATA/replies" || return 1
   rf_=$DATA/replies/$1.md
   if [ ! -e "$rf_" ]; then
     rt_=$(mktemp "$DATA/replies/.fix.XXXXXX") || return 1
-    printf '%s\n' "$3" >"$rt_" && { ln "$rt_" "$rf_" 2>/dev/null; rm -f "$rt_"; }
-    [ -e "$rf_" ] || return 1
+    { if [ $# -gt 2 ]; then printf '%s\n' "$3"; else cat; fi; } >"$rt_" &&
+      lset "$1" 5 "$2" && mv -f "$rt_" "$rf_" || { rm -f "$rt_"; return 1; }
+    kind=$2
+  else
+    kind=$(printf %s "$row" | cut -f 5)
+    if [ "$kind" = - ]; then  # 옛 판이 종류를 적기 전에 중단된 고정본
+      case $(tail -n 1 "$rf_") in '결과: 실패 취소 — hc-fill rm '*) kind=cancel ;; '결과: 실패 보고 없음'|'결과: 실패 보고 불완전') kind=noreport ;; *) kind=result ;; esac
+    fi
   fi
   crash after-reply-fix
-  lset "$1" 4 deliver 5 "$2" 6 "$(shasum -a 256 "$rf_" | cut -d ' ' -f 1)" 7 "$(wc -c <"$rf_" | tr -d ' ')"
+  sum=$(shasum -a 256 <"$rf_") && size=$(wc -c <"$rf_") || return 1
+  lset "$1" 4 deliver 5 "$kind" 6 "${sum%% *}" 7 "$((size))"
 }
 # 대기열 잠금 안에서 부르는 것들(qlock _rmx·_inadd·_rm)
 q_rmx() {  # q_rmx <이름> <상태>: 그 줄이 그 상태일 때만 뺀다(감사 줄 정리 — 그 사이 뜬 줄은 그대로). 없으면 1
@@ -189,6 +241,7 @@ q_rmx() {  # q_rmx <이름> <상태>: 그 줄이 그 상태일 때만 뺀다(감
   awk -F'\t' -v n="$1" -v s="$2" '!(($1 "")==n && $6==s)' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"
 }
 q_inadd() {  # q_inadd <이름> <프로젝트> <지시문> <선행> <기계제한> <우선> <되돌릴곳> <요청ID>: 대기열 줄과 장부 open을 한 잠금에서(멱등)
+  case $(lget "$8" | cut -f 4) in ''|open) ;; *) echo HAD; return 0 ;; esac
   ex=$(awk -F'\t' -v n="$1" '($1 "")==n {print ($11 == "" ? "-" : $11); exit}' "$Q" 2>/dev/null)
   if [ -n "$ex" ]; then [ "$ex" = "$7#$8" ] || die "이미 대기열에 있다(다른 요청): $1"; ia=HAD
   else pad16 "$1" "$2" "$3" "$4" "$5" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$7#$8" - "$6"; (IFS=$'\t'; printf '%s\n' "${ROW[*]}") >>"$Q" || exit 1; ia=ADDED; fi

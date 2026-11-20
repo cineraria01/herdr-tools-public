@@ -15,25 +15,35 @@ ok() { echo "ok - $*"; }
 bad() { echo "FAIL - $*"; fail=1; }
 
 # check <폴더> <예산 파일> [<갈래점 예산 파일>]: 위반마다 한 줄, 없으면 아무것도 안 찍는다
-check() {
-  (cd "$1" && git ls-files -z | xargs -0 wc -l 2>/dev/null | grep -v ' total$') |
+check() (
+  set -o pipefail
+  cd "$1" || exit 1
+  git ls-files -z | while IFS= read -r -d '' path; do
+    case $path in *.md | tests/* | */tests/*) continue ;; esac
+    n=$(wc -l <"$path") || exit 1
+    printf '%d\t%s\n' "$n" "$path"
+  done |
     awk -v lim="$LIMIT" -v lane="${4-}" '
-      FILENAME == ARGV[1] { if ($0 !~ /^#/ && NF == 2) b[$2] = $1; next }
-      FILENAME == ARGV[2] { if ($0 !~ /^#/ && NF == 2) o[$2] = $1; ob = 1; next }
-      { n = $1; p = $0; sub(/^[ \t]*[0-9]+[ \t]/, "", p); if (p ~ /(^|\/)tests\// || p ~ /\.md$/) next; seen[p] = 1
+      FILENAME == ARGV[1] || FILENAME == ARGV[2] {
+        n = $1; if (sub(/^[0-9]+[ \t]+/, "")) { if (FILENAME == ARGV[1]) b[$0] = n; else o[$0] = n }; next }
+      { n = $1; p = $0; sub(/^[0-9]+\t/, "", p); seen[p] = 1
         if (p in b) { if (n > b[p]) printf "늘었다 %s %d줄 (예산 %d) — 늘릴 것은 새 기능 파일로\n", p, n, b[p] }
         else if (n > lim) printf "새 거대 파일 %s %d줄 (한도 %d) — 기능별 파일로 나눈다\n", p, n, lim }
       END { for (p in b) if (!(p in seen)) printf "예산에 없는 파일 %s — 예산 줄을 지운다\n", p
-            if (lane != "" && ob) for (p in b) if (!(p in o) || b[p] > o[p]) printf "레인이 예산을 늘렸다 %s %d (갈래점 %s)\n", p, b[p], (p in o) ? o[p] : "없음" }' \
+            if (lane != "") for (p in b) if (!(p in o) || b[p] > o[p]) printf "레인이 예산을 늘렸다 %s %d (갈래점 %s)\n", p, b[p], (p in o) ? o[p] : "없음" }' \
       "$2" "${3:-/dev/null}" -
-}
+)
 
 # 자기 시험: 임시 저장소에서 늘어남·새 거대 파일·예산 밖·레인의 예산 올림이 걸리는지
 T=$(mktemp -d "${TMPDIR:-/tmp}/line-budget-test.XXXXXX") || exit 1
 trap 'rm -rf "$T"' EXIT
+. "$here/isolate.sh" || exit 1
 mkdir -p "$T/r/tests" && cd "$T/r" && git init -q . || exit 1
 seq 700 >big; seq 10 >small; seq 900 >tests/huge.test.sh; seq 900 >doc.md; git add . >/dev/null
 printf '# 예산\n700 big\n' >"$T/b"
+: >"$T/empty-budget"
+if (git() { return 128; }; check "$T/r" "$T/empty-budget" >/dev/null); then bad "git ls-files 실패가 빈 저장소로 통과"
+else ok "git ls-files 실패는 검사 오류"; fi
 [ -z "$(check "$T/r" "$T/b")" ] && ok "예산 그대로·시험·문서 큰 파일은 통과" || bad "깨끗한 판이 걸림: $(check "$T/r" "$T/b")"
 seq 701 >big
 case $(check "$T/r" "$T/b") in *"늘었다 big 701줄"*) ok "예산보다 늘면 실패" ;; *) bad "늘어남을 못 잡음" ;; esac
@@ -53,14 +63,15 @@ case $(check "$T/r" "$T/b5" "$T/o3" lane) in *"레인이 예산을 늘렸다 x 6
 
 # 이 저장소
 R=$(cd "$here/.." && pwd)
-if ! git -C "$R" rev-parse -q --verify HEAD >/dev/null 2>&1; then echo "ok - 건너뜀 저장소 판정(git 저장소 밖 사본)"; exit $fail; fi
+if [ ! -e "$R/.git" ]; then echo "ok - 건너뜀 저장소 판정(git 저장소 밖 사본)"; exit $fail; fi
+git -C "$R" rev-parse -q --verify HEAD >/dev/null || { bad "HEAD 조회 실패"; exit 1; }
 [ -f "$R/$B" ] || bad "예산 파일이 없다: $B"
 ob=
-if [ -n "${HC_LANE-}" ] && mb=$(git -C "$R" merge-base HEAD origin/main 2>/dev/null) &&
-  git -C "$R" cat-file -e "$mb:$B" 2>/dev/null; then
-  ob=$T/base-budget; git -C "$R" show "$mb:$B" >"$ob"
+if [ -n "${HC_LANE-}" ]; then
+  mb=$(git -C "$R" merge-base HEAD origin/main) && entry=$(git -C "$R" ls-tree "$mb" -- "$B") || { bad "갈래점 예산 조회 실패"; exit 1; }
+  if [ -n "$entry" ]; then ob=$T/base-budget; git -C "$R" show "$mb:$B" >"$ob" || { bad "갈래점 예산 읽기 실패"; exit 1; }; fi
 fi
-out=$(check "$R" "$R/$B" "$ob" ${ob:+lane})
+out=$(check "$R" "$R/$B" "$ob" ${ob:+lane}) || { bad "추적 파일 목록 또는 줄 수 읽기 실패"; exit 1; }
 if [ -z "$out" ]; then ok "이 저장소: 한도 ${LIMIT}줄·예산 $B 지킴${ob:+ (레인: 갈래점 예산과도 견줌)}"
 else printf '%s\n' "$out" | sed 's/^/FAIL - /'; fail=1; fi
 exit $fail

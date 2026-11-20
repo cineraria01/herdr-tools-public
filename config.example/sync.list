@@ -26,6 +26,7 @@ Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.sha
 도구         .local/lib/hc-lane/**                            tools:lib/hc-lane/                              macos
 도구         .local/bin/hc-sweep                              tools:bin/hc-sweep                              macos
 도구         .local/bin/ovis-split                            tools:bin/ovis-split                            macos
+도구         .local/bin/tests/isolate.sh                      tools:tests/isolate.sh                          macos
 도구         .local/bin/tests/hc-lane.test.sh                 tools:tests/hc-lane.test.sh                     macos
 도구         .local/bin/tests/hc-lane-merger.test.sh          tools:tests/hc-lane-merger.test.sh              macos
 도구         .local/bin/herdr-settings-merge                  tools:bin/herdr-settings-merge                  all

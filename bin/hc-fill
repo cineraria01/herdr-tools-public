@@ -74,6 +74,7 @@ case $cmd in
     pad16 "$@"; (IFS=$'\t'; printf '%s\n' "${ROW[*]}") >>"$Q"; exit ;;
   _rmx) q_rmx "$@"; exit ;;
   _lset) lset "$@"; exit ;;
+  _fix) rfix "$@"; exit ;;
   _recover) rmigrate; exit ;;
   _inadd) q_inadd "$@"; exit ;;
   _rm) q_rm "$1"; exit ;;
@@ -159,10 +160,9 @@ case $cmd in
     # 먼저 띄움 레인의 선행: local 저장소의 지금 있는 origin/<기본>으로(fetch 없이 — ls는 빠르게). 판정 못 하면 1
     els() {
       FR=$(repo_of "$1" "$LOCAL"); [ -n "$FR" ] || return 1
-      FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
-      git -C "$FR" log -1 "origin/$FB" >/dev/null 2>&1 || return 1
+      FB=$(project_ref "$FR") || return 1
       ew= ed=
-      for x in $(printf %s "$2" | tr , ' '); do if [ -n "$(landed "$x")" ]; then ed="$ed,$x"; else ew="$ew,$x"; fi; done
+      for x in $(printf %s "$2" | tr , ' '); do eh=$(landed "$x") || return 1; if [ -n "$eh" ] || cached_mark "$1" "$x"; then ed="$ed,$x"; else ew="$ew,$x"; fi; done
       if [ -z "$ew" ]; then echo "선행 들어감 — 본 작업"; else echo "선행 기다림 ${ew#,}${ed:+ · 들어감 ${ed#,}}"; fi
     }
     while IFS=$'\t' read -r -u 3 name proj brief after only state m addr stuck added reply owner prio early ak ovk _; do
@@ -237,8 +237,8 @@ MQP= MQS= MQBAD=
 
 # 자리 세기 전에 끝나는 바퀴(빈 대기열 + idle 0, die 등)는 held.tsv를 비운다 — 그동안 못 본 레인이 묵은 시각을 물려받지 않게
 # (감사 [낮음] 1). 다 세면 HELDW=1. dry-run은 건드리지 않는다
-HELDW= SNAPD=   # SNAPD: 이번 바퀴 지시문 사본 폴더(겹침 검사·띄우기가 같은 사본을 — 아스트라 2차 중간 1)
-trap '[ $dry = 1 ] || [ -n "$HELDW" ] || : 2>/dev/null >"$DATA/held.tsv"; [ -z "$SNAPD" ] || rm -rf "$SNAPD"' EXIT
+HELDW= SB=$DATA/.run-brief.tmp   # run.lock 안에서 한 줄씩 쓰는 사본. 다음 바퀴는 중단 때 남은 사본도 회수한다.
+trap '[ $dry = 1 ] || [ -n "$HELDW" ] || : 2>/dev/null >"$DATA/held.tsv"; rm -f -- "$SB"' EXIT
 [ $dry = 1 ] || qlock _recover || die "대기열 복구(받은편지 줄 옮기기) 실패, 이번 바퀴는 띄우지 않았다"
 inbox_tick
 merger_tick
@@ -269,7 +269,7 @@ TERMS=$(printf '%s\n' "$raw" | jq -r --arg l "$LOCAL" '.terminals | arrays | .[]
    (.status | if type == "object" then (.state // "-") elif . == null then "-" else tostring end), (.cwd // "-")] | @tsv') &&
   printf '%s\n' "$raw" | jq -e '.terminals | arrays' >/dev/null || die "hc ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다"
 # hc-lane 레인(라벨 hc-lane=1) 주소: 상태 훅을 아직 안 보낸 레인은 hc ls에 agent가 argv 첫 낱말(env)·status가 null로 온다
-LANEADDR=$(hc ls --label hc-lane=1 --json | jq -r '.terminals | arrays | .[].address') ||
+raw=$(hc ls --label hc-lane=1 --json) && LANEADDR=$(printf '%s\n' "$raw" | jq -er '.terminals | arrays | map(.address) | join("\n")') ||
   die "hc ls --label hc-lane=1 실패, 이번 바퀴는 띄우지 않았다"
 raw=$(hc machine ls --json) && [ -n "$raw" ] || die "hc machine ls 실패, 이번 바퀴는 띄우지 않았다"
 printf '%s\n' "$TERMS" | awk -F'\t' -v g="$AGENT" '$3==g {f=1} END {exit !f}' ||
@@ -290,6 +290,7 @@ if [ -f "$OWNF" ]; then
   OREC=$(awk -F'\t' 'NF >= 7' "$OWNF")
   awk -F'\t' 'NF && NF < 7 {f = 1} END {exit !f}' "$OWNF" && OSEED=1
 else OSEED=1; fi
+try_prune
 ev_tick
 park_tick
 reply_tick   # 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다(병합기 2단계)
@@ -425,6 +426,7 @@ while IFS=$'\t' read -r -u 3 rn rp rm_ ra rs _; do
   if [ "$rm_" != "$LOCAL" ] && ! printf '%s\n' "$CONN" | grep -Fxq -- "$rm_"; then
     [ "$OVM" = off ] || echo "겹침: $rn @$rm_ 연결 안 됨 — 끝났는지 몰라 쓰기 소유 유지"; continue
   fi
+  own_pending "$rn" "$rm_" "$ra" && continue
   if lalive "$ra" "$rn"; then own_done "$rn" "$ra" "$rs" || continue
   else
     mqueued "$rp" "$rn"; mq_=$?   # 0 큐에 있음 · 1 없음 · 2 모름
@@ -496,14 +498,16 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
   # 자동 감사 줄은 지난 바퀴의 감사 터미널(판정 뒤 done·idle로 남음)을, 주차한 줄은 주차하고 쉬는 터미널을 새 실행으로 잡지 않는다.
   # 채택은 hc-lane 레인(라벨 hc-lane=1)이고 cwd가 그 기계 그 프로젝트 저장소(.wt/ 포함)일 때만(4차 B 높음 7 — 이름만 같은 남의 터미널을
   # 채택하면 그 레인이 영영 안 뜬다. 안 맞으면 띄우고, 쓰기 레인 중복은 hc-lane 임대가 막는다)
-  live=
+  try_old_busy "$name" "$rid" && { echo "옛 실행 정리 기다림 $name"; continue; }
+  live= parkbusy=
   while IFS=$'\t' read -r lm la ls_ lc_; do
     [ -n "$la" ] || continue
     inlist "$lm=$la" "$stuck" && continue
-    case $ls_ in done | idle) case ${ak:--}:${ef:--} in audit=*:* | *:parked) continue ;; esac ;; esac
+    case ${ak:--}:$ls_ in audit=*:done | audit=*:idle) continue ;; esac
     if ! printf '%s\n' "$LANEADDR" | grep -Fxq -- "$la" || ! inproj "$proj" "$lm" "$lc_"; then
       echo "알림 $name: 같은 이름 터미널 $la 는 hc-lane 레인($proj 폴더)이 아니라 채택하지 않음"; continue
     fi
+    if [ "${ef:--}" = parked ]; then park_candidate "$name" "$rid" "$lm" "$la" "$ls_"; case $? in 1) continue ;; 2) parkbusy=1; continue ;; esac; fi
     live="$lm $la"; break
   done <<<"$(printf '%s\n' "$TERMS" | awk -F'\t' -v OFS='\t' -v n="$name" '($4 "")==n {print $1, $2, $5, $6}')"
   if [ -n "$live" ]; then
@@ -517,12 +521,14 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
       if [ -z "$tg_" ]; then
         case ${reply:--} in -|*'#'*) ;; *) old_report "${live%% *}" "$name" || { echo "건너뜀 $name: ${live%% *} 의 옛 보고를 비켜 두지 못했다"; continue; } ;; esac
       fi
-      QRID=$rid qset "$name" up "${live%% *}" "${live#* }" "$stuck" "$te_" "$tu_" && trydel "$name"
+      pget "${live#* }" || PRUN=-
+      tryput "$name" "$rid" "${live%% *}" "$te_" "$tu_" "${live#* }" "$PRUN" && QRID=$rid qset "$name" up "${live%% *}" "${live#* }" "$stuck" "$te_" "$tu_"
       [ -z "$tg_" ] || echo "이미 떠 있음 $name: 띄운 뒤 멈춘 이번 시도 — 시도 기록대로(먼저 ${te_:-아님}·감사 ${tu_:-아님})"
     fi
     continue
   fi
-  nd_block "$name" "$only" "${owner:--}" && continue
+  [ -z "$parkbusy" ] || { echo "주차 정리 기다림 $name"; continue; }
+  nd_block "$name" "$only" "${owner:--}" "$proj" && continue
   sx_=$(printf '%s\n' "$SEENOFF" | awk -F'\t' -v n="$name" '($2 "")==n {print $1 " " $3; exit}')
   [ -z "$sx_" ] || { echo "건너뜀 $name: 끊긴 기계 ${sx_%% *}에 지난 바퀴 같은 이름 터미널(${sx_#* })이 있었다 — 끝났는지 몰라 띄우지 않음(다시 붙으면 본다)"; continue; }
   if [ "$after" != - ]; then
@@ -585,8 +591,7 @@ fi
 # 겹침 대기·능력 막힘 기록(ls 비고): 이번 바퀴 것으로 바꾼다
 [ $dry = 1 ] || { printf '%s' "$OVWAIT" >"$DATA/overlap.tsv.tmp" && mv -f "$DATA/overlap.tsv.tmp" "$DATA/overlap.tsv"; }
 [ $dry = 1 ] || { printf '%s' "$NDNOW" >"$DATA/need.tsv.tmp" && mv -f "$DATA/need.tsv.tmp" "$DATA/need.tsv"; }
-# 쓰기 소유 실행 기록: overlap off여도 쓴다(빈 기록도 — 없음은 「채움」이라 다르다)
-[ $dry = 1 ] || { printf '%s\n' "$OREC" | awk 'NF' >"$OWNF.tmp" && mv -f "$OWNF.tmp" "$OWNF"; }
+own_finish
 
 after_tick
 

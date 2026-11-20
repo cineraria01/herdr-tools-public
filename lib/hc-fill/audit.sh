@@ -36,11 +36,20 @@ alive() { printf '%s\n' "$TERMS" | awk -F'\t' -v a="$1" '$2==a {print $5; f=1; e
 lastev() {  # lastev <이름> <터미널> [<상태>]: 그 터미널이 그 이름으로 적은 마지막 사건 줄(events는 시각 순)
   printf '%s\n' "$EV" | awk -F'\t' -v n="$1" -v a="$2" -v s="${3-}" '($4 "")==n && $3==a && (s == "" || $5==s) {l=$0} END {print l}'
 }
+# 확정한 실행 키는 터미널이 사라진 뒤에도 같은 주소의 옛 사건을 거른다.
+attempt_run() { awk -F'\t' -v n="$1" -v a="$2" '($1 "")==n && $6==a && $7 ~ /@[0-9]+$/ {print $7; exit}' "$DATA/try.tsv" 2>/dev/null; }
+joblast() {
+  local key
+  key=$(attempt_run "$1" "$2")
+  if [ -n "$key" ]; then runlast "$1" "$2" "$key" "${3-}"
+  elif pget "$2" && [ "$PNAME" = "$1" ]; then runlast "$1" "$2" "$PRUN" "${3-}"
+  else lastev "$@"; fi
+}
 # pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms> — 레인 report 10칸과 같은 꼴)·PNAME. 0 살아 있음, 3 끝남 확정(not_found·finished), 1 모름
 pget() {
   PRUN= PNAME=
   pg_=$(hc get "$1" --json 2>&1 </dev/null); pr_=$?
-  printf '%s\n' "$pg_" | grep -q '"not_found"' && return 3
+  printf '%s\n' "$pg_" | jq -e '(.error.kind // .kind) == "not_found"' >/dev/null 2>&1 && return 3
   [ $pr_ = 0 ] || return 1
   printf '%s\n' "$pg_" | jq -se 'map(select(type == "object")) | .[0].state == "finished"' >/dev/null 2>&1 && return 3
   pc_=$(printf '%s\n' "$pg_" | jq -sr 'map(select(type == "object")) | .[0].created_ms // empty' 2>/dev/null)
@@ -97,7 +106,14 @@ a_void() {
   case $vo_ in void) return 0 ;; taken | landing) aupd "$1" 8 taken; echo "감사 $1: 레인이 이미 판정을 받음($vo_) — 끝"; return 2 ;; esac
   return 1
 }
-abase() { ab_=$(git -C "$(repo_of "$1" "$LOCAL")" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null); ab_=${ab_#origin/}; echo "${ab_:-main}"; }
+abase() {
+  local path
+  path=$(repo_of "$1" "$LOCAL")
+  if [ -n "$path" ]; then project_ref "$path"; return; fi
+  path=$(repo_of "$1" "$2"); [ -n "$path" ] || return 1
+  onm "$2" "$(declare -f project_ref)
+project_ref \"\$d\"" "$path"
+}
 # abrief <aid> <레인> <기계> <sha40> <프로젝트>: 감사 지시문 briefs/audit/<aid>.md를 확정(이미 있으면 그대로 — 처음 확정본으로 이어 감)
 abrief() {
   bf=$DATA/briefs/audit/$1.md
@@ -112,7 +128,10 @@ abrief() {
 \`hc-lane report 판정 {sha} \"감사 완료 {audit_id} 높음 <n>·중간 <n>·낮음 <n>\"\`" ;;
   esac
   t=${t//\{lane\}/$2} t=${t//\{machine\}/$3} t=${t//\{worktree\}/${repo%/}.wt/$2} t=${t//\{branch\}/$2} t=${t//\{sha\}/$4} t=${t//\{audit_id\}/$1}
-  t=${t//\{base\}/$(abase "$5")} t=${t//\{brief\}/"~/.local/share/hc-fill/runs/$2-run.md"} t=${t//\{report\}/"~/.local/share/hc-fill/reports/audit-$1.md"}
+  local ref branch
+  ref=$(abase "$5" "$3") || { echo "자동 감사 미룸 $2: 기본 가지 조회 실패"; return 1; }
+  branch=${ref#refs/heads/}; branch=${branch#origin/}
+  t=${t//origin\/\{base\}/$ref} t=${t//\{base\}/$branch} t=${t//\{brief\}/"~/.local/share/hc-fill/runs/$2-run.md"} t=${t//\{report\}/"~/.local/share/hc-fill/reports/audit-$1.md"}
   mkdir -p "${bf%/*}" && printf '%s\n' "$t" >"$bf.tmp" && mv -f "$bf.tmp" "$bf" || { echo "자동 감사 못 함 $2: 감사 지시문을 쓰지 못함 $bf"; return 1; }
 }
 # a_put <aid> <레인> <기계> <프로젝트>: 감사 줄 audit-<aid>를 대기열에(이미 있으면 그대로 — 멱등). 주인은 레인 줄 주인
@@ -169,12 +188,13 @@ a_queued() {
   case $sha in "$ls_"*) [ ${#ls_} -ge 7 ] || ls_=x ;; *) ls_=x ;; esac
   if [ "$ls_" = x ]; then aupd "$aid" 8 superseded; echo "판정 버림 $an: $ln 이 새 완료($(printf %s "$le_" | cut -f 6))를 적었다 — 새 차수로"; return 0; fi
   msg_=$(printf %s "$v_" | cut -f 7)
-  h_=$(printf %s "$msg_" | sed -n 's/.*높음 *\([0-9][0-9]*\).*/\1/p') md_=$(printf %s "$msg_" | sed -n 's/.*중간 *\([0-9][0-9]*\).*/\1/p')
-  lw_=$(printf %s "$msg_" | sed -n 's/.*낮음 *\([0-9][0-9]*\).*/\1/p')
-  if [ -z "$h_" ] || [ -z "$md_" ]; then
+  local format="^감사 완료 $aid 높음 ([0-9]+)·중간 ([0-9]+)·낮음 ([0-9]+)$"
+  if [[ $msg_ =~ $format ]]; then
+    h_=${BASH_REMATCH[1]} md_=${BASH_REMATCH[2]} lw_=${BASH_REMATCH[3]}
+  else
     a_esc "$aid" unreadable "$ln 감사 ${rnd}번째 판정 줄을 못 읽음(「${msg_}」) — 지휘 판단 ($an @$qm_ $rep)"; return 0
   fi
-  if [ "$h_" = 0 ] && [ "$md_" = 0 ]; then av=pass
+  if [[ $h_$md_ =~ ^0+$ ]]; then av=pass
   elif [ "${afx:-0}" -lt "$AMAX" ]; then av=fix afx=$((${afx:-0} + 1))
   else a_esc "$aid" limit "$ln 감사 ${rnd}번째 높음 ${h_}·중간 $md_ — 지휘 판단 (지적 ${afx}번, 상한 audit_max $AMAX, $an @$qm_ $rep)"; return 0; fi
   [ $dry = 0 ] || { echo "${P}넘길 판정 $an → $ln $pa ($av, 높음 ${h_}·중간 ${md_}·낮음 ${lw_:-?})"; return 0; }
@@ -187,8 +207,25 @@ a_deliver() {
   if ! aok "$am"; then [ -z "$alc" ] || [ "$alc" = - ] || aupd "$aid" 13 -; return 0; fi   # 끊긴 동안은 기다린 시간을 세지 않는다
   [ $dry = 0 ] || { echo "${P}둘 판정 $aid → $am:verdicts/$ln/"; return 0; }
   IFS=$'\t' read -r _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ rep <<<"$(arow "$aid")"
+  # 파일 공개 전에 부모 실행·최신 완료를 재확인한다. 이미 수거했으면 a_void가 그 표시를 보존한다.
+  pget "$pa"; pr_=$?
+  [ $pr_ != 1 ] || return 0
+  if [ $pr_ = 3 ] || [ "$PRUN" != "$prun" ]; then
+    a_void "$aid" "$ln" "$am"; case $? in 0) a_esc "$aid" parent-ended "$ln 감사 ${rnd}번째 판정($av)을 수거하기 전에 부모 실행($prun)이 끝났다 — 지휘 판단 ($an $rep)" ;; esac
+    return 0
+  fi
+  le_=$(runlast "$ln" "$pa" "$prun" 완료); ls_=$(printf %s "$le_" | cut -f 6)
+  [ -n "$le_" ] || { echo "판정 두기 미룸 $aid: 부모 완료 사건을 확인하지 못했다"; return 0; }
+  case $sha in "$ls_"*) [ ${#ls_} -ge 7 ] || ls_=x ;; *) ls_=x ;; esac
+  if [ "$ls_" = x ]; then
+    a_void "$aid" "$ln" "$am"; case $? in 0) aupd "$aid" 8 superseded; echo "판정 취소 $an: $ln 이 수거 전에 새 완료를 적었다 — 새 차수로" ;; esac
+    return 0
+  fi
+  local ref branch
+  ref=$(abase "$(aproj "$aid")" "$am") || { echo "판정 두기 미룸 $aid: 기본 가지 조회 실패"; return 0; }
+  branch=${ref#refs/heads/}; branch=${branch#origin/}
   vb_=$(printf 'aid\t%s\nlane\t%s\nrun\t%s\nsha\t%s\nverdict\t%s\nreport\t%s\nround\t%s\nbase\t%s\n' "$aid" "$ln" "$prun" "$sha" "$av" "$rep" "$rnd" \
-    "$(abase "$(aproj "$aid")")")
+    "$branch")
   vh_=$(printf '%s\n' "$vb_" | shasum -a 256 | cut -d ' ' -f 1) vz_=$(printf '%s\n' "$vb_" | wc -c | tr -d ' ')
   vo_=$(printf '%s\n' "$vb_" | onm -i "$am" "$(s_vput)" "~/.local/share/hc-fill/verdicts/$ln" "$aid" "$vh_" "$vz_") ||
     { echo "판정 두기 미룸 $aid → $am: 원격 쓰기 실패, 다음 바퀴에"; return 0; }
@@ -201,19 +238,6 @@ a_deliver() {
   esac
   set -- $vo_
   case $2 in taken | landing) aupd "$aid" 8 taken; echo "판정 수거됨 $an → $ln ($2)"; a_cleanup_now; return 0 ;; void) aupd "$aid" 8 superseded; return 0 ;; esac
-  # 아직 수거 안 함: 부모가 끝났거나 새 완료면 void를 먼저 잡고(레인이 먼저 잡았으면 수거로) 넘기거나 버린다
-  pget "$pa"; pr_=$?
-  [ $pr_ != 1 ] || return 0
-  if [ $pr_ = 3 ] || [ "$PRUN" != "$prun" ]; then
-    a_void "$aid" "$ln" "$am"; case $? in 0) a_esc "$aid" parent-ended "$ln 감사 ${rnd}번째 판정($av)을 수거하기 전에 부모 실행($prun)이 끝났다 — 지휘 판단 ($an $rep)" ;; esac
-    return 0
-  fi
-  le_=$(runlast "$ln" "$pa" "$prun" 완료); ls_=$(printf %s "$le_" | cut -f 6)
-  case $sha in "$ls_"*) [ ${#ls_} -ge 7 ] || ls_=x ;; *) ls_=x ;; esac
-  if [ "$ls_" = x ] && [ -n "$le_" ]; then
-    a_void "$aid" "$ln" "$am"; case $? in 0) aupd "$aid" 8 superseded; echo "판정 취소 $an: $ln 이 수거 전에 새 완료를 적었다 — 새 차수로" ;; esac
-    return 0
-  fi
   now_=$(date +%s)
   case $alc in '' | - | *[!0-9]*) ;; *) d_=$((now_ - alc)); [ $d_ -le 600 ] || d_=600; awt=$((${awt:-0} + d_)) ;; esac   # 한 바퀴 몫은 10분까지
   aupd "$aid" 12 "${awt:-0}" 13 "$now_"
@@ -238,12 +262,12 @@ a_cleanup() {
   [ "$qk_" = "audit=$ln" ] || return 0
   [ $dry = 0 ] || { echo "${P}정리할 감사 줄 $cn_ ($qs_)"; return 0; }
   if [ "$qs_" = up ]; then
-    case $(alive "$qa_") in
+    aok "$qm_" || return 0
+    if lalive "$qa_" "$cn_"; then case $(alive "$qa_") in
       done | idle)
-        aesc "$ln" "$(qown "$ln")" "감사 터미널 $qa_ 정리 필요($cn_, 차수 $aid ${ast}) — 레인 hc-lane clean 전에 지휘가 hc kill $qa_ (hc-fill은 끄지 않는다)" "hf:$aid:cleanup" || return 0 ;;
-      gone) ;;
+        aesc "$ln" "$(qown "$ln")" "감사 터미널 $qa_ 정리 필요($cn_, 차수 $aid ${ast}) — 정리할 때 이름과 차수를 다시 확인한다" "hf:$aid:cleanup" || return 0 ;;
       *) return 0 ;;
-    esac
+    esac; fi
   fi
   qlock _rmx "$cn_" "$qs_" >/dev/null 2>&1 && echo "감사 줄 뺌 $cn_ (차수 $aid ${ast})"
 }
@@ -251,13 +275,10 @@ a_cleanup() {
 a_open() {
   n=$1 proj=$2 m=$3 la=$4 lo=$5
   l0_=$(lastev "$n" "$la" 완료); [ -n "$l0_" ] || return 0
-  s0_=$(printf %s "$l0_" | cut -f 6)
-  # 이미 이 주소의 차수가 이 sha를 다뤘으면 hc get 없이 건너뜀(바퀴마다 원격 조회를 줄임)
-  awk -F'\t' -v n="$n" -v a="$la" -v s="$s0_" 'NF >= 17 && ($2 "")==n && $7==a && (s == "-" ? $5 == "-" : index($5, s) == 1) {f=1} END {exit !f}' "$AT" 2>/dev/null && return 0
   pget "$la" || return 0
   lc_=$(runlast "$n" "$la" "$PRUN" 완료); [ -n "$lc_" ] || return 0
   s_=$(printf %s "$lc_" | cut -f 6)
-  awk -F'\t' -v n="$n" -v r="$PRUN" -v s="$s_" 'NF >= 17 && ($2 "")==n && $4==r && (s == "-" ? $5 == "-" : index($5, s) == 1) {f=1} END {exit !f}' "$AT" 2>/dev/null && return 0
+  awk -F'\t' -v n="$n" -v r="$PRUN" -v a="$la" -v s="$s_" 'NF >= 17 && ($2 "")==n && $4==r && $7==a && (s == "-" ? $5 == "-" : index($5, s) == 1) {f=1} END {exit !f}' "$AT" 2>/dev/null && return 0
   # 옮긴 옛 기록이 같은 sha를 이미 다뤘으면 다시 열지 않는다(이미 보낸 판정)
   [ "$s_" = - ] || ! awk -F'\t' -v n="$n" -v s="$s_" 'NF >= 17 && ($2 "")==n && $4=="-" && (index($5, s) == 1 || index(s, $5) == 1) {f=1} END {exit !f}' "$AT" 2>/dev/null || return 0
   # 이 레인의 끝나지 않은 차수: 감사가 아직 돌면 미룸(감사 둘이 함께 돌지 않게), 아니면 그 차수를 끝낸다(deliver는 void를 먼저)
@@ -297,12 +318,12 @@ a_open() {
   case $s40_ in *[!0-9a-f]*) echo "자동 감사 미룸 $n: sha 꼴 「${s40_}」"; return 0 ;; esac
   [ ${#s40_} = 40 ] || { echo "자동 감사 미룸 $n: sha 꼴 「${s40_}」"; return 0; }
   if [ $dry = 1 ]; then echo "${P}넣을 감사 audit-<새 차수> ← $n ${s40_:0:8} (${rnd}번째, $m)"; return 0; fi
-  # 차례: 프로젝트 기록 → 지시문 확정 → 기록 opening → 대기열 → queued (중간에 죽어도 opening이 남은 단계를 잇는다)
-  printf '%s\t%s\n' "$aid" "$proj" >>"$DATA/audit-proj.tsv"
+  # 지시문을 확정하기 전에 차수를 기록해야 재시작해도 같은 ID로 이어 간다.
+  printf '%s\t%s\n' "$aid" "$proj" >>"$DATA/audit-proj.tsv" || return 1
+  aadd "$aid" "$n" "$rnd" "$PRUN" "$s40_" "$m" "$la" opening "$afx" - 0 0 - - 0 - - || return 1
+  crash after-opening
   abrief "$aid" "$n" "$m" "$s40_" "$proj" || return 0
   crash after-brief
-  aadd "$aid" "$n" "$rnd" "$PRUN" "$s40_" "$m" "$la" opening "$afx" - 0 0 - - 0 - -
-  crash after-opening
   a_put "$aid" "$n" "$m" "$proj" || return 0
   crash after-put
   aupd "$aid" 8 queued
@@ -333,7 +354,9 @@ mgres() {
   [ -n "$2" ] || return 0
   printf '%s\n' "$EV" | awk -F'\t' -v n="$1" -v M="$MGM" -v sid="$2" \
     'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
-     ($4 "") == n && ($5 == "착지" || $5 == "막힘") && ($2 in m) && index($7, "제출 ID " sid) { r = $0 } END { print r }'
+     ($4 "") == n && ($5 == "착지" || $5 == "막힘") && ($2 in m) {
+       msg = $7; gsub(/,/, " ", msg); if (index(" " msg " ", " 제출 ID " sid " ")) r = $0
+     } END { print r }'
 }
 ev_tick() {
   # 쓰기 소유 실행 기록(OREC)의 기계도 읽는다 — rm·sent 뒤에도 살아 있는 레인의 착지를 보려고(아스트라 2차 중간 4)
@@ -356,12 +379,16 @@ ev_tick() {
     if [ "$m" != "$LOCAL" ] && { ! printf '%s\n' "$CONN" | grep -Fxq -- "$m" || printf '%s\n' "$eunk" | grep -Fxq -- "$m"; }; then
       awk -F'\t' -v OFS='\t' -v n="$n" -v r="$r" '($1 "")==n && ($8 "")==r { $7 = "old"; print; exit }' "$LRT" 2>/dev/null; continue
     fi
-    l=$(lastev "$n" "$a")
+    l=$(joblast "$n" "$a")
     if [ -z "$l" ]; then printf '%s\t-\t-\t-\t-\t%s\tfresh\t%s\n' "$n" "$enow" "$r"; continue; fi
-    # 제출한 레인(마지막 사건 「제출」)은 병합기 기계가 그 제출 ID로 적은 결과(착지·막힘)가 있으면 그것을 보인다(병합기 3차 중간 10 —
-    # ls가 제출자 터미널만 읽어 최종 결과를 놓쳤다)
-    if [ "$(printf %s "$l" | cut -f 5)" = 제출 ]; then
-      r_=$(mgres "$n" "$(printf %s "$l" | cut -f 7 | awk '{ print $1 }')")
+    # 제출 뒤 정리 중간 보고가 끼어도 같은 실행의 병합 결과를 보인다.
+    case $(printf %s "$l" | cut -f 5) in
+      제출) submission=$l ;;
+      중간) submission=$(joblast "$n" "$a" 제출) ;;
+      *) submission= ;;
+    esac
+    if [ -n "$submission" ]; then
+      r_=$(mgres "$n" "$(printf %s "$submission" | cut -f 7 | awk '{ print $1 }')")
       [ -z "$r_" ] || l=$r_
     fi
     es=$(date -j -u -f %Y-%m-%dT%H:%M:%SZ "$(printf %s "$l" | cut -f 1)" +%s 2>/dev/null) && eh=$(date -r "$es" +%H:%M) || eh=?
@@ -380,7 +407,7 @@ park_tick() {
   while IFS=$'\t' read -r -u 6 n m a st r; do
     [ -n "$n" ] || continue
     [ "$m" = "$LOCAL" ] || { printf '%s\n' "$CONN" | grep -Fxq -- "$m" && ! printf '%s\n' "$punk" | grep -Fxq -- "$m"; } || continue
-    l=$(lastev "$n" "$a"); [ "$(printf %s "$l" | cut -f 5)" = 주차 ] || continue
+    l=$(joblast "$n" "$a"); [ "$(printf %s "$l" | cut -f 5)" = 주차 ] || continue
     if [ $dry = 1 ]; then echo "${P}주차로 되돌릴 $n ($a)"; continue; fi
     QRID=$r qset "$n" wait - - "$st" parked && echo "주차 $n: $a 가 lane/$n ($(printf %s "$l" | cut -f 6 | cut -c 1-8))에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움"
   done 6<<<"$(awk -F'\t' -v OFS='\t' '$6=="up" && $14=="early" {print $1, $7, $8, $9, $17}' "$Q")"

@@ -4,29 +4,57 @@ cnt() { printf '%s\n' "$1" | grep -Fxc -- "$2" || true; }
 
 fetch_proj() {  # fetch_proj <프로젝트>: FR(local 저장소)·FB(기본 가지)를 둔다. 0 됨, 1 설정에 local repo 줄 없음, 2 fetch 실패
   FR=$(repo_of "$1" "$LOCAL"); [ -n "$FR" ] || return 1
+  FB=$(project_ref "$FR") || return 2
+  case $FB in refs/heads/*) return 0 ;; esac
   if ! inlist "$1" "$FETCHED"; then
     FETCHED="$FETCHED,$1"
     if [ $dry = 1 ]; then echo "${P}fetch 건너뜀: 지금 있는 origin 참조로 판정 ($FR)"
     elif ! git -C "$FR" fetch -q origin; then FETCHBAD="$FETCHBAD,$1"; fi
   fi
   inlist "$1" "$FETCHBAD" && return 2
-  FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
+  return 0
 }
 # 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정 — carousel-save-race가 선행 main-split의 착지를 커밋 제목 머리로 못 알아봐(「feat(frontend):
 # main-split-1 …」) 먼저 띄움 기한을 넘겼다): hc-lane land가 main과 같은 원자 push에 refs/hc-landed/<레인>/<UTC 초>(= 착지 커밋)를 싣는다.
-# since <선행>: 그 선행 대기열 줄을 넣은 시각(10칸, 이 기계 시각 분)의 UTC 초 — 그보다 앞선 표식(같은 이름의 옛 실행)은 안 센다. 줄이 없으면 빈 값
+# since <선행>: 줄 ID에 기록한 접수 초. ID가 없는 옛 줄만 10칸의 분 시각으로 복원한다.
 since() {
-  sa_=$(awk -F'\t' -v n="$1" '($1 "") == (n "") {print $10; exit}' "$Q" 2>/dev/null)
+  sa_=$(awk -F'\t' -v n="$1" '($1 "") == (n "") {
+    if ($17 ~ /^r[0-9]+-[0-9]+-[0-9]+$/) {split(substr($17,2), a, "-"); print a[1]} else print $10
+    exit}' "$Q" 2>/dev/null)
+  case $sa_ in *[!0-9]*|'') ;; *) printf '%s\n' "$sa_"; return ;; esac
   [ -n "$sa_" ] && [ "$sa_" != - ] || return 1
   date -j -f %Y-%m-%dT%H:%M:%S "$sa_:00" +%s 2>/dev/null || date -d "$sa_:00" +%s 2>/dev/null   # 초를 0으로(-j -f는 빠진 칸을 지금 값으로 채운다)
 }
-# lmark <선행> <since 초>: 그 뒤의 표식 가운데 sha가 origin/<FB>의 조상인 것(LMS)이 있으면 0. 표식 없음·조상 아님·git 오류(ls-remote·
-# merge-base 하나라도)는 1 — 아직(풀지 않음). fetch_proj 뒤. ponytail: 시각은 분 단위라 같은 분에 착지한 옛 실행 표식도 센다
+# lmark <선행> <접수 초>: 기준 가지에 든 표식은 0, 없으면 1, 조회 실패는 2.
 lmark() {
-  lmo_=$(git -C "$FR" ls-remote origin "refs/hc-landed/$1/*" </dev/null 2>/dev/null) || return 1
-  LMS=$(printf '%s\n' "$lmo_" | awk -v p="refs/hc-landed/$1/" -v t="$2" 'index($2, p) == 1 { s = substr($2, length(p) + 1); if (s ~ /^[0-9]+$/ && s + 0 >= t + 0) print $1 }' |
-    while read -r s_; do git -C "$FR" merge-base --is-ancestor "$s_" "origin/$FB" 2>/dev/null && { echo "$s_"; break; }; done)
-  [ -n "$LMS" ]
+  local refs candidates sha rc missing=1
+  LMS= LMFROM=$2
+  case $FB in origin/*) ;; *) return 1 ;; esac
+  refs=$(git -C "$FR" ls-remote origin "refs/hc-landed/$1/*" </dev/null 2>/dev/null) || return 2
+  candidates=$(printf '%s\n' "$refs" | awk -v p="refs/hc-landed/$1/" -v t="$2" 'index($2,p)==1 {
+    s=substr($2,length(p)+1); if (s ~ /^[0-9]+$/ && s+0>=t+0) print $1}') || return 2
+  while read -r sha; do
+    [ -n "$sha" ] || continue
+    git -C "$FR" merge-base --is-ancestor "$sha" "$FB" 2>/dev/null; rc=$?
+    case $rc in 0) LMS=$sha; return 0 ;; 1) ;; *) missing=2 ;; esac
+  done <<<"$candidates"
+  return "$missing"
+}
+# ls는 원격을 읽지 않고 마지막 바퀴에서 확인한 표식만 로컬 기본 가지와 다시 견준다.
+cached_mark() {
+  local stamp sha
+  [ -s "$DATA/after-landed.tsv" ] && stamp=$(since "$2") || return 1
+  sha=$(awk -F'\t' -v p="$1" -v n="$2" -v t="$stamp" '$1==p && ($2 "")==n && $3==t {print $4; exit}' "$DATA/after-landed.tsv")
+  [ -n "$sha" ] && git -C "$FR" merge-base --is-ancestor "$sha" "$FB" 2>/dev/null
+}
+# 선행의 제목이나 표식에서 확인한 착지. 조회 오류는 2로 넘긴다.
+landing_hit() {
+  local since_epoch
+  hit=$(landed "$1") || return 2
+  [ -z "$hit" ] || return 0
+  since_epoch=$(since "$1") || return 1
+  lmark "$1" "$since_epoch" || return $?
+  hit="${LMS:0:8} — 착지 표식"
 }
 after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 b), 2 판정 못 함
   fetch_proj "$2"
@@ -37,9 +65,12 @@ after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어�
   b=$FB ok=0
   for a in $(printf %s "$3" | tr , ' '); do
     # 들어감 = 커밋 제목 머리 규칙(지금 그대로) 또는 그 선행 줄을 넣은 뒤의 착지 표식이 origin/<기본>의 조상(대기열에 그 줄이 있을 때)
-    hit=$(landed "$a")
-    if [ -z "$hit" ] && st_=$(since "$a") && lmark "$a" "$st_"; then hit="$(printf %s "$LMS" | cut -c 1-8) — 착지 표식"; fi
-    if [ -n "$hit" ]; then echo "선행 $1 ← $a: 들어감 ($hit)"; else echo "선행 $1 ← $a: 아직 (origin/$b)"; ok=1; fi
+    landing_hit "$a"
+    case $? in
+      0) echo "선행 $1 ← $a: 들어감 ($hit)" ;;
+      1) echo "선행 $1 ← $a: 아직 ($b)"; ok=1 ;;
+      *) echo "선행 $1 ← $a: 판정 못 함(커밋·착지 표식 조회 실패)"; return 2 ;;
+    esac
   done
   return $ok
 }
@@ -51,7 +82,7 @@ lane_landed() {
   lp=$(awk -v n="$lp" '$1=="repo" { x = $0; sub(/^[ \t]*repo[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+/, "", x); sub(/[ \t]+$/, "", x); sub(/\/+$/, "", x); sub(/.*\//, "", x)
     if (x == n) { print $2; exit } }' "$CONF")
   [ -n "$lp" ] && fetch_proj "$lp" || return 1
-  LHIT=$(landed "$1"); [ -n "$LHIT" ]
+  LHIT=$(landed "$1") && [ -n "$LHIT" ]
 }
 
 # 자리를 차지한 에이전트(기계 한 줄에 하나). working·blocked 등은 늘 차지. done·idle은 hc-lane 작업 트리(<저장소>.wt/…)가
@@ -76,16 +107,50 @@ lanes_on() {  # hc-fill이 그 기계에 띄워 살아 있는 레인 수. 자동
 status_ok() {  # 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지
   end=$(( $(date +%s) + WAIT ))
   while :; do
-    hc get "$1" --json 2>/dev/null | jq -e '(.status | type) == "object"' >/dev/null && return 0
+    if created_=$(hc get "$1" --json 2>/dev/null | jq -er 'select((.status | type) == "object") | .created_ms // "-"'); then
+      case $created_ in ''|*[!0-9]*) START_RUN=- ;; *) START_RUN=${1##*/}@$created_ ;; esac
+      return 0
+    fi
     [ "$(date +%s)" -lt "$end" ] || return 1
     sleep "$POLL"
   done
 }
 
-# 시도 기록 $DATA/try.tsv(레인 줄ID 기계 먼저 감사): 띄우기 직전에 적고 up을 적으면 지운다. 이름마다 한 줄
-tryput() { { awk -F'\t' -v n="$1" '($1 "")!=n' "$DATA/try.tsv" 2>/dev/null; printf '%s\t%s\t%s\t%s\t%s\n' "$@"; } >"$DATA/try.tsv.tmp" && mv -f "$DATA/try.tsv.tmp" "$DATA/try.tsv"; }
-trydel() { [ $dry = 0 ] && [ -f "$DATA/try.tsv" ] || return 0; awk -F'\t' -v n="$1" '($1 "")!=n' "$DATA/try.tsv" >"$DATA/try.tsv.tmp" && mv -f "$DATA/try.tsv.tmp" "$DATA/try.tsv"; }
+# 시도 기록(이름·줄 ID·기계·먼저·감사·확정 주소). 대기열에서 빠져도 그 터미널이 끝날 때까지 보존한다.
+tryput() {
+  [ $dry = 0 ] || return 0
+  local file=$DATA/try.tsv
+  { { [ ! -e "$file" ] || awk -F'\t' -v n="$1" '($1 "")!=n' "$file"; } &&
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:--}" "${5:--}" "${6:--}" "${7:--}"; } >"$file.tmp" && mv -f "$file.tmp" "$file"
+}
+# 줄을 교체했어도 이전 시도의 기계가 끊겼거나 그 이름의 터미널이 아직 있으면 기다린다.
+try_old_busy() {
+  local machine addr
+  read -r machine addr <<<"$(awk -F'\t' -v n="$1" -v r="$2" '($1 "")==n && ($2 "")!=r {print $3, $6; exit}' "$DATA/try.tsv" 2>/dev/null)"
+  [ -n "$machine" ] || return 1
+  [ "$machine" = "$LOCAL" ] || printf '%s\n' "$CONN" | grep -Fxq -- "$machine" || return 0
+  printf '%s\n' "$TERMS" | awk -F'\t' -v m="$machine" -v a="$addr" -v n="$1" '$1==m && ($4 "")==n && (a=="" || a=="-" || $2==a) {f=1} END {exit !f}'
+}
+try_prune() {
+  local file=$DATA/try.tsv
+  [ $dry = 0 ] && [ -s "$file" ] || return 0
+  printf '%s\n' "$TERMS" | CONN_="$CONN" awk -F'\t' -v loc="$LOCAL" '
+    BEGIN {m[loc]=1; k=split(ENVIRON["CONN_"],x,"\n"); for(i=1;i<=k;i++) m[x[i]]=1}
+    FILENAME=="-" {seen[$1 SUBSEP $4]=1; next}
+    FILENAME==ARGV[2] {q[$1]=1; next}
+    ($1 in q) || !($3 in m) || (($3 SUBSEP $1) in seen)' - "${Q}" "$file" >"$file.tmp" && mv -f "$file.tmp" "$file"
+}
 tryget() { awk -F'\t' -v n="$1" -v r="$2" -v m="$3" '($1 "")==n && ($2 "")==r && $3==m {print $4 "\t" $5; exit}' "$DATA/try.tsv" 2>/dev/null; }   # 먼저<TAB>감사
+# 주차한 줄에서 채택할 수 있는 것은 같은 줄의 --resume 시도뿐이다. 주차를 보고한 터미널은 정리가 끝날 때까지 기다린다.
+park_candidate() {
+  local attempt
+  attempt=$(tryget "$1" "$2" "$3")
+  if [ "${attempt%%	*}" = resumed ]; then
+    [ -z "$EVBAD" ] && ! printf '%s\n' "$EV" | grep -Fxq -- "모름 $3" && pget "$4" || return 2
+    [ -n "$(runlast "$1" "$4" "$PRUN" 주차)" ] || return 0
+  fi
+  case $5 in done|idle) return 1 ;; *) return 2 ;; esac
+}
 # inproj <프로젝트> <기계> <cwd>: cwd가 그 기계 그 프로젝트 저장소(또는 <저장소>.wt/ 아래)면 0
 inproj() { ip_=$(repo_of "$1" "$2"); ip_=${ip_%/}; [ -n "$ip_" ] || return 1; case $3 in "$ip_" | "$ip_"/* | "$ip_".wt/*) return 0 ;; esac; return 1; }
 old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 새 레인 결과로 나가지 않게 .old-<시각>으로 비켜 둔다(지우지 않음)
@@ -114,7 +179,7 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
 "
   # 자동 감사(설정 audit): 감사 줄은 --read, 쓰기 줄(받은편지·--no-audit 빼고)은 「감사·착지」 절을 붙이고 감사 칸 auto
   rd= asec= LAUTO=
-  case ${AK:--} in audit=*) rd=--read ;; -) [ -z "$AUD" ] || [ "${5:--}" != - ] || { asec=$ASEC LAUTO=auto; } ;; esac
+  case ${AK:--} in audit=*) rd=--read ;; -|auto) [ -z "$AUD" ] || [ "${5:--}" != - ] || { asec=$ASEC LAUTO=auto; } ;; esac
   steps=$(hc-lane --print-steps $rd ${on:+--on "$on"} --name "$1" --repo "$4") || { echo "실패 $1 @$3: hc-lane --print-steps"; return 1; }
   [ -z "$rsec" ] || [ -n "$rid" ] || old_report "$3" "$1" || { echo "실패 $1 @$3: 그 기계의 옛 보고를 비켜 두지 못했다"; return 1; }
   runmd() { printf '%s\n\n%s\n' "$body" "$steps"; printf %s "$rsec"; printf %s "$asec"; printf %s "${ESEC-}"; printf %s "${RSEC-}"; }
@@ -147,9 +212,15 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
   fi
   # 시도 기록(아스트라 2차 ⑤⑥ — 띄운 뒤 up을 적기 전에 run이 죽으면 다음 바퀴의 「이미 떠 있음」 채택이 먼저 띄움·자동 감사 표시를 잃고
   # 이번 실행이 쓴 받은편지 보고를 .old-로 치웠다): 이름·줄 ID·기계·먼저·감사를 띄우기 전에. 채택이 같은 줄 ID·기계면 이것을 쓴다
-  [ $dry = 1 ] || tryput "$lane" "${RID-}" "${on:-$LOCAL}" "${EARLYF:--}" "${LAUTO:--}"
+  [ -z "${RESUME-}" ] || EARLYF=resumed
+  [ $dry = 1 ] || tryput "$lane" "${RID-}" "${on:-$LOCAL}" "${EARLYF:--}" "${LAUTO:--}" || return 2
   # HC_LANE_FILL=1: hc-lane이 레인 기록에 fill로 적는다(hc-lane wait가 「완료」를 마지막 보고로 봄)
+  if [ -z "$rd" ]; then
+    own_add "$lane" "$proj" "${on:-$LOCAL}" "pending:${on:-$LOCAL}" "$pst_" "$SB" "$PAFT" "$PSOLO"
+    own_store
+  fi
   out=$(HC_LANE_COORD=$wco HC_LANE_OWNER=$own HC_LANE_FILL=1 HERDR_LAND_PRIORITY=$(wcnt "$lane") hc-lane $rd ${RESUME:+--resume} ${on:+--on "$on"} --name "$lane" --repo "$repo" -- "$@" 2>&1); lr=$?
+  crash after-launch
   # 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로(stuck 기록, 그 기계 빼고 다음으로)
   case $lr in 0|5|6|7) ;; *) echo "실패 $lane @${on:-$LOCAL}: hc-lane: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"; return 1 ;; esac
   SWHY=; [ $lr = 0 ] || SWHY=$(printf '%s\n' "$out" | grep -m 1 '^hc-lane: 시작 안 됨' | cut -c 1-200)
@@ -195,14 +266,14 @@ place() {
     launch "$1" "$3" "$m" "$repo" "$5" "$6"; lr=$?
     [ $lr != 2 ] || { bad=1; break; }
     [ $lr = 0 ] || [ $lr = 5 ] || continue
-    [ -n "$isa" ] || { own_add "$1" "$2" "$m" "$ADDR" "$pst_" "$3" "${PAFT:--}" "${PSOLO:--}"; GOTADDR=1; }
+    [ -n "$isa" ] || { own_bind "$1" "pending:$m" "$ADDR"; GOTADDR=1; }
     NOW=$(printf '%s\n%s' "$NOW" "$m")   # 상태가 안 잡혀도 자리는 차 있다
     if [ $lr = 0 ] && status_ok "$ADDR"; then
       [ -n "$isa" ] || NOWL=$(printf '%s\n%s' "$NOWL" "$m")
       pe_=; [ -z "${7-}" ] || pe_=early; [ -z "${RESUME-}" ] || pe_=resumed   # 주차에서 이어 띄움은 resumed(다시 먼저 띄움 후보가 아님)
+      tryput "$1" "$RID" "$m" "$pe_" "$LAUTO" "$ADDR" "$START_RUN" || die "실행 기록 저장 실패"
       if QRID=$RID qset "$1" up "$m" "$ADDR" "$stuck" "$pe_" "$LAUTO"; then
         if [ -n "${7-}" ]; then echo "먼저 띄움 $1 → $m $ADDR ($repo, 선행 $7)"; else echo "띄움 $1 → $m $ADDR ($repo${RESUME:+, 주차한 가지 lane/$1 에서 이어})"; fi
-        trydel "$1"
       else echo "줄 바뀜 $1: 띄우는 동안 대기열 줄이 빠지거나 다시 들어왔다 — 띄운 $m $ADDR 은 옛 줄의 실행이라 새 줄에 적지 않음(지휘가 정리)"; fi
       placed=1 UPNOW="$UPNOW,$1"; break
     fi
@@ -219,19 +290,21 @@ early_sec() {
   dl=$(( $(date +%s) + EWAIT * 3600 ))
   dls=$(date -r "$dl" '+%Y-%m-%d %H:%M' 2>/dev/null || date -d "@$dl" '+%Y-%m-%d %H:%M')
   re1='^([a-z]+(\([^)]*\))?!?: *)?' re2='([^a-z0-9_-]|$)'
-  w='until git fetch -q origin'
+  local fetch=
+  case $2 in origin/*) fetch='git fetch -q origin && ' ;; esac
+  w="until ${fetch}subjects=\$(git log $2 --format=%s)"
   for a in $(printf %s "$1" | tr , ' '); do
     # after_ok와 같은 판정: 제목 머리, 또는 그 선행 줄을 넣은 뒤의 착지 표식 sha가 origin/<기본>의 조상(ls-remote·merge-base 오류면 아직)
     # 파이프 끝은 ( … ) 하위 셸 — { …; exit; }면 zsh(파이프 끝을 지금 셸에서 돈다)에서 그 exit가 기다림 셸째 끝낸다(2026-11-20)
-    if st_=$(since "$a"); then w="$w &&
-  { git log origin/$2 --format=%s | grep -Eq '$re1$a$re2' || { o=\$(git ls-remote origin 'refs/hc-landed/$a/*') && printf '%s\\n' \"\$o\" | awk '{ s = \$2; sub(/^refs\\/hc-landed\\/$a\\//, \"\", s); if (s ~ /^[0-9]+\$/ && s + 0 >= $st_) print \$1 }' | ( while read -r s; do git merge-base --is-ancestor \"\$s\" origin/$2 && exit 0; done; exit 1 ); }; }"
+    if [ -n "$fetch" ] && st_=$(since "$a"); then w="$w &&
+  { printf '%s\\n' \"\$subjects\" | grep -Eq '$re1$a$re2' || { o=\$(git ls-remote origin 'refs/hc-landed/$a/*') && printf '%s\\n' \"\$o\" | awk '{ s = \$2; sub(/^refs\\/hc-landed\\/$a\\//, \"\", s); if (s ~ /^[0-9]+\$/ && s + 0 >= $st_) print \$1 }' | ( while read -r s; do git merge-base --is-ancestor \"\$s\" $2 && exit 0; done; exit 1 ); }; }"
     else w="$w &&
-  git log origin/$2 --format=%s | grep -Eq '$re1$a$re2'"; fi
+  printf '%s\\n' \"\$subjects\" | grep -Eq '$re1$a$re2'"; fi
   done
   cat <<EOF
 
 ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, $(date '+%Y-%m-%d %H:%M'))
-자리가 비어 hc-fill이 이 레인을 선행 레인($(printf %s "$1" | sed 's/,/, /g'))이 origin/$2에 들어가기 **전에** 띄웠다. 위 지시문의 본 작업은 선행이 들어간 뒤에 한다.
+자리가 비어 hc-fill이 이 레인을 선행 레인($(printf %s "$1" | sed 's/,/, /g'))이 $2에 들어가기 **전에** 띄웠다. 위 지시문의 본 작업은 선행이 들어간 뒤에 한다.
 1. 지금은 준비만: 지시문·계약 읽기, 이 레인 몫 파일의 실패 시험·골든 고정(커밋해도 된다), 선행 레인이 무엇을 바꾸는지 미리 읽기. 선행 레인이 고칠 파일은 아직 고치지 않는다.
 2. 준비가 끝나면 자리를 쥐고 기다리지 않는다(2026-11-20 사용자 「노는 워크트리 없이」): 준비를 커밋한 뒤(커밋할 것이 없어도 된다) 이 작업 폴더에서 \`hc-lane park "<준비 한 줄>"\` → 위 착지·정리 절차의 \`hc-lane clean\` 줄 → 턴을 끝낸다. hc-lane report 완료는 적지 않는다. 선행이 들어가면 hc-fill이 주차한 가지(원격 lane/<레인>)에서 이 레인을 다시 띄우고 지시문 끝에 「이어 가기」 절을 붙인다.
 3. park가 종료 3(원격 없는 저장소)일 때만 아래 블록을 그대로 한 번에 돌려 선행을 기다린다. 배경 실행 금지(\`&\`·nohup도, 도구의 배경 실행 run_in_background도). 명령 시간 한도는 도구가 허락하는 최대로 준다(예: Bash 도구 timeout 600000). 선행마다 판정 줄이 따로다 — 합치거나 줄을 고치지 않는다. 그래도 한도로 끊기면 같은 블록을 다시 돌린다(기한은 고정 시각이다).
@@ -241,7 +314,7 @@ $w
 do [ "\$(date +%s)" -lt $dl ] || hc-lane early-wait $(printf %s "$1" | tr , ' ') || { echo "선행 대기 초과"; break; }; sleep 180; done
 \`\`\`
 4. 「선행 대기 초과」가 찍혔으면(기한 ${dls}·${EWAIT}시간이 지났고 선행이 막힘·끝남·사라짐이거나 상태를 모름) 그 바로 앞 줄들(\`<선행>: <까닭>\`)을 붙여 \`hc-lane report 막힘 - "선행 대기 초과: <선행>: <까닭>"\`을 부르고 멈춘다. 이 레인의 대기열 줄은 「떠 있음」으로 남아 hc-fill이 다시 띄우지 않으니, 지휘가 \`hc-fill rm <레인>\` 뒤 다시 넣는다.
-5. 블록으로 기다려 선행이 모두 들어갔으면 \`git rebase origin/$2\` 뒤 본 작업을 한다(준비 커밋은 그대로 둔다).
+5. 블록으로 기다려 선행이 모두 들어갔으면 \`git rebase $2\` 뒤 본 작업을 한다(준비 커밋은 그대로 둔다).
 EOF
 }
 
@@ -250,8 +323,8 @@ resume_sec() {
   cat <<EOF
 
 ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, $(date '+%Y-%m-%d %H:%M'))
-이 레인은 먼저 띄워 준비한 뒤 주차했다(hc-lane park). 선행($(printf %s "$2" | sed 's/,/, /g'))이 origin/$3에 들어가 hc-fill이 주차한 가지 origin/lane/$1 에서 이 작업 트리를 만들었다(준비 커밋이 들어 있다).
-1. 먼저 \`git fetch origin && git rebase origin/$3\` — 충돌은 양쪽 내용을 살려 푼다. 준비 커밋은 그대로 둔다.
+이 레인은 먼저 띄워 준비한 뒤 주차했다(hc-lane park). 선행($(printf %s "$2" | sed 's/,/, /g'))이 $3에 들어가 hc-fill이 주차한 가지 origin/lane/$1 에서 이 작업 트리를 만들었다(준비 커밋이 들어 있다).
+1. 먼저 \`git fetch origin && git rebase $3\` — 충돌은 양쪽 내용을 살려 푼다. 준비 커밋은 그대로 둔다.
 2. 그다음 위 지시문의 본 작업을 끝까지 한다. 다시 주차하지 않는다.
 EOF
 }

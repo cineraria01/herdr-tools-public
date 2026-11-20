@@ -7,6 +7,7 @@ TOOL=${HERDR_TOOLS_CONFIG_BIN:-$here/../bin/herdr-tools-config}
 EX=$here/../config.example
 T=$(mktemp -d "${TMPDIR:-/tmp}/htc-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
+. "$here/isolate.sh" || exit 1
 export HOME="$T/home" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 unset HERDR_TOOLS_CONFIG
 mkdir -p "$HOME" "$T/c1" "$T/c2" "$T/공백 폴더"
@@ -163,6 +164,12 @@ printf 'SECRET-HOST-3 up\n' >"$R/upper.txt"
 t "lint: 대소문자를 무시한다" '[ $rc = 1 ] && [ "$out" = "upper.txt:1: secret-host-[0-9]+" ]'
 rm -f "$R/latin1.txt" "$R/blob.bin" "$R/secret-host-8.md" "$R/upper.txt"
 
+# 추적 목록 조회가 실패하면 공개용 개인 값 검사는 완료되지 않았다.
+mkdir -p "$T/list-failure"
+printf '#!/bin/sh\n[ "$1" != ls-files ] || exit 128\nexec /usr/bin/git "$@"\n' >"$T/list-failure/git"; chmod +x "$T/list-failure/git"
+(cd "$R" && PATH="$T/list-failure:$PATH" HERDR_TOOLS_CONFIG="$T/c1" bash "$TOOL" lint --strict >"$T/out" 2>"$T/err"); rc=$?
+t "lint: git ls-files가 실패하면 검사 오류" '[ $rc = 2 ]'
+
 # sync-lint: lib/<도구>/가 있는 도구에 bin 줄만 있으면 더할 줄을 찍고 종료 1. 대상이 같거나 all인 lib 나무 줄이면 통과
 mkdir -p "$T/sr/lib/tool-a" "$T/sr/lib/tool-b"
 printf '# 시험\n도구 .local/bin/tool-a tools:bin/tool-a macos\n도구 .local/bin/tool-b tools:bin/tool-b local\n도구 .local/bin/tool-c tools:bin/tool-c all\n' >"$T/sl"
@@ -171,6 +178,9 @@ t "sync-lint: lib 줄 없음 — 도구마다 더할 줄, 종료 1 (lib 폴더 �
 printf '도구 .local/lib/tool-a/** tools:lib/tool-a/ macos\n도구 .local/lib/tool-b/** tools:lib/tool-b all\n' >>"$T/sl"
 run - sync-lint "$T/sr" "$T/sl"
 t "sync-lint: 같은 대상·all lib 줄이 있으면 통과" '[ $rc = 0 ] && [ -z "$out" ]'
+sed 's|.local/lib/tool-a/\*\*|elsewhere/lib/tool-a/**|' "$T/sl" >"$T/wrong-dir"
+run - sync-lint "$T/sr" "$T/wrong-dir"
+t "sync-lint: 대상 기계가 같아도 로더가 못 찾는 설치 경로는 거절" '[ $rc = 1 ] && [ "$out" = "도구  .local/lib/tool-a/**  tools:lib/tool-a/  macos" ]'
 printf '도구 .local/bin/tool-a tools:bin/tool-a box-1\n' >>"$T/sl"
 run - sync-lint "$T/sr" "$T/sl"
 t "sync-lint: 다른 대상의 bin 줄은 그 대상 lib 줄이 따로 있어야" '[ $rc = 1 ] && [ "$out" = "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1" ]'

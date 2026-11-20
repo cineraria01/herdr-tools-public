@@ -106,16 +106,39 @@ utcnow() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 utc_of() {  # utc_of <대기열 더한시각(이 기계 분)>: UTC. 못 읽으면 ~(어떤 사건 시각보다 뒤 — 착지로 풀지 않음)
   s_=$(date -j -f %Y-%m-%dT%H:%M:%S "$1:00" +%s 2>/dev/null) && date -u -r "$s_" +%Y-%m-%dT%H:%M:%SZ || echo '~'
 }
-own_rel() {  # own_rel <레인> <주소>: 그 기록과 지시문 사본을 지운다(dry-run은 사본을 안 지움)
-  x_=$(printf '%s\n' "$OREC" | awk -F'\t' -v n="$1" -v a="$2" '($1 "")==n && $4==a {print $6}')
-  OREC=$(printf '%s\n' "$OREC" | awk -F'\t' -v n="$1" -v a="$2" 'NF && !(($1 "")==n && $4==a)')
+own_store() {
+  [ $dry = 1 ] || { printf '%s\n' "$OREC" | awk 'NF' >"$OWNF.tmp" && mv -f "$OWNF.tmp" "$OWNF"; } || die "쓰기 소유 기록 저장 실패"
+}
+own_rel() {
+  OREC=$(printf '%s\n' "$OREC" | awk -F'\t' -v n="$1" -v a="$2" 'NF && !(($1 "")==n && $4==a)') || die "쓰기 소유 기록 읽기 실패"
+}
+own_bind() {
+  OREC=$(printf '%s\n' "$OREC" | awk -F'\t' -v OFS='\t' -v n="$1" -v a="$2" -v b="$3" '
+    ($1 "")==n && $4==b {next} ($1 "")==n && $4==a {$4=b} NF') || die "쓰기 소유 주소 기록 실패"
+  own_store
+}
+own_finish() {
   [ $dry = 0 ] || return 0
-  printf '%s\n' "$x_" | while IFS= read -r f_; do case $f_ in "$OWND"/*) rm -f -- "$f_" ;; esac; done
+  own_store
+  local f
+  for f in "$OWND"/*; do
+    [ -f "$f" ] && [[ ${f##*/} =~ ^[a-z0-9_-]+\.[a-zA-Z0-9]{6}$ ]] || continue
+    awk -F'\t' -v p="$f" '$6==p {k=1} END {exit !k}' "$OWNF" || { [ $? = 1 ] && rm -f -- "$f"; }
+  done
+}
+# 주소를 받기 전 끊긴 띄우기: 그 기계에 같은 이름의 실행이 보이면 저장해 둔 원래 지시문을 그 주소에 잇는다.
+own_pending() {
+  case $3 in pending:*) ;; *) return 1 ;; esac
+  local addr
+  addr=$(printf '%s\n' "$TERMS" | awk -F'\t' -v m="$2" -v n="$1" '$1==m && ($4 "")==n {print $2; exit}')
+  [ -n "$addr" ] || return 1
+  own_bind "$1" "$3" "$addr"
 }
 own_add() {  # own_add <레인> <프로젝트> <기계> <주소> <시작UTC> <지시문> <선행|-> <겹침칸>: 지시문을 $OWND에 복사해 기록(dry-run은 복사 없이)
   c_=$6
   if [ $dry = 0 ]; then
     if mkdir -p "$OWND" && c_=$(mktemp "$OWND/$1.XXXXXX") && cat -- "$6" >"$c_" 2>/dev/null; then :
+    elif [ "${4#pending:}" != "$4" ]; then die "띄우기 보류: 쓰기 소유 $1 지시문 사본을 못 만듦"
     else [ -z "$c_" ] || [ "$c_" = "$6" ] || rm -f -- "$c_"; c_=$6; echo "알림: 쓰기 소유 $1 지시문 사본을 못 만듦 — 원본으로 봄($6)"; fi
   fi
   own_rel "$1" "$4"
@@ -124,15 +147,22 @@ own_add() {  # own_add <레인> <프로젝트> <기계> <주소> <시작UTC> <�
 }
 own_done() {  # own_done <레인> <주소> <시작UTC>: 그 실행이 착지했으면 0. 사건을 못 읽었으면 1(유지)
   [ -z "$EVBAD" ] || return 1
-  lx_=$(lastev "$1" "$2")
+  lx_=$(joblast "$1" "$2")
   [ "$(printf %s "$lx_" | cut -f 5)" = 착지 ] && ! [ "$(printf %s "$lx_" | cut -f 1)" \< "$3" ] && return 0
   # 그 터미널이 아직 사건을 하나도 안 적었으면(비교 시각 없음) 같은 이름의 옛 착지로 풀지 않는다(병합기 2차 중간 6).
   # 마지막 사건이 「제출」이면 그 제출 ID(한 줄 첫 낱말)가 든 병합기 착지로도 푼다 — 시각과 상관없이(3차 중간 11 — 같은 초·접수
   # 확인 전에 병합기가 끝나면 「뒤」가 아니라 소유가 남았다)
+  local submission
+  submission=$(joblast "$1" "$2" 제출)
+  if [ -n "$submission" ]; then
+    sid_=$(printf %s "$submission" | cut -f 7 | awk '{print $1}')
+    [ "$(mgres "$1" "$sid_" | cut -f 5)" = 착지 ]; return
+  fi
+  # 제출 ID가 없던 옛 형식은 레인의 완료·제출 보고와 ID 없는 병합기 착지만 잇는다.
+  case $(printf %s "$lx_" | cut -f 5,7) in 완료$'\t'제출*) ;; *) return 1 ;; esac
   printf '%s\n' "$EV" | awk -F'\t' -v n="$1" -v t="$(printf %s "$lx_" | cut -f 1)" -v M="$MGM" \
-    -v sid="$(printf %s "$lx_" | awk -F'\t' '$5 == "제출" { split($7, w, " "); print w[1] }')" \
     'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
-     t != "" && ($4 "") == n && $5 == "착지" && ($2 in m) && ($1 > t || (sid != "" && index($7, "제출 ID " sid))) { f = 1 } END { exit !f }'
+     t != "" && ($4 "") == n && $5 == "착지" && ($2 in m) && !index($7,"제출 ID ") && $1 > t { f = 1 } END { exit !f }'
 }
 
 tmap() { printf '%s\n' "$THENMAP" | awk -F'\t' -v n="$1" '($1 "")==n {print $2; f = 1; exit} END {if (!f) print n}'; }   # 이어 붙인 이름이면 받은 줄
@@ -200,11 +230,12 @@ ovl_placed() {
 
 nd_block() {
   [ -n "$NEED" ] || return 1
-  for nm_ in $(machines | awk '{print $1}'); do
+  for nm_ in $(machines | awk '$2+0>0 && ($3=="-" || $3+0>0) {print $1}'); do
     [ "$2" = - ] || inlist "$nm_" "$2" || continue
+    [ -n "$(repo_of "$4" "$nm_")" ] || continue
     mhas "$nm_" "$NEED" && return 1
   done
-  nl_="그 능력을 가진 기계가 없다(설정 machine-has)"; [ "$2" = - ] || nl_="기계 제한 $2 안에 $nl_"
+  nl_="그 능력을 가진 기계가 없다(프로젝트 저장소·쓰기 상한·설정 machine-has)"; [ "$2" = - ] || nl_="기계 제한 $2 안에 $nl_"
   echo "막힘 $1: 필요 $NEED — $nl_. 대기로 둠"
   ns_=0
   if printf '%s\n' "$NDOLD" | grep -Fxq -- "$1	$NEED	1"; then ns_=1
@@ -214,15 +245,13 @@ nd_block() {
   return 0
 }
 # snap <레인> <지시문>: 바퀴 처음에 읽은 줄(ROWS)과 지금 대기열 줄을 견줘(1-5칸·10칸부터 — 상태·주소 칸은 이 바퀴가 바꾼다) 같으면
-# 지시문을 이번 바퀴 사본 $SNAPD/<레인>.md로 떠 SB에 — 겹침 검사·띄우기·실행 기록이 모두 이 사본을 쓴다. 바퀴 도중 rm·add로 줄이
+# 지시문을 $SB에 복사한다. 겹침 검사·띄우기·실행 기록이 모두 이 줄의 사본을 쓴다. 바퀴 도중 rm·add로 줄이
 # 바뀌었으면 1(다음 바퀴에 새 줄로 다시 판정 — 아스트라 2차 중간 1)
 snap() {
   o_=$(printf '%s\n' "$ROWS" | awk -F'\t' -v n="$1" '($1 "")==n {print; exit}' | cut -f 1-5,10-)
   c_=$(awk -F'\t' -v n="$1" '($1 "")==n {print; exit}' "$Q" 2>/dev/null | cut -f 1-5,10-)
   [ "$o_" = "$c_" ] || { echo "대기열 줄이 바뀌었다 $1 — 다음 바퀴에 다시 판정"; return 1; }
-  [ -n "$SNAPD" ] || SNAPD=$(mktemp -d "${TMPDIR:-/tmp}/hc-fill-snap.XXXXXX") || { echo "실패 $1: 지시문 사본 폴더를 못 만듦"; return 1; }
-  SB=$SNAPD/$1.md
-  cat -- "$2" >"$SB" 2>/dev/null && grep -q '[^[:space:]]' -- "$SB" || { echo "실패 $1: 지시문 사본을 못 뜸: $2"; return 1; }
+  (umask 077; cat -- "$2" >"$SB") 2>/dev/null && grep -q '[^[:space:]]' -- "$SB" || { echo "실패 $1: 지시문 사본을 못 뜸: $2"; return 1; }
 }
 
 # 선행 상태(2026-11-19 fill-dep-needs 사용자 「① 선행 사슬 기다림 (추천)」 — 먼저 띄움 레인은 선행이 살아 진행 중이어도 기한에 「선행 대기
@@ -233,10 +262,10 @@ snap() {
 # 그 터미널의 마지막 사건 완료·착지·제출 go, 막힘 stop · 사건 없이 쉼: hold분 안 go, 넘으면 stop. 생존은 이 바퀴 hc ls(TERMS — 이름 대조)로
 # 본다(원격 임대 refs/hc-lanes/<레인>은 끝난 뒤 clean 전까지 남아 「살아 있음」으로 못 쓴다). fetch 실패면 들어감 판정만 건너뛴다. dry-run은 찍기만
 pred_state() {  # pred_state <선행> <기다리는 줄 프로젝트>: PSV=「go|stop<TAB>까닭」
+  LMS=
   if fetch_proj "$2" >/dev/null; then
-    h_=$(landed "$1")
-    [ -n "$h_" ] || ! st_=$(since "$1") || ! lmark "$1" "$st_" || h_="$(printf %s "$LMS" | cut -c 1-8) 착지 표식"
-    [ -z "$h_" ] || { PSV="go	들어감(${h_%% *})"; return; }
+    landing_hit "$1"
+    case $? in 0) PSV="go	들어감(${hit%% *})"; return ;; 2) PSV="go	모름(착지 조회 실패)"; return ;; esac
   fi
   r_=$(awk -F'\t' -v n="$1" '($1 "")==n {print; exit}' "$Q")
   [ -n "$r_" ] || { tf_=$(thenof "$1"); [ -z "$tf_" ] || r_=$(awk -F'\t' -v n="$tf_" '($1 "")==n {print; exit}' "$Q"); }   # --then 이름
@@ -267,6 +296,7 @@ pred_state() {  # pred_state <선행> <기다리는 줄 프로젝트>: PSV=「go
 }
 after_tick() {
   [ -s "$Q" ] || return 0
+  local markers=
   atn_=$(date +%s)
   for am_ in $(awk -F'\t' '$6=="up" && $14=="early" {print $7}' "$Q" | sort -u); do
     [ "$am_" = "$LOCAL" ] || printf '%s\n' "$CONN" | grep -Fxq -- "$am_" || { echo "선행 상태 미룸 @$am_: 연결 안 됨"; continue; }
@@ -275,6 +305,8 @@ after_tick() {
       for x_ in $(printf %s "$aa_" | tr , ' '); do
         printf '%s' "$ab_" | cut -f 1 | grep -Fxq -- "$x_" && continue
         pred_state "$x_" "$ap_"
+        [ -z "$LMS" ] || markers="$markers$ap_	$x_	$LMFROM	$LMS
+"
         ab_="$ab_$x_	$PSV	$atn_
 "
       done
@@ -284,4 +316,5 @@ after_tick() {
     printf '%s' "$ab_" | onm -i "$am_" 'mkdir -p "${d%/*}" && cat >"$d.tmp" && mv -f "$d.tmp" "$d"' "~/.local/share/hc-fill/after.tsv" ||
       echo "선행 상태 쓰기 실패 @$am_ — 다음 바퀴에"
   done
+  [ $dry = 1 ] || { printf '%s' "$markers" >"$DATA/after-landed.tsv.tmp" && mv -f "$DATA/after-landed.tsv.tmp" "$DATA/after-landed.tsv"; }
 }

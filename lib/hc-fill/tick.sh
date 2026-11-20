@@ -50,12 +50,13 @@ irej() {  # irej <사유>: 받은편지 요청 $n(기계 $im 폴더 $idir)을 re
     echo "거절 $im $n: $1" || echo "받은편지 $im $n: 거절($1)을 쓰지 못했다, 다음 바퀴에"
 }
 s_ilist() {
-  printf %s 'for c in "$d"/.hc-fill/claim/*; do [ -f "$c" ] || continue; n=${c##*/}; case $n in *.tmp) continue ;; esac; [ -f "$d/$n.req" ] || rm -f "$c"; done
+  printf %s 'if [ "$1" = 0 ]; then for c in "$d"/.hc-fill/claim/*; do [ -f "$c" ] || continue; n=${c##*/}; case $n in *.tmp) continue ;; esac; [ -f "$d/$n.req" ] || rm -f "$c"; done; fi
 for f in "$d"/*.req; do [ -f "$f" ] || continue; f=${f##*/}; printf "%s\n" "${f%.req}"; done'
 }
 s_iclaim() {
   printf %s 'h() { if [ -f "$1" ]; then shasum -a 256 "$1" | cut -d " " -f 1; else echo -; fi; }
 c=$d/.hc-fill/claim/$1; r=- cq=- cb=-; [ ! -f "$c" ] || read -r r cq cb <"$c" || :
+if [ "$r" != - ] && [ -f "$d/taken/$1.$r.req" ]; then r=- cq=- cb=-; fi
 b=$d/$1.brief.md; [ -f "$b" ] || [ "$r" = - ] || b=$d/taken/$1.$r.brief.md
 q=$(h "$d/$1.req"); [ "$q" != - ] || exit 3
 echo "${r:--} ${cq:--} ${cb:--} $q $(h "$b")"'
@@ -67,7 +68,7 @@ inbox_tick() {
     [ -n "$idir" ] || { echo "알림: 설정 inbox 줄에 폴더가 없다: $im"; continue; }
     case $idir in *'#'*) echo "알림: 설정 inbox 폴더에 #를 쓰지 않는다(요청 ID 칸 구분): $idir"; continue ;; esac
     up_ok "$im" || { echo "받은편지 건너뜀 $im: 연결 안 됨"; continue; }
-    names=$(onm "$im" "$(s_ilist)" "$idir") || { echo "받은편지 건너뜀 $im: 목록을 읽지 못했다"; continue; }
+    names=$(onm "$im" "$(s_ilist)" "$idir" "$dry") || { echo "받은편지 건너뜀 $im: 목록을 읽지 못했다"; continue; }
     while IFS= read -r -u 7 n; do
       [ -n "$n" ] || continue
       why= p= a=- o=- pr=high rid=
@@ -149,17 +150,31 @@ s_ipub() {
   printf %s 'mkdir -p "$d/done/.hc-fill" || exit 1
 exec lockf -k -t 30 "$d/done/.hc-fill/$1.lock" sh -c '\''d=$1 n=$2 r=$3 h=$4 z=$5 m=$d/done/.hc-fill f=$d/done/$2.md o=$d/done/.hc-fill/owner/$2
  hs() { shasum -a 256 "$1" | cut -d " " -f 1; }
+ setowner() { mkdir -p "${o%/*}" && printf "%s\n" "$r" >"$o.tmp" && mv -f "$o.tmp" "$o"; }
  mark() { printf "%s\n" "$h" >"$m/$r.sent.tmp" && mv -f "$m/$r.sent.tmp" "$m/$r.sent"; }
 if [ -f "$m/$r.sent" ]; then if [ "$(cat "$m/$r.sent")" = "$h" ]; then echo ALREADY; else echo CONFLICT; fi; exit 0; fi
+ready=$m/$r.ready; intent=$m/$r.publishing
+if [ -f "$intent" ]; then
+  [ "$(cat "$intent")" = "$h" ] || { echo CONFLICT; exit 0; }
+  # ready가 사라지는 연산은 요청자 경로로의 rename뿐이다. 요청자가 이미 수거했어도 다시 공개하지 않는다.
+  [ -e "$ready" ] || { mv -f "$intent" "$m/$r.sent" && echo ALREADY; exit; }
+fi
 t=$m/$r.tmp; cat >"$t" || exit 1
 if [ "$(wc -c <"$t" | tr -d " ")" != "$z" ] || [ "$(hs "$t")" != "$h" ]; then rm -f "$t"; echo BADINPUT; exit 0; fi
 if [ -f "$f" ]; then
-  if [ "$(hs "$f")" = "$h" ]; then rm -f "$t"; mark && echo ALREADY; exit 0; fi
-  [ "$(cat "$o" 2>/dev/null)" = "$r" ] || { rm -f "$t"; echo EXISTS; exit 0; }
+  rm -f "$t"
+  if [ -f "$o" ]; then
+    owner=$(cat "$o") || exit 1
+    [ "$owner" = "$r" ] || { echo EXISTS; exit 0; }
+  fi
+  if [ "$(hs "$f")" = "$h" ]; then setowner && mark && echo ALREADY; exit; fi
+  echo EXISTS; exit 0
 fi
-mkdir -p "${o%/*}" && printf "%s\n" "$r" >"$o.tmp" && mv -f "$o.tmp" "$o" && mv -f "$t" "$f" && mark && echo SENT'\'' _ "$d" "$@"'
+setowner &&
+  mv -f "$t" "$ready" && printf "%s\n" "$h" >"$intent.tmp" && mv -f "$intent.tmp" "$intent" &&
+  mv -f "$ready" "$f" && mv -f "$intent" "$m/$r.sent" && echo SENT'\'' _ "$d" "$@"'
 }
-rdone() { printf '%s\n' "$1" | tail -n 1 | grep -Eq '^결과: (고침|넘김|실패)'; }
+rdone() { printf '%s\n' "$1" | tail -n 1 | grep -Eq '^결과: (고침[[:blank:]]+[[:xdigit:]]{4,40}[[:blank:]]*|(넘김|실패)[[:blank:]]+[^[:space:]].*)$'; }
 reply_tick() {
   ICON=$CONN
   # 1) 고정
@@ -169,12 +184,14 @@ reply_tick() {
     lr_=$(lget "$rid"); [ "$(printf %s "$lr_" | cut -f 4)" = open ] || continue
     if [ -e "$DATA/replies/$rid.md" ]; then [ $dry = 1 ] || rfix "$rid" "$(printf %s "$lr_" | cut -f 5)" -; continue; fi   # 고정 뒤 장부 전에 죽음
     up_ok "$m" || { echo "되돌려 주기 미룸 $n: $m 연결 안 됨"; continue; }
+    if [ -n "$EVBAD" ] || printf '%s\n' "$EV" | grep -Fxq -- "모름 $m"; then
+      echo "되돌려 주기 미룸 $n: 레인 사건을 못 읽어 제출 여부를 모름"; continue
+    fi
     # 병합기에 제출하고 끝난 레인(마지막 사건 「제출」)은 그 제출 ID의 병합기 결과(착지·막힘)가 정해진 뒤에 회신하고, 그 결과를 끝 줄로
     # 붙인다(병합기 2차 높음 6·2단계 — 제출만 하고 끝난 터미널을 「끝」으로 보면 착지 전에 회신했다)
     mline_=
-    lx_=$(lastev "$n" "$a")
-    if [ "$(printf %s "$lx_" | cut -f 5)" = 제출 ]; then
-      [ -z "$EVBAD" ] || { echo "되돌려 주기 미룸 $n: 레인 사건을 못 읽어 병합기 결과를 모름"; continue; }
+    lx_=$(joblast "$n" "$a" 제출)
+    if [ -n "$lx_" ]; then
       sid_=$(printf %s "$lx_" | cut -f 7 | awk '{ print $1 }')
       mr_=$(mgres "$n" "$sid_")
       [ -n "$mr_" ] || { echo "되돌려 주기 미룸 $n: 병합기 결과 기다림(제출 ID $sid_)"; continue; }
@@ -184,6 +201,13 @@ reply_tick() {
       esac
     fi
     rpth="~/.local/share/hc-fill/reports/$n.$rid.md"; case $(printf %s "$lr_" | cut -f 8) in *legacy*) rpth="~/.local/share/hc-fill/reports/$n.md" ;; esac
+    # 종료를 확인한 뒤 보고를 읽어, 마지막 mv와 종료가 같은 바퀴에 일어나도 본문을 놓치지 않는다.
+    pget "$a"; endrc=$?
+    if [ "$endrc" = 0 ]; then
+      started=$(attempt_run "$n" "$a")
+      if [ -n "$started" ] && [ "$PRUN" != "$started" ]; then endrc=3
+      elif [ -n "$PNAME" ] && [ "$PNAME" != - ] && [ "$PNAME" != "$n" ] && ! lalive "$a" "$n"; then endrc=3; fi
+    fi
     rep=$(onm "$m" 'if [ -f "$d" ]; then echo HAVE; cat "$d"; else echo NONE; fi' "$rpth") ||
       { echo "되돌려 주기 미룸 $n: $m 에서 보고를 읽지 못했다"; continue; }
     kind=result body=
@@ -193,8 +217,7 @@ reply_tick() {
       *) echo "되돌려 주기 미룸 $n: $m 에서 보고를 읽지 못했다"; continue ;;
     esac
     if [ -z "$body" ] || ! rdone "$body"; then
-      [ "$(alive "$a")" = gone ] || continue   # 아직 쓰는 중이거나 터미널이 살아 있다 — 다 쓴(마지막 줄 결과:) 보고만 보낸다
-      pget "$a"; [ $? = 3 ] || { echo "되돌려 주기 미룸 $n: hc ls에 없지만 hc get이 없음(not_found)·끝남(finished)이라 하지 않는다"; continue; }
+      [ "$endrc" = 3 ] || { lalive "$a" "$n" || echo "되돌려 주기 미룸 $n: 터미널 종료를 확인하지 못했다"; continue; }
       kind=noreport; if [ -n "$body" ]; then body="$body
 결과: 실패 보고 불완전"; else body="결과: 실패 보고 없음"; fi
     fi
@@ -225,8 +248,8 @@ $mline_"
   done 6<<<"$(cat "$LED" 2>/dev/null)"
   # 3) 장부 sent인데 대기열 줄이 아직 up이면 sent로(공개·장부 뒤 대기열 기록 전에 죽음)
   [ $dry = 0 ] || return 0
-  awk -F'\t' 'NR==FNR { if ($4 == "sent") s[$1] = 1; next } $6=="up" && index($11, "#") { r = $11; sub(/^.*#/, "", r); if (r in s) print $1 "\t" $7 "\t" $8 "\t" $9 }' "$LED" "$Q" 2>/dev/null |
-    while IFS=$'\t' read -r n m a stuck; do qset "$n" sent "$m" "$a" "$stuck"; done
+  awk -F'\t' 'NR==FNR { if ($4 == "sent") s[$1] = 1; next } $6=="up" && index($11, "#") { r = $11; sub(/^.*#/, "", r); if (r in s) print $1 "\t" $7 "\t" $8 "\t" $9 "\t" $17 }' "$LED" "$Q" 2>/dev/null |
+    while IFS=$'\t' read -r n m a stuck row; do QRID=$row qset "$n" sent "$m" "$a" "$stuck"; done
 }
 
 mqload() {
@@ -266,14 +289,20 @@ merger_tick() {
     set --
     for c_ in $cur_; do [ "$c_" = "$w_" ] || set -- "$@" ":refs/herdr/merger/$c_"; done
     [ -z "$w_" ] || printf '%s\n' "$cur_" | grep -Fxq -- "$w_" || set -- "$@" "+refs/remotes/origin/HEAD:refs/herdr/merger/$w_"
+    if [ $dry = 0 ] && [ -n "$w_" ]; then
+      # 켬 push의 응답을 잃더라도 설정 줄을 지우면 다음 바퀴가 끌 수 있어야 한다.
+      if ! { { [ ! -e "$mgf_" ] || awk -F'\t' -v p="$p_" '$1 != p' "$mgf_"; } &&
+        printf '%s\t%s\n' "$p_" "$w_"; } >"$mgf_.tmp" || ! mv -f "$mgf_.tmp" "$mgf_"; then
+        echo "병합기 $p_: 관리 기록을 못 써 켬 표식을 보류"; continue
+      fi
+    fi
     if [ $# -gt 0 ]; then
       if [ $dry = 1 ]; then echo "${P}병합기 $p_: git push origin $*"
-      elif git -C "$r_" push -q origin "$@" 2>/dev/null; then echo "병합기 $p_: ${w_:+켬 → $w_}${w_:-끔}"
+      elif git -C "$r_" push -q --atomic origin "$@" 2>/dev/null; then echo "병합기 $p_: ${w_:+켬 → $w_}${w_:-끔}"
       else echo "병합기 $p_: 켬 표식 push 실패 — 다음 바퀴에"; continue; fi
     fi
     [ $dry = 1 ] && continue
-    if [ -n "$w_" ]; then awk -F'\t' -v p="$p_" '$1 != p' "$mgf_" 2>/dev/null >"$mgf_.tmp"; printf '%s\t%s\n' "$p_" "$w_" >>"$mgf_.tmp"; mv -f "$mgf_.tmp" "$mgf_"
-    else awk -F'\t' -v p="$p_" '$1 != p' "$mgf_" >"$mgf_.tmp" && mv -f "$mgf_.tmp" "$mgf_"; fi
+    [ -n "$w_" ] || { awk -F'\t' -v p="$p_" '$1 != p' "$mgf_" >"$mgf_.tmp" && mv -f "$mgf_.tmp" "$mgf_"; }
   done
   MQP= MQS= MQBAD=   # 켬 표식을 고쳤을 수 있으니 이 바퀴의 나머지는 다시 읽는다
 }

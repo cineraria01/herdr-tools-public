@@ -69,10 +69,13 @@ cmd_lint() {
     git rev-parse --git-dir >/dev/null 2>&1 || die2 "lint: 파일을 주거나 git 저장소 안에서 부른다"
     # 지금 읽은 패턴 파일 하나만 뺀다(패턴 글자가 자기에게 걸림). 실제 경로(링크 풂)로 견준다. 파일을 직접 주면 검사한다
     self=$(realpath -- "$pf") here=$(pwd -P)
+    local listed=
     while IFS= read -r -d '' f; do
+      [ -n "$f" ] || { listed=1; break; }   # 빈 이름은 git이 목록을 끝까지 읽은 표시
       [ "$here/$f" = "$self" ] && continue
       [ -e "$f" ] || [ -L "$f" ] && files+=("$f")   # 작업 트리에서 지운 추적 파일은 뺀다
-    done < <(git ls-files -z)
+    done < <(git ls-files -z && printf '\0')
+    [ -n "$listed" ] || die2 "lint: git ls-files 실패 — 추적 파일을 검사하지 못했다"
   fi
   [ ${#pats[@]} -gt 0 ] && [ ${#files[@]} -gt 0 ] || return 0
   # 심볼릭 링크는 git에 대상 경로 글자로 들어간다: 그 글자를 견주고 대상 내용은 읽지 않는다
@@ -102,19 +105,23 @@ cmd_lint() {
 
 cmd_sync_lint() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die2 "sync-lint <범용 저장소> [<sync.list>]"
-  local repo=$1 list=${2:-$dir/sync.list} b k tool t d bad=0
+  local repo=$1 list=${2:-$dir/sync.list} b d tool t missing bad=0
   [ -f "$list" ] || die2 "sync.list 없음: $list"
   # 고칠 줄의 맥 경로는 도구가 함수 파일을 찾는 자리(bin 옆 ../lib/<도구>)
-  while IFS=$'\t' read -r b k tool t; do
+  missing=$(awk '{ sub(/\r$/, "") } /^[ \t]*(#|$)/ || NF < 4 { next }
+    $3 ~ /^tools:bin\/[^\/]+$/ {
+      n++; b[n] = $1; tl[n] = substr($3, 11); t[n] = $4
+      root = $2; sub(/[^\/]+$/, "", root); sub(/[^\/]+\/$/, "", root); dst[n] = root "lib/" tl[n] "/**"; next }
+    $3 ~ /^tools:lib\/[^\/]+\/?$/ && $2 ~ /\/\*\*$/ { x = substr($3, 11); sub(/\/$/, "", x); lib[x, $2, $4] = 1 }
+    END { for (i = 1; i <= n; i++) if (!((tl[i], dst[i], t[i]) in lib) && !((tl[i], dst[i], "all") in lib))
+      printf "%s\t%s\t%s\t%s\n", b[i], dst[i], tl[i], t[i] }' "$list") || die2 "sync.list 읽기 실패: $list"
+  while IFS=$'\t' read -r b d tool t; do
+    [ -n "$tool" ] || continue
     [ -d "$repo/lib/$tool" ] || continue
-    d=${k%/*}; case $d in */*) d=${d%/*}/ ;; *) d= ;; esac
     [ $bad = 1 ] || echo "$me: $list — lib 나무 줄이 없다(bin만 깔리면 그 도구가 멈춘다). 이 줄을 더한다:" >&2
-    printf '%s  %slib/%s/**  tools:lib/%s/  %s\n' "$b" "$d" "$tool" "$tool" "$t"
+    printf '%s  %s  tools:lib/%s/  %s\n' "$b" "$d" "$tool" "$t"
     bad=1
-  done < <(awk '{ sub(/\r$/, "") } /^[ \t]*(#|$)/ || NF < 4 { next }
-    $3 ~ /^tools:bin\/[^\/]+$/ { n++; b[n] = $1; k[n] = $2; tl[n] = substr($3, 11); t[n] = $4; next }
-    $3 ~ /^tools:lib\/[^\/]+\/?$/ && $2 ~ /\/\*\*$/ { x = substr($3, 11); sub(/\/$/, "", x); lib[x, $4] = 1 }
-    END { for (i = 1; i <= n; i++) if (!((tl[i], t[i]) in lib) && !((tl[i], "all") in lib)) printf "%s\t%s\t%s\t%s\n", b[i], k[i], tl[i], t[i] }' "$list")
+  done <<<"$missing"
   return $bad
 }
 
