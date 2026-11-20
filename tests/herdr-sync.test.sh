@@ -548,6 +548,21 @@ run --check
 touch "$T/release"; wait "$pid"
 t "잠금: 다른 herdr-sync가 돌면 바로 끝" '[ $rc = 75 ] && printf "%s" "$out" | grep -Fq "다른 herdr-sync"'
 
+# 13-1. 범용 저장소에 lib/<도구>/가 생겼는데 개인 sync.list에 bin 줄만 있으면(2026-11-20 herdr-tools-split) 아무 데도 쓰지 않고 멈춘다.
+# bin만 깔리면 모든 기계의 그 도구가 「함수 파일을 못 읽었다」로 멈추기 때문. --check도 같은 판정
+put "$T/repo/lib/hc-lane/a.sh" 'a=1\n'
+git -C "$T/repo" add lib && git -C "$T/repo" commit -qm lib && HERDR_LAND=1 git -C "$T/repo" push -q origin main
+put "$T/repo/bin/hc-lane" '#!/bin/sh\necho lib-lane\n' && git -C "$T/repo" commit -qam lib-lane && HERDR_LAND=1 git -C "$T/repo" push -q origin main
+before=$(snap)
+run --check
+t "lib 줄 없음 --check: 멈추고 고칠 줄을 찍는다" '[ $rc = 2 ] && has "도구  .local/lib/hc-lane/**  tools:lib/hc-lane/  macos"'
+run
+t "lib 줄 없음: 아무 기계에도 쓰지 않고 멈춘다 (새 bin도 안 깖)" '[ $rc = 2 ] && [ "$(snap)" = "$before" ] && ! grep -q lib-lane "$W1/.local/bin/hc-lane" && has "도구  .local/lib/hc-lane/**  tools:lib/hc-lane/  macos"'
+printf '도구     .local/lib/hc-lane/**       tools:lib/hc-lane/             macos\n' >> "$T/conf/sync.list"
+git -C "$T/conf" commit -qam lib && HERDR_LAND=1 git -C "$T/conf" push -q origin main
+run
+t "lib 줄을 더하면: bin과 lib를 함께 깐다" '[ $rc = 0 ] && is "$W1/.local/lib/hc-lane/a.sh" "a=1\n" && is "$W1/.local/bin/hc-lane" "#!/bin/sh\necho lib-lane\n"'
+
 # 14. 범용 저장소의 config.example/sync.list: 꼴이 맞고, tools: 경로가 모두 있고, bin/*을 모두 깐다
 LIST=$here/../config.example/sync.list
 if [ -f "$LIST" ]; then

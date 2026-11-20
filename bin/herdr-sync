@@ -217,8 +217,8 @@ ready() {   # ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only
   [ -z "$(git -C "$1" status --porcelain)" ] || die "저장소에 커밋하지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시: $1"
   git -C "$1" pull -q --ff-only || die "git pull --ff-only 실패: $1 (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main)"
 }
-ready "$REPO"
-ready "$CONF"
+ready "$REPO"; ready "$CONF"   # 그다음 lib/<도구>/가 있는 도구에 bin 줄만 있으면 맞추기 전에 멈춘다(bin만 깔리면 그 도구가 멈춤, --check도)
+HERDR_TOOLS_CONFIG=$CONF bash "$REPO/bin/herdr-tools-config" sync-lint "$REPO" "$CONF/sync.list" || exit 2
 STAMP=$(date +%Y%m%d-%H%M%S)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/herdr-sync.XXXXXX") || exit 1
 trap 'rm -rf "$TMP"' EXIT

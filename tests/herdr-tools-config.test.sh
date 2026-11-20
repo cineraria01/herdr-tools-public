@@ -163,6 +163,23 @@ printf 'SECRET-HOST-3 up\n' >"$R/upper.txt"
 t "lint: 대소문자를 무시한다" '[ $rc = 1 ] && [ "$out" = "upper.txt:1: secret-host-[0-9]+" ]'
 rm -f "$R/latin1.txt" "$R/blob.bin" "$R/secret-host-8.md" "$R/upper.txt"
 
+# sync-lint: lib/<도구>/가 있는 도구에 bin 줄만 있으면 더할 줄을 찍고 종료 1. 대상이 같거나 all인 lib 나무 줄이면 통과
+mkdir -p "$T/sr/lib/tool-a" "$T/sr/lib/tool-b"
+printf '# 시험\n도구 .local/bin/tool-a tools:bin/tool-a macos\n도구 .local/bin/tool-b tools:bin/tool-b local\n도구 .local/bin/tool-c tools:bin/tool-c all\n' >"$T/sl"
+run - sync-lint "$T/sr" "$T/sl"
+t "sync-lint: lib 줄 없음 — 도구마다 더할 줄, 종료 1 (lib 폴더 없는 도구는 안 봄)" '[ $rc = 1 ] && [ "$out" = "$(printf "도구  .local/lib/tool-a/**  tools:lib/tool-a/  macos\n도구  .local/lib/tool-b/**  tools:lib/tool-b/  local")" ] && grep -Fq "lib 나무 줄이 없다" "$T/err"'
+printf '도구 .local/lib/tool-a/** tools:lib/tool-a/ macos\n도구 .local/lib/tool-b/** tools:lib/tool-b all\n' >>"$T/sl"
+run - sync-lint "$T/sr" "$T/sl"
+t "sync-lint: 같은 대상·all lib 줄이 있으면 통과" '[ $rc = 0 ] && [ -z "$out" ]'
+printf '도구 .local/bin/tool-a tools:bin/tool-a box-1\n' >>"$T/sl"
+run - sync-lint "$T/sr" "$T/sl"
+t "sync-lint: 다른 대상의 bin 줄은 그 대상 lib 줄이 따로 있어야" '[ $rc = 1 ] && [ "$out" = "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1" ]'
+run - sync-lint "$T/sr" "$T/none"
+t "sync-lint: sync.list 없음은 종료 2" '[ $rc = 2 ]'
+EXR=$(cd "$here/.." && pwd)
+run - sync-lint "$EXR" "$EX/sync.list"
+t "sync-lint: config.example/sync.list 통과" '[ $rc = 0 ] && [ -z "$out" ]'
+
 # 부름
 run "$T/c1"
 t "인자 없으면 종료 2" '[ $rc = 2 ]'

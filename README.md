@@ -302,7 +302,10 @@ hc-fill rm <레인>               # 대기열에서만 뺀다(떠 있는 터미�
 herdr-tools-config get balance.remote ""   # 값. 키가 없으면 기본값, 기본값도 없으면 종료 3
 herdr-tools-config file hc-fill.tsv        # 설정 폴더의 그 파일 절대 경로. 없으면 종료 3
 herdr-tools-config lint [--strict] [<파일>…]  # git ls-files(또는 준 파일)에서 개인 값 패턴(private-patterns.txt)에 걸린 줄. 걸리면 종료 1
+herdr-tools-config sync-lint <범용 저장소> [<sync.list>]  # lib/<도구>/가 있는 도구의 bin 줄에 같은 대상(또는 all) lib 나무 줄이 없으면 더할 줄을 찍고 종료 1
 ```
+
+- herdr-sync는 저장소를 pull한 직후 `sync-lint`를 부르고, 걸리면 아무 데도 쓰지 않고 종료 2로 멈춘다(`--check`도). bin만 깔리면 그 도구가 「함수 파일을 못 읽었다」로 모든 기계에서 멈추기 때문이다(2026-11-20 herdr-tools-split 때 개인 sync.list에 lib 줄이 빠졌다).
 
 - `config`는 한 줄에 `<키> <값>`(값은 줄 끝까지), 키 혼자면 빈 값, `#` 줄은 주석. 같은 키 두 번·잘못 부름은 종료 2.
 - lint 패턴은 `$HERDR_TOOLS_CONFIG/private-patterns.txt`, 없으면 `~/.local/share/herdr-tools/private-patterns.txt`. 둘 다 없으면 건너뛴다(종료 0). `--strict`면 패턴 파일이 없거나 패턴 줄이 없을 때 종료 3(`get`·`file`의 「설정 없음」과 같은 코드).

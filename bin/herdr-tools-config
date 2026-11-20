@@ -5,12 +5,14 @@
 #   lint [--strict] [<파일>…]  개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
 #                        패턴 파일이 없으면 경고 뒤 건너뜀(종료 0), --strict면 패턴 파일·패턴 줄이 없을 때 종료 3
 #                        이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
+#   sync-lint <범용 저장소> [<sync.list>]  <범용 저장소>/lib/<도구>/가 있는데 sync.list에 tools:bin/<도구> 줄만 있고 같은 대상(또는 all)의
+#                        tools:lib/<도구>/ 나무 줄이 없으면 더할 줄을 찍고 종료 1 (bin만 깔리면 그 도구가 「함수 파일을 못 읽었다」로 멈춘다)
 # config 꼴: 한 줄에 「<키> <값>」(값은 줄 끝까지, 앞뒤 빈칸 뺌), 「<키>」 혼자면 빈 값, # 줄은 주석.
 # 키는 <영역>.<이름>(^[a-z]+\.[a-z0-9_]+$). 같은 키 두 번·잘못 부름은 종료 2. 예시는 저장소 config.example/.
 set -u
 me=herdr-tools-config
 dir=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
-usage() { sed -n '2,8s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '2,10s/^# \{0,1\}//p' "$0"; }
 die2() { echo "$me: $*" >&2; exit 2; }
 
 cmd_get() {
@@ -98,7 +100,26 @@ cmd_lint() {
   return 1
 }
 
+cmd_sync_lint() {
+  [ $# -ge 1 ] && [ $# -le 2 ] || die2 "sync-lint <범용 저장소> [<sync.list>]"
+  local repo=$1 list=${2:-$dir/sync.list} b k tool t d bad=0
+  [ -f "$list" ] || die2 "sync.list 없음: $list"
+  # 고칠 줄의 맥 경로는 도구가 함수 파일을 찾는 자리(bin 옆 ../lib/<도구>)
+  while IFS=$'\t' read -r b k tool t; do
+    [ -d "$repo/lib/$tool" ] || continue
+    d=${k%/*}; case $d in */*) d=${d%/*}/ ;; *) d= ;; esac
+    [ $bad = 1 ] || echo "$me: $list — lib 나무 줄이 없다(bin만 깔리면 그 도구가 멈춘다). 이 줄을 더한다:" >&2
+    printf '%s  %slib/%s/**  tools:lib/%s/  %s\n' "$b" "$d" "$tool" "$tool" "$t"
+    bad=1
+  done < <(awk '{ sub(/\r$/, "") } /^[ \t]*(#|$)/ || NF < 4 { next }
+    $3 ~ /^tools:bin\/[^\/]+$/ { n++; b[n] = $1; k[n] = $2; tl[n] = substr($3, 11); t[n] = $4; next }
+    $3 ~ /^tools:lib\/[^\/]+\/?$/ && $2 ~ /\/\*\*$/ { x = substr($3, 11); sub(/\/$/, "", x); lib[x, $4] = 1 }
+    END { for (i = 1; i <= n; i++) if (!((tl[i], t[i]) in lib) && !((tl[i], "all") in lib)) printf "%s\t%s\t%s\t%s\n", b[i], k[i], tl[i], t[i] }' "$list")
+  return $bad
+}
+
 case ${1-} in
+  sync-lint) shift; cmd_sync_lint "$@" ;;
   get) shift; cmd_get "$@" ;;
   file) shift; cmd_file "$@" ;;
   lint) shift; cmd_lint "$@" ;;
