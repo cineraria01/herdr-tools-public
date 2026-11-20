@@ -63,6 +63,7 @@ if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; 
 echo "$name ${HERDR_LAND_PRIORITY:-없음}" >>"$T_LOG/landprio.log"   # 착지 줄 우선(그 레인을 기다리는 줄 수)
 case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜 실패" >&2; exit 1 ;; esac
 case " ${HC_FAKE_LANE_HELD-} " in *" $name "*) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다" >&2; exit 10 ;; esac   # 임대가 남은 레인: 어느 기계든 10
+[ -z "${HC_FAKE_LANE_HOOK-}" ] || eval "$HC_FAKE_LANE_HOOK" >/dev/null 2>&1   # 띄우는 동안 끼어드는 일(대기열 rm·add 등)
 # $HC_FAKE_LANE_START의 「<기계>/<이름>=<종료>」: 띄우고 터미널은 남긴 채 시작 확인 실패(5·6·7)로 끝난다(진짜 hc-lane처럼 JSON 끝 줄)
 for x in ${HC_FAKE_LANE_START-}; do case $x in "${on:-here}/$name="*)
   echo "hc-lane: 시작 안 됨 ${on:+$on/}$name: 가짜 로그인 막힘" >&2; echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\",\"start\":\"login\"}"; exit "${x#*=}" ;; esac; done
@@ -75,7 +76,9 @@ cat >"$T/bin/git" <<'EOF'
 #!/bin/bash
 echo "$*" >>"$T_LOG/git.log"
 for a in "$@"; do case $a in
-  fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1; exit 0 ;;
+  fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)
+         [ -z "${HC_FAKE_FETCH_HOOK-}" ] || [ -e "$T_LOG/fetch-hook.done" ] || { : >"$T_LOG/fetch-hook.done"; bash -c "$HC_FAKE_FETCH_HOOK" >/dev/null 2>&1; }
+         exit 0 ;;
   remote) [ -z "${HC_FAKE_NOORIGIN-}" ] || exit 2; exit 0 ;;   # NOORIGIN: 원격 없는 저장소(get-url 종료 2, ls-remote도 실패)
   # 착지 표식: ls-remote origin 'refs/hc-landed/<레인>/*'는 $T/landed/<레인>(「sha<TAB>ref」 줄, 없으면 진짜처럼 빈 답·종료 0)에서 ·
   # HC_FAKE_LSREMOTE_FAIL: 조회 실패(128) · HC_FAKE_MB_RC: merge-base --is-ancestor 종료(기본 0 = 조상)
@@ -115,7 +118,7 @@ lj() { s='{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","st
 fresh() { rm -rf "$HOME/.local/share/hc-fill" "$T/report.log" "$T/lane.log" "$T/landprio.log" "$T/events" "$T/hc.log" "$T/balance.log" "$T/git.log" "$T/gc.log" "$T/coord.log" "$T/owner.log" "$T/coordset.log" "$T/coordcheck.log"; : >"$T/commits"; mj box-1 box-2 shared slow; lj; unset HC_FAKE_LS_LANE HC_FAKE_NOSTATUS HC_FAKE_LANE_FAIL HC_FAKE_FETCH_FAIL HC_FAKE_GONE HC_FAKE_EXEC_FAIL HC_FAKE_LANE_START HC_FAKE_FINISHED HC_FAKE_COORD_GONE HC_FAKE_REPORT_RC HC_FAKE_SEND_FAIL; }
 brief() { printf '# 지시문 %s\n본문\n' "$1" >"$T/$1.md"; echo "$T/$1.md"; }
 add() { "$FILL" add --name "$1" --project app --brief "$(brief "$1")" "${@:2}" >/dev/null 2>&1; }
-where() { awk -F'\t' -v n="$1" '$1==n {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소
+where() { awk -F'\t' -v n="$1" '($1 "") == (n "") {print $6, $7, $8}' "$Q"; }   # 상태 기계 주소(이름은 글자로 — 10과 010이 다르게)
 launched() { grep -Fxc -- "$1" "$T/lane.log" 2>/dev/null; }          # hc-lane 띄우기 인자 줄 수
 
 # 0. 도구와 설정
@@ -344,10 +347,19 @@ t "agent 종류 0개: 경고, 종료 1, 띄우지 않음" '[ $rc = 1 ] && printf
 
 # 5. 두 번 띄우지 않음: 같은 이름이 어디선가 살아 있으면 떠 있음으로 표시
 fresh
-lj slow/k1:claude-code:dup
+lj "slow/k1:claude-code:dup:working:/Users/other/src/app.wt/dup"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"slow/k1"}]}'
 add dup
 run run
-t "같은 이름 살아 있음: hc-lane 안 부르고 떠 있음으로 표시" '[ ! -e "$T/lane.log" ] && [ "$(where dup)" = "up slow slow/k1" ] && printf "%s" "$out" | grep -q "이미 떠 있음 dup"'
+t "같은 이름 살아 있음(hc-lane 레인·그 프로젝트 폴더): hc-lane 안 부르고 떠 있음으로 표시" '[ ! -e "$T/lane.log" ] && [ "$(where dup)" = "up slow slow/k1" ] && printf "%s" "$out" | grep -q "이미 떠 있음 dup"'
+# 4차 B 높음 7(fill-dup-guard → fill-existing-defects): 이름만 같은 남의 터미널을 채택하면 그 레인이 영영 안 뜬다 — 라벨 hc-lane=1과
+# 그 기계 그 프로젝트 저장소(또는 그 .wt/ 아래) cwd가 다 맞을 때만 채택
+fresh
+lj "slow/k1:claude-code:dup:working:/Users/other/src/app.wt/dup" "box-2/k2:claude-code:dup2:working:/elsewhere/dup2"
+export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-2/k2"}]}'
+add dup; add dup2
+run run
+t "같은 이름이어도 hc-lane 레인(라벨 hc-lane=1)이 아니면 채택하지 않고 띄움" '[ "$(where dup)" = "up box-1 box-1/dup" ] || { printf "%s\n" "$out"; false; }'
+t "같은 이름 hc-lane 레인이어도 그 프로젝트 폴더가 아니면 채택하지 않고 띄움" '[ "$(where dup2)" = "up box-1 box-1/dup2" ] && ! printf "%s" "$out" | grep -q "이미 떠 있음" || { printf "%s\n" "$out"; false; }'
 
 # 6. 연결 안 된 기계는 건너뜀
 fresh
@@ -833,19 +845,21 @@ unset HC_FAKE_REPORT_RC
 fresh   # 감사 [낮음] 3: 세 번 보낸 뒤로는 2시간마다 — 되풀이는 사유가 먼저 띄움 상한일 때만(idle-once). ca가 살아 있어 바퀴마다 상한에 걸림
 sed -i.bak 's/^early$/early 1/' "$T/conf/hc-fill.tsv"; add ca --after pa --only box-2; add cb --after pa --only box-2
 run run; lj box-2/ca:claude-code:ca; back 2 700; run run; back 3 1900; run run; back 3 1900; run run
-t "되풀이 상한: 30분마다 세 번" '[ "$(grep -c . "$T/report.log")" = 3 ] || { cat "$T/report.log"; cat "$IT"; false; }'
+t "되풀이 상한: 30분마다 세 번" '[ "$(grep -c "먼저 띄움 상한" "$T/report.log")" = 3 ] || { cat "$T/report.log"; cat "$IT"; false; }'
 back 3 1900; run run
-t "되풀이 상한: 세 번 뒤로는 30분 지나도 안 보냄" '[ "$(grep -c . "$T/report.log")" = 3 ]'
+t "되풀이 상한: 세 번 뒤로는 30분 지나도 안 보냄" '[ "$(grep -c "먼저 띄움 상한" "$T/report.log")" = 3 ]'
 back 3 7300; run run
-t "되풀이 상한: 2시간 지나면 다시" '[ "$(grep -c . "$T/report.log")" = 4 ] || { cat "$IT"; false; }'
+t "되풀이 상한: 2시간 지나면 다시" '[ "$(grep -c "먼저 띄움 상한" "$T/report.log")" = 4 ] || { cat "$IT"; false; }'
 t "되풀이 상한: 넷 다 먼저 띄움 상한 사유" '[ "$(grep -c "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log")" = 4 ] || { cat "$T/report.log"; false; }'
+# 아스트라 2차 낮음 1: 상한 사유는 상한에 걸린 후보를 받을 기계(cb --only box-2)에만 — 다른 기계는 「띄울 것 없음」(한 번)
+t "되풀이 상한: 상한 사유는 그 후보를 받을 box-2에만, box-1은 「대기열에 띄울 것 없음」 한 번" '! grep "먼저 띄움 상한" "$T/report.log" | grep -Fq "box-1 자리" && [ "$(grep "대기열에 띄울 것 없음" "$T/report.log" | grep -c "box-1 자리")" = 1 ] || { cat "$T/report.log"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
 fresh   # 사유: 먼저 띄움 상한에 걸려 남긴 자리면 그렇게
 sed -i.bak 's/^early$/early 0/' "$T/conf/hc-fill.tsv"
 run run; back 2 700; run run
 t "사유: 먼저 띄움 상한에 안 걸렸으면 「대기열에 띄울 것 없음」" 'grep -Fq "대기열에 띄울 것 없음" "$T/report.log"'
 sed -i.bak 's/^early 0$/early 1/' "$T/conf/hc-fill.tsv"
-add ca --after pa --only box-1; add cb --after pa --only box-1; rm -f "$T/report.log"; run run
+add ca --after pa --only box-1; add cb --after pa --only box-2; rm -f "$T/report.log"; run run   # 상한 사유는 cb를 받을 box-2에(2차 낮음 1)
 t "사유: 대기열 빔으로 한 번 보낸 뒤 상한으로 바뀌면 30분 안이어도 그 사유로 다시 — 「먼저 띄움 상한(early 1)에 걸려 남김」" 'grep -Fq "먼저 띄움 상한(early 1)에 걸려 남김" "$T/report.log" && ! grep -Fq "대기열에 띄울 것 없음" "$T/report.log" || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
 capn() { awk -F'\t' '$6=="cap" {n++; if ($4 != 1) bad++} END {print n + 0, bad + 0}' "$IT"; }   # 상한 사유 줄 수 · 보낸 횟수가 1이 아닌 줄 수
 t "사유가 바뀌어 보내면 보낸 횟수는 1부터(감사 낮음 1 — 상한 사유도 30분 간격 세 번을 다 받게)" '[ "$(capn | cut -d" " -f2)" = 0 ] && [ "$(capn | cut -d" " -f1)" -ge 1 ] || { cat "$IT"; false; }'
@@ -1152,6 +1166,12 @@ t "ls는 원격 호출 안 함(hc-lane events·hc exec 없음)" '[ ! -e "$T/even
 mj box-2 shared slow; rm -f "$T/events.log"; run run; run ls
 t "연결 끊긴 기계: 지난 값을 두고 「(옛 값 HH:MM)」, 그 기계는 events에 --on 안 함" 'lrl lr1 | grep -Fq "착지 8bccc0d1 08:38" && lrl lr1 | grep -Eq "\(옛 값 [0-9]{2}:[0-9]{2}\)" && ! lrl lr2 | grep -Fq "옛 값" && ! grep -Fq -- "--on box-1" "$T/events.log" || { printf "%s\n" "$out"; cat "$LR" "$T/events.log"; false; }'
 mj box-1 box-2 shared slow; run run; run ls
+r_=$(awk -F'\t' '$1=="lr1" {print $17}' "$Q")
+t "last.tsv 여덟째 칸 = 대기열 줄 ID" '[ -n "$r_" ] && awk -F"\t" -v r="$r_" "\$1==\"lr1\" && \$8==r {f=1} END {exit !f}" "$LR" || { cat "$LR"; false; }'
+awk -F'\t' -v OFS='\t' '$1=="lr1" {$17 = "rnew"} 1' "$Q" >"$Q.t" && mv "$Q.t" "$Q"   # 같은 이름의 새 줄(rm·다시 add)
+mj box-2 shared slow; run run; run ls
+t "기존 6: 끊긴 기계의 지난 값은 줄 ID가 같을 때만 — 새 동명 줄에 옛 착지 sha가 안 붙음" '! lrl lr1 | grep -Fq "8bccc0d1" || { printf "%s\n" "$out"; cat "$LR"; false; }'
+mj box-1 box-2 shared slow; run run; run ls
 t "다시 연결되면 옛 값 표시 없음" 'lrl lr1 | grep -Fq "착지 8bccc0d1" && ! lrl lr1 | grep -Fq "옛 값" || { printf "%s\n" "$out"; false; }'
 cp "$LR" "$T/lr.before"; printf '2026-11-19T09:00:00Z\tm\tslow/lr2\tlr2\t막힘\t-\t테스트 실패\t1\n' >>"$T/events"; run run --dry-run
 t "dry-run은 last.tsv를 쓰지 않음" 'cmp -s "$LR" "$T/lr.before" || { cat "$LR"; false; }'
@@ -1165,7 +1185,7 @@ OR=$T/orepo; mkdir -p "$OR/bin" "$OR/lib" "$OR/docs/frag" "$OR.wt/o1"; : >"$OR/b
 # ofresh [warn|block|off|none]: 저장소 경로를 $OR로, overlap 줄을 그 값으로(none이면 줄을 뺌 — 설정을 안 적은 기존 설치). 사건 파일도 비움
 ofresh() { fresh; rm -f "$T/events"; oe_="s|^overlap[[:space:]].*|overlap  ${1:-warn}|"; [ "${1-}" != none ] || oe_='/^overlap[[:space:]]/d'
   sed -E -e "s|^(repo[[:space:]]+app[[:space:]]+here[[:space:]]+).*|\1$OR|" -e "$oe_" "$EX" >"$T/conf/hc-fill.tsv"; }
-t "겹침: 예시 설정의 overlap은 warn(처음엔 막지 않음)" 'grep -Eq "^overlap[[:space:]]+warn$" "$EX"'
+t "겹침: 예시 설정의 overlap은 block(같은 파일을 고칠 레인이 떠 있으면 막음 — 2026-11-20 지휘 t1cj)" 'grep -Eq "^overlap[[:space:]]+block$" "$EX"'
 oadd() { on_=$1 ob_=$2; shift 2; printf '# 지시문 %s\n%s\n' "$on_" "$ob_" >"$T/$on_.md"; "$FILL" add --name "$on_" --project app --brief "$T/$on_.md" "$@" >/dev/null 2>&1; }
 up() { [ "$(where "$1" | cut -d" " -f1)" = up ]; }
 OW=$HOME/.local/share/hc-fill/overlap-warn.log
@@ -1180,7 +1200,7 @@ t "겹침 off: 경고도 없음" 'up o2 && ! printf "%s" "$out" | grep -Fq "겹�
 ofresh none
 oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'
 run run
-t "겹침: 설정에 overlap 줄이 없으면(기존 설치) warn — 띄우고 경고" '! grep -q "^overlap" "$T/conf/hc-fill.tsv" && up o1 && up o2 && printf "%s" "$out" | grep -Fq "겹침 경고 o2: o1 예약 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+t "겹침: 설정에 overlap 줄이 없으면(기존 설치) block — 같은 파일 예약은 막음(2026-11-20 지휘 t1cj)" '! grep -q "^overlap" "$T/conf/hc-fill.tsv" && up o1 && [ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 o2: o1 (bin/tool)" || { printf "%s\n" "$out"; false; }'
 ofresh block
 oadd o1 '파일: `bin/tool`을 고친다'; oadd o2 '- 파일: bin/tool, docs/a.md'
 run run
@@ -1189,7 +1209,7 @@ run ls
 t "겹침 ls: 비고에 「겹침 대기(<앞 레인>: <파일>)」" 'printf "%s\n" "$out" | grep "^o2 " | grep -Fq "겹침 대기(o1: bin/tool)" || { printf "%s\n" "$out"; false; }'
 lj box-1/o1:claude-code:o1; echo "abc1234 o1: 옛 같은 이름 일" >"$T/commits"; run run
 t "겹침 block: 앞 레인이 떠 있는 동안 다음 바퀴에도 대기 — 옛 같은 이름 커밋 제목은 소유를 풀지 않음(아스트라 높음 4)" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
-printf '2026-11-19T08:38:00Z\tm\tbox-1/o1\to1\t착지\tabc12345\tmain에 넣음\t2\n' >"$T/events"; run run
+printf '%s\tm\tbox-1/o1\to1\t착지\tabc12345\tmain에 넣음\t2\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$T/events"; run run
 t "겹침 block: 앞 레인 터미널이 그 이름으로 착지 사건을 적으면(터미널이 남아도) 쓰기 소유를 풀어 뜸" 'up o2 || { printf "%s\n" "$out"; false; }'
 ofresh block
 oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
@@ -1265,8 +1285,8 @@ oadd o1 '파일: bin/tool' --only box-1; run run
 lj box-1/o1:claude-code:other-lane; oadd o2 '파일: bin/tool'; run run
 t "겹침 block: 대기열 주소를 다른 이름 터미널이 쓰면(주소 재사용) 그 레인은 끝남 — 소유 풂" '[ "$(where o1 | cut -d" " -f3)" = box-1/o1 ] && up o2 || { printf "%s\n" "$out"; cat "$Q"; false; }'
 ofresh block
-lj box-2/w1:claude-code:w1; oadd w1 '파일: bin/tool'; oadd w2 '파일: bin/tool'
-run run
+lj "box-2/w1:claude-code:w1:working:/home/me/src/app.wt/w1"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-2/w1"}]}'; oadd w1 '파일: bin/tool'; oadd w2 '파일: bin/tool'
+run run; unset HC_FAKE_LS_LANE
 t "겹침 block: 대기열이 wait인데 같은 이름 터미널이 이미 일하면 그 예약도 소유(아스트라 높음 3)" 'printf "%s" "$out" | grep -Fq "이미 떠 있음 w1" && [ "$(where w2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 w2: w1" || { printf "%s\n" "$out"; false; }'
 ofresh block
 oadd o1 '파일: bin/tool' --only box-1; run run
@@ -1339,6 +1359,125 @@ ofresh block
 oadd o1 '파일: bin/tool' --only box-1; oadd o2 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
 run run; back 2 700; rm -f "$T/report.log"; run run
 t "놀고 있음: 「겹침 대기 n줄」 사유는 그 줄을 받을 수 있는 기계(box-1)에만, 다른 기계는 「띄울 것 없음」(아스트라 중간 5)" 'grep -F "box-1 자리 1개" "$T/report.log" | grep -Fq "(겹침 대기 1줄) — 겹침 대기" && grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-2 자리 2개" && ! grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-1 " && ! grep -F "겹침 대기" "$T/report.log" | grep -Fq "box-2 " || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
+
+# 10k. 겹침 block의 남은 경계(2026-11-20 overlap-guard-2 — 아스트라 2차 감사 높음 2·중간 7·낮음 2, hc-fill 감사(99d653e) 낮음 2).
+#      쓰기 소유는 실행 기록(own.tsv: 레인 프로젝트 기계 주소 시작시각 지시문사본 선행): 쓰기 터미널 주소를 받은 때 적고, 그 기계가 연결된 채
+#      그 주소에 그 이름 터미널이 없거나 그 터미널이 시작 뒤 착지를 적으면 지운다
+OWNF=$HOME/.local/share/hc-fill/own.tsv
+ofresh block
+export HC_FAKE_LANE_START="box-1/o1=5"
+oadd o1 '파일: bin/tool' --only box-1; oadd o2 '파일: bin/tool'
+run run; unset HC_FAKE_LANE_START
+t "겹침 block(2차 높음 1): 상태가 안 잡혀 wait로 남은 레인도 주소를 받은 때부터 예약 — 같은 바퀴 다른 기계의 겹치는 줄은 대기" '[ "$(where o1 | cut -d" " -f1)" = wait ] && [ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 o2: o1 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+mj box-2 shared slow; run run
+t "겹침 block(2차 높음 1): 다음 바퀴에 그 기계가 끊겨도 남긴(stuck) 터미널의 예약 유지" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow; run run
+t "겹침 block(2차 높음 1): 다시 연결되고 그 주소에 터미널이 없으면(종료 확인) 풀려 뜸" 'up o2 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd c '파일: bin/tool' --after b --only slow; run run; lj slow/c:claude-code:c
+oadd b '파일: lib/b.sh' --after a; oadd a '파일: bin/tool'
+run run
+t "겹침+먼저 띄움(2차 높음 2): 먼저 뜬 c(--after b)의 예약은 b의 선행 a(사슬 끝)를 막지 않음 — 교착 없음" 'up c && up a && ! printf "%s" "$out" | grep -Fq "겹침 대기 a:" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd d '파일: bin/tool' --after x2 --only slow; run run; lj slow/d:claude-code:d
+oadd p '파일: bin/tool' --only box-1
+"$FILL" add --name x2 --project app --brief "$(brief x2)" --then p >/dev/null 2>&1
+run run
+t "겹침+먼저 띄움(2차 높음 2): --then으로 p에 붙은 x2를 기다리는 d의 예약은 실제 레인 p를 막지 않음" 'up d && up p && ! printf "%s" "$out" | grep -Fq "겹침 대기 p:" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+ofresh block
+echo "1234abcd pz: 선행" >"$T/commits"
+oadd y1 '파일: lib/b.sh' --after pz
+export HC_FAKE_FETCH_HOOK="\"$FILL\" rm y1 && printf '# 지시문 y1\n파일: bin/tool\n' >\"$T/y1.md\" && \"$FILL\" add --name y1 --project app --brief \"$T/y1.md\" --only box-2"
+run run; unset HC_FAKE_FETCH_HOOK; rm -f "$T/fetch-hook.done"
+t "겹침(2차 중간 1): 바퀴 도중 같은 이름 줄이 바뀌면(rm·add) 이번 바퀴엔 띄우지 않고 다음 바퀴에 다시 판정" '[ "$(where y1)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "대기열 줄이 바뀌었다 y1" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run run
+ocopy() { awk -F'\t' -v n="$1" '$1==n {print $6; exit}' "$OWNF"; }   # 그 레인 실행 기록의 지시문 사본
+t "겹침(2차 중간 1): 다음 바퀴에 새 줄(--only box-2)대로 뜨고, run 지시문 본문 = 검사한 지시문 사본(실행 기록)" '[ "$(where y1 | cut -d" " -f1,2)" = "up box-2" ] && c_=$(ocopy y1) && [ -f "$c_" ] && grep -Fq "bin/tool" "$c_" && head -c "$(wc -c <"$c_")" "$HOME/.local/share/hc-fill/runs/y1-run.md" | cmp -s - "$c_" || { printf "%s\n" "$out"; cat "$OWNF"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+printf '%s\tm\tbox-1/o1\to1\t착지\tabc12345\t옛 일\t2\n' "$(date -u -r $(( $(date +%s) - 86400 )) +%Y-%m-%dT%H:%M:%SZ)" >"$T/events"
+oadd o2 '파일: bin/tool'; run run
+t "겹침 block(2차 중간 2): 이름·주소를 다시 쓴 새 실행에 그 실행 전 시각의 착지 사건은 예약을 풀지 않음" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+"$FILL" rm o1 >/dev/null 2>&1; oadd o2 '파일: bin/tool'; run run
+t "겹침 block(2차 중간 4): hc-fill rm 뒤에도 살아 있는 레인은 쓰기 소유 — 대기" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 o2: o1" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+awk -F'\t' -v OFS='\t' '$1=="o1" {$6 = "sent"} 1' "$Q" >"$Q.x" && mv "$Q.x" "$Q"
+oadd o2 '파일: bin/tool'; run run
+t "겹침 block(2차 중간 4): 결과를 돌려준(sent) 미착지 레인도 터미널이 살아 있으면 쓰기 소유 — 대기" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block
+mkdir -p "$HOME/.local/state/hc-lane"; printf 'box-2/w1\tw1\t-\tread\n' >"$HOME/.local/state/hc-lane/lanes.tsv"
+lj "box-2/w1:claude-code:w1:working:/home/me/src/app.wt/w1"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-2/w1"}]}'   # 채택은 hc-lane 레인·프로젝트 폴더일 때만
+oadd w1 '파일: bin/tool' --only slow; oadd w2 '파일: bin/tool' --only box-1
+run run; rm -f "$HOME/.local/state/hc-lane/lanes.tsv"; unset HC_FAKE_LS_LANE
+t "겹침 block(2차 중간 4): 레인 기록이 read인 같은 이름 터미널은 쓰기 소유가 아님" 'up w2 && ! printf "%s" "$out" | grep -Fq "겹침 대기 w2" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd f1 '파일: bin'; oadd f2 '파일: bin/tool'
+oadd f3 '파일: main.c, .newconfig, NewTool'; oadd f4 '파일: `main.c`'; oadd f5 '쓰기: .newconfig'; oadd f6 '- 파일: NewTool'
+run run
+t "겹침 block(2차 중간 5): 「파일: bin」(끝 / 없는 맨 위 폴더)은 bin/ 예약 — 그 아래 파일 대기" 'up f1 && [ "$(where f2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 f2: f1" || { printf "%s\n" "$out"; false; }'
+t "겹침 block(2차 중간 5): 아직 없는 main.c(짧은 확장자)·.newconfig(점 파일)·NewTool(확장자 없음)도 예약" 'up f3 && [ "$(for x in f4 f5 f6; do where $x; done | sort -u)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd h1 '파일: lib/x.sh (참고 `bin/tool`)'; oadd h2 '파일: bin/tool'; oadd h3 '파일: lib/x.sh'
+run run
+t "겹침 block(2차 중간 6): 항목 첫 경로가 쓰기 대상 — 뒤 괄호의 참고 경로는 언급(경고만)" 'up h1 && up h2 && printf "%s" "$out" | grep -Fq "겹침 경고 h2: h1 언급 (bin/tool)" || { printf "%s\n" "$out"; false; }'
+t "겹침 block(2차 중간 6): 항목 첫 경로(아직 없는 lib/x.sh)는 예약" '[ "$(where h3)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "겹침 대기 h3: h1 (lib/x.sh)" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd j1 'bin/tool·lib/b.sh 를 본다'; oadd j2 '파일: lib/b.sh'
+run run
+t "겹침(2차 중간 6): 본문의 가운뎃점 목록(bin/tool·lib/b.sh)은 경로마다 언급" 'up j2 && printf "%s" "$out" | grep -Fq "겹침 경고 j2: j1 언급 (lib/b.sh)" || { printf "%s\n" "$out"; false; }'
+ofresh block; : >"$OR/README.md"; echo "overlap_ignore app README.md" >>"$T/conf/hc-fill.tsv"
+oadd ri1 '파일: README'; oadd ri2 '- 파일: lib/e.sh, README'
+run run
+t "겹침(hc-fill 감사 낮음): 맨 이름 README를 찾은 README.md도 overlap_ignore를 거침" 'up ri1 && up ri2 && ! printf "%s" "$out" | grep -Fq 겹침 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1; run run
+rm -f "$OWNF"; mj box-2 shared slow; lj; oadd o2 '파일: bin/tool'; run run
+t "겹침 block(hc-fill 감사 낮음): own.tsv가 없으면(새로 깐 첫 바퀴) 연결 안 된 기계의 up 레인은 끝났는지 몰라 소유 유지" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1; run run
+sed -i.bak 's/^overlap .*/overlap  off/' "$T/conf/hc-fill.tsv"; lj; run run
+sed -i.bak 's/^overlap .*/overlap  block/' "$T/conf/hc-fill.tsv"; mj box-2 shared slow; oadd o2 '파일: bin/tool'; run run
+t "겹침 block(hc-fill 감사 낮음): overlap off 동안 끝난 레인은 다시 켜도 낡은 own.tsv로 되살아나지 않음" 'up o2 && ! printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow
+run nope
+t "도움말(2차 낮음 2): --then 병용 금지 목록에 --overlap-ok" 'printf "%s" "$out" | grep -F -- "--no-audit·--coord" | grep -Fq -- "--overlap-ok"'
+t "README(2차 낮음 2): --then 병용 금지 목록에 --overlap-ok, 한 값 키 목록에 overlap" 'grep -F -- "--no-audit\`·\`--coord" "$here/../README.md" | grep -Fq -- "--overlap-ok" && grep -F "한 값 키(" "$here/../README.md" | grep -Fq "\`overlap\`"'
+# 10l. 단독(2026-11-20 지휘 t1cj — conflict-hotspots §4 K: 파일을 가로지르는 이름 바꾸기·sweep 레인이 다른 레인과 겹쳐 modify/delete 충돌):
+#      add --solo 줄은 그 프로젝트에 다른 쓰기 소유 레인이 있으면 기다리고, 단독이 떠 있으면 그 프로젝트의 다른 쓰기 줄을 띄우지 않는다.
+#      기다리는 줄은 띄우지 않으니 자리를 쥐지 않는다
+col16() { awk -F'\t' -v n="$1" '$1==n {print $16}' "$Q"; }
+ofresh block
+run add --name s1 --project app --brief "$(brief s1)" --solo
+t "add --solo: 대기열 16번째 칸 solo, 알림에 「단독」" '[ $rc = 0 ] && [ "$(col16 s1)" = solo ] && printf "%s" "$out" | grep -Fq 단독 || { printf "%s\n" "$out"; false; }'
+run add --name s2 --project app --brief "$T/s1.md" --solo --overlap-ok
+t "add --solo: --overlap-ok와 함께면 거절" '[ $rc != 0 ] && [ -z "$(where s2)" ]'
+run add --name s3 --project app --brief "$T/s1.md" --solo --then s1
+t "add --solo: --then과 함께면 거절(종료 2)" '[ $rc = 2 ]'
+ofresh warn
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+oadd s1 '파일: lib/b.sh' --solo; run run
+t "단독: 같은 프로젝트에 쓰기 소유 레인(o1)이 떠 있으면 파일이 안 겹쳐도 대기(overlap warn이어도)" '[ "$(where s1)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "단독 대기 s1: o1" || { printf "%s\n" "$out"; false; }'
+run ls
+t "단독 ls: 비고에 「단독」과 「겹침 대기(o1: 단독)」" 'printf "%s\n" "$out" | grep "^s1 " | grep -Fq "겹침 대기(o1: 단독)" && printf "%s\n" "$out" | grep "^s1 " | grep -Fq 단독 || { printf "%s\n" "$out"; false; }'
+lj; run run
+t "단독: 앞 레인이 끝나면(종료 확인) 단독이 뜸" 'up s1 || { printf "%s\n" "$out"; false; }'
+lj "$(where s1 | cut -d" " -f3):claude-code:s1"
+oadd o2 '본문만'; oadd o3 '파일: docs/a.md'; run run
+t "단독: 단독이 떠 있으면 그 프로젝트의 다른 쓰기 줄은 파일이 안 겹쳐도 대기" '[ "$(where o2)" = "wait - -" ] && [ "$(where o3)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "단독 대기 o2: s1" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1
+oadd s1 '파일: lib/b.sh' --solo --only slow --priority high; oadd lo '본문만' --only slow --priority low
+"$FILL" add --name t1 --project tools --brief "$(brief t1)" --only here >/dev/null 2>&1
+run run
+t "단독: 기다리는 단독 줄은 자리를 안 쥠 — 자리 1개 기계(slow)를 뒤 줄이 받음, 다른 프로젝트는 상관없음" '[ "$(where s1)" = "wait - -" ] && [ "$(where lo | cut -d" " -f1,2)" = "up slow" ] && up t1 || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd c '파일: bin/tool' --after s1 --only slow; run run; lj slow/c:claude-code:c
+oadd s1 '파일: lib/b.sh' --solo; run run
+t "단독: 단독 줄을 --after로 기다리며 먼저 뜬 레인은 그 단독을 막지 않음(교착 없음)" 'up s1 || { printf "%s\n" "$out"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
 
 # 10z. 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정): 선행은 커밋 제목 머리 규칙 또는 그 선행 줄을 넣은 뒤의 착지 표식
@@ -1380,6 +1519,15 @@ t "먼저 띄움 기다림: 줄을 넣기 전의 옛 표식은 안 셈" '[ "$(ew
 t "먼저 띄움 기다림: ls-remote 오류면 아직" '[ "$(ew "$later" 0 1 "ec: 고침")" = no ]'
 t "먼저 띄움 기다림: merge-base 1(조상 아님)·128(오류)이면 아직" '[ "$(ew "$later" 1 - "ec: 고침")" = no ] && [ "$(ew "$later" 128 - "ec: 고침")" = no ]'
 t "먼저 띄움 기다림: 제목 머리 규칙은 그대로(ea: …, 표식 없이)" '[ "$(ew - 0 - "ea: 끝" "ec: 고침")" = yes ]'
+# 2026-11-20 fill-early-wait-zsh: 표식 판정이 파이프 끝 { …; exit 1; }라 zsh(워커 Bash 도구의 셸)에서는 그 exit가 셸째 끝내
+# 기다림이 바로 빠졌다. 블록 전체(until … done)를 zsh·bash로 돌린다 — 가짜 sleep이 한 바퀴 뒤 ea 제목을 넣어 다음 판정에서 풀린다
+printf '#!/bin/sh\necho slept; printf "ea: 끝\\n" >>"$T_LOG/subjects"\n' >"$T/eg2/sleep"; chmod +x "$T/eg2/sleep"
+blk=$(awk '/^until /{f=1} f; f && /^do /{exit}' "$rf")
+eb() { rm -f "$T/lsr" "$T/lsrfail" "$T/mbrc"; printf '%s\n' "ec: 고침" >"$T/subjects"; PATH="$T/eg2:$PATH" "$1" -c "$blk
+echo rc=\$?" 2>&1; }
+for sh_ in zsh bash; do
+  t "먼저 띄움 기다림 블록($sh_): 선행 안 들어감이면 셸이 끝나지 않고 기다림 계속 → 들어가면 풀림" '[ "$(eb $sh_ | paste -sd" " -)" = "slept rc=0" ] || { eb $sh_; printf "%s\n" "$blk"; false; }'
+done
 
 # 10k. 선행 사슬(2026-11-19 fill-dep-needs 사용자 「① 선행 사슬 기다림 (추천)」 — make-url-import 하나가 늦자 뒤 레인들이 3~5시간 기다렸고,
 # 먼저 띄움 레인은 선행이 살아 진행 중이어도 기한에 「선행 대기 초과」로 멈춰 지휘를 불렀다)
@@ -1500,6 +1648,88 @@ run add --name ho --project app --brief "$T/ho.md"
 t "빈 지시문: 제목과 감사·착지 절만이면 거절" '[ $rc != 0 ] && [ -z "$(where ho)" ] || { printf "%s\n" "$out"; false; }'
 add ok1 --only slow; cp "$T/ap.md" "$HOME/.local/share/hc-fill/briefs/added/ok1.md"; run run
 t "빈 지시문: 대기열 사본이 부록만 되면 run도 띄우지 않음" '[ "$(where ok1 | cut -d" " -f1)" = wait ] && [ ! -e "$T/lane.log" ] && printf "%s" "$out" | grep -Fq "실패 ok1" || { printf "%s\n" "$out"; false; }'
+
+# 10y. 기존 결함(2026-11-20 fill-existing-defects — fill-dup-guard 보고 「기존」·아스트라 2차·4차 B에서 넘김)
+# 숫자 꼴 이름: awk의 ==는 양쪽이 숫자처럼 보이면 숫자로 견준다(10 == 010 == 1e1) — 이름은 글자로
+fresh
+add 010 --after zz9 --no-early
+run add --name 10 --project app --brief "$(brief 10)"
+t "숫자 이름: 010이 있어도 10을 넣음(글자 비교)" '[ $rc = 0 ] && [ "$(grep -c . "$Q")" = 2 ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run run
+t "숫자 이름: 10을 띄워도 010 줄은 대기 그대로" '[ "$(where 010)" = "wait - -" ] && [ "$(where 10 | cut -d" " -f1)" = up ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run rm 1e1
+t "숫자 이름: rm 1e1은 없는 레인(10·010과 다름)" '[ $rc = 1 ] && [ "$(where 010)" = "wait - -" ] && [ -n "$(where 10)" ]'
+run rm 10
+t "숫자 이름: rm 10은 010을 남김" '[ $rc = 0 ] && [ "$(where 010)" = "wait - -" ] && [ -z "$(where 10)" ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+# 자리·레인 기록은 주소만이 아니라 주소+이름으로(주소는 재사용된다 — 운영 모델): lanes.tsv의 옛 read 줄이 같은 주소의 새 쓰기 레인을 안 세게
+fresh
+lj "box-1/k1:claude-code:k1:done:$W/app.wt/k1" "box-1/k2:claude-code:k2:idle:$W/app.wt/k2"
+mkdir -p "${LT%/*}"; printf 'box-1/k1\taudit-old\tt0\tread\nbox-1/k2\tk2\tt0\tfill\n' >"$LT"
+add fd
+run run
+t "자리: 레인 기록 read가 같은 주소의 다른 이름이면(주소 재사용) 읽기 레인으로 안 봄 → 셈(box-1 가득 → box-2)" '[ "$(where fd)" = "up box-2 box-2/fd" ] && printf "%s" "$out" | grep -Fq "자리 box-1 box-1/k1 k1: done, 작업 트리 있음 → 셈" || { printf "%s\n" "$out"; false; }'
+rm -f "$LT"
+fresh
+lj box-1/a:claude-code:a box-1/b:claude-code:b box-2/a:claude-code:a2 box-2/b:claude-code:b2
+add s1; add s2; run run
+lj box-1/a:claude-code:a box-1/b:claude-code:b box-2/a:claude-code:a2 box-2/b:claude-code:b2 shared/s1:claude-code:other shared/s2:claude-code:s2
+add s3; run run
+t "레인상한: 대기열 주소에 다른 이름 터미널(주소 재사용)은 그 레인으로 안 셈 → shared에 셋째" '[ "$(where s3)" = "up shared shared/s3" ] || { printf "%s\n" "$out"; false; }'
+fresh; sed -i.bak 's/^early$/early 1/' "$T/conf/hc-fill.tsv"
+add ea --after pa --only box-1; add eb --after pa --only box-1; run run
+lj box-1/ea:claude-code:other; run run
+t "먼저 띄움 상한: 그 주소가 다른 이름이면(주소 재사용) 살아 있는 먼저 띄움으로 안 셈 → eb 띄움" '[ "$(where eb)" = "up box-1 box-1/eb" ] || { printf "%s\n" "$out"; false; }'
+cp "$EX" "$T/conf/hc-fill.tsv"
+# 7) 「이미 떠 있음」은 hc ls에 있는 기계만 본다 — 끊긴 기계에서 그 이름이 돌던 것은 끝났는지 모른다(목록에 없음 ≠ 끝남): 띄우지 않음
+fresh
+add hold1 --after zz9 --no-early   # 대기열이 비어 바퀴가 일찍 끝나지 않게
+lj "box-1/k9:claude-code:dx:working:/home/me/src/app.wt/dx"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/k9"}]}'
+run run
+add dx; mj box-2 shared slow; lj; unset HC_FAKE_LS_LANE
+run run
+t "끊긴 기계에 지난 바퀴 같은 이름 터미널이 있었으면 띄우지 않음(모름)" '[ "$(where dx)" = "wait - -" ] && printf "%s" "$out" | grep -q "dx.*끊긴 기계 box-1" || { printf "%s\n" "$out"; false; }'
+mj box-1 box-2 shared slow; run run
+t "다시 붙어 그 이름이 없으면 띄움" '[ "$(where dx | cut -d" " -f1)" = up ] || { printf "%s\n" "$out"; false; }'
+# 4차 B 높음 7: run이 대기열을 읽은 뒤(띄우는 동안) 그 레인이 rm·다시 add되면 새 줄을 옛 실행 주소로 덮지 않는다(qset이 이름만 보고 씀)
+fresh
+add rr
+export HC_FAKE_LANE_HOOK="'$FILL' rm rr; '$FILL' add --name rr --project app --brief '$(brief rr2)'"
+run run; unset HC_FAKE_LANE_HOOK
+t "띄우는 동안 rm·다시 add된 줄은 옛 실행으로 up이 되지 않음(새 줄 그대로 대기)" '[ "$(where rr)" = "wait - -" ] && grep -Fq "# 지시문 rr2" "$(awk -F"\t" "\$1==\"rr\" {print \$3}" "$Q")" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+t "줄 ID: add마다 17칸에 새 값(같은 이름 다시 add해도 다름)" '[ -n "$(awk -F"\t" "\$1==\"rr\" {print \$17}" "$Q")" ] && printf "%s" "$out" | grep -q "줄 바뀜 rr" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+# 기존 5: 감사 줄 _put이 옛 줄의 남긴것(상태 안 잡혀 남긴 감사 터미널)을 덮으면 그 터미널이 살아나도 중복 위험을 못 본다
+fresh; mkdir -p "${Q%/*}"
+printf 'audit-x\tapp\t/b\t-\tbox-1\twait\t-\t-\tbox-1=box-1/audit-x\t2026-11-20T00:00\t-\t-\turgent\tno-early\taudit=x\n' >"$Q"
+"$FILL" _put audit-x app /b2 - box-1 wait - - - 2026-11-20T00:01 - - urgent no-early audit=x
+t "_put: 옛 감사 줄의 남긴것을 이어 받고 나머지는 새 줄" '[ "$(cut -f 9 "$Q")" = box-1=box-1/audit-x ] && [ "$(cut -f 3 "$Q")" = /b2 ] && [ "$(grep -c . "$Q")" = 1 ] || { cat "$Q"; false; }'
+# 아스트라 2차 ⑤⑥: 띄운 뒤 up을 적기 전에 run이 죽으면 다음 바퀴 채택이 먼저 띄움 표시를 잃고, 이번 실행이 쓴 받은편지 결과를 .old-로 치웠다
+fresh
+add ck --after pz --only box-1
+awk -F'\t' -v OFS='\t' '$1=="ck" {$11 = "box-2:/tmp/x/done/ck.md"} 1' "$Q" >"$Q.t" && mv "$Q.t" "$Q"   # 받은편지 줄로
+# 가짜 hc-lane이 자기 조상 가운데 「hc-fill run」(바깥 run·lockf·안쪽 run) pid만 모아 끈다(이름으로 찾아 끄지 않는다)
+export HC_FAKE_LANE_HOOK='k=; p=$PPID; while [ "${p:-1}" -gt 1 ]; do case $(ps -o command= -p "$p") in *"hc-fill run"*) k="$k $p" ;; esac; p=$(ps -o ppid= -p "$p" | tr -d " "); done; kill -9 $k'
+run run; unset HC_FAKE_LANE_HOOK
+t "준비: 띄운 뒤 up 전에 run이 죽음 — 줄은 대기, 시도 기록이 남음" '[ "$(where ck)" = "wait - -" ] && grep -q "^ck	" "$HOME/.local/share/hc-fill/try.tsv" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+mkdir -p "$HOME/.local/share/hc-fill/reports"; echo "결과: 고침 abc1234" >"$HOME/.local/share/hc-fill/reports/ck.md"   # 그 실행이 쓴 결과
+lj "box-1/ck:claude-code:ck:working:/home/me/src/app.wt/ck"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/ck"}]}'
+run run; unset HC_FAKE_LS_LANE
+t "복구: 채택이 시도 기록의 먼저 띄움 표시(early)를 쓰고 시도 기록을 지움" '[ "$(where ck)" = "up box-1 box-1/ck" ] && [ "$(awk -F"\t" "\$1==\"ck\" {print \$14}" "$Q")" = early ] && ! grep -q "^ck	" "$HOME/.local/share/hc-fill/try.tsv" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+t "복구: 같은 실행의 받은편지 보고는 .old-로 치우지 않음" '[ -f "$HOME/.local/share/hc-fill/reports/ck.md" ] && ! ls "$HOME/.local/share/hc-fill/reports/" | grep -q "ck.md.old-" || { printf "%s\n" "$out"; ls "$HOME/.local/share/hc-fill/reports/"; false; }'
+# 주차(사용자 「노는 워크트리 없이」): 먼저 띄운 레인은 준비 뒤 hc-lane park로 가지를 원격에 두고 끝낸다 → hc-fill이 줄을 주차로 되돌려
+# 자리를 비우고 → 선행이 들어가면 hc-lane --resume으로 그 가지에서 다시 띄운다
+fresh; rm -f "$T/events"
+add pk --after pz --only box-1; run run
+rf=$HOME/.local/share/hc-fill/runs/pk-run.md
+t "먼저 띄움 절: 준비 뒤 hc-lane park → clean → 턴 끝(기다리지 않음), 기다림 블록은 원격 없을 때만" '[ "$(where pk)" = "up box-1 box-1/pk" ] && grep -Fq "hc-lane park" "$rf" && grep -Fq "park가 종료 3(원격 없는 저장소)일 때만" "$rf" || { cat "$rf"; false; }'
+lj "box-1/pk:claude-code:pk:idle:/home/me/src/app.wt/pk"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/pk"}]}'
+printf '2026-11-20T01:00:00Z\tm\tbox-1/pk\tpk\t주차\tabcdef12\tlane/pk 준비\t1\n' >"$T/events"; run run
+t "주차 사건: 줄을 대기·parked로(자리 비움), 쉬는 그 터미널은 채택 안 함, 선행 전이라 안 띄움" '[ "$(where pk)" = "wait - -" ] && [ "$(awk -F"\t" "\$1==\"pk\" {print \$14}" "$Q")" = parked ] && printf "%s" "$out" | grep -Fq "주차 pk" && ! printf "%s" "$out" | grep -q "이미 떠 있음 pk" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run ls
+t "ls: 주차(선행 …)" 'printf "%s\n" "$out" | grep "^pk " | grep -Fq "주차(선행 pz" || { printf "%s\n" "$out"; false; }'
+run run
+t "주차 줄은 선행 전에 다시 먼저 띄우지 않음" '[ "$(where pk)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+rm -f "$T/lane.log"; echo "aaaa1111 pz: 끝" >"$T/commits"; lj; unset HC_FAKE_LS_LANE; run run
+t "선행 착지 뒤: hc-lane --resume으로 다시 띄우고 「이어 가기」 절(먼저 띄움 절 없음), 먼저 칸 resumed" '[ "$(where pk)" = "up box-1 box-1/pk" ] && grep -Fxq -- --resume "$T/lane.log" && grep -Fq "## 이어 가기" "$rf" && ! grep -Fq "## 먼저 띄움" "$rf" && [ "$(awk -F"\t" "\$1==\"pk\" {print \$14}" "$Q")" = resumed ] || { printf "%s\n" "$out"; cat "$rf"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

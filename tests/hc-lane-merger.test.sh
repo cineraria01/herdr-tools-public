@@ -495,7 +495,7 @@ merge
 t "원격 레인 알림: 다음 바퀴에 box2/t-far 로 hc send, 사건은 그대로 하나" 'grep -q "^box2/t-far	" "$T/hc.send" && ! ls "$W/m/proj/.git/hc-merger/out/" | grep -q l-far && [ "$(awk -F"\t" "\$4 == \"l-far\" && \$5 == \"착지\"" "$EV" | grep -c .)" = 1 ] || { cat "$T/hc.send"; cat "$T/merr"; false; }'
 # 내장 착지의 push 응답 유실(구조 A): main에 들고 큐 표식도 지워졌는데 실패로 돌아오면(lease 판정은 종료 6) 원격이 후보를 담았는지
 # 먼저 보고 착지로 — 돌려보내지 않는다
-printf '#!/bin/sh\ncase " $* " in *" push --atomic origin HEAD:refs/heads/main "*) echo x >>"$T/inj"; %s "$@"; echo "fatal: the remote end hung up unexpectedly" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$rg" "$rg" >"$T/fail/git"
+printf '#!/bin/sh\ncase " $* " in *" push --atomic origin "*":refs/heads/main "*) echo x >>"$T/inj"; %s "$@"; echo "fatal: the remote end hung up unexpectedly" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$rg" "$rg" >"$T/fail/git"
 lane a l-lost3 lost3.txt lost3; land a l-lost3
 rm -f "$T/inj"
 mout=$(cd "$W/m/proj" && PATH="$T/fail:$PATH" "$LANE" merger --repo "$W/m/proj" --once 2>"$T/merr"); mrc=$?
@@ -531,7 +531,8 @@ land a l-gp; merge
 hm0=$(git -C "$W/m/proj" rev-parse HEAD)
 printf '#!/bin/sh\nrm -f "$T/vhook.l-wt"\nprintf "%%s|%%s\\n" "$(git -C "$W/m/proj" rev-parse HEAD)" "$(git -C "$W/m/proj" status --porcelain | wc -l | tr -d " ")" >"$T/wt.seen"\n' >"$T/vhook.l-wt"; chmod +x "$T/vhook.l-wt"
 lane a l-wt wt.txt wt; land a l-wt
-mkdir -p "$W/m/proj/.git/hc-merger/wt" && git -C "$W/m/proj" worktree add -q --detach "$W/m/proj/.git/hc-merger/wt/c.left" HEAD && : >"$W/m/proj/.git/hc-merger/wt/c.left/half-written"
+mkdir -p "$W/m/proj/.git/hc-merger/wt" && git -C "$W/m/proj" worktree add -q --detach "$W/m/proj/.git/hc-merger/wt/c.left" HEAD && : >"$W/m/proj/.git/hc-merger/wt/c.left/half-written"   # 앞 판 자리
+mkdir -p "$W/m/proj.merger-wt" && git -C "$W/m/proj" worktree add -q --detach "$W/m/proj.merger-wt/c-left2" HEAD   # 지금 자리
 merge
 t "임시 작업 트리: 검증 중 병합기 클론 HEAD 그대로·깨끗함, 남은 작업 트리는 지움" '[ "$(cat "$T/wt.seen")" = "$hm0|0" ] && mainlog | grep -Fxq l-wt && [ "$(git -C "$W/m/proj" worktree list | grep -c .)" = 1 ] || { cat "$T/wt.seen"; git -C "$W/m/proj" worktree list; cat "$T/merr"; false; }'
 # 중간 1: 같은 커밋을 다시 land하면(접수 확인이 끊겨 같은 줄을 다시) 새 제출을 만들지 않는다 — 큐에 있으면 그대로, 넣었으면 할 것 없음
@@ -568,7 +569,7 @@ t "제출 기록 못 읽음: 착지·반송 없이 쉼(75)" '[ $mrc = 75 ] && ma
 rm -f "$T/mmfail"; merge
 t "제출 기록 읽히면: 착지 사건에 제출 ID" 'awk -F"\t" "\$4 == \"l-mm\" && \$5 == \"착지\"" "$EV" | grep -Fq "제출 ID"'
 # 중간 8: main push 전송만 끊기고(원격은 안 받음) 큐 lease가 그대로면 일시 실패 — 한 번 만에 반송하지 않는다
-printf '#!/bin/sh\ncase " $* " in *" push --atomic origin HEAD:refs/heads/main "*) [ -e "$T/pf" ] && { rm -f "$T/pf"; echo "fatal: unable to access" >&2; exit 128; } ;; esac\nexec %s "$@"\n' "$rg" >"$T/fail/git"
+printf '#!/bin/sh\ncase " $* " in *" push --atomic origin "*":refs/heads/main "*) [ -e "$T/pf" ] && { rm -f "$T/pf"; echo "fatal: unable to access" >&2; exit 128; } ;; esac\nexec %s "$@"\n' "$rg" >"$T/fail/git"
 lane a l-pf pf.txt pf; land a l-pf
 : >"$T/pf"
 mout=$(cd "$W/m/proj" && PATH="$T/fail:$PATH" "$LANE" merger --repo "$W/m/proj" --once 2>"$T/merr"); mrc=$?
@@ -647,15 +648,19 @@ t "착지 스크립트를 고친 제출: 기본 브랜치 판으로 착지, 레�
 t "착지 스크립트 길도 착지 뒤 레인 표식 refs/hc-landed/<레인>/<초> = main에 든 커밋(fill-dup-guard)" 'r=$(og for-each-ref --format="%(refname) %(objectname)" "refs/hc-landed/l-hs/" | head -n 1); [ -n "$r" ] && og merge-base --is-ancestor "${r#* }" main || { og for-each-ref refs/hc-landed/; false; }'
 opush .claude/herdr-land.sh "$T/land-main.sh"   # 다음 시험을 위해 기본 브랜치 판으로 되돌림
 
-# 새 임시 작업 트리마다 준비 훅(.claude/herdr-setup.sh)을 먼저 — 메인 폴더(LANE_REPO)는 병합기 클론, 폴더 이름에 .train-(색인 건너뜀).
+# 새 임시 작업 트리마다 준비 훅(.claude/herdr-setup.sh)을 먼저 — 메인 폴더(LANE_REPO)는 병합기 클론, 코드 색인 도구는 PATH에서 빠짐.
 # 실패하면 일시 실패(큐에 그대로)
-printf '#!/bin/bash\necho "$LANE_REPO $LANE_BASE $(basename "$PWD")" >>"$T/setup.log"\n[ ! -e "$T/setupfail" ]\n' >"$T/setup.sh"
+printf '#!/bin/bash\necho "$LANE_REPO $LANE_BASE cbm=$(command -v codebase-memory-mcp || echo none)" >>"$T/setup.log"\nprintf "%%s\\n" "$PWD" >"$T/setup.pwd"\n[ ! -e "$T/setupfail" ]\n' >"$T/setup.sh"
 opush .claude/herdr-setup.sh "$T/setup.sh"
+mkdir -p "$T/cbm" && printf '#!/bin/sh\nexit 0\n' >"$T/cbm/codebase-memory-mcp" && chmod +x "$T/cbm/codebase-memory-mcp"
 touch "$T/setupfail"
 lane a l-su su.txt su; land a l-su
-merge
+PATH="$T/cbm:$PATH" merge
 mtop=$(cd "$W/m/proj" && pwd -P)
-t "준비 훅 실패: 일시 실패(75), 큐에 그대로, 착지 안 함" '[ $mrc = 75 ] && qrefs | grep -q l-su && ! mainlog | grep -Fxq l-su && grep -q "^$mtop main \.train-c\." "$T/setup.log" || { echo "rc=$mrc"; cat "$T/merr"; cat "$T/setup.log"; false; }'
+t "준비 훅 실패: 일시 실패(75), 큐에 그대로, 착지 안 함" '[ $mrc = 75 ] && qrefs | grep -q l-su && ! mainlog | grep -Fxq l-su && grep -q "^$mtop main " "$T/setup.log" || { echo "rc=$mrc"; cat "$T/merr"; cat "$T/setup.log"; false; }'
+# 2026-11-20 한 저장소의 병합기 첫 착지: 후보가 .git/hc-merger/wt/.train-c.* 라 Vite가 브라우저 점검 파일을 403(fs.deny **/.git/**·점 폴더)
+sp=$(cat "$T/setup.pwd")
+t "후보 작업 트리: 클론 옆 <클론>.merger-wt/ 아래 — 경로에 .git 마디·점으로 시작하는 마디 없음, 준비 훅에 색인 도구 안 보임" 'case $sp in "$mtop.merger-wt/"*) ;; *) false ;; esac && case "/${sp#"$(dirname "$mtop")"/}" in */.*) false ;; esac && tail -n 1 "$T/setup.log" | grep -Fq "cbm=none" || { cat "$T/setup.log"; false; }'
 rm -f "$T/setupfail"
 merge
 t "준비 훅 성공: 착지" '[ $mrc = 0 ] && mainlog | grep -Fxq l-su && [ -z "$(qrefs)" ] || { echo "rc=$mrc"; cat "$T/merr"; false; }'

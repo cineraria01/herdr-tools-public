@@ -640,18 +640,22 @@ git -C "$wt" rebase --abort 2>/dev/null
 
 # 15r. rerere(2026-11-19 lane-overlap-guard 사용자 「rebase 충돌이거 계속 일어나서 … 근본적으로」): 쓰기 레인 작업 트리를 만들 때
 #      저장소에 rerere.enabled·rerere.autoUpdate가 정해져 있지 않으면 true로. land는 rerere가 다 푼 rebase를 이어 간다
+#      (2026-11-20 overlap-guard-2, 아스트라 2차 중간 7: 저장소 설정에 true를 쓰면 뒤에 뜬 조건부 false 가지를 가린다 — 설정은 쓰지 않고
+#      공용 git 폴더에 rr-cache만 만든다. git은 rerere.enabled가 정해지지 않은 가지에서 rr-cache가 있으면 켠다. autoUpdate가 없어
+#      「Resolved」로만 푼 경로는 land가 git add 한다)
 mk t15rr
-t "rerere: 처음엔 저장소에 값이 없다(시험 전제)" '! git -C "$R" config --get rerere.enabled >/dev/null'
+rrc() { [ -d "$(git -C "$R" rev-parse --path-format=absolute --git-common-dir)/rr-cache" ]; }   # 공용 git 폴더에 rr-cache
+t "rerere: 처음엔 저장소에 값도 rr-cache도 없다(시험 전제)" '! git -C "$R" config --get rerere.enabled >/dev/null && ! rrc'
 run --read --name l-rd --repo "$R" -- true
-t "rerere: 읽기 레인(--read)은 켜지 않음" '[ $rc = 0 ] && ! git -C "$R" config --get rerere.enabled >/dev/null'
+t "rerere: 읽기 레인(--read)은 켜지 않음" '[ $rc = 0 ] && ! git -C "$R" config --get rerere.enabled >/dev/null && ! rrc'
 git -C "$R" config rerere.enabled false
 run --name l-rf --repo "$R" -- true
-t "rerere: 이미 false면 그대로(사용자가 끈 것), 정하지 않은 autoUpdate만 true" '[ $rc = 0 ] && [ "$(git -C "$R" config --get rerere.enabled)" = false ] && [ "$(git -C "$R" config --get rerere.autoUpdate)" = true ]'
+t "rerere: 쓰기 레인을 만들어도 저장소 설정은 그대로(false 그대로, autoUpdate도 안 씀)" '[ $rc = 0 ] && [ "$(git -C "$R" config --get rerere.enabled)" = false ] && ! git -C "$R" config --get rerere.autoUpdate >/dev/null'
 mk t15rc
 seed x base
 seed .claude/herdr-verify.sh 'exit 0'
 run --name l-rr --repo "$R" -- true; wt="$R.wt/l-rr"
-t "rerere: 쓰기 레인 작업 트리를 만들면 저장소에 rerere.enabled·autoUpdate true" '[ "$(git -C "$R" config --get rerere.enabled)" = true ] && [ "$(git -C "$R" config --get rerere.autoUpdate)" = true ]'
+t "rerere: 쓰기 레인 작업 트리를 만들면 rr-cache(정하지 않은 가지는 git이 켬), 저장소 설정에는 rerere.*를 안 씀" 'rrc && [ -z "$(git -C "$R" config --local --get-regexp "^rerere\\.")" ] || { git -C "$R" config --local --list; false; }'
 (cd "$wt" && echo lane >x && git commit -qm l-rr -- x); l0=$(git -C "$wt" rev-parse HEAD)
 seed x other
 lnd "$wt" main
@@ -704,7 +708,14 @@ printf '[rerere]\n\tenabled = false\n' >"$T/rr-off.gitconfig"
 printf '[includeIf "onbranch:l-ri"]\n\tpath = %s\n' "$T/rr-off.gitconfig" >"$T/.gitconfig"
 run --name l-ri --repo "$R" -- true; wt="$R.wt/l-ri"
 rm -f "$T/.gitconfig"
-t "rerere: 조건부(includeIf onbranch) false는 보존 — 저장소 설정에 enabled를 안 씀, autoUpdate만" '[ $rc = 0 ] && ! git -C "$R" config --local --get rerere.enabled >/dev/null && [ "$(git -C "$R" config --local --get rerere.autoUpdate)" = true ] || { cat "$T/err"; git -C "$R" config --local --list; false; }'
+t "rerere: 조건부(includeIf onbranch) false는 보존 — 저장소 설정에 rerere.*를 안 씀" '[ $rc = 0 ] && [ -z "$(git -C "$R" config --local --get-regexp "^rerere\\.")" ] || { cat "$T/err"; git -C "$R" config --local --list; false; }'
+# 아스트라 2차 중간 7: 일반 레인을 먼저 띄운 뒤 조건부 false 가지 레인 — 앞 레인이 저장소에 쓴 true가 뒤 가지의 false를 가리지 않는다
+mk t15ro
+printf '[includeIf "onbranch:l-ro2"]\n\tpath = %s\n' "$T/rr-off.gitconfig" >"$T/.gitconfig"
+run --name l-ro1 --repo "$R" -- true
+run --name l-ro2 --repo "$R" -- true; wt="$R.wt/l-ro2"
+t "rerere: 일반 레인 다음에 띄운 조건부 false 가지는 그 가지에서 false 그대로(앞 레인이 가리지 않음)" '[ $rc = 0 ] && [ "$(git -C "$wt" config --get rerere.enabled)" = false ] && [ -z "$(git -C "$R" config --local --get-regexp "^rerere\\.")" ] || { git -C "$R" config --local --list; false; }'
+rm -f "$T/.gitconfig"
 
 mk t15l   # .claude/herdr-land.sh가 있으면 그것에 맡긴다
 seed .claude/herdr-verify.sh 'echo should-not-run; exit 9'
@@ -713,6 +724,17 @@ mklane l-ls
 lnd "$wt/.claude"
 t "land: herdr-land.sh에 기본 브랜치·HERDR_LAND=1을 주고 맡김(하위 폴더에서 불러도 작업 폴더 최상위, 종료 코드 그대로)" '[ $rc = 6 ] && printf "%s" "$out" | grep -Fxq "land-script main HERDR_LAND=1 l-ls" && ! printf "%s" "$out" | grep -Fq should-not-run'
 t "land-log: herdr-land.sh 출력도 로그로, 실패면 경로" 'lg=$(llog l-ls) && grep -Fxq "land-script main HERDR_LAND=1 l-ls" "$lg" && grep -Fq "전체 로그 $lg" "$T/err"'
+# 원격 조회(git remote get-url)가 착지 앞에서 실패하면 병합기가 켜졌는지 몰라 착지하지 않는다(병합기 mgon — 종료 75, 스크립트도 안 돌림)
+mkdir -p "$T/gl-gu"; printf '#!/bin/sh\n[ "$1 $2" = "remote get-url" ] && exit 128\nexec "%s" "$@"\n' "$(command -v git)" >"$T/gl-gu/git"; chmod +x "$T/gl-gu/git"
+PATH="$T/gl-gu:$PATH" lnd "$wt"
+t "land: git remote get-url이 착지 앞에서 실패하면 착지하지 않음(종료 75) — herdr-land.sh도 안 돌림" '[ $rc = 75 ] && ! printf "%s" "$out" | grep -Fq "land-script" || { echo "rc=$rc"; cat "$T/err"; false; }'
+# 아스트라 4차 중간 2: 원격 조회는 스크립트 착지 성공 직후에 새로 — 그때 조회가 실패하면 착지는 성공(0)이고 메인 폴더는 앞당기지 않고 경고만
+mk t15lg
+seed .claude/herdr-land.sh ': >"$HOME/gu.ok"; exit 0'
+mkdir -p "$T/gl-gu2"; printf '#!/bin/sh\n[ "$1 $2" = "remote get-url" ] && [ -e "$HOME/gu.ok" ] && exit 128\nexec "%s" "$@"\n' "$(command -v git)" >"$T/gl-gu2/git"; chmod +x "$T/gl-gu2/git"
+mklane l-lg; rm -f "$T/gu.ok"
+PATH="$T/gl-gu2:$PATH" lnd "$wt"
+t "land: 스크립트 착지 뒤 원격 조회는 그때 새로 — 그 조회가 실패하면 종료 0·앞당김 안 함·경고" '[ $rc = 0 ] && ! printf "%s\n" "$out" | grep -q "^hc-lane: 메인 폴더 " && grep -Fq "원격 origin을 읽지 못했다" "$T/err" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
 mk t15q   # herdr-land.sh가 자기 검증 로그(.qa/<날짜>/herdr-verify-*)를 남기는 저장소: 그 폴더와 그 안 실패 줄도
 seed .claude/herdr-land.sh 'd=.qa/$(date +%F)/herdr-verify-000000-1; mkdir -p "$d"; printf "x\n--- FAIL: TestQaDir (0.1s)\n" >"$d/go-test.log"; echo "──── go 로그 끝"; exit 1'
 mklane l-qa
@@ -724,6 +746,171 @@ seed .claude/herdr-verify.sh 'exit 0'
 mklane l-m
 lnd "$wt"
 t "land: 기본 브랜치를 안 주면 origin/HEAD(master)" '[ $rc = 0 ] && [ "$(otop master)" = l-m ]'
+
+# 15s. 착지 안전(2026-11-20 land-metrics 레인 — 아스트라 감사·운영 모델): 보내는 것은 검증한 커밋 그 자체
+mk t15s
+seed .claude/herdr-verify.sh 'exit 0'
+rg_=$(command -v git)
+# 검증하는 동안 HEAD가 바뀌면(검증이 커밋을 더함) 검증하지 않은 커밋을 보내지 않는다 — 기준 SHA를 고정해 rebase하고 후보 SHA를 명시해 push
+run --name s-mv --repo "$R" -- true; wt="$R.wt/s-mv"
+(cd "$wt" && printf 'git commit -q --allow-empty -m sneaky; exit 0\n' >.claude/herdr-verify.sh && git commit -qm s-mv -- .claude/herdr-verify.sh)
+o0=$(git -C "$D/origin.git" rev-parse main)
+lnd "$wt"
+t "land: 검증하는 동안 HEAD가 바뀌면 보내지 않음 — 검증 안 한 커밋이 main에 안 들어감" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] && grep -Fq "HEAD가 바뀌었다" "$T/err" || { cat "$T/err"; false; }'
+# 아스트라 3차 중간 4: 정상 경로가 실제로 고정한 기준 SHA로 rebase하고 후보 SHA를 명시해 push하는지 — 가짜 git이 받은 인자를 그대로 대조
+mkdir -p "$T/gs-ar"; printf '#!/bin/sh\ncase $1 in rebase|push) echo "$*" >>"$HOME/ar.log" ;; esac\nexec "%s" "$@"\n' "$rg_" >"$T/gs-ar/git"; chmod +x "$T/gs-ar/git"
+run --name s-ar --repo "$R" -- true; wt="$R.wt/s-ar"   # 검증 스크립트가 부른 횟수를 직접 남긴다(아스트라 5차 중간 2)
+(cd "$wt" && printf 'echo x >>"$HOME/vc.log"; exit 0\n' >.claude/herdr-verify.sh && git commit -qm s-ar -- .claude/herdr-verify.sh)
+ar0=$(git -C "$D/origin.git" rev-parse main); rm -f "$T/ar.log" "$T/vc.log"
+PATH="$T/gs-ar:$PATH" lnd "$wt"
+vc1=$(wc -l <"$T/vc.log" 2>/dev/null | tr -d ' ')
+t "land: rebase는 고정한 기준 SHA(그때 origin/main)로, push는 원격 이름 origin에 후보 SHA:refs/heads/main으로(HEAD·참조 이름·주소가 아니라)" '[ $rc = 0 ] && [ "$(otop)" = s-ar ] && [ "$vc1" = 1 ] && grep -qx "rebase -q $ar0" "$T/ar.log" && m_=$(git -C "$D/origin.git" rev-parse main) && grep -Eqx "push --atomic origin $m_:refs/heads/main $m_:refs/hc-landed/s-ar/[0-9]{10}" "$T/ar.log" || { echo "rc=$rc ar0=$ar0 vc1=$vc1"; cat "$T/ar.log"; cat "$T/err"; false; }'
+# 아스트라 4차 중간 5·5차 중간 2: 이미 반영된 깨끗한 레인을 다시 부르면 검증·push 없이 「이미 들어가 있다」·종료 0 — 검증 횟수는 스크립트가 남긴 수로
+rm -f "$T/ar.log"
+PATH="$T/gs-ar:$PATH" lnd "$wt"
+vc2=$(wc -l <"$T/vc.log" 2>/dev/null | tr -d ' ')
+t "land: 이미 반영된 깨끗한 레인 재호출은 종료 0·검증 0번·push 0번" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "이미 들어가 있다" && ! grep -q "^push " "$T/ar.log" && [ "$vc1" = 1 ] && [ "$vc2" = "$vc1" ] || { echo "rc=$rc vc1=$vc1 vc2=$vc2"; printf "%s\n" "$out"; cat "$T/ar.log"; false; }'
+o0=$(git -C "$D/origin.git" rev-parse main)
+# rebase 뒤 HEAD 조회가 0인데 값이 이 저장소의 커밋이 아니면 검증·push 안 함(빈 후보로 push하면 main 지우기)
+mkdir -p "$T/gs-gh"
+printf '#!/bin/sh\nm='"'"'%s'"'"'\n[ "$1" = rebase ] && : >"$m"\nif [ -e "$m" ] && [ "$1" = rev-parse ]; then for a in "$@"; do [ "$a" = HEAD ] && { [ -z "$GHOST" ] || echo "$GHOST"; exit 0; }; done; fi\nexec "%s" "$@"\n' "$T/gs-gh.mark" "$rg_" >"$T/gs-gh/git"; chmod +x "$T/gs-gh/git"
+mklane s-gh
+rm -f "$T/gs-gh.mark"
+GHOST=$(printf '%040d' 1) PATH="$T/gs-gh:$PATH" lnd "$wt"
+t "land: rebase 뒤 HEAD 값이 커밋이 아니면(없는 SHA) 아무것도 안 보냄" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] && grep -Fq "커밋이 아니다" "$T/err" || { cat "$T/err"; false; }'
+rm -f "$T/gs-gh.mark"
+GHOST= PATH="$T/gs-gh:$PATH" lnd "$wt"
+t "land: rebase 뒤 HEAD 조회가 빈 값이면 아무것도 안 보냄(빈 후보 = main 지우기)" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse -q --verify main)" = "$o0" ] && grep -Fq "HEAD를 읽지 못했다" "$T/err" || { cat "$T/err"; false; }'
+# 검증이 추적 파일·색인을 바꾸면 검증한 파일과 보낼 커밋이 다르다 — 보내지 않음
+run --name s-vt --repo "$R" -- true; wt="$R.wt/s-vt"
+(cd "$wt" && printf 'echo "# 검증이 고침" >>.claude/herdr-verify.sh; exit 0\n' >.claude/herdr-verify.sh && git commit -qm s-vt -- .claude/herdr-verify.sh)
+lnd "$wt"
+t "land: 검증이 추적 파일을 바꾸면 push 안 함" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] && grep -Fq "추적 파일" "$T/err" || { cat "$T/err"; false; }'
+run --name s-vi --repo "$R" -- true; wt="$R.wt/s-vi"
+(cd "$wt" && echo a >s-vi.txt && git add -- s-vi.txt && printf 'echo b >s-vi.txt; git add -- s-vi.txt; exit 0\n' >.claude/herdr-verify.sh && git commit -qm s-vi -- s-vi.txt .claude/herdr-verify.sh)
+lnd "$wt"
+t "land: 검증이 색인을 바꿔도(git add) push 안 함" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] && grep -Fq "추적 파일" "$T/err" || { cat "$T/err"; false; }'
+# 아스트라 3차 중간 3: 보낼 커밋이 없어도(후보 = 기준) rebase 뒤 작업 트리 확인은 한다 — rebase(훅)가 추적 파일을 바꿨는데 「이미 들어가 있다」로 0이었다
+mkdir -p "$T/gs-tc"; printf '#!/bin/sh\nif [ "$1" = rebase ]; then "%s" "$@"; r=$?; echo "# rebase가 고침" >>.claude/herdr-verify.sh; exit $r; fi\nexec "%s" "$@"\n' "$rg_" "$rg_" >"$T/gs-tc/git"; chmod +x "$T/gs-tc/git"
+run --name s-tc --repo "$R" -- true; wt="$R.wt/s-tc"
+PATH="$T/gs-tc:$PATH" lnd "$wt"
+t "land: 후보 = 기준이어도 rebase 뒤 추적 파일이 바뀌었으면 「이미 들어가 있다」로 끝내지 않고 멈춤" '[ $rc != 0 ] && grep -Fq "rebase 뒤" "$T/err" && ! printf "%s" "$out" | grep -Fq "이미 들어가 있다" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+# git 실패를 성공·없음·「아님」으로 읽지 않는다(운영 모델): git status 실패 = 깨끗함 아님, push 응답은 사라질 수 있다, merge-base 실패 = 거절 아님
+mkdir -p "$T/gs-st" "$T/gs-lost" "$T/gs-pf" "$T/gs-mb"
+printf '#!/bin/sh\n[ "$1" = status ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gs-st/git"
+printf '#!/bin/sh\nif [ "$1" = push ]; then "%s" "$@" >/dev/null 2>&1; exit 1; fi\nexec "%s" "$@"\n' "$rg_" "$rg_" >"$T/gs-lost/git"   # 들어갔는데 응답이 사라짐
+printf '#!/bin/sh\nm='"'"'%s'"'"'\nif [ "$1" = push ]; then "%s" "$@" >/dev/null 2>&1; : >"$m"; exit 1; fi\ncase $1 in fetch|ls-remote) [ -e "$m" ] && exit 128 ;; esac\nexec "%s" "$@"\n' "$T/gs-pf.mark" "$rg_" "$rg_" >"$T/gs-pf/git"   # 응답 유실 + 다시 볼 ls-remote·fetch도 실패
+printf '#!/bin/sh\n[ "$1" = push ] && exit 1\n[ "$1" = merge-base ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gs-mb/git"   # push 실패 뒤 견주기 실패
+chmod +x "$T/gs-st/git" "$T/gs-lost/git" "$T/gs-pf/git" "$T/gs-mb/git"
+mklane s-st
+PATH="$T/gs-st:$PATH" lnd "$wt"
+t "land: git status가 실패하면 「깨끗함」으로 읽지 않고 멈춤 — push 안 함" '[ $rc != 0 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] && grep -Fq "git status" "$T/err" || { cat "$T/err"; false; }'
+mklane s-lost
+PATH="$T/gs-lost:$PATH" lnd "$wt"
+t "land: push 응답이 사라져도(원격에 들어감) fetch해 후보가 원격 기본에 있으면 착지로 끝냄 — 종료 0" '[ $rc = 0 ] && [ "$(otop)" = s-lost ] && printf "%s\n" "$out" | grep -Fq "들어가 있다" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+# 아스트라 3차 중간 1: 착지 뒤 메인 폴더 앞당김 — 저장소 설정 mergeOptions=--squash면 merge가 HEAD는 그대로·색인만 바꾼 채 0이라 「앞당김」이라 했다
+mklane s-sq
+git -C "$R" config branch.main.mergeOptions --squash
+PATH="$T/gs-lost:$PATH" lnd "$wt"
+git -C "$R" config --unset branch.main.mergeOptions
+t "land: 응답 유실 복구 뒤 메인 폴더 앞당김도 squash 설정에 안 바뀜 — 메인 폴더 main = origin/main, 깨끗" '[ $rc = 0 ] && [ "$(git -C "$R" rev-parse main)" = "$(git -C "$D/origin.git" rev-parse main)" ] && [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; git -C "$R" status --short; false; }'
+# 아스트라 4차 중간 1·3: 메인 폴더 앞당김의 git 조회 실패 — status·ls-files가 실패하면 깨끗함으로 읽지 않고 안 앞당김,
+# merge가 성공한 뒤 HEAD만 못 읽으면 「그대로 둠」이 아니라 「merge 성공, 최종 HEAD 확인 불가」. 가짜 git은 메인 폴더 안에서만 실패
+MAINF=$(cd "$R" && pwd -P); mkdir -p "$T/gs-mf"
+printf '#!/bin/sh\nif [ -n "$MF_FAIL" ] && [ "$(pwd -P)" = "$MAINF" ]; then\n  case "$MF_FAIL:$1" in status:status|lsfiles:ls-files) exit 128 ;; esac\n  if [ "$MF_FAIL:$1" = revparse:merge ]; then "%s" "$@"; r=$?; : >"$HOME/mf.merged"; exit $r; fi\n  if [ "$MF_FAIL:$1" = revparse:rev-parse ] && [ -e "$HOME/mf.merged" ]; then for a in "$@"; do [ "$a" = HEAD ] && exit 128; done; fi\nfi\nexec "%s" "$@"\n' "$rg_" "$rg_" >"$T/gs-mf/git"; chmod +x "$T/gs-mf/git"
+for mf_ in status lsfiles; do
+  mklane "s-mf-$mf_"; lm0=$(git -C "$R" rev-parse main)
+  MAINF=$MAINF MF_FAIL=$mf_ PATH="$T/gs-mf:$PATH" lnd "$wt"
+  t "land: 메인 폴더 앞당김에서 $mf_ 조회가 실패하면 깨끗함으로 읽지 않고 안 앞당김(착지는 성공)" '[ $rc = 0 ] && [ "$(otop)" = "s-mf-$mf_" ] && [ "$(git -C "$R" rev-parse main)" = "$lm0" ] && grep -Fq "앞당김 건너뜀" "$T/err" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+done
+mklane s-mf-rp; rm -f "$T/mf.merged"
+MAINF=$MAINF MF_FAIL=revparse PATH="$T/gs-mf:$PATH" lnd "$wt"
+t "land: 메인 폴더 merge는 성공했는데 HEAD만 못 읽으면 「그대로 둠」이 아니라 merge 성공·최종 HEAD 확인 불가" '[ $rc = 0 ] && [ -e "$T/mf.merged" ] && [ "$(git -C "$R" rev-parse main)" = "$(git -C "$D/origin.git" rev-parse main)" ] && grep -Fq "최종 HEAD" "$T/err" && ! grep -Fq "그대로 둠" "$T/err" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+mklane s-pf
+rm -f "$T/gs-pf.mark"
+PATH="$T/gs-pf:$PATH" lnd "$wt"
+t "land: push 응답이 사라지고 다시 볼 fetch도 실패하면 착지·거절로 정하지 않고 「모름」으로 멈춤" '[ $rc != 0 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" || { cat "$T/err"; false; }'
+mklane s-mb; o0=$(git -C "$D/origin.git" rev-parse main)
+PATH="$T/gs-mb:$PATH" lnd "$wt"
+t "land: push 실패 뒤 원격과 견주기(merge-base)가 실패하면 「거절」로 읽어 다시 하지 않고 「모름」으로 멈춤" '[ $rc != 0 ] && [ $rc != 4 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/err"; false; }'
+# push만 실패(원격은 닿고 그대로) — 원격 기본이 후보 안에 있으니 앞선 다른 push가 아니다: 「push 실패」로 멈추고 다시 하지 않음
+mkdir -p "$T/gs-pn"; printf '#!/bin/sh\n[ "$1" = push ] && exit 1\nexec "%s" "$@"\n' "$rg_" >"$T/gs-pn/git"; chmod +x "$T/gs-pn/git"
+mklane s-pn; o0=$(git -C "$D/origin.git" rev-parse main)
+PATH="$T/gs-pn:$PATH" lnd "$wt"
+t "land: push만 실패하고 원격은 그대로면 「push 실패」로 멈춤 — 거절 아님, 다시 안 함" '[ $rc = 1 ] && grep -Fq "다른 쪽 push가 앞선 것이 아니다" "$T/err" && ! grep -Fq 거절됨 "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/err"; false; }'
+# 아스트라 5차 중간 3: 두 번째 견주기만 실패 — push 실패 뒤 첫 merge-base(후보가 원격에 있나)는 1(없음), 두 번째(원격이 후보 안에 있나)는 128.
+# 「거절」로 읽어 다시 하지 않고 「모름」으로 멈춘다 — push는 착지 표식 실은 것 + 표식 빼고 한 번 더(fill-dup-guard) 둘뿐(그 뒤 다시 0번)
+mkdir -p "$T/gs-mb2"
+printf '#!/bin/sh\nif [ "$1" = push ]; then echo push >>"$HOME/mb2.log"; exit 1; fi\nif [ "$1" = merge-base ] && [ -s "$HOME/mb2.log" ]; then echo mb >>"$HOME/mb2.log"; [ "$(grep -c "^mb" "$HOME/mb2.log")" = 1 ] && exit 1; exit 128; fi\nexec "%s" "$@"\n' "$rg_" >"$T/gs-mb2/git"; chmod +x "$T/gs-mb2/git"
+mklane s-mb2; o0=$(git -C "$D/origin.git" rev-parse main); rm -f "$T/mb2.log"
+PATH="$T/gs-mb2:$PATH" lnd "$wt"
+t "land: push 실패 뒤 첫 견주기 1·두 번째 견주기 128이면 「모름」으로 멈춤 — 거절 아님, push 다시 0번" '[ $rc != 0 ] && [ $rc != 4 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" && [ "$(grep -c "^push" "$T/mb2.log")" = 2 ] && [ "$(grep -c "^mb" "$T/mb2.log")" = 2 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/mb2.log"; cat "$T/err"; false; }'
+# git remote get-url의 일시 오류(종료 2 아님)를 원격 없음으로 읽으면 원격 저장소인데 로컬 main을 올린다
+mkdir -p "$T/gs-gu"; printf '#!/bin/sh\n[ "$1 $2" = "remote get-url" ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gs-gu/git"; chmod +x "$T/gs-gu/git"
+mklane s-gu; lm0=$(git -C "$R" rev-parse main)
+PATH="$T/gs-gu:$PATH" lnd "$wt"
+t "land: git remote get-url이 실패하면 원격 없음으로 읽지 않고 멈춤 — 로컬 main 그대로" '[ $rc != 0 ] && grep -Fq "git remote get-url" "$T/err" && [ "$(git -C "$R" rev-parse main)" = "$lm0" ] || { cat "$T/err"; false; }'
+# 아스트라 5차 중간 1: 메인 폴더를 A→B로 앞당긴 직후 다른 착지가 같은 폴더를 B→C로 더 앞당기면(최종 HEAD가 목표를 품음) 「그대로 둠」이 아니라 실제 HEAD를 알린다.
+# 가짜 git은 메인 폴더의 merge가 성공한 뒤 커밋 하나를 더 얹는다(다른 착지 흉내). 메인 폴더 main이 origin보다 앞서니 이 절 맨 끝에 둔다
+mkdir -p "$T/gs-ah"; printf '#!/bin/sh\nif [ "$1" = merge ] && [ "$(pwd -P)" = "$MAINF" ]; then "%s" "$@" || exit; exec "%s" commit -q --allow-empty -m further; fi\nexec "%s" "$@"\n' "$rg_" "$rg_" "$rg_" >"$T/gs-ah/git"; chmod +x "$T/gs-ah/git"
+mklane s-ah
+MAINF=$MAINF PATH="$T/gs-ah:$PATH" lnd "$wt"
+t "land: 메인 폴더가 목표보다 더 앞으로 갔으면(목표를 품음) 「그대로 둠」이 아니라 실제 HEAD로 앞당김" '[ $rc = 0 ] && [ "$(git -C "$R" log -1 --format=%s main)" = further ] && git -C "$R" merge-base --is-ancestor "$(git -C "$D/origin.git" rev-parse main)" main && printf "%s\n" "$out" | grep -Fq "메인 폴더 앞당김" && printf "%s\n" "$out" | grep -Fq "$(git -C "$R" rev-parse --short main)" && ! grep -Fq "그대로 둠" "$T/err" || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+# 착지 스크립트 도중 터미널 Ctrl-C(그룹 SIGINT)면 스크립트도 같이 멈춰 push가 없다(검증·스크립트를 앞에서 돌리는 지금 꼴을 지킨다 —
+# 배경으로 돌리면 SIGINT를 무시해 스크립트가 남아 push했다). 시험 셸의 배경 명령은 SIGINT를 무시한 채 시작하니 기본값으로 돌려 제 그룹으로
+mk t15sg
+# 스크립트는 스스로 시간을 재지 않는다 — 신호를 받거나 부모의 제어 파이프가 닫힐 때까지 기다리고, 「go」 줄을 받았을 때만 push.
+# 시간 상한과 정리는 부모(시험)가 맡는다: 늦게 보낸 신호도 같은 결과(아스트라 5차 중간 4 — 스크립트가 30초 뒤 스스로 9로 끝나 순서에 달렸다)
+seed .claude/herdr-land.sh 'git fetch -q origin && git rebase -q origin/main && echo $$ >"$HOME/sg.pid" && read -r l <"$HOME/sg.fifo" && [ "$l" = go ] || { : >"$HOME/sg.closed"; exit 9; }; HERDR_LAND=1 git push -q origin HEAD:main'
+mklane s-gi
+rm -f "$T/sg.pid" "$T/sg.closed" "$T/sg.fifo"; o0=$(git -C "$D/origin.git" rev-parse main)
+mkfifo "$T/sg.fifo"; exec 7<>"$T/sg.fifo"   # 부모만 쥔 쓰기 끝(자식에는 7>&-로 안 넘김) — 닫으면 스크립트의 read가 EOF로 풀린다
+(cd "$wt" && exec python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setpgid(0, 0); os.execvp(sys.argv[1], sys.argv[1:])' "$LANE" land >/dev/null 2>"$T/err" 7>&-) & lp=$!
+i=0; while [ ! -s "$T/sg.pid" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done; rdyf=; [ -s "$T/sg.pid" ] || rdyf=1
+kill -INT -- "-$lp"; ksig=$?   # 신호 전송 성공(ksig 0)과 hc-lane이 SIGINT로 끝남(130)을 함께 본다(아스트라 4차 중간 4)
+i=0; while kill -0 "$lp" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done   # 부모의 시간 상한: 10초 안에 안 끝나면 제어 파이프를 닫아 풀어 준다
+exec 7>&-; wait "$lp"; rc=$?
+sgp=$(cat "$T/sg.pid" 2>/dev/null)   # 스크립트가 끝났는지 그 pid로만 본다(빈 값이면 보지 않음 — kill -0 0은 그룹 전체)
+i=0; while [ -n "$sgp" ] && kill -0 "$sgp" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+sgl=; [ -z "$sgp" ] || ! kill -0 "$sgp" 2>/dev/null || sgl=1
+t "land: 착지 스크립트 도중 그룹 Ctrl-C면 스크립트도 끝나 push 없음 — 신호로 끝남(130), 파이프 닫힘으로 풀린 것 아님" '[ -z "$rdyf" ] && [ "$ksig" = 0 ] && [ -z "$sgl" ] && [ $rc = 130 ] && [ ! -e "$T/sg.closed" ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc rdyf=$rdyf ksig=$ksig sgl=$sgl"; ls "$T/sg.closed" 2>/dev/null; cat "$T/err"; false; }'
+# 아스트라 6차 높음 1: origin의 push 주소가 여럿이면 한 곳만 받아도(둘째는 없는 경로) fetch로 본 첫 곳으로 착지라 했다 — 지원하지 않고 막는다.
+# push 주소 조회가 실패해도 모르면 착지하지 않는다
+mk t15pu
+seed .claude/herdr-verify.sh 'exit 0'
+mklane p-2; o0=$(git -C "$D/origin.git" rev-parse main)
+git -C "$R" config --add remote.origin.pushurl "$D/origin.git"; git -C "$R" config --add remote.origin.pushurl "$D/없는 곳.git"
+lnd "$wt"
+t "land: origin의 push 주소가 둘이면 착지를 시작하지 않음 — 첫 곳에도 안 보냄" '[ $rc != 0 ] && grep -Fq "push 주소가 하나가 아니다" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+git -C "$R" config --unset-all remote.origin.pushurl
+mkdir -p "$T/gs-pu"; printf '#!/bin/sh\n[ "$1 $2 $3" = "remote get-url --push" ] && exit 128\nexec "%s" "$@"\n' "$(command -v git)" >"$T/gs-pu/git"; chmod +x "$T/gs-pu/git"
+PATH="$T/gs-pu:$PATH" lnd "$wt"
+t "land: push 주소 조회가 실패하면 착지하지 않음(모르면 안 함)" '[ $rc != 0 ] && grep -Fq "push 주소를 읽지 못했다" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+# 아스트라 7차 높음: 검증하는 동안 push 주소가 하나에서 둘로 바뀌면(includeIf onbranch 등) 시작 때 검사만으로는 한 곳만 받고도 종료 0이었다.
+# 검증 스크립트가 push 주소 둘(origin과 없는 곳)을 더한다 — 보내기 전에 멈추고 origin에도 안 보낸다
+run --name p-cv --repo "$R" -- true; wt="$R.wt/p-cv"
+(cd "$wt" && printf 'u=$(git remote get-url origin); git config --add remote.origin.pushurl "$u"; git config --add remote.origin.pushurl "$u.없음"; exit 0\n' >.claude/herdr-verify.sh && git commit -qm p-cv -- .claude/herdr-verify.sh)
+o0=$(git -C "$D/origin.git" rev-parse main)
+lnd "$wt"
+pu0=$(git -C "$R" remote get-url origin)
+t "land: 검증하는 동안 push 주소가 바뀌면 보내지 않음 — origin에도 안 들어감, 진단에 주소를 찍지 않음(아스트라 8차 높음 3)" '[ $rc != 0 ] && grep -Fq "push 주소가 바뀌었다" "$T/err" && ! grep -Fq "$pu0" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+git -C "$R" config --unset-all remote.origin.pushurl
+# 아스트라 7차 높음(지휘 결정): 브랜치별 조건 설정(includeIf onbranch)이 있으면 착지를 시작하지 않는다 — HEAD 상태에 따라 push 주소가 바뀐다.
+# 설정 조회가 실패해도 시작하지 않는다
+mklane p-ii; o0=$(git -C "$D/origin.git" rev-parse main)
+git -C "$R" config "includeIf.onbranch:p-ii.path" "$T/없는.gitconfig"
+lnd "$wt"
+git -C "$R" config --unset "includeIf.onbranch:p-ii.path"
+t "land: includeIf onbranch 설정이 있으면 착지를 시작하지 않음 — origin에 안 들어감" '[ $rc != 0 ] && grep -Fq "includeIf onbranch" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+mkdir -p "$T/gs-ic"; printf '#!/bin/sh\n[ "$1 $2" = "config --get-regexp" ] && exit 128\nexec "%s" "$@"\n' "$(command -v git)" >"$T/gs-ic/git"; chmod +x "$T/gs-ic/git"
+PATH="$T/gs-ic:$PATH" lnd "$wt"
+t "land: 조건 설정 조회가 실패하면 착지하지 않음(모르면 안 함)" '[ $rc != 0 ] && grep -Fq "git 설정을 읽지 못했다" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
+# 아스트라 8차 높음 2: ls-remote는 이름 끝도 맞춘다 — 후보가 refs/archive/refs/heads/main에만 있고 원격 main은 그대로인데 착지라 했다.
+# 가짜 git: push는 보내지 않고 실패, ls-remote는 그 앞에 후보를 가리키는 refs/archive/refs/heads/main 줄을 더함
+mkdir -p "$T/gs-lr"; printf '#!/bin/sh\n[ "$1" = push ] && exit 1\nif [ "$1" = ls-remote ]; then printf "%%s\\trefs/archive/refs/heads/main\\n" "$(git rev-parse HEAD)"; fi\nexec "%s" "$@"\n' "$(command -v git)" >"$T/gs-lr/git"; chmod +x "$T/gs-lr/git"
+mklane p-lr; o0=$(git -C "$D/origin.git" rev-parse main)
+PATH="$T/gs-lr:$PATH" lnd "$wt"
+t "land: ls-remote에서 둘째 칸이 정확히 refs/heads/main인 줄만 본다 — 다른 ref의 후보로 착지라 하지 않음" '[ $rc != 0 ] && ! printf "%s\n" "$out" | grep -Fq "들어가 있다" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; printf "%s\n" "$out"; cat "$T/err"; false; }'
 
 # 16. hc-lane guard: 공용 git 폴더 pre-push 관문
 g() { out=$("$LANE" guard "$@" 2>"$T/err"); rc=$?; }
@@ -837,6 +1024,20 @@ git -C "$R" checkout -q -b side
 lnd "$wt"
 t "원격 없음 land: main이 아무 데도 체크아웃 안 됐으면 update-ref로 올림(메인 폴더 브랜치는 그대로)" '[ $rc = 0 ] && [ "$(ltop)" = o-c ] && [ "$(git -C "$R" symbolic-ref --short HEAD)" = side ] && [ "$(ltop side)" = o-b ] || { cat "$T/err"; false; }'
 git -C "$R" checkout -q main
+# git worktree list가 실패하면 빈 목록으로 읽지 않는다 — 체크아웃된 main에 update-ref하면 메인 폴더 작업 트리·색인이 뒤처진다
+rg_=$(command -v git); mkdir -p "$T/go-wl"; printf '#!/bin/sh\n[ "$1 $2" = "worktree list" ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/go-wl/git"; chmod +x "$T/go-wl/git"
+run --name o-w --repo "$R" -- true; wt="$R.wt/o-w"
+(cd "$wt" && echo o-w >o-w.txt && git add -- o-w.txt && git commit -qm o-w -- o-w.txt)
+lm0=$(git -C "$R" rev-parse main)
+PATH="$T/go-wl:$PATH" lnd "$wt"
+t "원격 없음 land: git worktree list가 실패하면 멈춤 — 로컬 main 그대로" '[ $rc != 0 ] && grep -Fq "worktree list" "$T/err" && [ "$(git -C "$R" rev-parse main)" = "$lm0" ] || { cat "$T/err"; false; }'
+# 저장소 설정 branch.main.mergeOptions=--squash면 merge --ff-only가 main을 안 움직이고 색인에만 올린 채 0 — 착지가 된 줄 알았다(아스트라 최종 2차 높음 1의 안전 몫)
+run --name o-s --repo "$R" -- true; wt="$R.wt/o-s"
+(cd "$wt" && echo o-s >o-s.txt && git add -- o-s.txt && git commit -qm o-s -- o-s.txt)
+git -C "$R" config branch.main.mergeOptions --squash
+lnd "$wt"
+git -C "$R" config --unset branch.main.mergeOptions
+t "원격 없음 land: squash 설정이 있어도 로컬 main을 후보로 fast-forward — 메인 폴더 깨끗" '[ $rc = 0 ] && [ "$(ltop)" = o-s ] && [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] || { echo "rc=$rc"; cat "$T/err"; git -C "$R" status --short; false; }'
 git -C "$R" branch -q -m main master
 run --name o-m --repo "$R" -- true
 t "원격 없음: main이 없고 master가 있으면 master 기준" '[ $rc = 0 ] && has LANE_BASE=master && printf "%s" "$out" | grep -Fq "hc-lane land master"'
@@ -2533,6 +2734,35 @@ t "land: 없으면 0" 'printf "%s" "$out" | grep -Fxq "land-prio 0" || { printf 
 rm -f "$HCLOG"
 HERDR_LAND_PRIORITY=2 HC_LANE_FILL=1 HC_FAKE_RUN_ADDR=t9lp run --start-wait 0 --name lane-lp --repo "$R" -- claude
 t "띄우기: HERDR_LAND_PRIORITY를 레인 환경에" '[ $rc = 0 ] && has HERDR_LAND_PRIORITY=2 || { cat "$T/err"; false; }'
+
+# 23. 주차·이어 띄우기(2026-11-20 fill-existing-defects, 사용자 「노는 워크트리 없이」): 먼저 띄운 레인이 준비를 끝내면 hc-lane park로
+# 가지를 원격 lane/<레인>에 두고 임대를 같은 --atomic push로 놓은 뒤 「주차」 사건 → clean이 「제출됨」으로 지움 → 선행 착지 뒤
+# hc-lane --resume이 그 가지에서 새 작업 트리를 만든다
+mk t23
+seed .claude/herdr-verify.sh 'exit 0'
+EVF=$T/.local/state/hc-lane/events.tsv
+run --name pk-a --repo "$R" -- claude; pa_=$(lref pk-a); wt="$R.wt/pk-a"
+(cd "$wt" && echo prep >pk.txt)
+out=$(cd "$wt" && HC_LANE=pk-a HC_LANE_LEASE=$pa_ "$LANE" park 2>"$T/err"); rc=$?
+t "park: 커밋 안 된 새 파일이 있으면 종료 1, 원격 lane/<레인> 안 만듦·임대 그대로" '[ $rc = 1 ] && ! git -C "$D/origin.git" rev-parse -q --verify refs/heads/lane/pk-a >/dev/null && [ "$(lref pk-a)" = "$pa_" ] || { cat "$T/err"; false; }'
+(cd "$wt" && git add -- pk.txt && git commit -qm "pk-a: 준비" -- pk.txt); ps_=$(git -C "$wt" rev-parse HEAD)
+out=$(cd "$wt" && HC_LANE=pk-a HC_LANE_LEASE=$pa_ "$LANE" park "실패 시험만" 2>"$T/err"); rc=$?
+t "park: HEAD를 원격 lane/<레인>에, 임대는 같은 push로 놓음, 「주차」 사건(sha·한 줄)" '[ $rc = 0 ] && [ "$(git -C "$D/origin.git" rev-parse refs/heads/lane/pk-a)" = "$ps_" ] && [ -z "$(lref pk-a)" ] && tail -n 1 "$EVF" | grep -F "${tab}pk-a${tab}주차${tab}$ps_${tab}" | grep -Fq "실패 시험만" && printf "%s" "$out" | grep -Fq "임대 놓음" || { printf "%s\n" "$out"; cat "$T/err"; tail -n 2 "$EVF"; false; }'
+out=$(cd "$wt" && HC_LANE=pk-a "$LANE" park 2>"$T/err"); rc=$?
+t "park: 같은 커밋으로 다시 불러도 종료 0(같은 값으로 모임)" '[ $rc = 0 ] && [ "$(git -C "$D/origin.git" rev-parse refs/heads/lane/pk-a)" = "$ps_" ] || { cat "$T/err"; false; }'
+out=$(cd "$R" && "$LANE" clean --repo "$R" --branch pk-a 2>"$T/err"); rc=$?
+t "park 뒤 clean: 원격 lane/<레인>에 그대로 있는 가지라 「제출됨」으로 지움(자리 비움)" '[ $rc = 0 ] && [ ! -e "$wt" ] && ! git -C "$R" show-ref -q --verify refs/heads/pk-a && printf "%s" "$out" | grep -Fq "제출됨" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+seedp c c   # 그사이 선행이 main에 들어감
+run --resume --name pk-a --repo "$R" -- claude
+t "--resume: 주차한 가지에서 새 작업 트리(준비 커밋 그대로), upstream은 origin/main, 임대 새로 잡음" '[ $rc = 0 ] && [ "$(git -C "$wt" rev-parse HEAD)" = "$ps_" ] && [ "$(git -C "$wt" rev-parse --abbrev-ref "@{u}")" = origin/main ] && [ -n "$(lref pk-a)" ] || { cat "$T/err"; false; }'
+run --resume --name pk-z --repo "$R" -- claude
+t "--resume: 주차한 가지가 없으면 안 띄움(종료 1, 작업 트리 없음)" '[ $rc != 0 ] && [ ! -e "$R.wt/pk-z" ] && grep -Fq "origin/lane/pk-z" "$T/err" || { cat "$T/err"; false; }'
+run --read --resume --name pk-r --repo "$R" -- claude
+t "--resume은 --read와 함께 쓰지 않음" '[ $rc != 0 ]'
+mk t23n; git -C "$R" remote remove origin
+mkdir -p "$R.wt"; git -C "$R" worktree add -q -b pk-n "$R.wt/pk-n" 2>/dev/null
+out=$(cd "$R.wt/pk-n" && HC_LANE=pk-n "$LANE" park 2>"$T/err"); rc=$?
+t "park: 원격 없는 저장소는 종료 3(기다림으로)" '[ $rc = 3 ] || { cat "$T/err"; false; }'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

@@ -40,7 +40,7 @@ idle     10
 hold     60
 #audit   ~/.config/herdr-tools/hc-fill-audit.md
 audit_max 2
-overlap  warn
+overlap  block
 #overlap_ignore app docs/fragments/*
 #
 # machine  이름  상한  레인상한  셈     (위에서부터 차례대로 빈 자리를 찾는다)
