@@ -1391,18 +1391,18 @@ submit_cmd() {
 # v0.NEXT@<레인>·착지 스크립트가 가지 이름을 레인으로 읽는다).
 merger_cmd() {
   # MVP-1은 한 건씩만(2026-11-20 지휘 t1cj 2차 「최소판을 더 작게」 — 묶음·준비 훅은 MVP-2)
-  mo_=0 mt_=30 mr_= mb_=
+  mo_=0 mtick_=30 mr_= mb_=   # mtick_: 빈 바퀴 쉼(초) — 다른 함수가 쓰지 않는 이름(감사 중간 1: mt_를 merge-tree 결과가 덮어 sleep <SHA>로 쉬지 않고 돌았다)
   while [ $# -gt 0 ]; do
     case $1 in
       --repo) val "$@"; mr_=$2; shift 2 ;;
       --once) mo_=1; shift ;;
-      --tick) val "$@"; mt_=$2; shift 2 ;;
+      --tick) val "$@"; mtick_=$2; shift 2 ;;
       -h|--help) usage ;;
       -*) die "merger: 알 수 없는 인자: $1" ;;
       *) [ -z "$mb_" ] || die "merger: 남는 인자: $1"; mb_=$1; shift ;;
     esac
   done
-  case $mt_ in ''|*[!0-9]*) die "merger: --tick은 초(정수): $mt_" ;; esac
+  case $mtick_ in ''|*[!0-9]*) die "merger: --tick은 초(정수): $mtick_" ;; esac
   [ -n "$mr_" ] || die "merger: --repo <병합기 전용 클론> 이 필요하다"
   # Go 빌드 캐시를 macOS가 비우는 ~/Library/Caches 밖에(2026-11-20 verify-speed-study: 워커 Mac mini에서 캐시 항목이 사라져 「could not
   # import os … no such file」로 전체 검증을 처음부터 다시 두 번). 병합기는 같은 클론·같은 캐시를 계속 쓰니 캐시가 곧 속도다
@@ -1447,12 +1447,14 @@ merger_cmd() {
   ml_=$evdir/merger-logs
   mkdir -p "$ml_" || die "merger: 로그 폴더를 만들지 못했다: $ml_"
   mme_=${HC_LANE_MACHINE:-$(hostname -s 2>/dev/null)}
-  if [ $mo_ = 1 ]; then echo "hc-lane merger: $top ($base) 큐가 빌 때까지 한 번"; else echo "hc-lane merger: $top ($base) 큐를 본다 — 빈 바퀴 ${mt_}초"; fi
+  if [ $mo_ = 1 ]; then echo "hc-lane merger: $top ($base) 큐가 빌 때까지 한 번"; else echo "hc-lane merger: $top ($base) 큐를 본다 — 빈 바퀴 ${mtick_}초"; fi
   while :; do
     mround
     # --once: 큐가 빌 때까지(시험·손으로 한 번 돌리기). 원격 오류로 못 본 바퀴면 75(아스트라 1차 중간 4 — 빈 큐와 가린다)
     if [ $mo_ = 1 ] && [ -z "$mq_" ]; then [ -z "$mer_" ] || exit 75; break; fi
-    [ -n "$mq_" ] || sleep "$mt_"
+    # 쉼 값은 매번 숫자인지 본다(아니면 30) — 어떤 함수가 덮어도 쉬지 않고 원격을 두드리지 않게
+    case $mtick_ in ''|*[!0-9]*) mtick_=30 ;; esac
+    [ -n "$mq_" ] || sleep "$mtick_"
   done
 }
 # 한 바퀴. mq_ = 처리한 큐 참조(없거나 원격 오류로 쉬면 빈 값), mer_ = 원격 오류로 못 본 것이 있음.
@@ -1527,7 +1529,7 @@ mround() {
   fi
   # 제출 내용이 이미 기본 브랜치에 다 들었으면(같은 패치가 다른 SHA로 — 합친 트리 = 기본 브랜치 트리) 착지·검증 없이 정리만
   # (2026-11-20 지휘 t1cj — 이미 든 커밋을 rebase 뒤 main과 같은 트리로 전체 검증했다)
-  if mt_=$(git merge-tree --write-tree "$B_" "${bs_[0]}" 2>/dev/null) && [ "$mt_" = "$(git rev-parse "$B_^{tree}")" ]; then
+  if mgt_=$(git merge-tree --write-tree "$B_" "${bs_[0]}" 2>/dev/null) && [ "$mgt_" = "$(git rev-parse "$B_^{tree}")" ]; then
     mbn_=1; mi_=${bi_[0]}; mdone "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$B_" "제출 내용이 이미 $base 에 있음(합친 트리가 같음)" || { mer_=1; mq_=; }
     return 0
   fi
@@ -1555,7 +1557,7 @@ mround() {
     for i_ in $(seq 1 $((${#bq_[@]} - 1))); do
       s_=${bs_[i_]}
       ianc "$s_" "$B_" && continue
-      mt_=$(git merge-tree --write-tree "$B_" "$s_" 2>/dev/null) && [ "$mt_" = "$(git rev-parse "$B_^{tree}")" ] && continue
+      mgt_=$(git merge-tree --write-tree "$B_" "$s_" 2>/dev/null) && [ "$mgt_" = "$(git rev-parse "$B_^{tree}")" ] && continue
       [ -n "$(git ls-tree --name-only "$s_" -- .claude/herdr-land.sh)" ] && [ -z "$hb_" ] && continue
       if mtouch "$s_"; then [ -z "$msu_" ] || continue; msu_=1; fi
       k_+=("$i_")

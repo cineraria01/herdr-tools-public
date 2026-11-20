@@ -710,5 +710,18 @@ kill "$op" 2>/dev/null; wait "$op" 2>/dev/null
 t "격리: 바깥 잠금 fd 19를 쥔 채여도 병합기는 시험 HOME 아래 자기 잠금으로 큐를 처리(잠금에 안 막힘)" '[ $mrc = 0 ] && [ -z "$(qrefs)" ] && ! grep -Fq "아직 돈다" "$T/merr" && ls "$T"/.local/state/hc-lane/merger.*.lock >/dev/null 2>&1 || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 t "격리: 시험은 T 밖 저장소를 못 찾는다(GIT_CEILING_DIRECTORIES), 물려받은 fd 19는 닫힘" '! git -C "$T" rev-parse --git-dir >/dev/null 2>&1 && ! { : >&19; } 2>/dev/null'
 
+# 상주 루프(감사 7c010d9 이후 중간 1, 지휘 t1cj 긴급): 착지 한 번 뒤에도 빈 바퀴는 --tick초를 쉰다 — 빈 바퀴 쉼 값을 merge-tree 결과가
+# 덮어 sleep <SHA>가 바로 끝나 쉬지 않고 git ls-remote를 두드렸다(재현 12초에 240번). 감싼 git으로 ls-remote 횟수를 센다
+rgit=$(command -v git)
+mkdir -p "$T/gc"; printf '#!/bin/bash\n[ "$1" != ls-remote ] || echo x >>"$T/lsr.count"\nexec "%s" "$@"\n' "$rgit" >"$T/gc/git"; chmod +x "$T/gc/git"
+og update-ref refs/herdr/merger/box main
+lane a l-spin spin.txt spin; land a l-spin
+: >"$T/lsr.count"
+(cd "$W/m/proj" && PATH="$T/gc:$PATH" exec "$LANE" merger --repo "$W/m/proj" --tick 1) >"$T/spin.out" 2>&1 & sp=$!
+for i in $(seq 100); do mainlog | grep -Fxq l-spin && break; sleep 0.1; done
+sleep 6; kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null
+lc=$(grep -c . "$T/lsr.count")
+t "상주 루프: 착지 한 번 뒤 빈 바퀴는 --tick 1초를 쉰다 — 6초 남짓에 ls-remote가 몇십 번 안(쉬지 않으면 수백 번)" 'mainlog | grep -Fxq l-spin && [ "$lc" -le 40 ] || { echo "ls-remote ${lc}번"; tail -5 "$T/spin.out"; false; }'
+
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]
