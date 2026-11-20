@@ -78,5 +78,27 @@ mk h; sd .claude/herdr-verify.sh 'echo verify-ran'; lane 'echo land-lane' .claud
 out=$(cd "$D/l" && HERDR_MERGER=1 "$LANE" land main 2>"$T/err"); rc=$?
 t "병합기 안 착지: 기본 브랜치에 없는 스크립트는 안 돌리고 종료 7, main 그대로" '[ $rc = 7 ] && ! printf "%s" "$out" | grep -Fq land-lane && ! otree | grep -Fxq lane'
 
+# 9. 먼저 rebase 충돌을 rerere가 기록한 풀이로 다 풀면 이어 가 새 판으로 착지(land-stale-lows 감사 낮음 1 — 이 자리의 rerere 길)
+mk i; sd .claude/herdr-land.sh "$LAND_OLD"; sd x.txt base; lane mine
+git -C "$D/l" config rerere.enabled true; git -C "$D/l" config rerere.autoUpdate true
+l0=$(git -C "$D/l" rev-parse HEAD)
+sd x.txt theirs; sd .claude/herdr-land.sh "$LAND_NEW"
+lnd
+(cd "$D/l" && printf 'mine\ntheirs\n' >x.txt && git add -- x.txt && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$D/l" reset -q --hard "$l0"
+lnd
+t "먼저 rebase 충돌을 rerere가 다 풀면: 이어 가 새 판으로 착지" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq land-new && grep -Fq "rerere가 기록한 풀이" "$T/err" && [ "$(git -C "$D/o.git" show main:x.txt | paste -sd , -)" = mine,theirs ]'
+
+# 10. 먼저 rebase 출력도 착지 로그에 남는다(감사 낮음 3 — llog_init이 먼저 rebase 뒤였다)
+t "먼저 rebase 안내 줄이 land-logs 로그에도" 'grep -rlFq "낡음 → 먼저 rebase" "$T/.local/state/hc-lane/land-logs" 2>/dev/null'
+
+# 11. origin 없는 저장소: 로컬 <기본>이 기준, 안내 줄은 「로컬 main」(감사 낮음 2 — refs/heads/main 꼴로 찍혔다)
+D=$T/k; git init -q -b main "$D/r"
+(cd "$D/r" && mkdir .claude && echo 'echo land-old' >.claude/herdr-land.sh && git add -- .claude && git commit -qm seed &&
+  git worktree add -q -b lane "$D/l" && echo 'echo land-new' >.claude/herdr-land.sh && git commit -qam new)
+(cd "$D/l" && echo x >x.txt && git add -- x.txt && git commit -qm lane)
+lnd
+t "origin 없는 저장소: 「로컬 main 보다 낡음」, 새 판으로" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq land-new && grep -Fq "가 로컬 main 보다 낡음 → 먼저 rebase" "$T/err" && ! grep -Fq refs/heads "$T/err"'
+
 echo "1..$n (실패 $fails)"
 [ $fails = 0 ]

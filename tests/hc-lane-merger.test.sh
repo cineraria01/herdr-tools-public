@@ -59,6 +59,8 @@ lane() { (cd "$W/$1/proj" && git fetch -q origin && git checkout -q -B "$2" orig
 land() { out=$(cd "$W/$1/proj" && HC_LANE=$2 "$LANE" land 2>"$T/err"); rc=$?; }
 # 병합기 MVP-1은 한 건씩(묶음 없음). 켬 표식 조회 재시도는 기다리지 않게
 export HC_LANE_MGON_WAITS=0
+# 이 파일의 앞쪽 시험은 한 건씩(MVP-1) 동작을 본다 — 묶음(기본 3)은 아래 「묶음」 시험에서 HC_LANE_MERGER_BATCH=3으로
+export HC_LANE_MERGER_BATCH=1
 merge() { mout=$(cd "$W/m/proj" && "$LANE" merger --repo "$W/m/proj" --once "$@" 2>"$T/merr"); mrc=$?; }
 
 # 1. 설정이 없으면 land는 예전 그대로(제출 없이 main에 착지)
@@ -610,6 +612,32 @@ off_
 lane a l-off2 off2.txt off2
 land a l-off2
 t "끄기: 표식을 지우면 착지 그대로" '[ $rc = 0 ] && [ "$(mainlog | head -n 1)" = l-off2 ] && ! qrefs | grep -q l-off2 || { cat "$T/err"; false; }'
+
+# 묶음(최대 3, 2026-11-20 지휘 t1cj 3번): 앞 구성원 위에 차례로 얹고 → 검증 한 번 → push 한 번(CAS). 실패면 마지막 것 빼고 다시
+on_
+bmerge() { HC_LANE_MERGER_BATCH=3 merge; }
+vcount() { grep -c . "$T/verify.log"; }
+lane a l-b1 b1.txt b1; land a l-b1; lane a l-b2 b2.txt b2; land a l-b2; lane a l-b3 b3.txt b3; land a l-b3
+v0=$(vcount); bmerge
+t "묶음 3: 셋이 검증 한 번·push 한 번으로 main에(제출 순서), 큐 비고 merge-done 셋, 일지 묶음 크기 3" '[ $mrc = 0 ] && [ "$(mainlog | head -n 3 | paste -sd , -)" = l-b3,l-b2,l-b1 ] && [ "$(vcount)" = $((v0 + 1)) ] && [ -z "$(qrefs)" ] && [ "$(og for-each-ref refs/merge-done/l-b1 refs/merge-done/l-b2 refs/merge-done/l-b3 | wc -l | tr -d " ")" = 3 ] && awk -F"\t" "\$3 == \"l-b3\" && \$7 == 3 && \$10 == \"착지\"" "$MJ" | grep -q . || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+t "묶음 3: 착지 사건 셋(「묶음 3」), 2번째부터도 레인 표식" '[ "$(awk -F"\t" "(\$4 == \"l-b1\" || \$4 == \"l-b2\" || \$4 == \"l-b3\") && \$5 == \"착지\"" "$EV" | grep -c "묶음 3")" = 3 ] && [ -n "$(og for-each-ref refs/hc-landed/l-b3/)" ]'
+# 앞 구성원 위에 얹으면 충돌하는 구성원은 이번 묶음에서 빼고 큐에 그대로 — 맨 앞이 되면 혼자(main과 충돌이면 그때 반송)
+lane a l-c1 cx.txt one; land a l-c1; lane b l-c2 cx.txt two; land b l-c2; lane a l-c3 c3.txt c3; land a l-c3
+v0=$(vcount); bmerge
+t "묶음: 충돌하는 구성원은 빼고 나머지 둘이 검증 한 번으로, 뺀 것은 다음에 혼자 → 반송" '[ $mrc = 0 ] && mainlog | grep -Fxq l-c1 && mainlog | grep -Fxq l-c3 && ! mainlog | grep -Fxq l-c2 && og for-each-ref refs/merge-failed/ | grep -q l-c2 && [ -z "$(qrefs)" ] || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+# 묶음 검증이 실패하면 마지막 것을 빼고 다시 — 실패한 제출만 혼자일 때 반송, 나머지는 들어감
+lane a l-f1 f1.txt f1; land a l-f1; lane a l-f2 f2.txt f2; land a l-f2; lane a l-f3 bad.txt f3; land a l-f3
+v0=$(vcount); bmerge
+t "묶음 실패: 셋(실패) → 둘(통과) → 셋째 혼자(실패, 반송), 검증 세 번" '[ $mrc = 0 ] && mainlog | grep -Fxq l-f1 && mainlog | grep -Fxq l-f2 && ! mainlog | grep -Fxq l-f3 && og for-each-ref refs/merge-failed/ | grep -q l-f3 && [ "$(vcount)" = $((v0 + 3)) ] && [ ! -e "$W/m/proj/.git/hc-merger/cap" ] && [ -z "$(qrefs)" ] || { echo "rc=$mrc v=$(vcount)/$v0"; cat "$T/merr"; false; }'
+# 「한 묶음에 하나만」 경로(기본 브랜치의 .claude/herdr-merge-solo): 그 경로를 건드리는 구성원은 묶음에 하나만
+printf 'docs/frag/\n' >"$T/solo.src"
+(d=$(mktemp -d "$T/so.XXXXXX") && git clone -q "$O" "$d/c" && cd "$d/c" && cp "$T/solo.src" .claude/herdr-merge-solo && git add .claude/herdr-merge-solo && git commit -qm o-solo && git push -q origin main)
+(cd "$W/a/proj" && git fetch -q origin && git checkout -q -B l-s1 origin/main && mkdir -p docs/frag && printf 's1\n' >docs/frag/s1.md && git add docs/frag/s1.md && git commit -qm l-s1); land a l-s1
+(cd "$W/b/proj" && git fetch -q origin && git checkout -q -B l-s2 origin/main && mkdir -p docs/frag && printf 's2\n' >docs/frag/s2.md && git add docs/frag/s2.md && git commit -qm l-s2); land b l-s2
+lane a l-s3 s3.txt s3; land a l-s3
+v0=$(vcount); bmerge
+t "한 묶음에 하나만 경로: 첫 묶음은 l-s1+l-s3, l-s2는 다음에 혼자 — 검증 두 번" '[ $mrc = 0 ] && mainlog | grep -Fxq l-s1 && mainlog | grep -Fxq l-s2 && mainlog | grep -Fxq l-s3 && [ "$(vcount)" = $((v0 + 2)) ] && [ "$(mainlog | head -n 1)" = l-s2 ] || { echo "rc=$mrc v=$(vcount)/$v0"; mainlog | head -5; cat "$T/merr"; false; }'
+off_
 
 # 2단계(2026-11-20 지휘 t1cj): 전용 착지 스크립트(.claude/herdr-land.sh)가 있는 저장소도 받는다 — 착지는 그 스크립트의 기본 브랜치 판.
 # 기본 브랜치 판 = 큐 lease를 싣는 진짜 꼴(HERDR_LAND_PUSH_EXTRA를 main push에 --atomic), 레인이 고친 판 = 표시만 남기고 아무것도 안 함

@@ -104,7 +104,9 @@ usage() {
                 .claude/herdr-land.sh가 있으면 그 기본 브랜치 판(제출 트리 속 판 아님)에 맡기고, 기본 브랜치에 없는 스크립트가 작업 트리에
                 있거나 rebase로 막 생겼으면 종료 7. 이 둘(과 HERDR_MERGER)은 검증 자식에 물려주지 않는다
        hc-lane merger --repo <병합기 전용 클론> [--once] [--tick <초>] [<기본 브랜치>]   (병합기 기계에서 하나만)
-  merger        큐(refs/merge-queue/*)를 이름 순으로 하나씩 — 새 임시 작업 트리에서 준비 훅(.claude/herdr-setup.sh, 있으면) 뒤
+  merger        큐(refs/merge-queue/*)를 이름 순으로 묶음(HC_LANE_MERGER_BATCH, 기본 3 — 앞 구성원 위에 차례로 얹고 검증 한 번·push
+                한 번, 실패면 마지막 것 빼고 다시, 기본 브랜치의 .claude/herdr-merge-solo 경로는 묶음에 하나만)으로 —
+                새 임시 작업 트리에서 준비 훅(.claude/herdr-setup.sh, 있으면) 뒤
                 레인 이름 그대로의 로컬 가지로 HERDR_MERGER=1 hc-lane land, 큐 표식은 HERDR_LAND_PUSH_EXTRA로 기본 브랜치 push가 함께
                 지운다. 기본 브랜치에 없는 .claude/herdr-land.sh를 제출이 새로 들이면 반송, 종료 7은 일시 실패. 바퀴마다 켬 표식이 이 기계(HC_LANE_MACHINE,
                 없으면 hostname -s)인지 보고, 꺼졌으면 쉬고 다른 기계면 멈춘다. 표식은 길 안내일 뿐 — 정확성은 기본 브랜치 CAS
@@ -1253,6 +1255,20 @@ rr_ok() {
   # 두 확인 명령이 각각 성공했고 결과가 빌 때만(명령이 실패해 빈 출력이면 이어 가지 않는다 — 아스트라 감사 중간 1)
   u_=$(git diff --name-only --diff-filter=U) && [ -z "$u_" ] && u_=$(git rerere remaining) && [ -z "$u_" ]
 }
+# lerr <글>: 화면(오류 출력)과 착지 로그에(빈 글은 안 찍음)
+lerr() { [ -n "$1" ] || return 0; printf '%s\n' "$1" >&2; [ -z "$llog" ] || printf '%s\n' "$1" >>"$llog"; }
+# rb_ <기준>: land의 rebase 한 번 — rerere가 다 푼 충돌(rr_ok)은 이어 간다. 0 아니면 rebase는 멈춘 채(먼저 rebase·착지 반복 두 자리가
+# 같이 쓴다 — land-stale-lows 감사 낮음 1, 한쪽만 고쳐 갈라지지 않게)
+rb_() {
+  ro=$(LC_ALL=C git rebase -q "$1" 2>&1); rr=$?
+  lerr "$ro"
+  while [ $rr != 0 ] && rr_ok "$ro"; do
+    lerr "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다"
+    ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
+    lerr "$ro"
+  done
+  return $rr
+}
 # ---- 병합기(2026-11-20 레인 land-merger-mvp — 사용자 결정 「중앙 병합기, 브랜치만 (추천)」 → 「병합기 최소 버전을 먼저 만들어서
 # 전체 적용시키고 일단 사용부터」. 왜: 레인마다 fetch·rebase·검증·차례·push를 하니 rebase 충돌·차례 다툼·재검증으로 착지가 밀렸다.
 # main에 쓰는 프로세스를 하나로 하면 그 다툼이 통째로 없어진다) ----
@@ -1469,8 +1485,11 @@ mround() {
     fetchr git fetch -q origin '+refs/merge-queue-meta/*:refs/hc-merger/meta/*' 2>/dev/null ||
       { echo "hc-lane merger: 제출 기록을 받지 못했다(git fetch) — 다음 바퀴에" >&2; mer_=1; return 0; }
   fi
-  # 큐를 이름(초) 순으로 맨 앞 하나(MVP-1 — 묶음 없음). 반송을 다시 하는 중(fail/)·다른 기본 브랜치 제출은 건너뛴다
-  bq_=() bs_=() bl_=() bm_=() bi_=() bj_= bd_=
+  # 큐를 이름(초) 순으로 앞에서 묶음 크기만큼(HC_LANE_MERGER_BATCH, 기본 3 — 묶음이 실패하면 $mj_/cap으로 하나씩 줄여 다시).
+  # 반송을 다시 하는 중(fail/)·다른 기본 브랜치 제출은 건너뛴다
+  mN_=${HC_LANE_MERGER_BATCH:-3}; case $mN_ in ''|*[!0-9]*|0) mN_=3 ;; esac
+  mc_=$(cat "$mj_/cap" 2>/dev/null) || mc_=; case $mc_ in ''|*[!0-9]*|0) ;; *) [ "$mc_" -ge "$mN_" ] || mN_=$mc_ ;; esac
+  bq_=() bs_=() bl_=() bm_=() bi_=() bdl_=() bj_= bd_=
   while read -r mq_ ms_; do
     [ -n "$mq_" ] || continue
     mn_=${mq_#refs/merge-queue/}
@@ -1479,14 +1498,20 @@ mround() {
     case $mn_ in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-?*) ;; *) ln_= ;; esac
     mm_=$(printf '%s\n' "$qs_" | awk -v r="refs/merge-queue-meta/$mn_" '$2 == r { print $1 }')
     # 레인 이름이 가지 이름으로 못 쓰는 꼴이면 그 항목만 반송(2차 중간 13 — 후보 가지를 만들다 병합기가 멈춰 큐 전체가 막혔다)
+    # 묶음 뒤쪽에서 걸리면 묶음을 거기서 끊는다(그 항목은 맨 앞이 될 때 처리 — 앞 제출을 막지 않게)
     if ! lname_ok "$ln_"; then
+      [ ${#bq_[@]} = 0 ] || break
       mfail "$mq_" "$ms_" "${ln_:--}" "${mm_:--}" - "큐 이름 꼴이 아니다(<UTC초 10자리>-<레인>, 레인은 가지 이름으로 쓸 수 있는 a-z 0-9 - _)" || mer_=1; mq_=x; return 0
     fi
-    mmeta "$mm_" "$ms_" || { echo "hc-lane merger: 제출 기록 $mn_ 을 읽지 못했다(또는 원본과 안 맞음) — 다음 바퀴에" >&2; mer_=1; mq_=; return 0; }
+    if ! mmeta "$mm_" "$ms_"; then
+      [ ${#bq_[@]} = 0 ] || break
+      echo "hc-lane merger: 제출 기록 $mn_ 을 읽지 못했다(또는 원본과 안 맞음) — 다음 바퀴에" >&2; mer_=1; mq_=; return 0
+    fi
     # 다른 기본 브랜치로 낸 제출은 건드리지 않는다 — 그 브랜치의 병합기 몫(1차 높음 7)
     if [ -n "$mbs_" ] && [ "$mbs_" != "$base" ]; then echo "hc-lane merger: $ln_ 건너뜀 — 기본 브랜치 $mbs_ 로 낸 제출(이 병합기는 $base)" >&2; continue; fi
-    bq_+=("$mq_") bs_+=("$ms_") bl_+=("$ln_") bm_+=("${mm_:--}") bi_+=("$mi_") bj_=$mjb_ bd_=$mid_
-    break
+    [ ${#bq_[@]} -gt 0 ] || bj_=$mjb_ bd_=$mid_   # 작업 표식은 맨 앞 제출 것만
+    bq_+=("$mq_") bs_+=("$ms_") bl_+=("$ln_") bm_+=("${mm_:--}") bi_+=("$mi_") bdl_+=("$mid_")
+    [ ${#bq_[@]} -lt "$mN_" ] || break
   done <<<"$(printf '%s\n' "$qs_" | awk 'NF == 2 && index($2, "refs/merge-queue/") == 1 { print $2, $1 }' | LC_ALL=C sort)"
   mq_=
   [ ${#bq_[@]} -gt 0 ] || return 0
@@ -1518,24 +1543,59 @@ mround() {
   #  · 큐 표식 삭제 + 그 SHA lease(구조 B — 다시 제출했으면 main도 안 움직인다)
   #  · 제출 ID 표식 HEAD:refs/hc-landed/<제출 ID>(3차 높음 4 — 재시작 때 이 표식이 main의 조상이면 완료, 패치 일치로 판정하지 않는다)
   #  · 작업 표식 HEAD:refs/hc-landed/<작업 ID>(2차 중간 12 — 원격에 아직 없을 때만)
-  ex_=":${bq_[0]} --force-with-lease=${bq_[0]}:${bs_[0]}"
-  [ -z "$bd_" ] || ! git check-ref-format "refs/hc-landed/$bd_" || ex_="$ex_ HEAD:refs/hc-landed/$bd_"
+  # 묶음 뒤쪽(2번째부터) 거르기 — 맨 앞이 될 때 따로 처리할 것은 뺀다: 이미 기본 브랜치에 든 것(트리 같음 포함)·기본 브랜치에 없는
+  # 착지 스크립트를 들이는 것·저장소가 「한 묶음에 하나만」으로 정한 경로(기본 브랜치의 .claude/herdr-merge-solo, 줄마다 git 경로 —
+  # 예: 착지가 한 번에 하나만 접는 문서 조각 폴더)를 앞 구성원과 함께 건드리는 것
+  msolo_=(); if mso_=$(git show "$B_:.claude/herdr-merge-solo" 2>/dev/null); then while IFS= read -r l_; do case $l_ in ''|'#'*) ;; *) msolo_+=("$l_") ;; esac; done <<<"$mso_"; fi
+  msu_=   # 묶음에 「하나만」 경로를 건드린 구성원이 이미 있음
+  mtouch() { [ ${#msolo_[@]} -gt 0 ] && [ -n "$(git diff --name-only "$(git merge-base "$1" "$B_")" "$1" -- "${msolo_[@]}" 2>/dev/null)" ]; }
+  ! mtouch "${bs_[0]}" || msu_=1
+  if [ ${#bq_[@]} -gt 1 ]; then
+    k_=(0)
+    for i_ in $(seq 1 $((${#bq_[@]} - 1))); do
+      s_=${bs_[i_]}
+      ianc "$s_" "$B_" && continue
+      mt_=$(git merge-tree --write-tree "$B_" "$s_" 2>/dev/null) && [ "$mt_" = "$(git rev-parse "$B_^{tree}")" ] && continue
+      [ -n "$(git ls-tree --name-only "$s_" -- .claude/herdr-land.sh)" ] && [ -z "$hb_" ] && continue
+      if mtouch "$s_"; then [ -z "$msu_" ] || continue; msu_=1; fi
+      k_+=("$i_")
+    done
+    mkeep_ "${k_[@]}"
+  fi
+  mjx_=   # 작업 표식(맨 앞 제출 것, 원격에 아직 없을 때만)
   if [ -n "$bj_" ] && [ "$bj_" != - ] && [ "$bj_" != "$bd_" ] && git check-ref-format "refs/hc-landed/$bj_"; then
     hk_=$(git ls-remote origin "refs/hc-landed/$bj_") || { echo "hc-lane merger: 작업 표식을 보지 못했다(git ls-remote) — 다음 바퀴에" >&2; mer_=1; mq_=; return 0; }
-    [ -n "$hk_" ] || ex_="$ex_ HEAD:refs/hc-landed/$bj_"
+    [ -n "$hk_" ] || mjx_="HEAD:refs/hc-landed/$bj_"
   fi
-  br_=${bl_[0]} mlab_=${bl_[0]}
+  mexbuild
+  br_=${bl_[0]}
   lgf_=$ml_/${bl_[0]}-$(date +%Y%m%d-%H%M%S)-$$.log
   C0_=${bs_[0]}
   # 일지 — 행동 전에(작업 트리를 만들기 전에 — 3차 높음 6)
-  { printf '%s %s %s\n' "$br_" "$B_" "$C0_"
-    for i_ in "${!bq_[@]}"; do printf '%s %s %s %s\n' "${bq_[i_]}" "${bs_[i_]}" "${bl_[i_]}" "${bm_[i_]}"; done
-  } >"$mj_/cur.tmp" && mv -f "$mj_/cur.tmp" "$mj_/cur" || die "merger: 일지를 쓰지 못했다"
+  mjwrite
   # 후보는 매번 새 임시 작업 트리(병합기 자기 폴더 <클론>.merger-wt/)에서 레인 이름 가지로 — 병합기 클론의 작업 트리는 건드리지 않는다.
   # 만들다 꺼져도 다음 바퀴가 그 폴더의 작업 트리를 지우고 다시 만든다(3차 높음 6 — 클론에서 체크아웃하다 꺼지면 더러운 클론으로 큐 전체가 멈췄다)
   mwt_=$(mktemp -d "$mwr_/c-XXXXXX") && git worktree add -q -f -B "$br_" "$mwt_" "$C0_" || die "merger: 후보 작업 트리를 만들지 못했다($br_)"
-  echo "hc-lane merger: 착지 시작 — $mlab_ (기준 $(printf %.8s "$B_"))"
-  mbn_=1 ls0_=$(date +%s)
+  # 묶음: 뒤쪽 구성원을 앞 구성원 위에 차례로 얹는다(그 제출이 기본 브랜치에서 갈라진 뒤의 커밋만). 충돌하는 구성원은 이번 묶음에서 빼고
+  # 큐에 그대로(맨 앞이 될 때 혼자 — 충돌이면 그때 반송). 착지는 이 가지 전체를 기본 브랜치에 rebase·검증 한 번·push 한 번(CAS)
+  if [ ${#bq_[@]} -gt 1 ]; then
+    k_=(0)
+    for i_ in $(seq 1 $((${#bq_[@]} - 1))); do
+      mf_=$(git merge-base "${bs_[i_]}" "$B_") || die "merger: git merge-base 실패(${bl_[i_]})"
+      if (cd "$mwt_" && git rebase -q --onto "$br_" "$mf_" "${bs_[i_]}" && git checkout -q -B "$br_") >>"$lgf_" 2>&1 </dev/null; then
+        k_+=("$i_")
+      else
+        (cd "$mwt_" && { git rebase --abort; git checkout -q -f "$br_"; }) >>"$lgf_" 2>&1 </dev/null
+        echo "hc-lane merger: 묶음에서 뺌 — ${bl_[i_]}(앞 구성원 위에 얹으면 충돌, 큐에 그대로)" >&2
+      fi
+    done
+    if [ ${#k_[@]} -lt ${#bq_[@]} ]; then
+      mkeep_ "${k_[@]}"; mjwrite; mexbuild
+    fi
+  fi
+  mlab_=$(IFS=+; printf '%s' "${bl_[*]}")
+  echo "hc-lane merger: 착지 시작 — $mlab_ (기준 $(printf %.8s "$B_")${bq_[1]+, 묶음 ${#bq_[@]}})"
+  mbn_=${#bq_[@]} ls0_=$(date +%s)
   # 새 작업 트리라 준비 훅(.claude/herdr-setup.sh — 의존성·빌드 산출물)을 레인을 만들 때처럼 먼저. 실패는 일시 실패로(75 — 망 등)
   # 준비 훅의 코드 색인(곧 지울 폴더를 후보마다 색인하면 검증과 CPU를 다툰다)은 색인 도구를 PATH에서 빼 건너뛰게 한다 — 준비 훅이
   # 「도구가 없으면 색인 안 함」이라 저장소를 고치지 않고 된다
@@ -1550,6 +1610,27 @@ mround() {
   ls1_=$(date +%s)
   tail -n 5 "$lgf_"
   mjudge
+}
+# mkeep_ <번호>…: 묶음 배열(bq_ bs_ bl_ bm_ bi_ bdl_)에서 그 번호만 남긴다(순서 그대로)
+mkeep_() {
+  local q=() s=() l=() m=() i=() d=() x
+  for x in "$@"; do q+=("${bq_[x]}") s+=("${bs_[x]}") l+=("${bl_[x]}") m+=("${bm_[x]}") i+=("${bi_[x]}") d+=("${bdl_[x]}"); done
+  bq_=("${q[@]}") bs_=("${s[@]}") bl_=("${l[@]}") bm_=("${m[@]}") bi_=("${i[@]}") bdl_=("${d[@]}")
+}
+# mexbuild: main push에 함께 실을 인자(ex_) — 구성원마다 큐 표식 삭제 + 그 SHA lease와 제출 ID 표식, 끝에 작업 표식(mjx_)
+mexbuild() {
+  ex_=
+  for i_ in "${!bq_[@]}"; do
+    ex_="$ex_${ex_:+ }:${bq_[i_]} --force-with-lease=${bq_[i_]}:${bs_[i_]}"
+    [ -z "${bdl_[i_]}" ] || ! git check-ref-format "refs/hc-landed/${bdl_[i_]}" || ex_="$ex_ HEAD:refs/hc-landed/${bdl_[i_]}"
+  done
+  [ -z "$mjx_" ] || ex_="$ex_ $mjx_"
+}
+# mjwrite: 일지(cur) — 후보 가지·기준·후보 첫 커밋 한 줄, 담긴 제출마다 한 줄. tmp→mv
+mjwrite() {
+  { printf '%s %s %s\n' "$br_" "$B_" "$C0_"
+    for i_ in "${!bq_[@]}"; do printf '%s %s %s %s\n' "${bq_[i_]}" "${bs_[i_]}" "${bl_[i_]}" "${bm_[i_]}"; done
+  } >"$mj_/cur.tmp" && mv -f "$mj_/cur.tmp" "$mj_/cur" || die "merger: 일지를 쓰지 못했다"
 }
 mhook_="기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
 # mwtclean: 병합기 자기 임시 작업 트리(<클론>.merger-wt/ 아래, 앞 판의 .git/hc-merger/wt/ 아래도)를 모두 지운다 — 앞 실행이 남긴 것 포함
@@ -1571,7 +1652,11 @@ mjudge() {
   O_=$(git rev-parse -q --verify "refs/remotes/origin/$base^{commit}") && C_=$(git rev-parse -q --verify "refs/heads/$br_") ||
     die "merger: 착지 뒤 후보·origin/$base 를 읽지 못했다 — 다음 실행이 일지로 판정한다"
   if ianc "$C_" "$O_"; then
-    mdone_all "$C_" "병합기 착지" || { mer_=1; mq_=; return 0; }
+    mdone_all "$C_" "병합기 착지${bq_[1]+(묶음 ${#bq_[@]}: $mlab_)}" || { mer_=1; mq_=; return 0; }
+    # 묶음 2번째부터의 레인 표식 refs/hc-landed/<레인>/<UTC 초>(fill-dup-guard — 맨 앞은 착지가 붙였다). 못 붙여도 착지는 됨
+    for i_ in "${!bl_[@]}"; do [ "$i_" = 0 ] || git push -q origin "$C_:refs/hc-landed/${bl_[i_]}/$(date -u +%s)" </dev/null 2>/dev/null ||
+      echo "hc-lane merger: ${bl_[i_]} 착지 표식을 두지 못했다(착지는 됨)" >&2; done
+    rm -f "$mj_/cap"
     mfin; return 0
   fi
   case $lr_ in
@@ -1584,8 +1669,15 @@ mjudge() {
     echo "hc-lane merger: ${bl_[0]} 일시 실패(종료 $lr_, 로그 $lgf_) — 큐에 두고 다음 바퀴에" >&2
     mfin; mq_=; mer_=1; return 0
   fi
+  # 묶음이 실패하면(일시 실패 아님) 아무도 돌려보내지 않고 마지막 것을 빼고 다시 — 다음 바퀴의 묶음 크기 $mj_/cap = 지금 - 1.
+  # 혼자일 때 실패해야 그 제출을 돌려보낸다
+  if [ ${#bq_[@]} -gt 1 ]; then
+    echo "hc-lane merger: 묶음 ${#bq_[@]}($mlab_) 실패(종료 $lr_, 로그 $lgf_) — 마지막 ${bl_[${#bl_[@]}-1]} 빼고 다시" >&2
+    echo $((${#bq_[@]} - 1)) >"$mj_/cap.tmp" && mv -f "$mj_/cap.tmp" "$mj_/cap" || die "merger: 묶음 크기를 적지 못했다"
+    mfin; mq_=x; return 0
+  fi
   mtrans "$lr_" "$lgf_" && lr_="$lr_, 일시 실패가 3번 넘음"
-  mfin
+  mfin; rm -f "$mj_/cap"
   mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$lgf_" "착지 실패(종료 $lr_)" || mer_=1
 }
 # mrecover: 일지가 있으면(앞 실행이 끊김) 먼저 정리. 0 정리함(새로 골라도 됨) · 1 원격을 못 봐 쉼.
@@ -1932,19 +2024,19 @@ land_cmd() {
   # 큐 삭제 인자가 herdr-tools 자체 시험의 가짜 원격 push에 실려 거절됐다). 착지 스크립트에는 이름을 붙여 넘긴다
   px_=${HERDR_LAND_PUSH_EXTRA-} mgx_=${HERDR_MERGER-}
   unset HERDR_LAND_PUSH_EXTRA HERDR_MERGER
-  llog= qa0=$(qadirs)
+  # 착지 로그는 첫 fetch·rebase 전에 연다 — 먼저 rebase·rebase 충돌(종료 3)도 로그에 남게(land-stale-lows 감사 낮음 3)
+  qa0=$(qadirs); llog_init
   # 낡은 착지 스크립트(2026-11-20 land-stale-script — 한 레인이 문서 조각 접기 전 판 herdr-land.sh로 착지해 조각이
   # main에 남았다. bash는 rebase 전에 읽은 옛 판을 끝까지 돈다). fetch는 스크립트가 없는 가지도 한다(<기본>에 새로 생긴 것을 보려고): 가지가 그 스크립트를 스스로 바꾸지 않았는데(HEAD 판 = 갈래점 판)
   # 갈래점 판이 <기본> 판과 다르면(새로 생기거나 지워진 것 포함) 먼저 rebase해 <기본> 판으로 이어 간다. 바꾼 가지는 제 판 그대로
   lf_=.claude/herdr-land.sh
-  if git remote get-url origin >/dev/null 2>&1; then ob_=refs/remotes/origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패"
-  else ob_=refs/heads/$base; fi
+  if git remote get-url origin >/dev/null 2>&1; then ob_=refs/remotes/origin/$base obl_=origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패"
+  else ob_=refs/heads/$base obl_="로컬 $base"; fi
   # 병합기 안 착지: 기본 브랜치에 전용 착지 스크립트가 있으면 그 기본 브랜치 판(방금 받은 것)을 꺼내 맡긴다 — 제출 트리 속 판(레인이
   # 고쳤을 수 있음)은 실행하지 않는다(2단계 2026-11-20 지휘 t1cj). 스크립트는 자기 자리($0)를 쓰지 않는 것을 전제로 임시 파일에서 돈다
   if [ "$mgx_" = 1 ] && git cat-file -e "$ob_:$lf_" 2>/dev/null; then
     mls_=$(mktemp "${TMPDIR:-/tmp}/hc-merger-land.XXXXXX") && git show "$ob_:$lf_" >"$mls_" || die "land: 기본 브랜치의 $lf_ 를 꺼내지 못했다"
-    echo "hc-lane land: 병합기 — ${ob_#refs/remotes/} 판 $lf_ 에 맡긴다"
-    llog_init
+    echo "hc-lane land: 병합기 — $obl_ 판 $lf_ 에 맡긴다"
     lrun env HERDR_LAND=1 ${px_:+HERDR_LAND_PUSH_EXTRA="$px_"} bash "$mls_" "$base"; rc=$?
     rm -f "$mls_"
     # 내장 길의 병합기 안 착지와 같게: push는 병합기 인자 그대로, 착지 표식 refs/hc-landed/<레인>/<UTC 초>는 착지 뒤 따로(fill-dup-guard)
@@ -1953,16 +2045,9 @@ land_cmd() {
   fi
   lb_() { git rev-parse -q --verify "$1:$lf_" 2>/dev/null; }   # 그 판의 스크립트 blob(없으면 빈 값)
   if mb_=$(git merge-base HEAD "$ob_" 2>/dev/null) && [ "$(lb_ HEAD)" = "$(lb_ "$mb_")" ] && [ "$(lb_ "$mb_")" != "$(lb_ "$ob_")" ]; then
-    echo "▸ hc-lane land: 가지의 $lf_ 가 ${ob_#refs/remotes/} 보다 낡음 → 먼저 rebase" >&2
+    lerr "▸ hc-lane land: 가지의 $lf_ 가 $obl_ 보다 낡음 → 먼저 rebase"
     [ -z "$(git status --porcelain --untracked-files=no)" ] || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
-    ro=$(LC_ALL=C git rebase -q "$ob_" 2>&1); rr=$?
-    [ -z "$ro" ] || printf '%s\n' "$ro" >&2
-    while [ $rr != 0 ] && rr_ok "$ro"; do
-      echo "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다" >&2
-      ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
-      [ -z "$ro" ] || printf '%s\n' "$ro" >&2
-    done
-    [ $rr = 0 ] || { echo "hc-lane land: rebase 충돌 — 양쪽 내용을 살려 풀고 git add → git rebase --continue 한 뒤 착지 줄(hc-lane land $base)을 다시" >&2; exit 3; }
+    rb_ "$ob_" || { lerr "hc-lane land: rebase 충돌 — 양쪽 내용을 살려 풀고 git add → git rebase --continue 한 뒤 착지 줄(hc-lane land $base)을 다시"; exit 3; }
   fi
   # 병합기 안 착지: 제출·기준에 있던 스크립트는 병합기가 이미 반송하니, 여기 있는 것은 위 rebase가 들인 것 — 맡기지 않고 7(감사 7c010d9 중간 1)
   [ "$mgx_" != 1 ] || [ ! -f .claude/herdr-land.sh ] ||
@@ -1971,7 +2056,6 @@ land_cmd() {
     # 저장소 착지 스크립트에는 먼저 맡긴다(원격 조회 오류가 스크립트 착지를 막지 않게 — 아스트라 3차 중간 2). 원격 조회는 착지
     # 성공 직후에 새로 해 메인 폴더 앞당김에만 쓰고(실행 전 결과를 쓰지 않는다 — 4차 중간 2), 못 읽었으면 앞당기지 않고 경고만
     echo "hc-lane land: .claude/herdr-land.sh $base 에 맡긴다"
-    llog_init
     # 표식(과 임대 지우기)은 HERDR_LAND_PUSH_EXTRA(공백으로 나눈 refspec — 병합기가 넘긴 인자 뒤에)로 넘겨 그 스크립트가 main push에
     # --atomic으로 싣게 한다 — 임대 지우기는 원격 임대가 이 레인 값일 때만 넣는다(없는 ref 지우기로 원자 push가 실패하지 않게). 못 실었으면 land_after가 따로
     lmr_= lpx_=; if lmn_=$(lmname) && git remote get-url origin >/dev/null 2>&1; then
@@ -2020,17 +2104,7 @@ land_cmd() {
     [ $remote = 0 ] || fetchr git fetch -q origin || die "land: git fetch 실패"
     # 기준 SHA를 이 바퀴에 고정해 그 SHA로 rebase(rebase 뒤 참조가 움직여도 기준이 바뀌지 않게)
     bs_=$(git rev-parse -q --verify "$bref^{commit}") || die "land: $blab 가 없다"
-    ro=$(LC_ALL=C git rebase -q "$bs_" 2>&1); rr=$?
-    [ -z "$ro" ] || printf '%s\n' "$ro" >&2
-    while [ $rr != 0 ] && rr_ok "$ro"; do
-      echo "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다" >&2
-      ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
-      [ -z "$ro" ] || printf '%s\n' "$ro" >&2
-    done
-    if [ $rr != 0 ]; then
-      echo "hc-lane land: rebase 충돌. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 같은 줄(hc-lane land $base)을 다시" >&2
-      exit 3
-    fi
+    rb_ "$bs_" || { lerr "hc-lane land: rebase 충돌. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 같은 줄(hc-lane land $base)을 다시"; exit 3; }
     # 병합기 안 착지: rebase한 기본 브랜치에 전용 착지 스크립트가 생겼으면 내장 길로 넣지 않는다 — 종료 7, 병합기가 반송(3차 높음 7)
     [ "$mgx_" != 1 ] || [ ! -f .claude/herdr-land.sh ] ||
       { echo "hc-lane land: 기본 브랜치에 전용 착지 스크립트(.claude/herdr-land.sh)가 생겼다 — 병합기 MVP-1은 내장 길로 넣지 않는다" >&2; exit 7; }
@@ -2051,7 +2125,6 @@ land_cmd() {
     fi
     [ -f .claude/herdr-verify.sh ] ||
       die "land: .claude/herdr-verify.sh 가 없어 push하지 않았다(검증 없는 착지는 없다). 저장소에 검증 스크립트(또는 .claude/herdr-land.sh)를 두거나 지휘에 알린다"
-    [ -n "$llog" ] || llog_init
     lrun bash .claude/herdr-verify.sh || { lfail $?; die "land: 검증 실패, push하지 않았다. 고쳐 커밋한 뒤 같은 줄을 다시"; }
     # 검증한 그 커밋·그 파일만 보낸다: 검증하는 동안 HEAD가 바뀌었거나 검증이 추적 파일·색인을 고쳤으면 보내지 않는다
     h_=$(git rev-parse -q --verify HEAD) || die "land: 검증 뒤 HEAD를 읽지 못했다(git 실패) — 보내지 않았다. 같은 줄을 다시"
