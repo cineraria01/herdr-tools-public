@@ -11,6 +11,7 @@ LANE=${HC_LANE_BIN:-}
 [ -f "$LANE" ] || LANE=$here/../hc-lane       # 깔린 사본(~/.local/bin/tests/)
 T=$(mktemp -d "${TMPDIR:-/tmp}/hc-lane-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
+. "$here/isolate.sh"
 W="$T/공백 있는 폴더"   # 모든 저장소를 공백·한글 경로 아래에 둔다
 mkdir -p "$T/bin" "$W"
 # 가짜 hc: run 인자는 $HCLOG, exec 인자는 $HCLOG.exec에 한 줄씩. exec는 -- 뒤 명령을 그 자리에서 돌린다(--on 시험용).
@@ -28,15 +29,24 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
   [ -z "${HC_FAKE_GET_SLEEP-}" ] || exec sleep "$HC_FAKE_GET_SLEEP"   # 응답 없는 코어(alarm이 이 프로세스를 끝내 고아가 안 남게 exec)
   # $HC_FAKE_GET_NAME이면 맨 위 name도(앞의 foreground.name은 다른 값 — 진짜 hc 꼴)
   [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"},\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
-  # 띄운 터미널(t9zz): 기본은 status가 잡힘. HC_FAKE_NOSTATUS=1 늘 null, =untilkeys 키를 받기 전까지 null, =finished 끝남
+  # 띄운 터미널(t9zz): 기본은 status가 잡힘. HC_FAKE_NOSTATUS=1 늘 null, =untilkeys 키를 받기 전까지 null, =finished 끝남,
+  # =idle 늘 idle·turn 0(첫 지시가 입력칸에 남은 꼴). 아래 둘은 이 주소 get이 $HC_FAKE_IDLE_GETS번(기본 5)이 될 때까지 idle·turn 0이고 그 뒤
+  # =idleuntil working·turn 0(첫 턴 진행 중 — 실측: 첫 턴 동안 working·turn 0, 턴이 끝나야 turn 1), =idleturn idle·turn 1(working을 못 본 채 첫 턴이 끝난 꼴)
   case $2 in *t9zz)
+    k9=$(grep -c 't9zz$' "$HCLOG.get") tn=0
+    # $HC_FAKE_GET9_FAIL=<a>-<b>: 이 주소의 a~b번째 get은 실패 — 출력은 working·turn 1이지만 종료 1(실패한 조회의 출력을 믿지 않는지)
+    if [ -n "${HC_FAKE_GET9_FAIL-}" ] && [ "$k9" -ge "${HC_FAKE_GET9_FAIL%-*}" ] && [ "$k9" -le "${HC_FAKE_GET9_FAIL#*-}" ]; then
+      echo "{\"address\":\"$2\",\"name\":\"x\",\"state\":\"live\",\"status\":{\"state\":\"working\"},\"turn\":1}"; exit 1; fi
     case ${HC_FAKE_NOSTATUS-} in
       '') s='{"state":"working"}' ;;
       untilkeys) s=null; [ -e "$HCLOG.keys" ] && s='{"state":"working"}' ;;
       finished) echo "{\"address\":\"$2\",\"state\":\"finished\",\"status\":null}"; exit 0 ;;
+      idle) s='{"app":"claude-code","state":"idle"}' ;;
+      idleuntil) s='{"app":"claude-code","state":"idle"}'; [ "$k9" -lt "${HC_FAKE_IDLE_GETS:-5}" ] || s='{"app":"claude-code","state":"working"}' ;;
+      idleturn) s='{"app":"claude-code","state":"idle"}'; [ "$k9" -lt "${HC_FAKE_IDLE_GETS:-5}" ] || tn=1 ;;
       *) s=null ;;
     esac
-    echo "{\"address\":\"$2\",\"name\":\"x\",\"state\":\"live\",\"status\":$s,\"turn\":0}"; exit 0 ;;
+    echo "{\"address\":\"$2\",\"name\":\"x\",\"state\":\"live\",\"status\":$s,\"turn\":$tn}"; exit 0 ;;
   esac
   # 살아 있는 지휘 여럿: $HCLOG.live 파일의 「주소 pid」 줄(배경 watch가 도중에 바뀌게 파일로). 이름은 주소와 같게
   if [ -f "$HCLOG.live" ]; then p_=$(awk -v a="$2" '$1 == a { print $2 }' "$HCLOG.live"); [ -z "$p_" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":$p_,\"state\":\"live\"}"; exit 0; }; fi
@@ -78,6 +88,8 @@ case $1 in
   run) [ -n "${HC_FAKE_RUN_FAIL-}" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; }
        echo "{\"address\":\"${HC_FAKE_RUN_ADDR:-t9zz}\",\"agent\":\"x\",\"state\":\"live\"}" ;;
   exec) on=; while [ "$1" != -- ]; do [ "$1" != --on ] || on=$2; shift; done; shift
+        # $HC_FAKE_LEASE_EXEC4: 임대 호출(hc-lane-lease)만 코어가 종료 4(machine_unknown) — 원격 없음(no-origin)과 가름
+        case "$*" in *hc-lane-lease*) [ -z "${HC_FAKE_LEASE_EXEC4-}" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; } ;; esac
         # $HC_FAKE_MACH_HOME가 있으면 기계마다 HOME을 <그 폴더>/<기계>로(폴더가 없으면 모르는 기계, 종료 4)
         if [ -n "$on" ] && [ -n "${HC_FAKE_MACH_HOME-}" ]; then
           [ -d "$HC_FAKE_MACH_HOME/$on" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; }
@@ -114,7 +126,7 @@ EOF
 chmod +x "$T/bin/herdr-app"
 ln -s "$LANE" "$T/bin/hc-lane"   # 착지 절차의 hc-lane clean이 이 사본을 쓰게
 export PATH="$T/bin:$PATH" HCLOG="$T/hc.log" HC_LANE_POLL=0.1
-unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_COORD HC_LANE_FILL   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
+unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_COORD HC_LANE_FILL HC_LANE_LEASE HC_LANE_JOB   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 HOME="$T"
 printf 'export HL_ZSHRC=read\ncd /\n' >"$T/.zshrc"   # --on 설정 단계만 읽어야 하고, 안의 cd가 setup 위치를 바꾸면 안 된다
 printf 'export HL_ZPROFILE=read\n' >"$T/.zprofile"     # --on은 로그인 셸(.zprofile의 brew shellenv 등)도
@@ -797,6 +809,7 @@ lc .claude/herdr-setup.sh 'echo "$LANE_REPO|$LANE_BASE" > setup-ran'
 run --name o-a --repo "$R" -- true
 wt="$R.wt/o-a"
 t "원격 없음: 레인 만들기 종료 0, 로컬 main 기준, 준비 훅 돎" '[ $rc = 0 ] && [ "$(git -C "$wt" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] && [ "$(cat "$wt/setup-ran")" = "$R|main" ] && has LANE_BASE=main || { cat "$T/err"; false; }'
+t "원격 없음: 임대 없이 띄움(HC_LANE_LEASE 빈 값 — origin 없음이 확인된 저장소만)" '[ $rc = 0 ] && has HC_LANE_LEASE='
 t "원격 없음: 착지 줄은 hc-lane land main, 기준 로컬 main" 'printf "%s" "$out" | grep -Fq "&& hc-lane land main" && printf "%s" "$out" | grep -Fq "기준 로컬 main"'
 rm -f "$wt/setup-ran"
 (cd "$wt" && echo o-a >o-a.txt && git add -- o-a.txt && git commit -qm o-a -- o-a.txt)
@@ -1531,6 +1544,76 @@ t "lane.start_wait 0: 시작 확인 끔, 종료 0" '[ $rc = 0 ] && printf "%s\n"
 conf 'lane.start_wait 다섯'
 run --name lane-sx --repo "$R" -- claude
 t "lane.start_wait가 숫자가 아니면 띄우기 전에 오류" '[ $rc != 0 ] && grep -Fq lane.start_wait "$T/err" && [ ! -e "$R.wt/lane-sx" ]'
+
+# 첫 턴 확인(launch-submit-check 2026-11-20 — 원격 워커의 자동 감사: 시작 훅 뒤 실행 인자 첫 지시가 244초 입력칸에 남아 idle로 멈췄다,
+# 세션 기록에 사용자 줄 없음, 지휘의 Enter 한 번에 바로 제출). 감시는 알림 전용: status가 잡힌 뒤 lane.first_turn_wait초 안에
+# turn > 0 또는 status working(실측: 첫 턴 동안 working·turn 0, 턴이 끝나야 turn 1)을 한 번도 못 보면 사건 막힘 한 줄
+# 「첫 턴 없음 <주소>」. 키는 보내지 않고 띄우기 결과(종료 0 + 주소)는 그대로. 사건은 따로 둔 상태 폴더에(뒤 watch·wait 시험의 events.tsv를 건드리지 않게)
+SD="$T/submit-state"; SEV="$SD/hc-lane/events.tsv"
+sk() { rm -f "$HCLOG.keys" "$HCLOG.get"; }
+gets9() { grep -c 't9zz$' "$HCLOG.get"; }
+bl() { run --brief "$BD/BRIEF.md" --name "$1" --repo "$R" -- claude --model m "{brief} 지시문을 읽고 진행하라. 너는 worker다."; }
+fev() { grep -F "${tab}$1${tab}막힘${tab}" "$SEV" 2>/dev/null; }   # 이름이 ev(사건 줄 만들기, 뒤 watch 시험)와 겹치지 않게
+# hc-fill처럼 두 출력이 모두 닫혀 주소를 받은 뒤에만 다음 10초로 간다. 첫 idle 뒤의 조회는 끊긴 기계를 흉내 낸다.
+clockbin="$T/turn-clock"; mkdir -p "$clockbin"
+cat >"$clockbin/date" <<'EOF'
+#!/bin/sh
+if [ "$1" = +%s ]; then cat "$HCLOG.time"; else exec /bin/date "$@"; fi
+EOF
+cat >"$clockbin/sleep" <<'EOF'
+#!/bin/bash
+if [ "$(cat "$HCLOG.time")" = 0 ]; then
+  read -r -t 5 <>"$HCLOG.release" || touch "$HCLOG.late"
+fi
+echo $(( $(cat "$HCLOG.time") + $1 )) >"$HCLOG.time"
+EOF
+chmod +x "$clockbin/date" "$clockbin/sleep"
+mkfifo "$HCLOG.release"; exec 8<>"$HCLOG.release"
+conf 'lane.start_wait 1' 'lane.first_turn_wait 60'
+sk; echo 0 >"$HCLOG.time"
+out=$(PATH="$clockbin:$PATH" HC_LANE_POLL=10 HC_FAKE_NOSTATUS=idle HC_FAKE_GET9_FAIL=2-99 HC_LANE_FILL=1 XDG_STATE_HOME=$SD \
+  "$LANE" --name lane-ftq --repo "$R" -- claude "첫 지시" 2>&1); rc=$?
+echo go >&8; exec 8>&-
+for ((i=0; i<100; i++)); do fev lane-ftq >/dev/null && break; sleep 0.05; done
+t "대기열은 첫 idle에 주소를 받고, 연결이 끊겨도 감시는 따로 막힘을 적는다" '[ $rc = 0 ] && [ ! -e "$HCLOG.late" ] && printf "%s\n" "$out" | tail -n 1 | jq -e ".lane == \"t9zz\" and .start == \"ok\"" >/dev/null && [ "$(fev lane-ftq | grep -c .)" = 1 ]'
+conf 'lane.start_wait 1' 'lane.first_turn_wait 1'
+sk; echo 100 >"$HCLOG.time"
+PATH="$clockbin:$PATH" HC_LANE_POLL=2 XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idleuntil HC_FAKE_IDLE_GETS=2 bl lane-ft-deadline
+t "유예 1초·간격 2초면 1초만 기다리고 마감에 새 조회를 시작하지 않는다" '[ $rc = 0 ] && [ "$(cat "$HCLOG.time")" = 101 ] && [ "$(gets9)" = 1 ] && [ "$(fev lane-ft-deadline | grep -c .)" = 1 ]'
+# 조회는 실제 남은 시간으로 제한한다. capt가 perl alarm에 넘기는 초를 기록한다.
+cat >"$clockbin/perl" <<'EOF'
+#!/bin/sh
+[ "${4-}" != hc ] || echo "$3" >>"$HCLOG.alarm"
+exec /usr/bin/perl "$@"
+EOF
+chmod +x "$clockbin/perl"
+conf 'lane.start_wait 1' 'lane.first_turn_wait 3'
+sk; echo 100 >"$HCLOG.time"
+PATH="$clockbin:$PATH" HC_LANE_POLL=2 XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idleuntil HC_FAKE_IDLE_GETS=2 bl lane-ft-alarm
+t "3초 유예에서 2초 기다린 뒤에는 남은 1초만 조회에 준다" '[ $rc = 0 ] && [ "$(cat "$HCLOG.alarm")" = 1 ] && [ "$(gets9)" = 2 ]'
+conf 'lane.start_wait 1' 'lane.first_turn_wait 2'
+sk; XDG_STATE_HOME=$SD HC_FAKE_GET9_FAIL=1-1 HC_FAKE_NOSTATUS=idle bl lane-ft-first-fail
+t "첫 조회가 working을 출력하고 실패하면 다시 조회하고, 이후 idle만 보이면 막힘" '[ $rc = 0 ] && [ "$(gets9)" -ge 2 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"noturn\"" && [ "$(fev lane-ft-first-fail | grep -c .)" = 1 ]'
+sk; XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idleturn HC_FAKE_IDLE_GETS=3 bl lane-ft1
+t "turn > 0이면(working을 못 봤어도) 조용히 start ok — 사건·키 없음" '[ $rc = 0 ] && [ ! -e "$HCLOG.keys" ] && [ "$(gets9)" -ge 3 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"ok\"" && ! fev lane-ft1 >/dev/null || { cat "$T/err"; false; }'
+sk; XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idleuntil HC_FAKE_IDLE_GETS=3 bl lane-ft2
+t "첫 턴 진행 중(working·turn 0)도 조용히 start ok" '[ $rc = 0 ] && [ "$(gets9)" -ge 3 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"ok\"" && ! fev lane-ft2 >/dev/null || { cat "$T/err"; false; }'
+sk; XDG_STATE_HOME=$SD HC_LANE_OWNER=t1own HC_FAKE_NOSTATUS=idle bl lane-ft3
+t "마감까지 turn 0·idle이면 사건 막힘 하나 「첫 턴 없음 <주소>」(주인 지휘 --to), 키 없음, 종료 0 + 주소" '[ $rc = 0 ] && [ ! -e "$HCLOG.keys" ] && [ "$(fev lane-ft3 | grep -c .)" = 1 ] && [ "$(fev lane-ft3 | cut -f9)" = t1own ] && fev lane-ft3 | grep -Fq "첫 턴 없음 t9zz" && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"lane\":\"t9zz\"" && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"noturn\"" || { cat "$T/err"; fev lane-ft3; false; }'
+sk; XDG_STATE_HOME=$SD HC_FAKE_GET9_FAIL=2-4 HC_FAKE_NOSTATUS=idleturn HC_FAKE_IDLE_GETS=6 bl lane-ft4
+t "조회 실패가 섞여도(실패한 조회의 출력은 안 믿음) 마감까지 계속 — 그 뒤 turn > 0이면 ok" '[ $rc = 0 ] && [ "$(gets9)" -ge 6 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"ok\"" && ! fev lane-ft4 >/dev/null || { echo "gets=$(gets9)"; cat "$T/err"; false; }'
+mkdir -p "$T/event-fail/hc-lane/events.tsv"   # 레인 기록은 성공하고 사건 추가만 실패한다
+sk; XDG_STATE_HOME=$T/event-fail HC_FAKE_NOSTATUS=idle bl lane-ftw
+t "막힘 사건을 못 적어도 띄우기 결과는 그대로(종료 0 + 주소) — 오류 출력 한 줄만" '[ $rc = 0 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"lane\":\"t9zz\"" && [ "$(wc -l <"$T/err")" -eq 1 ] && grep -Fq "사건을 적지 못했다" "$T/err" || { echo "rc=$rc"; cat "$T/err"; false; }'
+conf 'lane.start_wait 1' 'lane.first_turn_wait 08'
+sk; XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idleturn HC_FAKE_IDLE_GETS=3 bl lane-ft7
+t "lane.first_turn_wait 08(앞 0)도 십진수로(셈 오류 없이) 종료 0" '[ $rc = 0 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"ok\"" && ! grep -Fq "value too great" "$T/err" || { cat "$T/err"; false; }'
+conf 'lane.start_wait 1' 'lane.first_turn_wait 0'
+sk; XDG_STATE_HOME=$SD HC_FAKE_NOSTATUS=idle bl lane-ft8
+t "lane.first_turn_wait 0: 첫 턴 확인 끔(status만 보고 ok)" '[ $rc = 0 ] && printf "%s\n" "$out" | tail -n 1 | grep -Fq "\"start\":\"ok\"" && ! fev lane-ft8 >/dev/null || { cat "$T/err"; false; }'
+conf 'lane.first_turn_wait 하나'
+run --name lane-ft9 --repo "$R" -- claude
+t "lane.first_turn_wait가 숫자가 아니면 띄우기 전에 오류" '[ $rc != 0 ] && grep -Fq lane.first_turn_wait "$T/err" && [ ! -e "$R.wt/lane-ft9" ]'
 noconf
 
 # fetch: 그 기계 로그인 셸(zsh·~/.zshrc) 꼴로 git fetch
@@ -2170,7 +2253,8 @@ mklane fr-land
 seedp c2 c2
 race 1
 out=$(cd "$wt" && GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" "$LANE" land 2>"$T/err"); rc=$?
-t "fetch 경합: land의 fetch도 다시 해 착지" '[ $rc = 0 ] && [ "$(otop)" = fr-land ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
+# fetch 3번 = 낡은 착지 스크립트 확인 fetch(경합 1번 → 다시 1번) + 착지 반복의 fetch 1번
+t "fetch 경합: land의 fetch도 다시 해 착지" '[ $rc = 0 ] && [ "$(otop)" = fr-land ] && [ "$(fn)" = 3 ] || { cat "$T/err"; fn; false; }'
 race 1
 GITRACE=$T/race GITRACE_MSG=$rmsg PATH="$T/racebin:$PATH" run clean --repo "$R" --branch fr-land
 t "fetch 경합: clean의 fetch도 다시 해 정리" '[ $rc = 0 ] && [ ! -e "$R.wt/fr-land" ] && [ "$(fn)" = 2 ] || { cat "$T/err"; fn; false; }'
@@ -2329,6 +2413,95 @@ HC_FAKE_LIVE=tQc HC_TERMINAL_ID=tQc run --dry-run --name q-dry --repo "$R" -- cl
 t "대기열만: --dry-run은 영향 없음(아무것도 안 만듦)" '[ $rc = 0 ] && [ ! -e "$R.wt/q-dry" ] && ! grep -Fq "hc-fill add" "$T/err" || { cat "$T/err"; false; }'
 run land --direct
 t "대기열만: --direct는 레인을 띄울 때만" '[ $rc = 1 ] && grep -Fq -- "--direct는 레인을 띄울 때만" "$T/err" || { cat "$T/err"; false; }'
+
+# 22. 레인 임대·착지 표식(2026-11-20 fill-dup-guard, 지휘 결정 — 중복 실행 막기는 띄우는 쪽에서): 쓰기 레인은 hc run 직전에 원격
+# refs/hc-lanes/<레인>을 없을 때만 만든다. 이미 있으면 「이미 돎」 종료 10, 조회·push 실패면 종료 1(안 띄움). 풀기는 land 성공(main·표식과
+# 한 --atomic push)·clean·손(hc-lane lease drop). 둘째 클론 = 다른 기계(같은 origin)
+mk t22
+seed .claude/herdr-verify.sh 'exit 0'
+git clone -q "$D/origin.git" "$D/둘째 기계" 2>/dev/null; R2="$D/둘째 기계"
+lref() { git -C "$D/origin.git" rev-parse -q --verify "refs/hc-lanes/$1" 2>/dev/null; }
+lsub() { git -C "$D/origin.git" log -1 --format=%s "refs/hc-lanes/$1" 2>/dev/null; }
+mrefs() { git -C "$D/origin.git" for-each-ref --format='%(refname) %(objectname)' "refs/hc-landed/$1/"; }
+runs() { grep -c '^run$' "$HCLOG" 2>/dev/null || true; }   # hc run 부른 횟수
+run --name ls-a --repo "$R" -- claude
+la_=$(lref ls-a)
+t "임대: 띄우면 원격에 refs/hc-lanes/<레인>(빈 트리, 제목 hc-lane lease <레인> <기계> <UTC>), 레인 환경 HC_LANE_LEASE = 그 값" '[ $rc = 0 ] && [ -n "$la_" ] && lsub ls-a | grep -Eq "^hc-lane lease ls-a [^ ]+ 20[0-9-]+T[0-9:]+Z$" && has "HC_LANE_LEASE=$la_" || { cat "$T/err"; false; }'
+r0=$(runs); run --name ls-a --repo "$R2" -- claude
+t "임대: 다른 기계(둘째 클론)에서 같은 이름이면 「이미 돎」 종료 10, hc run 안 부름, 워크트리 되돌림, 임대 그대로" '[ $rc = 10 ] && [ "$(runs)" = "$r0" ] && [ ! -e "$R2.wt/ls-a" ] && ! git -C "$R2" show-ref -q --verify refs/heads/ls-a && [ "$(lref ls-a)" = "$la_" ] && grep -Fq "이미 돎" "$T/err" && grep -Fq "hc-lane lease drop --repo" "$T/err" || { echo "rc=$rc runs=$(runs) r0=$r0 lref=$(lref ls-a) la=$la_"; ls "$R2.wt" 2>&1; cat "$T/err"; false; }'
+run --read --name ls-rd --repo "$R2" -- claude
+t "임대: --read(조사·감사)는 임대를 잡지 않음" '[ $rc = 0 ] && [ -z "$(lref ls-rd)" ]'
+# push 응답 유실: 원격에는 들어갔는데 push가 실패로 끝남 → 원격 값이 자기 것이면 잡은 것(띄움), 다른 기계의 다시 시도는 10
+RG=$(command -v git); mkdir -p "$T/lostgit" "$T/downgit"
+printf '#!/bin/bash\n"%s" "$@"; r=$?\ncase " $* " in *" push "*refs/hc-lanes/*) exit 128 ;; esac\nexit $r\n' "$RG" >"$T/lostgit/git"
+printf '#!/bin/bash\ncase " $* " in *" push "*refs/hc-lanes/*|*" ls-remote "*) echo "fatal: 원격 닿지 않음(가짜)" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' "$RG" >"$T/downgit/git"
+chmod +x "$T/lostgit/git" "$T/downgit/git"
+out=$(PATH="$T/lostgit:$PATH" "$LANE" --name ls-l --repo "$R" -- claude 2>"$T/err"); rc=$?
+ll_=$(lref ls-l)
+t "임대 응답 유실: push가 실패로 끝나도 원격 값이 이 실행의 것이면 띄움(같은 값을 레인 환경에)" '[ $rc = 0 ] && [ -n "$ll_" ] && has "HC_LANE_LEASE=$ll_" || { cat "$T/err"; false; }'
+r0=$(runs); out=$(PATH="$T/lostgit:$PATH" "$LANE" --name ls-l --repo "$R2" -- claude 2>"$T/err"); rc=$?
+t "임대 응답 유실 뒤 다른 기계에서 다시 시도: 종료 10, 안 띄움(둘이 뜨지 않음)" '[ $rc = 10 ] && [ "$(runs)" = "$r0" ] && [ "$(lref ls-l)" = "$ll_" ]'
+r0=$(runs); out=$(PATH="$T/downgit:$PATH" "$LANE" --name ls-d --repo "$R" -- claude 2>"$T/err"); rc=$?
+t "임대 조회·push 실패(원격 닿지 않음): 종료 1, hc run 안 부름(모르면 안 띄움), 방금 만든 워크트리 지움" '[ $rc = 1 ] && [ "$(runs)" = "$r0" ] && [ ! -e "$R.wt/ls-d" ] && [ -z "$(lref ls-d)" ] && grep -Fq "임대를 잡지 못했다" "$T/err" || { cat "$T/err"; false; }'
+r0=$(runs); HC_FAKE_LEASE_EXEC4=1 run --on box --name ls-u --repo "$R" -- claude
+t "임대 --on: 코어가 종료 4(기계 조회 실패)면 원격 없음으로 읽지 않고 종료 1, 안 띄움(아스트라 4차 높음 3)" '[ $rc = 1 ] && [ "$(runs)" = "$r0" ] && [ ! -e "$R.wt/ls-u" ] && [ -z "$(lref ls-u)" ] && grep -Fq "원격 없음 확인 못 함" "$T/err" || { cat "$T/err"; false; }'
+run --on box --name ls-v --repo "$R2" -- claude
+t "임대 --on: 그 기계의 로그인 셸(hc exec)로 잡음" '[ $rc = 0 ] && [ -n "$(lref ls-v)" ] && grep -Fq hc-lane-lease "$HCLOG.exec" || { cat "$T/err"; false; }'
+out=$("$LANE" lease drop --repo "$R" --name ' ' 2>"$T/err"); rc=$?
+t "lease: 공백뿐인 --name은 거절(push 안 함)" '[ $rc != 0 ] && [ -n "$(lref ls-v)" ]'
+# 손으로: lease show·drop
+out=$("$LANE" lease show --repo "$R" --name ls-l 2>"$T/err"); rc=$?
+t "lease show: 「값 제목」" '[ $rc = 0 ] && [ "$out" = "$ll_ $(lsub ls-l)" ]'
+out=$("$LANE" lease drop --repo "$R2" --name ls-l 2>"$T/err"); rc=$?
+t "lease drop: 놓음(다른 클론에서도), 그 뒤 다른 기계가 띄울 수 있음" '[ $rc = 0 ] && [ -z "$(lref ls-l)" ] && printf "%s" "$out" | grep -Fq "놓음 refs/hc-lanes/ls-l"'
+out=$("$LANE" lease show --repo "$R" --name ls-l 2>"$T/err"); rc=$?
+t "lease show: 없으면 「-」" '[ $rc = 0 ] && [ "$out" = - ]'
+out=$("$LANE" lease show --repo "$T/없는 저장소" --name ls-l 2>"$T/err"); rc=$?
+t "lease show: 저장소가 아니면 조회 실패(종료 1 — 임대 없음으로 읽지 않음)" '[ $rc = 1 ]'
+out=$("$LANE" lease drop --repo "$R" --name ls-l --branch x 2>"$T/err"); rc=$?
+t "lease: --on·--repo·--name 밖의 인자는 거절" '[ $rc != 0 ] && [ -z "$out" ]'
+# land: main·표식·임대 지우기가 한 --atomic push. pre-receive는 한 push에 든 ref를 적기만, update 훅은 ref마다 「ref old」를 적고
+# $T/rejlease가 있으면 임대 ref 하나만 거절한다(--atomic이 없으면 main은 그 push에서 들어간다 — 아스트라 4차 중간·시험)
+printf '#!/bin/sh\nr=; while read -r o n ref; do r="$r $ref"; done; echo "push$r" >>"%s"\nexit 0\n' "$T/recv.log" >"$D/origin.git/hooks/pre-receive"
+printf '#!/bin/sh\ncase $1 in refs/hc-lanes/*) [ ! -f "%s" ] || { echo "임대 거절(가짜)" >&2; exit 1; } ;; esac\nexit 0\n' "$T/rejlease" >"$D/origin.git/hooks/update"
+# post-receive는 실제로 바뀐 ref만 받는다: --atomic이면 임대가 거절된 첫 push는 아무것도 안 바뀌고, 없으면 main·표식이 그 push에서 바뀐다
+printf '#!/bin/sh\nr=; while read -r o n ref; do r="$r $ref"; done; echo "done$r" >>"%s"\n' "$T/post.log" >"$D/origin.git/hooks/post-receive"
+chmod +x "$D/origin.git/hooks/pre-receive" "$D/origin.git/hooks/update" "$D/origin.git/hooks/post-receive"
+wt="$R.wt/ls-a"; (cd "$wt" && echo a >ls-a.txt && git add -- ls-a.txt && git commit -qm "feat(x): ls-a-1 다른 제목" -- ls-a.txt)
+seedp c c; rm -f "$T/recv.log"
+out=$(cd "$wt" && HC_LANE_LEASE=$la_ "$LANE" land main 2>"$T/err"); rc=$?
+m_=$(git -C "$D/origin.git" rev-parse main)
+t "land: 표식 refs/hc-landed/<레인>/<UTC 초> = 착지 커밋, 임대 지움 — main과 한 push(--atomic)" '[ $rc = 0 ] && [ "$(otop)" = "feat(x): ls-a-1 다른 제목" ] && mrefs ls-a | grep -Eq "^refs/hc-landed/ls-a/[0-9]{10} $m_$" && [ -z "$(lref ls-a)" ] && [ "$(grep -c . "$T/recv.log")" = 1 ] && grep -Eq "^push( [^ ]+)*" "$T/recv.log" && grep -Fq refs/heads/main "$T/recv.log" && grep -Fq refs/hc-landed/ls-a/ "$T/recv.log" && grep -Fq refs/hc-lanes/ls-a "$T/recv.log" || { cat "$T/err" "$T/recv.log"; false; }'
+# 원자: 임대 쪽이 거절되면 그 push는 main도 안 바뀐다 → main만 다시(검증 다시 안 돎), 표식은 따로, 임대는 못 놓았다고 알림
+run --name ls-b --repo "$R" -- claude; lb_=$(lref ls-b); wt="$R.wt/ls-b"; (cd "$wt" && echo b >ls-b.txt && git add -- ls-b.txt && git commit -qm ls-b -- ls-b.txt)
+seedp d d; rm -f "$T/recv.log" "$T/post.log"; : >"$T/rejlease"
+out=$(cd "$wt" && HC_LANE_LEASE=$lb_ "$LANE" land main 2>"$T/err"); rc=$?; rm -f "$T/rejlease"
+t "land 원자: 임대 ref 하나만 거절돼도 그 push의 main·표식은 안 바뀜(첫 push 통째 취소) → main만 다시 착지, 표식 따로, 임대는 남고 알림" '[ $rc = 0 ] && [ "$(otop)" = ls-b ] && head -n 1 "$T/recv.log" | grep -Fq refs/hc-lanes/ls-b && [ "$(head -n 1 "$T/post.log")" = "done refs/heads/main" ] && [ "$(sed -n 2p "$T/recv.log")" = "push refs/heads/main" ] && [ -n "$(mrefs ls-b)" ] && [ "$(lref ls-b)" = "$lb_" ] && grep -Fq "임대를 놓지 못했다" "$T/err" || { cat "$T/err" "$T/recv.log" "$T/post.log"; false; }'
+"$LANE" lease drop --repo "$R" --name ls-b >/dev/null 2>&1
+# 임대가 이 실행 값이 아니면(손으로 놓고 다른 실행이 잡음) 지우지 않고 착지·표식만
+run --name ls-c --repo "$R" -- claude; wt="$R.wt/ls-c"; (cd "$wt" && echo c >ls-c.txt && git add -- ls-c.txt && git commit -qm ls-c -- ls-c.txt)
+"$LANE" lease drop --repo "$R" --name ls-c >/dev/null 2>&1; out=$("$LANE" --name ls-c --repo "$R2" -- claude 2>/dev/null); lc_=$(lref ls-c)
+seedp e e
+out=$(cd "$wt" && HC_LANE_LEASE=$(printf '%040d' 0) "$LANE" land main 2>"$T/err"); rc=$?   # 40자 0을 이어 만든다(공개 검사의 16진 꼴에 안 걸리게)
+t "land: 임대가 다른 실행의 것이면 그대로 두고 착지·표식만" '[ $rc = 0 ] && [ "$(otop)" = ls-c ] && [ -n "$(mrefs ls-c)" ] && [ -n "$lc_" ] && [ "$(lref ls-c)" = "$lc_" ] || { cat "$T/err"; false; }'
+# clean이 임대를 놓는다(띄운 뒤 아무것도 안 한 레인)
+run --name ls-e --repo "$R" -- claude
+t "clean 준비: 임대 있음" '[ -n "$(lref ls-e)" ]'
+out=$(cd "$R" && "$LANE" clean --repo "$R" --branch ls-e 2>"$T/err"); rc=$?
+t "clean: 정리하면서 임대 refs/hc-lanes/<레인>도 놓음" '[ $rc = 0 ] && [ -z "$(lref ls-e)" ] && printf "%s" "$out" | grep -Fq "임대 확인: refs/hc-lanes/ls-e 없음(놓음)" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+# herdr-land.sh: HERDR_LAND_PUSH_EXTRA로 표식(과 임대 지우기)을 넘김. 그 스크립트가 실으면 한 push, 안 실으면 land_after가 따로
+mk t22h
+seed .claude/herdr-verify.sh 'exit 0'
+seed .claude/herdr-land.sh 'echo "extra=$HERDR_LAND_PUSH_EXTRA"; git fetch -q origin && git rebase -q "origin/$1" || exit 3; if [ -f "$HOME/useextra" ]; then git push -q --atomic origin "HEAD:refs/heads/$1" $HERDR_LAND_PUSH_EXTRA; else git push -q origin "HEAD:refs/heads/$1"; fi'
+run --name lh-a --repo "$R" -- claude; lh_=$(lref lh-a); wt="$R.wt/lh-a"; (cd "$wt" && echo h >lh-a.txt && git add -- lh-a.txt && git commit -qm lh-a -- lh-a.txt)
+: >"$T/useextra"
+out=$(cd "$wt" && HC_LANE_LEASE=$lh_ "$LANE" land main 2>"$T/err"); rc=$?; rm -f "$T/useextra"
+m_=$(git -C "$D/origin.git" rev-parse main)
+t "herdr-land.sh: HERDR_LAND_PUSH_EXTRA = 「HEAD:refs/hc-landed/<레인>/<초> :refs/hc-lanes/<레인>」, 실으면 표식·임대 지우기가 main과 함께" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Eq "^extra=HEAD:refs/hc-landed/lh-a/[0-9]{10} :refs/hc-lanes/lh-a$" && mrefs lh-a | grep -Fq " $m_" && [ -z "$(lref lh-a)" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+run --name lh-b --repo "$R" -- claude; lh_=$(lref lh-b); wt="$R.wt/lh-b"; (cd "$wt" && echo h >lh-b.txt && git add -- lh-b.txt && git commit -qm lh-b -- lh-b.txt)
+out=$(cd "$wt" && HC_LANE_LEASE=$lh_ "$LANE" land main 2>"$T/err"); rc=$?
+m_=$(git -C "$D/origin.git" rev-parse main)
+t "herdr-land.sh가 EXTRA를 안 실어도: 착지 뒤 표식을 따로 두고(그 커밋이 origin/main에 들어갔을 때) 임대를 놓음" '[ $rc = 0 ] && [ "$(otop)" = lh-b ] && mrefs lh-b | grep -Fq " $m_" && [ -z "$(lref lh-b)" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

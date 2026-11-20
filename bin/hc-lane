@@ -6,7 +6,12 @@
 # hc run은 호출자 환경을 넘기지 않아서 LANE_* 는 `env K=V <명령…>`으로 감싸 넘긴다.
 set -u
 
-die() { printf 'hc-lane: %s\n' "$*" >&2; [ "${cmd-}" != clean ] || cj stopped "$*"; exit 1; }
+die() {
+  printf 'hc-lane: %s\n' "$*" >&2; [ "${cmd-}" != clean ] || cj stopped "$*"
+  # 병합기가 멈추면 막힘 사건(감사 land-merge-train-2 중간 4 — main에 쓰는 곳이 하나라 조용히 서면 전체 착지가 선다)
+  [ -z "${mgrun_-}" ] || (mgrun_=; report_cmd 막힘 - "병합기 멈춤: $* (클론 ${top:-?})" --name merger) >/dev/null 2>&1
+  exit 1
+}
 j() { printf %s "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 cj() {  # clean 결과 JSON 한 줄(앞에서 멈춰 아직 정하지 않은 값은 빈 값)
   printf '{"clean":"%s","reason":"%s","dry_run":%s,"on":"%s","repo":"%s","worktree":"%s","branch":"%s","base":"%s","teardown":"%s"}\n' \
@@ -18,6 +23,8 @@ usage() {
 사용법: hc-lane [--on <기계>] [--read | --direct] [--branch <이름>] [--dry-run] [--print-steps] [--brief <지시문>]
                --name <레인> --repo <저장소 경로> [-- <실행 명령…>]
   기본          fetch → <저장소>.wt/<브랜치>에 origin/<기본> 기준 워크트리 → .claude/herdr-setup.sh(있으면) → hc run --bg
+                쓰기 레인은 hc run 직전에 레인 임대 refs/hc-lanes/<레인>을 없을 때만 잡는다(아래 lease): 이미 있으면 「이미 돎」 종료 10,
+                조회·push 실패면 종료 1 — 둘 다 띄우지 않고 방금 만든 워크트리를 되돌린다. 레인 환경 HC_LANE_LEASE = 그 임대 값
                 원격 origin이 없는 저장소는 fetch 없이 로컬 <기본>(main, 없으면 master) 기준
                 (모든 git fetch는 같은 클론의 참조 잠금 경합(cannot lock ref 등)이면 1·2·4초 쉬고 3번까지 다시)
                 메인 폴더 앞당김: fetch 뒤(--read도 fetch 뒤)와 land 착지 뒤, 메인 폴더가 기본 브랜치이고 추적 파일 변경·진행 중인
@@ -48,6 +55,9 @@ usage() {
                 --start-wait <초>(이 호출만) 또는 설정 lane.start_wait초(기본 60, 0이면 이 단계를 끔. status를 내지 않는
                 명령·CLI는 0으로) 안에 hc get status가 안 잡히면 화면 끝에서 막힘 낱말을 찾아
                 한 줄로 알리고 종료 5 시작 안 됨(원인 모름·신뢰 질문·끝남), 6 로그인·인증 막힘, 7 키체인 막힘(터미널은 남긴다)
+                status가 잡힌 뒤 설정 lane.first_turn_wait초(기본 60, 0이면 끔) 안에 turn > 0 또는 status working을
+                한 번도 못 보면 사건 막힘 「첫 턴 없음 <주소>」과 start noturn(종료 0). hc-fill에는 첫 status에서 start ok와
+                주소를 돌려주고 따로 감시한다(진단은 hc-lane/watch.log).
        hc-lane clean [--on <기계>] [--dry-run] [--archive] --repo <저장소 경로> (--branch <브랜치> | --name <레인>)
   clean         착지한 레인의 워크트리·브랜치를 지운다: fetch 뒤 브랜치(와 워크트리 HEAD)가 origin/<기본>에
                 들어갔는지 → 추적 변경·무시되지 않은 untracked가 없는지(등록이 지워지고 폴더만 남았으면 저장소
@@ -72,10 +82,37 @@ usage() {
                 rebase가 내용 충돌로 멈췄는데 rerere가 기록한 풀이로 그 충돌 경로를 모두 풀었으면(미병합·rerere remaining 없음)
                 GIT_EDITOR=true git rebase --continue로 이어 간다. 일부만 풀렸거나 충돌이 아닌 중단(훅 등)이면 멈춘 그대로 종료 3
                 (쓰기 레인 작업 트리를 만들 때 저장소에 rerere.enabled·rerere.autoUpdate가 정해져 있지 않으면 true로 켠다)
+                원격이 있으면 main push에 --atomic으로 착지 표식 refs/hc-landed/<레인>/<UTC 초>(= 착지한 커밋)와 이 레인 임대 지우기
+                (HC_LANE_LEASE 값 lease)를 함께 싣는다(herdr-land.sh에는 HERDR_LAND_PUSH_EXTRA로 넘김). 못 실었으면 착지 뒤 따로
                 종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음
                 검증(herdr-land.sh면 그 전체) 출력은 화면 그대로 + ${XDG_STATE_HOME:-~/.local/state}/hc-lane/land-logs/<레인>-<시각>-<pid>.log
                 (14일 지난 것은 지움). 실패면 실패 줄(--- FAIL·FAIL <패키지>·panic·(fail)·✗·✖·not ok, 최대 40줄 — 이번에 생긴
                 .qa/<날짜>/herdr-verify-* 폴더의 *.log도 뒤짐)·그 폴더·「전체 로그 <경로>」를 오류 출력에, $HC_LANE이면 중간 사건에도 경로
+                병합기가 켜진 저장소(원격 참조 refs/herdr/merger/<병합기 기계>가 있음 — hc-fill 설정 「merger <프로젝트> <기계>」가
+                켜고 끔)에서는 착지 대신 제출: HEAD를 refs/heads/lane/<레인> + refs/merge-queue/<UTC초>-<레인> + 제출 기록에 한 번의
+                원자 push(같은 레인의 옛 표식은 지움, 기본 브랜치는 안 건드림), 접수가 확인되면 「중간 <sha> 제출 <ID> → <큐>」 사건과
+                끝 줄 「제출 …」, 종료 0(이미 들어간 커밋이면 할 것 없음 0). 켜졌는지(원격 설정·켬 표식) 못 읽으면 착지하지 않고 75.
+                HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 원격 lane/*에 그 SHA 그대로 있는 가지를 「제출됨」으로 지운다.
+                HERDR_LAND_PUSH_EXTRA="<git push 인자> …"(refspec — 왼쪽 HEAD = 기본 브랜치에 넣는 커밋 — 와 --force-with-lease=<참조>:<SHA>;
+                병합기는 「:<큐> --force-with-lease=<큐>:<SHA>」와 HEAD:refs/hc-landed/<제출 ID>)면 기본 브랜치와 한 번의 --atomic push로
+                싣고, lease 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6. 병합기 안 착지(HERDR_MERGER=1)에서 rebase한 기본
+                브랜치에 .claude/herdr-land.sh가 생겼으면 종료 7. 이 둘(과 HERDR_MERGER)은 검증 자식에 물려주지 않는다
+       hc-lane merger --repo <병합기 전용 클론> [--once] [--tick <초>] [<기본 브랜치>]   (병합기 기계에서 하나만)
+  merger        MVP-1: 전용 착지 스크립트(.claude/herdr-land.sh)가 없는 저장소의 큐(refs/merge-queue/*)를 이름 순으로 하나씩 —
+                레인 이름 그대로의 로컬 가지로 HERDR_MERGER=1 hc-lane land, 큐 표식은 HERDR_LAND_PUSH_EXTRA로 기본 브랜치 push가 함께
+                지운다. 제출 트리에 .claude/herdr-land.sh가 있으면 그 제출은 반송(MVP-2). 바퀴마다 켬 표식이 이 기계(HC_LANE_MACHINE,
+                없으면 hostname -s)인지 보고, 꺼졌으면 쉬고 다른 기계면 멈춘다. 표식은 길 안내일 뿐 — 정확성은 기본 브랜치 CAS
+                (큐 참조를 건드리는 원격 쓰기는 모두 그 큐의 지금 SHA에 lease). 후보는 매번 새 임시 작업 트리(<git 폴더>/hc-merger/wt).
+                착지 전에 일지(<git 폴더>/hc-merger/cur: 가지·기준·후보·제출)를 쓰고, 바퀴마다 새로 고르기 전에 그 일지부터 정리
+                (원격 refs/hc-landed/<제출 ID>가 기본 브랜치의 조상 → 완료, 그 밖 → 후보 버림·제출은 큐에 남았으면 처음부터).
+                착지 종료와 상관없이 원격이 후보를 담았나를 먼저 본다. 다른 기본 브랜치로 낸 제출은 건드리지 않음.
+                일시 실패(75·4·원격 받기·push 결과 모름)는 큐에 두고 3번 넘으면 돌려보냄. git 조회 실패는 모두 「모르면 안 함」.
+                들어가면 제출 기록을 refs/merge-done/<레인>으로 옮기고 lane 가지를 지운 뒤 「착지」 사건(--name <레인>, 제출 때 지휘가
+                있으면 --to, 레인 터미널이 살아 있으면 hc send). 실패면 표식을 refs/merge-failed/<이름>으로 옮기고
+                (lane 가지는 둠) 「막힘」 사건(까닭·로그 …/hc-lane/merger-logs/). 사건은 보낼 함(hc-merger/out)을 거쳐 끊겨도 다음
+                바퀴가 보내고, 한 제출에 한 번만(사건·일지에 「제출 ID <ID>」 열쇠가 이미 있으면 안 적음). 잠금은 잠금 파일의 flock(착지 자식까지 물려받음). GOCACHE가 없으면
+                ~/.cache/go-build. 빈 바퀴는 --tick초(기본 30) 쉼, --once는 큐가 빌 때까지(원격 오류·일시 실패로 남긴 바퀴면 75).
+                전용 클론 = 레인 작업 트리를 두지 않는 클론. 종료 75 이미 돎(또는 그 착지가 아직 돎)
        hc-lane gc [--on <기계>] [--dry-run] [--integ[=<접두>]] [--remote-branches] [--min-age <시간>] --repo <저장소 경로>
   gc            끝난 레인 정리: 연결된 작업 폴더마다 HEAD가 origin/<기본>에 다 들어갔고(조상이거나 git cherry에 + 없음)
                 깨끗하고(추적 변경·untracked 없음, 무시된 보관물 .qa/ 없음) 그 폴더를 cwd로 쓰는 hc 터미널이 없고
@@ -91,7 +128,11 @@ usage() {
                 push는 HERDR_LAND=1일 때만 받고, 아니면 새 착지 줄을 알리고 거절한다. 다른 브랜치·참조는 통과.
                 다른 pre-push 훅이 있거나 core.hooksPath가 있으면 건드리지 않고 멈춘다. remove는 자기가 넣은 것만 지운다.
                 status 종료: 0 깔림, 1 없음, 3 다른 훅. 원격이 하나도 없는 저장소는 push가 없어 「설치할 것 없음」(종료 0)
-       hc-lane report <중간|완료|착지|막힘|판정> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]]   (레인 안에서)
+       hc-lane lease show|drop [--on <기계>] --repo <저장소 경로> --name <레인>
+  lease         레인 임대 refs/hc-lanes/<레인>(프로젝트 원격). 쓰기 레인은 hc run 직전에 없을 때만 만들어 잡고(이미 있으면 「이미 돎」
+                종료 10, 조회·push 실패도 안 띄움 — 종료 1), land 성공(main과 같은 원자 push)·clean에서 놓는다. 그 밖(레인이 죽음·
+                지휘가 hc-fill rm)으로 임대가 남아 다시 못 띄우면 이 drop으로 손으로 놓는다. show: 「값 제목」 또는 「-」
+       hc-lane report <중간|완료|착지|막힘|판정|제출> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]]   (레인 안에서)
   report        이 기계 ${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv에 한 줄을 더한다(지우지 않음):
                 시각(UTC)·기계(HC_LANE_MACHINE, 없으면 hostname)·터미널($HC_TERMINAL_ID)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·
                 그때의 hc turn(터미널 밖이면 -). 옛 7칸 줄도 읽는다.
@@ -171,7 +212,7 @@ capt() { if command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @AR
 # ---- 레인 사건(2026-11-16 lane-events): 레인이 상태를 직접 적고(report) 지휘는 그것만 읽는다(events·wait) ----
 # 화면 글자·보고 파일 끝 줄을 긁던 감시가 칸이 한 줄이거나 파일 이름이 다르면 완료를 놓쳤다(레인이 20~80분 놀았다).
 evdir=${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane
-evstates='중간 완료 착지 막힘 판정'
+evstates='중간 완료 착지 막힘 판정 제출'   # 제출 = 병합기 큐 접수(hc-lane land가 적음, 착지는 병합기가 따로)
 tab=$(printf '\t')
 utc() { if [ $# = 0 ]; then date -u +%Y-%m-%dT%H:%M:%SZ; else date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; fi; }
 flat() { printf %s "$1" | tr '\t\r\n' '   '; }
@@ -225,6 +266,21 @@ report_cmd() {
     lane=$(git symbolic-ref -q --short HEAD 2>/dev/null)
     ob=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); ob=${ob#origin/}
     case " main master ${ob:-main} " in *" $lane "*) lane= ;; esac
+  fi
+  # 병합기에 제출만 한 커밋의 「착지」는 적지 않는다(감사 land-merge-train-2 중간 1, 병합기 1차 중간 7 — --name이어도): 원격
+  # lane/<레인>(제출 push가 고친 추적 참조)이 그 커밋을 담거나 이 기계 제출 기록(<공용 git 폴더>/hc-submitted — push 응답이 끊겨 추적 참조가
+  # 없을 때)에 있고, 기본 브랜치에는 없으면 착지는 병합기가 적는다. 거짓 착지는 겹침 소유를 풀고 지표에 남는다
+  # 기본 브랜치는 제출 기록의 셋째 칸(제출 때의 대상), 없으면 origin/HEAD(2차 중간 8 — report는 origin_base 정의 전에 돌아 늘 main이었다)
+  if [ "$st" = 착지 ] && [ "$sha" != - ] && [ -n "$lane" ]; then
+    sb_=$(awk -v l="$lane" -v s="$sha" '$1 == l && index($2, s) == 1 && $3 != "" { b = $3 } END { print b }' "$(git rev-parse --git-common-dir 2>/dev/null)/hc-submitted" 2>/dev/null)
+    [ -n "$sb_" ] || { sb_=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); sb_=${sb_#origin/}; }
+  fi
+  if [ "$st" = 착지 ] && [ "$sha" != - ] && [ -n "$lane" ] && {
+      git merge-base --is-ancestor "$sha" "refs/remotes/origin/lane/$lane" 2>/dev/null ||
+      awk -v l="$lane" -v s="$sha" '$1 == l && index($2, s) == 1 { f = 1 } END { exit !f }' "$(git rev-parse --git-common-dir 2>/dev/null)/hc-submitted" 2>/dev/null; } &&
+    ! git merge-base --is-ancestor "$sha" "refs/remotes/origin/${sb_:-main}" 2>/dev/null; then
+    echo "hc-lane report: $sha 는 병합기 큐에 제출만 됐다(lane/$lane) — 착지는 병합기가 사건(착지·막힘 --name $lane)으로 적는다. 아무것도 적지 않음"
+    return 0
   fi
   tail_="$tab${tn:--}${to_:+$tab$to_}"
   line="$(utc)$tab$(bcut 64 "$(flat "${m:--}")")$tab$(bcut 64 "$(flat "${HC_TERMINAL_ID:--}")")$tab$(bcut 64 "$(flat "${lane:--}")")$tab$st$tab$(flat "$sha")$tab"
@@ -417,9 +473,10 @@ stopped() {  # stopped <사건 줄들> <이번 바퀴 모름 기계들>
     # lane.notify no면 hc가 지휘에 종료를 알리지 않으니 이것이 유일한 알림
     # 마지막 보고: 착지·판정, --read·hc-fill 레인(레인 기록 넷째 칸 read·fill)은 완료도(sweep-rename 5). 지휘가 hc kill로 닫은 것
     # (reason killed)은 일부러 닫은 것이라 알리지 않는다 — hc-sweep이 닫은 것은 정리됨 사건이 판정한다
-    fin=' 착지 판정 '
+    # 「제출」(병합기 큐에 넣고 끝남 — 착지는 병합기가 알린다)도 정상 끝(병합기 3차 중간 10)
+    fin=' 착지 판정 제출 '
     case $(printf '%s\n' "$km_" | A=${a##*/} N=$nm awk -F'\t' '$1 == ENVIRON["A"] && $2 == ENVIRON["N"] { k = $3 } END { print k }') in
-      read|fill) fin=' 착지 판정 완료 ' ;;
+      read|fill) fin=' 착지 판정 제출 완료 ' ;;
     esac
     # killed가 지휘의 hc kill인지: parent가 없거나(hc-fill 레인) 아직 살아 있을 때만. parent가 끝났거나 없어졌거나 모르면
     # die_with_parent로 함께 끝난 것이라 알린다(재감사 [중간] M1 — 지휘 칸이 죽어 함께 killed된 구현 레인을 놓쳤다)
@@ -629,7 +686,7 @@ ev_cmd() {
       function num(x) { return x ~ /^[0-9]+$/ }
       { t2 = $3 SUBSEP $4 }
       $5 == "정리됨" { a3 = $3; sub(/^.*\//, "", a3)
-        if ((lst[t2] == "착지" || lst[t2] == "판정" || (lst[t2] == "완료" && kind[a3 SUBSEP $4] ~ /^(read|fill)$/)) && num($8) && num(ltn[t2]) && $8 + 0 <= ltn[t2] + 1) next
+        if ((lst[t2] == "착지" || lst[t2] == "판정" || lst[t2] == "제출" || (lst[t2] == "완료" && kind[a3 SUBSEP $4] ~ /^(read|fill)$/)) && num($8) && num(ltn[t2]) && $8 + 0 <= ltn[t2] + 1) next
         if (nk("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
         $5 = "멈춤"; $6 = "-"; $7 = "뜻밖의 종료(정리됨) " $7 }
       $5 != "멈춤" { lrep($5, $6, NF >= 8 ? $8 : "-", t2) }
@@ -915,7 +972,9 @@ case ${1-} in
   fetch) cmd=fetch; shift ;;
   gc) cmd=gc; shift ;;
   land) cmd=land; shift; case ${1-} in ''|-*) ;; *) lbase=$1; shift ;; esac ;;
+  merger) cmd=merger; shift; mga_=("$@"); set -- ;;   # 자기 인자는 merger_cmd가 읽는다(아래 함수 정의 뒤에 부름)
   guard) cmd=guard; shift; act=${1-}; [ $# = 0 ] || shift ;;
+  lease) cmd=lease; shift; act=${1-}; [ $# = 0 ] || shift ;;
 esac
 while [ $# -gt 0 ]; do
   case $1 in
@@ -967,6 +1026,11 @@ elif [ $cmd = gc ]; then
 elif [ $cmd = land ]; then
   [ -z "$on$name$branch$repo" ] && [ $read$dry$steps = 000 ] && [ $# = 0 ] ||
     die "land는 레인 작업 폴더 안에서 인자 없이(또는 기본 브랜치 하나만) 부른다: hc-lane land [<기본 브랜치>]"
+elif [ $cmd = merger ]; then
+  :   # 인자는 merger_cmd가 읽는다
+elif [ $cmd = lease ]; then
+  case $act in show|drop) ;; *) usage ;; esac
+  [ -n "$repo" ] && [ -n "$name" ] && [ -z "$branch" ] && [ $read$dry$steps = 000 ] && [ $# = 0 ] || die "lease show|drop에는 --on·--repo·--name만 쓴다"
 elif [ $cmd = guard ]; then
   case $act in install|status|remove) ;; *) usage ;; esac
   [ -n "$repo" ] || usage
@@ -1134,16 +1198,662 @@ rr_ok() {
   # 두 확인 명령이 각각 성공했고 결과가 빌 때만(명령이 실패해 빈 출력이면 이어 가지 않는다 — 아스트라 감사 중간 1)
   u_=$(git diff --name-only --diff-filter=U) && [ -z "$u_" ] && u_=$(git rerere remaining) && [ -z "$u_" ]
 }
+# ---- 병합기(2026-11-20 레인 land-merger-mvp — 사용자 결정 「중앙 병합기, 브랜치만 (추천)」 → 「병합기 최소 버전을 먼저 만들어서
+# 전체 적용시키고 일단 사용부터」. 왜: 레인마다 fetch·rebase·검증·차례·push를 하니 rebase 충돌·차례 다툼·재검증으로 착지가 밀렸다.
+# main에 쓰는 프로세스를 하나로 하면 그 다툼이 통째로 없어진다) ----
+# 켜는 곳은 원격 하나: 원격 참조 refs/herdr/merger/<병합기 기계>(값은 아무 커밋)가 있으면 그 저장소의 hc-lane land는 제출(lane/<레인> +
+# 큐 표식)로 바뀌고, 그 기계의 hc-lane merger가 큐를 하나씩 기존 착지(HERDR_MERGER=1 hc-lane land)로 넣는다. 지우면 다음 착지부터 예전
+# 그대로. 개인 설정이 아닌 까닭: 워커 기계에는 개인 설정(herdr-tools-config)이 없어 레인이 도는 기계가 읽지 못한다. 원격 참조는
+# ls-remote 한 번으로 모든 기계·레인(rebase 안 해도)에 바로 닿고, 착지의 fetch 횟수를 늘리지 않는다.
+# 원격을 못 읽으면(켜졌는지 모름) 몇 번 다시 보고, 끝내 못 읽으면 직접 착지하지 않는다(아스트라 1차 높음 5 — 조회 한 번 실패로
+# 큐·차례를 건너뛰어 main을 올렸다). 「조회 성공 + 표식 없음」일 때만 예전 착지 길
+mgon() {  # 0 켜짐(병합기 기계를 mg_에), 1 꺼짐(조회 성공·표식 없음), 2 모름(조회 실패)
+  # 원격 없는 저장소(get-url 종료 2)만 병합기가 없다. 그 밖의 실패는 모름(2차 높음 5 — 종료 128을 「꺼짐」으로 읽어 큐를 건너뛰었다)
+  git remote get-url origin >/dev/null 2>&1
+  case $? in 0) ;; 2) return 1 ;; *) echo "hc-lane land: 원격 설정(git remote get-url origin)을 읽지 못해 병합기가 켜졌는지 모른다 — 착지하지 않았다. 같은 줄을 다시" >&2; return 2 ;; esac
+  for w_ in ${HC_LANE_MGON_WAITS:-1 2 4} -; do
+    mgt_=$(git ls-remote origin 'refs/herdr/merger/*' 2>/dev/null) && break
+    [ "$w_" = - ] && { echo "hc-lane land: 원격을 읽지 못해 병합기가 켜졌는지 모른다 — 착지하지 않았다. 같은 줄을 다시" >&2; return 2; }
+    sleep "$w_"
+  done
+  mg_=$(printf '%s\n' "$mgt_" | awk 'NF == 2 { sub(/^refs\/herdr\/merger\//, "", $2); print $2; exit }')
+  [ -n "$mg_" ]
+}
+# 레인 이름 = hc-fill 레인 이름 규칙(okname: a-z 0-9 _ - 32자) + git 가지 이름으로 쓸 수 있음(git check-ref-format --branch). 레인을 띄울
+# 때(hc-lane이 그 이름으로 가지를 만든다)와 같은 두 검사다(3차 중간 13 — 「_audit」을 받는 쪽과 거절하는 쪽이 갈렸다, 2차 중간 13 — 「-audit」).
+# 글자를 늘어놓는다: [a-z] 범위는 로캘에 따라 대문자도 받는다(시험 14에서 Bad_Name이 통과)
+lname_ok() {
+  case $1 in ''|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
+  [ ${#1} -le 32 ] && git check-ref-format --branch "$1" >/dev/null 2>&1
+}
+# 제출: HEAD를 refs/heads/lane/<레인>과 큐 표식 refs/merge-queue/<UTC초>-<레인>에 한 번의 원자 push로(같은 레인의 옛 표식은 같은
+# push에서 지움 — 다시 제출하면 새 것만 남는다). 기본 브랜치는 건드리지 않는다. 결과를 모르면(전송 오류) 원격을 다시 읽어 둘 다
+# 그 SHA면 제출로, 그 밖·읽기 실패는 멈춤(같은 줄을 다시 돌리면 같은 결과로 모인다). 종료 0 제출(또는 이미 들어감), 1 실패
+submit_cmd() {
+  llog_init
+  ln_=${HC_LANE:-$(git symbolic-ref -q --short HEAD 2>/dev/null)}
+  lname_ok "$ln_" || die "land(제출): 레인 이름은 a-z 0-9 - _ 32자까지여야 큐에 넣는다: ${ln_:-(분리된 HEAD)}"
+  # 병합기 클론의 로컬 가지와 겹치는 이름(기본 브랜치·묶음 가지)은 받지 않는다(감사 낮음 3)
+  case $ln_ in "$base"|merge-batch|batch|main|master) die "land(제출): 레인 이름 $ln_ 은 병합기가 쓰는 가지 이름이라 큐에 넣지 않는다 — 레인 작업 트리에서 HC_LANE=<레인>으로" ;; esac
+  git remote get-url origin >/dev/null 2>&1 || die "land(제출): origin이 없는 저장소는 병합기로 넣지 않는다"
+  for f_ in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD; do
+    # 경로 조회가 실패하면 빈 경로가 「없음」으로 통과했다(3차 높음 5) — 모르면 제출하지 않는다
+    gp_=$(git rev-parse --git-path "$f_") && [ -n "$gp_" ] || die "land(제출): git rev-parse --git-path 실패 — 진행 중인 rebase·merge가 있는지 모른다"
+    [ ! -e "$gp_" ] || die "land(제출): 진행 중인 rebase·merge가 있다($f_). 마친 뒤 같은 줄을 다시"
+  done
+  # 무시되지 않은 새 파일도 본다(아스트라 1차 중간 8 — 빠진 새 파일로 제출이 되고 뒤 clean이 그 파일로 멈췄다)
+  st_=$(git status --porcelain --untracked-files=normal) || die "land(제출): git status 실패 — 작업 트리를 모른다"
+  [ -z "$st_" ] || die "land(제출): 커밋 안 된 변경·새 파일이 있다(git status). 커밋하거나 치운 뒤 같은 줄을 다시"
+  # 선행(HERDR_LAND_AFTER)은 최소판에서 뺐다(2026-11-20 지휘 — 이름만으로는 그 실행의 선행을 못 가린다, 2판에서 작업 ID로). 선행이 아직이면
+  # 제출하지 말고 기다린다(hc-fill --after가 띄우기를 막는다)
+  [ -z "${HERDR_LAND_AFTER-}" ] || die "land(제출): 선행(HERDR_LAND_AFTER)은 병합기 최소판에 없다 — 선행이 main에 들어간 뒤 HERDR_LAND_AFTER 없이 같은 줄을"
+  sh_=$(git rev-parse -q --verify HEAD) || die "land(제출): HEAD를 읽지 못했다"
+  lrun fetchr git fetch -q origin || die "land(제출): git fetch 실패"
+  ob_=$(git rev-parse -q --verify "refs/remotes/origin/$base^{commit}") || die "land(제출): origin/$base 가 없다"
+  git merge-base --is-ancestor "$sh_" "$ob_"; ia_=$?
+  case $ia_ in
+    0) echo "hc-lane land: 이 레인의 커밋은 이미 origin/$base 에 있다 — 제출할 것 없음"; exit 0 ;;
+    1) ;;
+    *) die "land(제출): git merge-base --is-ancestor 실패(종료 $ia_)" ;;
+  esac
+  rs_=$(git ls-remote origin "refs/heads/lane/$ln_" 'refs/merge-queue/*' 'refs/merge-queue-meta/*' 'refs/merge-failed/*' "refs/merge-done/$ln_") ||
+    die "land(제출): 원격을 읽지 못했다(git ls-remote) — 같은 줄을 다시"
+  # 병합기가 이 레인의 앞 제출을 넣는 중이어도 다시 제출할 수 있다: 병합기의 main push가 그 큐 표식을 lease로 함께 지우니, 여기서 옛
+  # 표식을 지우면 그 push는 통째로 거절된다(구조 B)
+  cur_=$(printf '%s\n' "$rs_" | awk -v r="refs/heads/lane/$ln_" '$2 == r { print $1 }')
+  # 같은 커밋을 이미 냈으면 새 제출을 만들지 않는다(3차 중간 1 — 접수 확인이 끊겨 같은 줄을 다시 돌리면, 이미 rebase돼 들어간 원본은
+  # 조상 검사에서 빠져 새 제출이 됐다): 큐에 그 SHA로 남아 있으면 접수 그대로, refs/merge-done/<레인>(넣은 제출 기록)의 원본이 이
+  # 커밋이면 이미 넣음
+  if [ "$cur_" = "$sh_" ] && printf '%s\n' "$rs_" | awk -v l="$ln_" -v s="$sh_" '{ n = $2 } sub(/^refs\/merge-queue\/[0-9]+-/, "", n) && n == l && $1 == s { f = 1 } END { exit !f }'; then
+    echo "hc-lane land: 이 커밋($(git rev-parse --short "$sh_"))은 이미 병합기 큐에 있다(lane/$ln_) — 새로 내지 않음. 결과는 병합기가 사건으로 알린다"; exit 0
+  fi
+  dn_=$(printf '%s\n' "$rs_" | awk -v r="refs/merge-done/$ln_" '$2 == r { print $1 }')
+  if [ -n "$dn_" ]; then
+    fetchr git fetch -q origin "+refs/merge-done/$ln_:refs/hc-lane/merge-done/$ln_" || die "land(제출): 넣은 제출 기록을 받지 못했다(git fetch) — 같은 줄을 다시"
+    if [ "$(git rev-parse -q --verify "$dn_^" 2>/dev/null)" = "$sh_" ]; then
+      echo "hc-lane land: 이 커밋은 병합기가 이미 $base 에 넣었다(refs/merge-done/$ln_) — 제출할 것 없음"; exit 0
+    fi
+  fi
+  # 같은 레인의 옛 표식·기록(다시 제출하면 새 것만 남는다)
+  olds_=$(printf '%s\n' "$rs_" | awk -v l="$ln_" '{ n = $2; if (sub(/^refs\/merge-queue(-meta)?\//, "", n) && n ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-/ && substr(n, 12) == l) print $2, $1 }')
+  # 큐 이름은 지금 큐와 반송된 것(refs/merge-failed/)에 없는 초로(3차 중간 2 — 같은 초에 세 번 내면 옛 반송 이름과 겹쳤다)
+  e_=$(date -u +%s)
+  while printf '%s\n' "$rs_" | grep -Eq "[[:space:]]refs/merge-(queue|failed)/$e_-$ln_\$"; do e_=$((e_ + 1)); done
+  q_=refs/merge-queue/$e_-$ln_ qm_=refs/merge-queue-meta/$e_-$ln_
+  # 제출 기록(아스트라 비교 검증 2026-11-20 ①): 감사받은 그 SHA(원본)·갈래점·고유 제출 ID(이 착지 시도 ID)·기계·터미널을 빈 트리 커밋
+  # 메시지로(부모 = 원본). 병합기가 결과 사건·돌려보낼 때 이 값을 남긴다
+  fk_=$(git merge-base "$sh_" "$ob_") || die "land(제출): 갈래점을 구하지 못했다(git merge-base)"
+  # owner = 결과를 받을 지휘(HC_LANE_OWNER, 없으면 -) — 병합기가 사건 --to로 넘긴다(아스트라 1차 중간 12)
+  ow_=$(printf %s "${HC_LANE_OWNER:--}" | tr -c 'A-Za-z0-9_.,/-' -)
+  # 기계(병합기가 hc send 할지 견주는 값 — merger의 mme_와 같은 출처)·제출 ID(<기계>-<UTC 시각>-<pid>)
+  mt_=$(printf %s "${HC_LANE_MACHINE:-$(hostname -s 2>/dev/null)}" | tr -c 'A-Za-z0-9_.-' -); mt_=${mt_:--}
+  sid_=$mt_-$(date -u +%Y%m%dT%H%M%S)-$$
+  et_=$(git hash-object -t tree -w /dev/null) &&
+    mc_=$(git commit-tree "$et_" -p "$sh_" -m "merge-queue lane=$ln_ id=$sid_ orig=$sh_ fork=$fk_ base=$base host=$mt_ term=${HC_TERMINAL_ID:--} owner=$ow_ job=$(printf %s "${HC_LANE_JOB:--}" | tr -c 'A-Za-z0-9_.~-' -)") ||
+    die "land(제출): 제출 기록 커밋을 만들지 못했다"
+  set -- "$sh_:refs/heads/lane/$ln_" "$sh_:$q_" "$mc_:$qm_" "--force-with-lease=refs/heads/lane/$ln_:$cur_" "--force-with-lease=$q_:" "--force-with-lease=$qm_:"
+  while read -r or_ os_; do
+    [ -n "$or_" ] || continue
+    set -- "$@" ":$or_" "--force-with-lease=$or_:$os_"
+  done <<<"$olds_"
+  po_=$(git push --atomic --porcelain origin "$@" 2>&1); pr_=$?
+  [ -z "$llog" ] || printf '%s\n' "$po_" >>"$llog"
+  # 원격 접수 확인: push가 0이어도 다시 읽어 본다(응답이 끊긴 실패도 같은 판정). 제출 기록 커밋(mc_ — 이 제출 ID가 든 이번 push만의 값)이
+  # 큐 기록 자리에 있거나, 그새 병합기가 처리해 refs/merge-done/<레인>(넣음)·refs/merge-failed-meta/<이름>(돌려보냄)에 있으면 접수다.
+  # 큐 표식은 병합기의 main push가 lease로 먼저 지우니 보지 않는다(2차 중간 1 — 그 틈에 부르면 접수를 실패로 냈다, 1차 중간 1)
+  rb_=$(git ls-remote origin "$qm_" "refs/merge-done/$ln_" "refs/merge-failed-meta/$e_-$ln_") ||
+    die "land(제출): 원격 접수를 확인하지 못했다(git ls-remote) — 같은 줄을 다시(다시 제출해도 큐에는 하나만 남는다)"
+  printf '%s\n' "$rb_" | awk -v c="$qm_" -v d="refs/merge-done/$ln_" -v f="refs/merge-failed-meta/$e_-$ln_" -v m="$mc_" '
+    ($2 == c || $2 == d || $2 == f) && $1 == m { g = 1 } END { exit !g }' ||
+    { printf '%s\n' "$po_" >&2; die "land(제출): push 실패(위 git 출력, 종료 $pr_) — 같은 줄을 다시"; }
+  # 접수가 확정된 뒤에만(2차 중간 14): 이 기계 기록 <공용 git 폴더>/hc-submitted(레인·SHA·기본 브랜치 — report 착지가 push 응답 유실로
+  # 추적 참조가 없어도 제출만 한 커밋을 가린다, 1차 중간 7·2차 중간 8)과 「제출」 사건(제출 ID·큐 이름)
+  printf '%s %s %s\n' "$ln_" "$sh_" "$base" >>"$(git rev-parse --git-common-dir)/hc-submitted" || echo "hc-lane land: 제출 기록(hc-submitted)을 쓰지 못했다" >&2
+  # 사건 상태 「제출」(3차 중간 10 — 중간이면 wait가 「뜻밖의 종료」로 봤다). 한 줄 첫 낱말이 제출 ID — 병합기의 착지·막힘 사건(「제출 ID <ID>」)과
+  # hc-fill이 이것으로 잇는다
+  (report_cmd 제출 "$sh_" "$sid_ → $q_ (병합기 $mg_ 가 $base 에 넣는다)" --name "$ln_") >/dev/null || echo "hc-lane land: 제출 사건을 쓰지 못했다" >&2
+  echo "hc-lane land: 제출 $(git rev-parse --short "$sh_") → $q_ (lane/$ln_) — 병합기(${mg_})가 $base 에 넣고 결과를 사건(착지·막힘 --name $ln_)으로 알린다. 이 레인은 여기서 끝(report 착지는 부르지 않아도 된다 — 불러도 적히지 않음)"
+  exit 0
+}
+# merger --repo <병합기 전용 클론> [--once] [--tick <초>] [<기본 브랜치>]: 큐를 이름(초) 순으로 하나씩 처리한다. 한 클론에 하나만(잠금).
+# 전용 클론: 레인 작업 트리를 두지 않는 곳이어야 한다(제출마다 레인 이름 그대로의 로컬 가지를 만들어 착지한다 — 문서 자리표시
+# v0.NEXT@<레인>·착지 스크립트가 가지 이름을 레인으로 읽는다).
+merger_cmd() {
+  # MVP-1은 한 건씩만(2026-11-20 지휘 t1cj 2차 「최소판을 더 작게」 — 묶음·준비 훅은 MVP-2)
+  mo_=0 mt_=30 mr_= mb_=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --repo) val "$@"; mr_=$2; shift 2 ;;
+      --once) mo_=1; shift ;;
+      --tick) val "$@"; mt_=$2; shift 2 ;;
+      -h|--help) usage ;;
+      -*) die "merger: 알 수 없는 인자: $1" ;;
+      *) [ -z "$mb_" ] || die "merger: 남는 인자: $1"; mb_=$1; shift ;;
+    esac
+  done
+  case $mt_ in ''|*[!0-9]*) die "merger: --tick은 초(정수): $mt_" ;; esac
+  [ -n "$mr_" ] || die "merger: --repo <병합기 전용 클론> 이 필요하다"
+  # Go 빌드 캐시를 macOS가 비우는 ~/Library/Caches 밖에(2026-11-20 verify-speed-study: 워커 Mac mini에서 캐시 항목이 사라져 「could not
+  # import os … no such file」로 전체 검증을 처음부터 다시 두 번). 병합기는 같은 클론·같은 캐시를 계속 쓰니 캐시가 곧 속도다
+  [ -n "${GOCACHE-}" ] || export GOCACHE="$HOME/.cache/go-build"
+  case $0 in /*) self_=$0 ;; */*) self_=$PWD/$0 ;; *) self_=$(command -v "$0" 2>/dev/null || echo "$0") ;; esac
+  cd "$mr_" 2>/dev/null && top=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$top" || die "merger: git 저장소가 아니다: $mr_"
+  git remote get-url origin >/dev/null 2>&1 || die "merger: origin이 없다: $top"
+  base=${mb_:-$(origin_base .)}
+  plain "$base" || die "merger: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: $base"
+  # 켜졌는지는 바퀴마다 본다(mround — 켬 표식이 이 기계가 아니면 큐를 건드리지 않는다)
+  # MVP-1이 받는 저장소 = 전용 착지 스크립트(.claude/herdr-land.sh)가 없는 저장소(기본 hc-lane land 길). 있는 저장소의 제출은 반송한다
+  # (2026-11-20 지휘 t1cj 2차 — 제출 트리 속 훅을 병합기가 실행하지 않게, 2차 높음 1. 그런 저장소는 MVP-2)
+  [ ! -f .claude/herdr-land.sh ] ||
+    echo "hc-lane merger: 경고 — 이 저장소에는 전용 착지 스크립트(.claude/herdr-land.sh)가 있다. 병합기 MVP-1은 그런 제출을 반송한다(MVP-2)" >&2
+  mkdir -p "$evdir" || die "merger: 상태 폴더를 만들지 못했다: $evdir"
+  # 잠금 = 이 셸의 열린 파일(fd 19)에 건 flock(구조 C, 검증 잠금 단순판과 같은 꼴): 착지 자식·검증 손자까지 같은 열린 파일을 물려받아
+  # 트리가 다 끝나야 풀린다 — 병합기만 SIGKILL돼도 살아 있는 착지와 새 병합기가 같은 클론을 쓰지 않는다(1차 높음 9). pid를 보지 않는다.
+  # macOS엔 flock 명령이 없어 perl의 flock(2)로 같은 fd를 잠근다
+  lk=$evdir/merger.$(ckey "$top").lock
+  # 먼저 닫는다: macOS bash 3.2는 이미 열린 fd 19에 exec 19>>파일을 해도 fd를 바꾸지 않는다 — 다른 병합기 아래(그 착지가 돌린 시험 등)에서
+  # 뜨면 물려받은 바깥 잠금(같은 열린 파일이라 flock도 성공)을 쥐고 자기 잠금은 비운 채 돌았다(2026-11-20 병합기 첫 착지 15분 멈춤)
+  exec 19>&-
+  exec 19>>"$lk" || die "merger: 잠금 파일을 열지 못했다: $lk"
+  if command -v flock >/dev/null 2>&1; then flock -n 19; lr_=$?; [ $lr_ != 1 ] || lr_=75
+  else perl -e 'use Fcntl qw(:flock); open(my $f, ">&=", 19) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 75; exit 0'; lr_=$?; fi
+  case $lr_ in
+    0) ;;
+    75) echo "hc-lane merger: 이 클론의 병합기(또는 그 착지)가 아직 돈다 — 잠금 $lk" >&2; exit 75 ;;
+    *) die "merger: 잠금을 걸지 못했다(종료 $lr_): $lk" ;;
+  esac
+  mgrun_=1   # 여기부터 die는 막힘 사건도 남긴다
+  trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
+  mj_=$(git rev-parse --git-path hc-merger) && mkdir -p "$mj_/out" "$mj_/fail" "$mj_/wt" && mj_=$(cd "$mj_" && pwd -P) || die "merger: 일지 폴더를 만들지 못했다"
+  # 클론 작업 트리는 분리 HEAD로 둔다 — 가지를 체크아웃해 두면 착지 뒤 메인 폴더 맞추기(ffmain)가 클론 작업 트리를 바꾼다(3차 높음 6과 같은
+  # 꼴: 바꾸다 꺼지면 클론이 더러워져 큐가 멈춘다). 클론이 깨끗할 때만, 한 번
+  if git symbolic-ref -q HEAD >/dev/null; then
+    st_=$(git status --porcelain --untracked-files=all) && [ -z "$st_" ] && git checkout -q --detach || die "merger: 병합기 클론을 분리 HEAD로 두지 못했다(커밋 안 된 변경?): $top"
+  fi
+  ml_=$evdir/merger-logs
+  mkdir -p "$ml_" || die "merger: 로그 폴더를 만들지 못했다: $ml_"
+  mme_=${HC_LANE_MACHINE:-$(hostname -s 2>/dev/null)}
+  if [ $mo_ = 1 ]; then echo "hc-lane merger: $top ($base) 큐가 빌 때까지 한 번"; else echo "hc-lane merger: $top ($base) 큐를 본다 — 빈 바퀴 ${mt_}초"; fi
+  while :; do
+    mround
+    # --once: 큐가 빌 때까지(시험·손으로 한 번 돌리기). 원격 오류로 못 본 바퀴면 75(아스트라 1차 중간 4 — 빈 큐와 가린다)
+    if [ $mo_ = 1 ] && [ -z "$mq_" ]; then [ -z "$mer_" ] || exit 75; break; fi
+    [ -n "$mq_" ] || sleep "$mt_"
+  done
+}
+# 한 바퀴. mq_ = 처리한 큐 참조(없거나 원격 오류로 쉬면 빈 값), mer_ = 원격 오류로 못 본 것이 있음.
+# 일지 하나(구조 A, $mj_/cur): 착지를 부르기 **전에** 원자적으로(tmp→mv) 「<가지> <기준 B> <후보 C>」 한 줄 + 담긴 제출마다 「<큐 참조>
+# <제출 SHA> <레인> <기록 SHA|->」를 쓴다. 바퀴마다 새 제출을 고르기 전에 그 일지부터 정리한다(mrecover). 큐 표식은 기본 브랜치 push가
+# lease로 함께 지우고(구조 B), 정리는 기본 브랜치가 후보를 담은 것을 본 뒤에만 한다
+mround() {
+  mq_= mer_= mbn_= ls0_= ls1_=
+  mflush
+  # 병합기 클론은 병합기만 쓴다 — 앞 실행이 남긴 멈춘 rebase는 풀고, 그래도 깨끗하지 않으면 멈춘다(모르는 변경을 지우지 않음)
+  rbabort
+  st_=$(git status --porcelain --untracked-files=all) || die "merger: git status 실패 — 클론 상태를 모른다"
+  [ -z "$st_" ] || die "merger: 병합기 클론에 커밋 안 된 변경·새 파일이 있다 — 살펴 치운 뒤 다시 띄운다: $PWD"
+  mwtclean
+  mrecover || return 0
+  mfretry
+  qs_=$(git ls-remote origin 'refs/merge-queue/*' 'refs/merge-queue-meta/*' 'refs/herdr/merger/*') || { echo "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에" >&2; mer_=1; return 0; }
+  # 켬 표식이 이 기계인지 바퀴마다 본다 — 길 안내일 뿐 정확성 조건이 아니다(3차 지휘 t1cj: main에 쓰는 모든 길이 main CAS라 병합기가
+  # 둘 돌거나 전환 중 직접 착지가 끼어도 main은 틀리지 않는다 — 한쪽 push가 거절되고 다시 할 뿐. 큐를 고치는 원격 쓰기는 모두 그 큐
+  # 참조의 지금 SHA에 lease를 건다)
+  msha_=$(printf '%s\n' "$qs_" | awk -v r="refs/herdr/merger/$mme_" '$2 == r { print $1 }')
+  if [ -z "$msha_" ]; then
+    mo2_=$(printf '%s\n' "$qs_" | awk 'index($2, "refs/herdr/merger/") == 1 { print substr($2, 19); exit }')
+    [ -z "$mo2_" ] || die "merger: 켬 표식이 다른 기계(refs/herdr/merger/$mo2_)다 — 이 병합기($mme_)는 멈춘다(기계를 옮겼거나 이름이 다르면 HC_LANE_MACHINE=<표식의 기계>로)"
+    echo "hc-lane merger: 켬 표식 refs/herdr/merger/$mme_ 가 없다(꺼짐) — 큐를 건드리지 않고 쉰다" >&2
+    mer_=1; return 0
+  fi
+  # 제출 기록(원본·갈래점·제출 ID·기본 브랜치·지휘 — 레인이 같은 push로 올림)을 한 번에 받는다. 못 받으면 이 바퀴는 쉰다
+  if printf '%s\n' "$qs_" | grep -q 'refs/merge-queue-meta/'; then
+    fetchr git fetch -q origin '+refs/merge-queue-meta/*:refs/hc-merger/meta/*' 2>/dev/null ||
+      { echo "hc-lane merger: 제출 기록을 받지 못했다(git fetch) — 다음 바퀴에" >&2; mer_=1; return 0; }
+  fi
+  # 큐를 이름(초) 순으로 맨 앞 하나(MVP-1 — 묶음 없음). 반송을 다시 하는 중(fail/)·다른 기본 브랜치 제출은 건너뛴다
+  bq_=() bs_=() bl_=() bm_=() bi_=() bj_= bd_=
+  while read -r mq_ ms_; do
+    [ -n "$mq_" ] || continue
+    mn_=${mq_#refs/merge-queue/}
+    [ ! -f "$mj_/fail/$mn_" ] || continue   # 돌려보내기를 다시 하는 중(mfretry)
+    ln_=${mn_#??????????-}
+    case $mn_ in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-?*) ;; *) ln_= ;; esac
+    mm_=$(printf '%s\n' "$qs_" | awk -v r="refs/merge-queue-meta/$mn_" '$2 == r { print $1 }')
+    # 레인 이름이 가지 이름으로 못 쓰는 꼴이면 그 항목만 반송(2차 중간 13 — 후보 가지를 만들다 병합기가 멈춰 큐 전체가 막혔다)
+    if ! lname_ok "$ln_"; then
+      mfail "$mq_" "$ms_" "${ln_:--}" "${mm_:--}" - "큐 이름 꼴이 아니다(<UTC초 10자리>-<레인>, 레인은 가지 이름으로 쓸 수 있는 a-z 0-9 - _)" || mer_=1; mq_=x; return 0
+    fi
+    mmeta "$mm_" "$ms_" || { echo "hc-lane merger: 제출 기록 $mn_ 을 읽지 못했다(또는 원본과 안 맞음) — 다음 바퀴에" >&2; mer_=1; mq_=; return 0; }
+    # 다른 기본 브랜치로 낸 제출은 건드리지 않는다 — 그 브랜치의 병합기 몫(1차 높음 7)
+    if [ -n "$mbs_" ] && [ "$mbs_" != "$base" ]; then echo "hc-lane merger: $ln_ 건너뜀 — 기본 브랜치 $mbs_ 로 낸 제출(이 병합기는 $base)" >&2; continue; fi
+    bq_+=("$mq_") bs_+=("$ms_") bl_+=("$ln_") bm_+=("${mm_:--}") bi_+=("$mi_") bj_=$mjb_ bd_=$mid_
+    break
+  done <<<"$(printf '%s\n' "$qs_" | awk 'NF == 2 && index($2, "refs/merge-queue/") == 1 { print $2, $1 }' | LC_ALL=C sort)"
+  mq_=
+  [ ${#bq_[@]} -gt 0 ] || return 0
+  mq_=${bq_[0]}
+  fetchr git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" '+refs/merge-queue/*:refs/hc-merger/q/*' ||
+    { echo "hc-lane merger: git fetch 실패 — 다음 바퀴에" >&2; mer_=1; mq_=; return 0; }
+  B_=$(git rev-parse -q --verify "refs/remotes/origin/$base^{commit}") || die "merger: origin/$base 가 없다"
+  # 이미 기본 브랜치에 든 제출은 착지 없이 정리만(병합기를 켜기 전에 들어갔거나 손으로 넣음). 정리가 안 되면 쉰다 — --once가 같은 항목을
+  # 쉬지 않고 되풀이하지 않게(3차 중간 3). 후보는 그 제출 자신(작업 표식도 그것으로 — 3차 중간 4)
+  if ianc "${bs_[0]}" "$B_"; then
+    mbn_=1; mi_=${bi_[0]}; mdone "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "${bs_[0]}" "제출이 이미 $base 에 있음" || { mer_=1; mq_=; }
+    return 0
+  fi
+  # 전용 착지 스크립트가 든 제출, 또는 지금 기본 브랜치에 그 스크립트가 생겼으면 반송(2차 높음 1·3차 높음 7 — MVP-1은 기본 착지 길만.
+  # rebase 뒤에 생기면 착지가 종료 7로 멈춘다 — 아래 mjudge)
+  hl_=$(git ls-tree --name-only "${bs_[0]}" -- .claude/herdr-land.sh) && hb_=$(git ls-tree --name-only "$B_" -- .claude/herdr-land.sh) ||
+    die "merger: git ls-tree 실패(${bs_[0]} · $B_)"
+  if [ -n "$hl_$hb_" ]; then
+    mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" - "$mhook_" || mer_=1
+    return 0
+  fi
+  # main push에 함께(HERDR_LAND_PUSH_EXTRA = git push 인자 목록 — 착지 표식과 같은 이름·꼴, 지휘 t1cj):
+  #  · 큐 표식 삭제 + 그 SHA lease(구조 B — 다시 제출했으면 main도 안 움직인다)
+  #  · 제출 ID 표식 HEAD:refs/hc-landed/<제출 ID>(3차 높음 4 — 재시작 때 이 표식이 main의 조상이면 완료, 패치 일치로 판정하지 않는다)
+  #  · 작업 표식 HEAD:refs/hc-landed/<작업 ID>(2차 중간 12 — 원격에 아직 없을 때만)
+  ex_=":${bq_[0]} --force-with-lease=${bq_[0]}:${bs_[0]}"
+  [ -z "$bd_" ] || ! git check-ref-format "refs/hc-landed/$bd_" || ex_="$ex_ HEAD:refs/hc-landed/$bd_"
+  if [ -n "$bj_" ] && [ "$bj_" != - ] && [ "$bj_" != "$bd_" ] && git check-ref-format "refs/hc-landed/$bj_"; then
+    hk_=$(git ls-remote origin "refs/hc-landed/$bj_") || { echo "hc-lane merger: 작업 표식을 보지 못했다(git ls-remote) — 다음 바퀴에" >&2; mer_=1; mq_=; return 0; }
+    [ -n "$hk_" ] || ex_="$ex_ HEAD:refs/hc-landed/$bj_"
+  fi
+  br_=${bl_[0]} mlab_=${bl_[0]}
+  lgf_=$ml_/${bl_[0]}-$(date +%Y%m%d-%H%M%S)-$$.log
+  C0_=${bs_[0]}
+  # 일지 — 행동 전에(작업 트리를 만들기 전에 — 3차 높음 6)
+  { printf '%s %s %s\n' "$br_" "$B_" "$C0_"
+    for i_ in "${!bq_[@]}"; do printf '%s %s %s %s\n' "${bq_[i_]}" "${bs_[i_]}" "${bl_[i_]}" "${bm_[i_]}"; done
+  } >"$mj_/cur.tmp" && mv -f "$mj_/cur.tmp" "$mj_/cur" || die "merger: 일지를 쓰지 못했다"
+  # 후보는 매번 새 임시 작업 트리(병합기 자기 폴더 hc-merger/wt/)에서 레인 이름 가지로 — 병합기 클론의 작업 트리는 건드리지 않는다.
+  # 만들다 꺼져도 다음 바퀴가 그 폴더의 작업 트리를 지우고 다시 만든다(3차 높음 6 — 클론에서 체크아웃하다 꺼지면 더러운 클론으로 큐 전체가 멈췄다)
+  mwt_=$(mktemp -d "$mj_/wt/c.XXXXXX") && git worktree add -q -f -B "$br_" "$mwt_" "$C0_" || die "merger: 후보 작업 트리를 만들지 못했다($br_)"
+  echo "hc-lane merger: 착지 시작 — $mlab_ (기준 $(printf %.8s "$B_"))"
+  mbn_=1 ls0_=$(date +%s)
+  (cd "$mwt_" && HERDR_MERGER=1 HC_LANE=$br_ HERDR_LAND_PUSH_EXTRA="$ex_" exec "$self_" land "$base") >>"$lgf_" 2>&1 </dev/null; lr_=$?
+  ls1_=$(date +%s)
+  tail -n 5 "$lgf_"
+  mjudge
+}
+mhook_="전용 착지 스크립트(.claude/herdr-land.sh)가 든 제출·기본 브랜치 — 병합기 MVP-1은 받지 않는다(이 저장소는 병합기를 끄고 레인이 직접 착지, MVP-2에서 받음)"
+# mwtclean: 병합기 자기 임시 작업 트리(hc-merger/wt/ 아래)를 모두 지운다 — 앞 실행이 남긴 것 포함(병합기 것만이라 지워도 된다)
+mwtclean() {
+  mkdir -p "$mj_/wt" || die "merger: 작업 트리 폴더를 만들지 못했다: $mj_/wt"
+  wl_=$(git worktree list --porcelain) || die "merger: git worktree list 실패"
+  printf '%s\n' "$wl_" | sed -n 's/^worktree //p' | while IFS= read -r w_; do
+    case $w_ in "$mj_/wt/"*) git worktree remove -f -f "$w_" >/dev/null 2>&1 || echo "hc-lane merger: 남은 작업 트리를 지우지 못했다: $w_" >&2 ;; esac
+  done
+  git worktree prune >/dev/null 2>&1
+  # ponytail: 등록 전에 끊긴 빈 폴더(mktemp만 된 것)는 남는다 — 비어 있어 해가 없다, 쌓이면 손으로
+  mwt_=
+}
+# mjudge: 착지(종료 lr_) 뒤 판정. 종료 코드와 상관없이 먼저 원격이 후보를 담았는지 본다(1차 높음 3 — 응답 유실로 1이어도 들어갔을 수 있다).
+# 못 보면 일지를 두고 쉰다(다음 바퀴의 mrecover가 같은 판정)
+mjudge() {
+  fetchr git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" ||
+    { echo "hc-lane merger: 착지 뒤 git fetch 실패 — 일지를 두고 다음 바퀴에 판정" >&2; mer_=1; mq_=; return 0; }
+  O_=$(git rev-parse -q --verify "refs/remotes/origin/$base^{commit}") && C_=$(git rev-parse -q --verify "refs/heads/$br_") ||
+    die "merger: 착지 뒤 후보·origin/$base 를 읽지 못했다 — 다음 실행이 일지로 판정한다"
+  if ianc "$C_" "$O_"; then
+    mdone_all "$C_" "병합기 착지" || { mer_=1; mq_=; return 0; }
+    mfin; return 0
+  fi
+  case $lr_ in
+    0) lr_="0(그런데 $base 에 없음)" ;;
+    6) echo "hc-lane merger: 함께 실은 lease 참조가 바뀜(그새 다시 제출함) — 후보를 버리고 다음 바퀴에" >&2; mfin; return 0 ;;
+    7) mfin; mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$lgf_" "$mhook_(rebase한 기본 브랜치에 생김)" || mer_=1; return 0 ;;
+  esac
+  if mtrans "$lr_" "$lgf_" && mtry "${bq_[0]}" "${bl_[0]}"; then
+    # 일시 실패(기다림 상한·push 거절 횟수·원격 받기 실패)는 큐에 그대로 두고 쉰다(1차 중간 2 — 3번 넘으면 돌려보냄).
+    # --once는 75로 끝난다(2차 중간 11 — 큐를 남긴 채 0이었다)
+    echo "hc-lane merger: ${bl_[0]} 일시 실패(종료 $lr_, 로그 $lgf_) — 큐에 두고 다음 바퀴에" >&2
+    mfin; mq_=; mer_=1; return 0
+  fi
+  mtrans "$lr_" "$lgf_" && lr_="$lr_, 일시 실패가 3번 넘음"
+  mfin
+  mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$lgf_" "착지 실패(종료 $lr_)" || mer_=1
+}
+# mrecover: 일지가 있으면(앞 실행이 끊김) 먼저 정리. 0 정리함(새로 골라도 됨) · 1 원격을 못 봐 쉼.
+#  제출 ID 표식이 main에 있음 → 그 제출 완료 / 그 밖 → 후보 버림, 제출은 큐에 남아 있으면 다시 고른다(큐 표식은 main push로만 지워진다)
+mrecover() {
+  [ -f "$mj_/cur" ] || return 0
+  read -r br_ jB_ jC_ <"$mj_/cur" || die "merger: 일지를 읽지 못했다: $mj_/cur"
+  fetchr git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" ||
+    { echo "hc-lane merger: 끊긴 앞 실행 판정에 git fetch 실패 — 다음 바퀴에" >&2; mer_=1; return 1; }
+  O_=$(git rev-parse -q --verify "refs/remotes/origin/$base^{commit}") || die "merger: origin/$base 가 없다"
+  # 들어갔는지는 main push가 원자로 함께 실은 제출 ID 표식 refs/hc-landed/<제출 ID>로만 본다 — 그 표식이 있고 그 SHA가 main의
+  # 조상이면 완료, 아니면 처음부터(제출은 큐에 남아 있으면 다시 고른다). 패치 일치(git cherry)는 쓰지 않는다(3차 높음 4 — 다시 제출해
+  # 철회된 옛 제출이 같은 패치로 완료가 됐다). 제출 기록이 없는 큐 항목(손으로 넣음)만 후보 가지 끝으로 본다
+  bq_=() bs_=() bl_=() bm_=() bi_=() bd2_=()
+  while read -r q_ s_ ln_ m_; do
+    [ -n "$q_" ] || continue
+    # 제출 기록이 있는데 못 읽으면 쉰다(3차 중간 7 — 제출 ID 없이 끝냈다)
+    mmeta "${m_#-}" "$s_" 2>/dev/null || { echo "hc-lane merger: 끊긴 앞 실행의 제출 기록($ln_)을 읽지 못했다 — 일지를 두고 다음 바퀴에" >&2; mer_=1; return 1; }
+    bq_+=("$q_") bs_+=("$s_") bl_+=("$ln_") bm_+=("$m_") bi_+=("$mi_") bd2_+=("$mid_")
+  done < <(tail -n +2 "$mj_/cur")
+  mbn_=${#bq_[@]}
+  set --; for i_ in "${!bq_[@]}"; do [ -z "${bd2_[i_]}" ] || set -- "$@" "refs/hc-landed/${bd2_[i_]}"; done
+  lk2_=; [ $# = 0 ] || lk2_=$(git ls-remote origin "$@") || { echo "hc-lane merger: 끊긴 앞 실행 판정에 제출 ID 표식을 못 읽음 — 다음 바퀴에" >&2; mer_=1; return 1; }
+  for i_ in "${!bq_[@]}"; do
+    if [ -n "${bd2_[i_]}" ]; then
+      hs_=$(printf '%s\n' "$lk2_" | awk -v r="refs/hc-landed/${bd2_[i_]}" '$2 == r { print $1 }')
+      [ -n "$hs_" ] && { git cat-file -e "$hs_^{commit}" 2>/dev/null || fetchr git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base"; } &&
+        ianc "$hs_" "$O_" || { echo "hc-lane merger: 끊긴 앞 실행의 ${bl_[i_]} — 제출 ID 표식이 main에 없다, 처음부터(큐에 남아 있으면 다시 고른다)"; continue; }
+    else
+      C_=$(git rev-parse -q --verify "refs/heads/$br_"); cr_=$?
+      case $cr_ in 0) ;; 1) C_=$jC_ ;; *) echo "hc-lane merger: 끊긴 앞 실행의 후보 가지를 읽지 못했다(종료 $cr_) — 일지를 두고 다음 바퀴에" >&2; mer_=1; return 1 ;; esac
+      ianc "$C_" "$O_" || { echo "hc-lane merger: 끊긴 앞 실행의 ${bl_[i_]}(제출 기록 없음) — main에 없다, 처음부터"; continue; }
+      hs_=$C_
+    fi
+    echo "hc-lane merger: 끊긴 앞 실행의 ${bl_[i_]} 가 $base 에 있다($(printf %.8s "$hs_")) — 완료 처리"
+    mi_=${bi_[i_]}; mdone "${bq_[i_]}" "${bs_[i_]}" "${bl_[i_]}" "${bm_[i_]}" "$hs_" "앞 병합기 실행이 넣었음" || { mer_=1; return 1; }
+  done
+  mfin
+  mq_=x   # 이 바퀴에 일을 했다(--once가 이어 돈다)
+  return 0
+}
+# mdone_all <C> <까닭>: 담긴 제출(bq_…)을 모두 완료. 망 오류면 1(일지를 두고 다음 바퀴에)
+mdone_all() {
+  for i_ in "${!bq_[@]}"; do
+    mi_=${bi_[i_]}; mdone "${bq_[i_]}" "${bs_[i_]}" "${bl_[i_]}" "${bm_[i_]}" "$1" "$2" || return 1
+  done
+}
+# mfin: 임시 작업 트리·후보 가지·일지를 치운다(병합기 클론의 작업 트리는 건드리지 않는다)
+mfin() {
+  mwtclean
+  [ -z "${br_-}" ] || ! git show-ref -q --verify "refs/heads/$br_" || git branch -q -D "$br_" || die "merger: 후보 가지 $br_ 를 지우지 못했다"
+  rm -f "$mj_/cur"
+}
+# mmeta <기록 SHA|빈 값> <제출 SHA>: 제출 기록을 읽어 mbs_(기본 브랜치)·mi_(사건에 붙일 글)·mo__(지휘)·mh_(기계)·mtm_(터미널)에.
+# 기록이 없으면(손으로 넣은 큐 표식) 빈 값으로 0. 읽기 실패·부모가 제출 SHA가 아니면 1(1차 높음 6 — 파이프가 git 실패를 가렸다)
+mmeta() {
+  mbs_= mi_= mo__= mh_= mtm_= mid_= mjb_=
+  [ -n "$1" ] && [ "$1" != - ] || return 0
+  mp_=$(git rev-parse -q --verify "$1^" 2>/dev/null) && [ "$mp_" = "$2" ] || return 1
+  mb_l=$(git log -1 --format=%B "$1" 2>/dev/null) || return 1
+  mb_l=${mb_l%%$'\n'*}
+  for kv_ in $mb_l; do
+    case $kv_ in base=*) mbs_=${kv_#base=} ;; owner=*) mo__=${kv_#owner=} ;; host=*) mh_=${kv_#host=} ;; term=*) mtm_=${kv_#term=} ;; esac
+  done
+  [ "$mo__" != - ] || mo__=
+  mid_=$(printf '%s\n' "$mb_l" | tr ' ' '\n' | sed -n 's/^id=//p') mjb_=$(printf '%s\n' "$mb_l" | tr ' ' '\n' | sed -n 's/^job=//p')
+  mi_=$(printf '%s\n' "$mb_l" | tr ' ' '\n' | awk -F= '$1 == "id" { i = $2 } $1 == "fork" { f = substr($2, 1, 8) } END { if (i != "") printf "제출 ID %s, 갈래점 %s", i, f }')
+}
+# ianc <a> <b>: a가 b에 들어갔나 — 0 예, 1 아니오, 그 밖은 멈춤(git 실패를 「아니오」로 읽지 않는다)
+ianc() { git merge-base --is-ancestor "$1" "$2"; ia_=$?; case $ia_ in 0|1) return $ia_ ;; esac; die "merger: git merge-base --is-ancestor 실패(종료 $ia_)"; }
+rbabort() { if [ -e "$(git rev-parse --git-path rebase-merge)" ] || [ -e "$(git rev-parse --git-path rebase-apply)" ]; then git rebase --abort >/dev/null 2>&1; fi; }
+# mtrans <종료> <로그>: 다시 하면 될 착지 실패면 0(감사 중간 2) — 종료 75(검증 자리·원격 차례·공개 선점 기다림 상한)·4(push 거절
+# 횟수), 원격 받기 실패(내장 착지 「land: git fetch 실패」·「push 결과 모름」, 착지 스크립트 「git fetch origin 실패」). 충돌·검증 실패는 1
+# 내장 착지의 「push 실패(다른 쪽 push가 앞선 것이 아니다」도 — push 전송만 끊기고 원격은 후보를 받지 않은 꼴(3차 중간 8 — 한 번 만에
+# 반송했다. 들어갔으면 mjudge가 먼저 착지로, lease가 바뀌었으면 종료 6으로 가린다)
+mtrans() { case $1 in 75|4) return 0 ;; esac; grep -Eq 'git fetch( origin)? 실패|push 결과 모름|push 실패\(다른 쪽' "$2" 2>/dev/null; }
+# mtry <큐> <레인>: 그 제출의 일시 실패를 하나 세어 3번까지면 0(큐에 두고 쉼), 넘으면 1(돌려보냄 — 같은 실패를 끝없이 되풀이하지 않게)
+mtry() {
+  tf_=$mj_/$2.tr tc_=
+  [ ! -f "$tf_" ] || tc_=$(awk -v q="$1" '$1 == q { print $2 }' "$tf_")
+  tc_=$(( ${tc_:-0} + 1 ))
+  printf '%s %s\n' "$1" "$tc_" >"$tf_" || die "merger: 일시 실패 횟수를 쓰지 못했다: $tf_"
+  [ "$tc_" -le 3 ]
+}
+# mjrec <큐 이름> <레인> <결과> <후보|-> <까닭>: 병합기 일지 …/hc-lane/merger-journal.tsv에 제출마다 한 줄(2026-11-20 지휘 — 효과 수치는
+# 병합기 자기 일지 하나에서, 착지 시도 기록 대신). 칸(탭): 적은 시각 · 큐 이름 · 레인 · 제출 ID · 작업 ID(HC_LANE_JOB) · 제출 시각 ·
+# 묶음 크기(그 착지에 든 제출 수) · 착지 시작 · 착지 끝(push 응답을 받은 뒤 — 시각은 이 병합기가 잰 것) · 결과(착지|돌려보냄) ·
+# 후보 SHA(40자 — 기본 브랜치가 담은 것, 돌려보냄은 -) · 까닭. 모르는 칸은 -. 한 번 O_APPEND(1000바이트 안)
+# ponytail: 끊긴 실행을 다음 바퀴가 다시 정리하면 같은 큐 이름 줄이 둘일 수 있다 — 읽는 쪽이 큐 이름으로 하나만 센다
+mjrec() {
+  mt0_=-; [ -z "${ls0_-}" ] || mt0_=$(utc "$ls0_"); mt1_=-; [ -z "${ls1_-}" ] || mt1_=$(utc "$ls1_")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(utc)" "$1" "$2" "${mid_:--}" "${mjb_:--}" "$(utc "${1%%-*}")" "${mbn_:--}" \
+    "$mt0_" "$mt1_" "$3" "$4" "$(bcut 300 "$(flat "$5")")" >>"$evdir/merger-journal.tsv" || echo "hc-lane merger: 병합기 일지를 쓰지 못했다" >&2
+}
+# mkey <큐 이름>: 그 제출의 결과를 가리는 열쇠 — 제출 기록이 있으면 「제출 ID <ID>」(제출마다 하나), 없으면 「큐 <이름>」. 결과 사건의 한 줄과
+# 병합기 일지에 이 열쇠를 넣고, 같은 열쇠가 이미 적혔으면 다시 적지 않는다(3차 중간 6 — 사건·일지를 쓴 뒤 표시를 따로 써 그 사이에 죽으면
+# 겹쳤다, 2차 중간 5). mmeta 뒤에 부른다
+mkey() { if [ -n "${mid_-}" ]; then printf '제출 ID %s' "$mid_"; else printf '큐 %s' "$1"; fi; }
+# mjonce <mjrec 인자…>: 같은 큐 이름·제출 ID·결과의 일지 줄이 없을 때만 적는다
+mjonce() {
+  LC_ALL=C awk -F'\t' -v n="$1" -v i="${mid_:--}" -v r="$3" '$2 == n && $4 == i && $10 == r { f = 1 } END { exit !f }' "$evdir/merger-journal.tsv" 2>/dev/null ||
+    mjrec "$@"
+}
+# mdone <큐> <제출 SHA> <레인> <기록 SHA|-> <들어간 후보 C> <까닭>: 기본 브랜치가 C를 담은 뒤의 정리 — 한 번의 원자 push로, 원격에 지금 남은
+# 것만: 제출 기록을 refs/merge-done/<레인>으로(접수 확인·결과 조회용, 기록 없는 큐면 C), 큐 표식·lane 가지·기록은 그 제출 값일 때만 lease로
+# 지우고(3차 높음 3 — 옛 병합기가 새 제출을 지울 수 없다), 작업 표식이 없으면 C로(3차 중간 4). 정리가 확인된 뒤에만 결과 사건을 보낼 함에
+# 쓴다(3차 중간 5 — 지우기가 계속 실패해도 사건이 나갔다). 정리 뒤 사건 전에 죽으면 일지(cur)가 남아 다음 바퀴가 같은 정리(할 것 없음)·사건을
+# 한다. 제출 기록이 있는데 못 읽으면 쉰다(3차 중간 7). 망 오류·거절이면 1(일지를 두고 다음 바퀴가 같은 판정)
+mdone() {
+  q_=$1 s_=$2 ln_=$3 m_=${4#-} C_=$5 why_=$6 n_=${1#refs/merge-queue/}
+  mmeta "$m_" "$s_" 2>/dev/null || { echo "hc-lane merger: 제출 기록($n_)을 읽지 못했다 — 다음 바퀴에" >&2; return 1; }
+  dn_=${m_:-$C_} jk_=
+  [ -z "$mjb_" ] || [ "$mjb_" = - ] || ! git check-ref-format "refs/hc-landed/$mjb_" || jk_=refs/hc-landed/$mjb_
+  rr_=$(git ls-remote origin "$q_" "refs/heads/lane/$ln_" "refs/merge-queue-meta/$n_" "refs/merge-done/$ln_" ${jk_:+"$jk_"}) ||
+    { echo "hc-lane merger: 정리할 참조를 보지 못했다(git ls-remote) — 다음 바퀴에 일지로 판정" >&2; return 1; }
+  rv_() { printf '%s\n' "$rr_" | awk -v r="$1" '$2 == r { print $1 }'; }
+  set --
+  [ "$(rv_ "refs/merge-done/$ln_")" = "$dn_" ] || set -- "$@" "+$dn_:refs/merge-done/$ln_"
+  [ "$(rv_ "$q_")" != "$s_" ] || set -- "$@" ":$q_" "--force-with-lease=$q_:$s_"
+  [ "$(rv_ "refs/heads/lane/$ln_")" != "$s_" ] || set -- "$@" ":refs/heads/lane/$ln_" "--force-with-lease=refs/heads/lane/$ln_:$s_"
+  [ -z "$m_" ] || [ "$(rv_ "refs/merge-queue-meta/$n_")" != "$m_" ] || set -- "$@" ":refs/merge-queue-meta/$n_" "--force-with-lease=refs/merge-queue-meta/$n_:$m_"
+  [ -z "$jk_" ] || [ -n "$(rv_ "$jk_")" ] || set -- "$@" "$C_:$jk_"
+  if [ $# -gt 0 ] && ! git push -q --atomic --porcelain origin "$@" >/dev/null 2>&1; then
+    echo "hc-lane merger: $ln_ 의 큐·lane·기록 참조를 정리하지 못했다(git push) — 다음 바퀴에 일지로 판정" >&2; return 1
+  fi
+  rm -f "$mj_/$ln_.tr"
+  mjonce "$n_" "$ln_" 착지 "$C_" "$why_"
+  moutbox "$n_" 착지 "$C_" "$why_ — 제출 $(printf %.8s "$s_"), $(mkey "$n_")${mi_:+ (${mi_#*, })}" "$ln_" || return 1
+  msend "$n_"
+  echo "hc-lane merger: $ln_ 착지 $(printf %.8s "$C_") ($why_)"
+}
+# mfail <큐> <제출 SHA> <레인> <기록 SHA|-> <로그|-> <까닭>: 큐 표식을 refs/merge-failed/<이름>, 기록을 refs/merge-failed-meta/<이름>으로
+# 한 번의 원자 push로 옮기고(lane 가지는 둠) 막힘 사건. 옮기다 원격을 못 보면 멈추지 않고 fail/<이름>에 적어 다음 바퀴에 다시(1차 중간 3)
+# — 그동안 그 제출만 건너뛰고 다른 제출은 처리한다. 1 = 아직 못 옮김
+mfail() {
+  q_=$1 s_=$2 ln_=$3 m_=${4#-} lg__=${5#-} why_=$6 n_=${1#refs/merge-queue/} fr_=refs/merge-failed/${1#refs/merge-queue/}
+  # 제출 기록이 있는데 못 읽으면 반송하지 않고 쉰다(3차 중간 7). 이름 꼴이 틀린 항목은 기록이 맞지 않아도 반송한다(그 큐만 막히지 않게)
+  mmeta "$m_" "$s_" 2>/dev/null || { case $why_ in "큐 이름 꼴이 아니다"*) mi_= mid_= ;; *) echo "hc-lane merger: 제출 기록($n_)을 읽지 못했다 — 다음 바퀴에" >&2; return 1 ;; esac; }
+  # 옮기기 전에 할 일을 적고(fail/), 옮긴 것을 확인한 뒤에 사건을 보낼 함에 — 못 옮겼는데 막힘이 나가지 않게
+  # 다 쓴 뒤 바꿔 넣는다(2차 중간 4 — 덮어쓰다 끊겨 빈 파일이 남으면 다시 하기가 빈 이름으로 멈췄다)
+  printf '%s\n' "$q_" "$s_" "$ln_" "${m_:--}" "${lg__:--}" "$(flat "$why_")" >"$mj_/fail/$n_.tmp" && mv -f "$mj_/fail/$n_.tmp" "$mj_/fail/$n_" ||
+    die "merger: 돌려보낼 일을 적지 못했다"
+  ob__="병합기: $why_ — 원본 $(printf %.8s "$s_"), 기준 $(printf %.8s "${B_:--}"), $(mkey "$n_")${mi_:+ (${mi_#*, })}, $fr_ 로 옮김(lane/$ln_ 는 그대로)${lg__:+, 로그 $lg__}"
+  # 옮길 제출 객체가 이 클론에 아직 없으면(큐를 받기 전에 반송 — 이름 꼴) 그 큐 참조를 받는다
+  git cat-file -e "$s_^{commit}" 2>/dev/null || fetchr git fetch -q origin "+$q_:refs/hc-merger/q/$n_" 2>/dev/null ||
+    { echo "hc-lane merger: 실패한 제출 $q_ 를 받지 못했다(git fetch) — 다음 바퀴에 다시" >&2; return 1; }
+  set -- "$s_:$fr_" ":$q_" "--force-with-lease=$fr_:" "--force-with-lease=$q_:$s_"
+  [ -z "$m_" ] || set -- "$@" "$m_:refs/merge-failed-meta/$n_" ":refs/merge-queue-meta/$n_" "--force-with-lease=refs/merge-failed-meta/$n_:" "--force-with-lease=refs/merge-queue-meta/$n_:$m_"
+  git push -q --atomic --porcelain origin "$@" >/dev/null 2>&1 || {
+    rb_=$(git ls-remote origin "$q_" "$fr_") || { echo "hc-lane merger: 실패한 제출을 옮겼는지 확인하지 못했다($q_) — 다음 바퀴에 다시" >&2; return 1; }
+    case $(printf '%s\n' "$rb_" | awk -v a="$q_" -v b="$fr_" -v s="$s_" '$2 == a { q = 1 } $2 == b && $1 == s { f = 1 } END { print q ? "left" : (f ? "ok" : "gone") }') in
+      ok) ;;   # 응답만 끊김
+      gone) ob__="병합기: $why_ (그새 다시 제출해 옛 표식이 없어 옮기지 않음 — 새 제출은 큐에) — 원본 $(printf %.8s "$s_"), $(mkey "$n_")${lg__:+, 로그 $lg__}" ;;
+      *) echo "hc-lane merger: 실패한 제출 $q_ 를 $fr_ 로 옮기지 못했다 — 다음 바퀴에 다시" >&2; return 1 ;;
+    esac
+  }
+  moutbox "$n_" 막힘 - "$ob__" "$ln_" || return 1
+  rm -f "$mj_/fail/$n_" "$mj_/$ln_.tr"
+  mjonce "$n_" "$ln_" 돌려보냄 - "$why_"
+  msend "$n_"
+  echo "hc-lane merger: $ln_ 실패 — $why_ → $fr_" >&2
+}
+mfretry() {  # 옮기다 멈춘 돌려보내기를 다시(못 하면 그 제출만 계속 건너뜀)
+  for f_ in "$mj_"/fail/*; do
+    [ -f "$f_" ] || continue
+    case $f_ in *.tmp) continue ;; esac
+    q_= s_= ln_= m_= lg_f= why_=
+    { read -r q_; read -r s_; read -r ln_; read -r m_; read -r lg_f; read -r why_; } <"$f_"
+    # 읽은 칸이 꼴에 맞지 않으면(잘린 파일) 버린다 — 그 제출은 큐에 그대로라 다음 바퀴에 다시 판정된다(2차 중간 4)
+    case $q_ in refs/merge-queue/?*) ;; *) q_= ;; esac
+    if [ -z "$q_" ] || [ "${q_#refs/merge-queue/}" != "${f_##*/}" ] || ! printf %s "$s_" | grep -Eq '^[0-9a-f]{40}$' || [ -z "$ln_" ] || [ -z "$why_" ]; then
+      echo "hc-lane merger: 돌려보낼 기록 ${f_##*/} 이 깨졌다 — 버리고 큐에서 다시 판정" >&2; rm -f "$f_"; continue
+    fi
+    mfail "$q_" "$s_" "$ln_" "$m_" "$lg_f" "$why_" || mer_=1
+  done
+}
+# moutbox <이름> <상태> <sha|-> <글> <레인>: 보낼 사건을 out/<이름>에(지휘 --to·레인 터미널·결과 열쇠 함께). msend가 보내고 지운다
+moutbox() {
+  printf '%s\n' "$2" "$3" "$4" "$5" "${mo__-}" "${mh_-}" "${mtm_-}" "$(mkey "$1")" >"$mj_/out/$1.tmp" && mv -f "$mj_/out/$1.tmp" "$mj_/out/$1" ||
+    { echo "hc-lane merger: 보낼 사건을 적지 못했다" >&2; return 1; }
+}
+# msend <이름>: 사건(--name <레인>, 제출 때 적은 지휘가 있으면 --to)을 — 같은 레인·상태에 같은 결과 열쇠(mkey)가 든 사건이 이 기계 사건
+# 파일에 아직 없을 때만 — 적고(3차 중간 6·2차 중간 5), 제출한 레인 터미널이 살아 있고(최상위 state live) 그 이름(최상위 name)이 레인이면
+# hc send로도 알린다 — 이 기계면 <터미널>, 다른 기계면 <기계>/<터미널>(2차 중간 15·3차 중간 12). 알림이 실패하면(끊김) 보낼 함에 두고
+# 다음 바퀴에 다시, 세 번까지. 터미널이 없으면(not_found) 사건만. ponytail: hc get과 hc send 사이에 주소가 다른 실행에 다시 쓰이는 것은
+# 막지 못한다(모델 밖 — 확실한 결과는 제출 ID가 든 사건)
+msend() {
+  of_=$mj_/out/$1
+  [ -f "$of_" ] || return 0
+  o_k=
+  { read -r o_st; read -r o_sh; read -r o_msg; read -r o_ln; read -r o_to; read -r o_h; read -r o_t; read -r o_k; } <"$of_"
+  if ! LC_ALL=C awk -F'\t' -v l="$o_ln" -v s="$o_st" -v k="${o_k:-$o_msg}" '$4 == l && $5 == s && index($7, k) { f = 1 } END { exit !f }' "$evdir/events.tsv" 2>/dev/null; then
+    (mgrun_=; report_cmd "$o_st" "$o_sh" "$o_msg" --name "$o_ln" ${o_to:+--to "$o_to"}) >/dev/null ||
+      { echo "hc-lane merger: $o_st 사건을 쓰지 못했다 — 다음 바퀴에 다시" >&2; return 0; }
+  fi
+  if [ -n "$o_t" ] && [ "$o_t" != - ]; then
+    ad_=$o_t; [ "$o_h" = "$mme_" ] || ad_=$o_h/$o_t
+    gj_=$(capt 3 hc get "$ad_" --json 2>/dev/null); gr_=$?
+    nr_=0   # 다시 할까
+    if [ $gr_ = 0 ]; then
+      [ "$(printf '%s\n' "$gj_" | jq -r 'select(.state == "live") | .name // empty' 2>/dev/null)" != "$o_ln" ] ||
+        capt 5 hc send "$ad_" "hc-lane merger: $o_ln $o_st ${o_sh#-} — $o_msg" >/dev/null 2>&1 || nr_=1
+    elif [ $gr_ != 3 ]; then nr_=1; fi   # 3 = 그 터미널 없음(not_found) — 끝난 레인
+    if [ $nr_ = 1 ]; then
+      tr_=$(cat "$of_.try" 2>/dev/null); tr_=$(( ${tr_:-0} + 1 ))
+      if [ $tr_ -lt 3 ]; then
+        echo "$tr_" >"$of_.try"; echo "hc-lane merger: $o_ln 레인 터미널($ad_)에 알리지 못했다 — 다음 바퀴에 다시($tr_/3)" >&2; return 0
+      fi
+      echo "hc-lane merger: $o_ln 레인 터미널($ad_) 알림을 세 번 못 보냈다 — 사건만 남김" >&2
+    fi
+  fi
+  rm -f "$of_" "$of_.try"
+}
+mflush() { for f_ in "$mj_"/out/*; do case $f_ in *.tmp|*.try) continue ;; esac; [ ! -f "$f_" ] || msend "${f_##*/}"; done; }
+# ---- 레인 임대(2026-11-20 fill-dup-guard, 지휘 결정): 프로젝트 원격 ref refs/hc-lanes/<레인>(빈 트리 커밋, 제목 「hc-lane lease <레인>
+# <기계> <UTC 시각>」) 하나가 그 이름의 실행 하나다. 띄울 때(hc run 직전) 잡고, land 성공(main과 같은 원자 push)·clean에서 놓는다.
+# lease_core <take|show|drop> <저장소> <레인> [<기계(take)>|<기대값(drop)>] — 원격 기계에서도 그대로 돌게 이 함수만으로(declare -f).
+#   take: 0 잡음(찍는 값 = 임대 커밋 — push 응답을 잃었어도 원격 값이 이것이면) · 3 누가 쥐고 있다(「값 제목」) ·
+#         4 원격(origin) 없음이 확인됨(remote get-url 종료 2 — 「no-origin」을 찍는다. 부르는 쪽은 그 글자도 본다: hc exec의 종료 4와 가름) ·
+#         1 못 잡음·조회 실패(저장소 아님 포함) · 5 모름(push 실패 뒤 원격 조회도 실패)
+#   show: 「값 제목」 또는 「-」. 0 · 1 조회 실패 · 4 원격 없음
+#   drop: 기대값을 주면 그 값일 때만(다르면 3, 지금 값을 찍음), 안 주면 지금 값을 lease로 지움. 0 지움(없음·원격 없음 포함) · 1 실패
+lease_core() {
+  lc_op=$1 lc_r=$2 lc_n=$3 lc_x=${4-} lc_ref=refs/hc-lanes/$3
+  lc_g() { GIT_AUTHOR_NAME=hc-lane GIT_AUTHOR_EMAIL=hc-lane@localhost GIT_COMMITTER_NAME=hc-lane GIT_COMMITTER_EMAIL=hc-lane@localhost git -C "$lc_r" "$@"; }
+  lc_cur() { lc_l=$(lc_g ls-remote origin "$lc_ref" </dev/null) || return 1; printf '%s' "${lc_l%%[[:space:]]*}"; }
+  lc_sub() {  # 그 임대 커밋의 제목(없으면 받아 온다 — FETCH_HEAD는 안 씀)
+    lc_g cat-file -e "$1^{commit}" 2>/dev/null || lc_g fetch -q --no-tags --no-write-fetch-head origin "$lc_ref" </dev/null 2>/dev/null
+    lc_g log -1 --format=%s "$1" 2>/dev/null || echo '?'
+  }
+  lc_g remote get-url origin >/dev/null 2>&1; lc_o=$?
+  if [ $lc_o = 2 ]; then echo no-origin; [ "$lc_op" != drop ] || return 0; return 4; fi
+  [ $lc_o = 0 ] || return 1
+  case $lc_op in
+    take)
+      lc_t=$(lc_g hash-object -t tree -w /dev/null) &&
+        # 본문의 고유값: 같은 기계·같은 초·같은 이름이면 커밋 해시가 같아져 남의 임대를 자기 것으로 읽는다(응답 유실 판정)
+        lc_c=$(printf 'hc-lane lease %s %s %s\n\n%s-%s-%s\n' "$lc_n" "${lc_x:--}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$RANDOM" "$RANDOM" | lc_g commit-tree "$lc_t") || return 1
+      lc_g push -q --porcelain origin "--force-with-lease=$lc_ref:" "$lc_c:$lc_ref" </dev/null >/dev/null 2>&1 && { echo "$lc_c"; return 0; }
+      lc_v=$(lc_cur) || return 5   # push 실패: 원격 값으로 판정(응답만 잃었을 수 있다)
+      [ "$lc_v" != "$lc_c" ] || { echo "$lc_c"; return 0; }
+      [ -z "$lc_v" ] || { echo "$lc_v $(lc_sub "$lc_v")"; return 3; }
+      return 1 ;;
+    show) lc_v=$(lc_cur) || return 1; if [ -n "$lc_v" ]; then echo "$lc_v $(lc_sub "$lc_v")"; else echo -; fi; return 0 ;;
+    drop)
+      lc_v=$(lc_cur) || return 1
+      [ -n "$lc_v" ] || return 0
+      [ -z "$lc_x" ] || [ "$lc_x" = "$lc_v" ] || { echo "$lc_v"; return 3; }
+      lc_g push -q --porcelain origin "--force-with-lease=$lc_ref:$lc_v" ":$lc_ref" </dev/null >/dev/null 2>&1 && return 0
+      lc_v=$(lc_cur) && [ -z "$lc_v" ] && return 0   # 지운 응답만 잃었는지
+      return 1 ;;
+  esac
+  return 1
+}
+# lease_x <take|show|drop> <레인> [<기계|기대값>]: 대상 기계($on)의 $repo에서 — 원격은 로그인 셸(zx: git 자격 도우미 PATH)로
+lease_x() { zx "$repo" bash -c "$(declare -f lease_core); lease_core \"\$@\"" hc-lane-lease "$1" "$repo" "$2" "${3-}"; }
+# lease_cmd: hc-lane lease show|drop [--on <기계>] --repo <저장소> --name <레인> — 임대가 남아 다시 못 띄우면(레인이 죽음·지휘가 rm) 손으로
+lease_cmd() {
+  lo_=$(lease_x "$act" "$name"); r_=$?
+  case $act:$r_ in
+    show:0) printf '%s\n' "$lo_" ;;
+    show:4) [ "$lo_" = no-origin ] && echo "- (원격 없음 — 임대 없음)" || { echo "hc-lane lease: 조회하지 못했다(종료 4)" >&2; return 1; } ;;
+    drop:0) echo "hc-lane lease: 놓음 refs/hc-lanes/$name" ;;
+    *) echo "hc-lane lease: ${act}하지 못했다(git ls-remote·push origin, 종료 $r_): ${on:+$on:}$repo" >&2; return 1 ;;
+  esac
+}
+# ---- 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정 「착지 증거를 하나로」 — carousel-save-race가 선행 main-split의 착지를 커밋 제목
+# 머리로 못 알아봐(「feat(frontend): main-split-1 …」) 먼저 띄움 기한을 넘겼다): land는 main과 같은 --atomic push에
+# refs/hc-landed/<레인>/<UTC 초>(값 = 착지한 커밋)과 그 레인 임대 지우기(HC_LANE_LEASE 값 lease)를 싣는다. 기다리는 쪽(hc-fill 선행
+# 판정·먼저 띄움 기다림 줄)은 그 선행 줄을 넣은 뒤의 표식 sha가 origin/<기본>의 조상인지 본다. 표식은 지우지 않는다(작고, 지우는 쪽 경합)
+# lmname: 이 레인 이름(레인 환경 HC_LANE, 없으면 가지 이름) — 표식·임대 ref에 쓸 수 있을 때만
+lmname() {
+  lmn_=${HC_LANE:-$(git branch --show-current 2>/dev/null)}
+  case $lmn_ in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
+  echo "$lmn_"
+}
+# land_after <기본> <표식 ref>: main push 뒤 — 표식이 그 push에 못 실렸으면 따로(그 커밋이 origin/<기본>에 들어갔을 때만), 임대가 남았으면
+# 놓는다. 못 하면 알리기만(착지는 됨 — 표식이 없으면 기다리는 쪽이 커밋 제목 규칙으로만 풀려 더 기다릴 뿐, 남은 임대는 clean·손으로)
+land_after() {
+  if [ -n "${2-}" ]; then
+    la_=$(git ls-remote origin "$2" </dev/null 2>/dev/null)
+    if [ -z "$la_" ] && ! { git fetch -q origin </dev/null 2>/dev/null && git merge-base --is-ancestor HEAD "refs/remotes/origin/$1" &&
+        git push -q origin "HEAD:$2" </dev/null 2>/dev/null; }; then
+      echo "hc-lane land: 착지 표식 $2 를 두지 못했다(착지는 됨 — 기다리는 레인은 커밋 제목 규칙으로만 풀린다)" >&2
+    fi
+  fi
+  [ -n "${HC_LANE_LEASE-}" ] && lmn_=$(lmname) || return 0
+  ld_=$(git ls-remote origin "refs/hc-lanes/$lmn_" </dev/null 2>/dev/null) || { echo "hc-lane land: 임대를 확인하지 못했다(착지는 됨) — hc-lane clean이 놓는다" >&2; return 0; }
+  [ "${ld_%%[[:space:]]*}" = "$HC_LANE_LEASE" ] || return 0   # 이미 놓았거나 다른 실행의 것
+  git push -q origin "--force-with-lease=refs/hc-lanes/$lmn_:$HC_LANE_LEASE" ":refs/hc-lanes/$lmn_" </dev/null 2>/dev/null &&
+    echo "hc-lane land: 임대 놓음 refs/hc-lanes/$lmn_" || echo "hc-lane land: 임대를 놓지 못했다(착지는 됨) — hc-lane clean이 놓는다" >&2
+}
 land_cmd() {
   top=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$top" || die "land: git 작업 폴더 안에서 부른다(레인 워크트리): $PWD"
   base=${lbase:-$(origin_base .)}
   plain "$base" || die "land: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: $base"
+  # 병합기가 켜진 저장소(원격 refs/herdr/merger/<기계>)면 착지 대신 제출 — 병합기 안에서 부른 착지(HERDR_MERGER=1)는 아래 그대로.
+  # 켜졌는지 모르면 착지하지 않는다(종료 75 — 같은 줄을 다시). 이 분기만 병합기 몫이고 아래 본문은 착지 안전(land-safety) 몫이다
+  # (2026-11-20 t68과 정한 경계 — 나중에 착지하는 쪽이 rebase로 맞춘다)
+  if [ "${HERDR_MERGER-}" != 1 ]; then
+    mgon; case $? in 0) submit_cmd ;; 2) exit 75 ;; esac
+  fi
+  # 이 착지의 인자는 이 착지만 쓴다 — 검증 자식(저장소 시험이 다시 부르는 hc-lane land 등)에 물려주지 않는다(2차 높음 3: 병합기가 넘긴
+  # 큐 삭제 인자가 herdr-tools 자체 시험의 가짜 원격 push에 실려 거절됐다). 착지 스크립트에는 이름을 붙여 넘긴다
+  px_=${HERDR_LAND_PUSH_EXTRA-} mgx_=${HERDR_MERGER-}
+  unset HERDR_LAND_PUSH_EXTRA HERDR_MERGER
   llog= qa0=$(qadirs)
+  # 낡은 착지 스크립트(2026-11-20 land-stale-script — 한 레인이 문서 조각 접기 전 판 herdr-land.sh로 착지해 조각이
+  # main에 남았다. bash는 rebase 전에 읽은 옛 판을 끝까지 돈다). fetch는 스크립트가 없는 가지도 한다(<기본>에 새로 생긴 것을 보려고): 가지가 그 스크립트를 스스로 바꾸지 않았는데(HEAD 판 = 갈래점 판)
+  # 갈래점 판이 <기본> 판과 다르면(새로 생기거나 지워진 것 포함) 먼저 rebase해 <기본> 판으로 이어 간다. 바꾼 가지는 제 판 그대로
+  lf_=.claude/herdr-land.sh
+  if git remote get-url origin >/dev/null 2>&1; then ob_=refs/remotes/origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패"
+  else ob_=refs/heads/$base; fi
+  lb_() { git rev-parse -q --verify "$1:$lf_" 2>/dev/null; }   # 그 판의 스크립트 blob(없으면 빈 값)
+  if mb_=$(git merge-base HEAD "$ob_" 2>/dev/null) && [ "$(lb_ HEAD)" = "$(lb_ "$mb_")" ] && [ "$(lb_ "$mb_")" != "$(lb_ "$ob_")" ]; then
+    echo "▸ hc-lane land: 가지의 $lf_ 가 ${ob_#refs/remotes/} 보다 낡음 → 먼저 rebase" >&2
+    [ -z "$(git status --porcelain --untracked-files=no)" ] || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
+    ro=$(LC_ALL=C git rebase -q "$ob_" 2>&1); rr=$?
+    [ -z "$ro" ] || printf '%s\n' "$ro" >&2
+    while [ $rr != 0 ] && rr_ok "$ro"; do
+      echo "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다" >&2
+      ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
+      [ -z "$ro" ] || printf '%s\n' "$ro" >&2
+    done
+    [ $rr = 0 ] || { echo "hc-lane land: rebase 충돌 — 양쪽 내용을 살려 풀고 git add → git rebase --continue 한 뒤 착지 줄(hc-lane land $base)을 다시" >&2; exit 3; }
+  fi
+  # 병합기 안 착지: 제출·기준에 있던 스크립트는 병합기가 이미 반송하니, 여기 있는 것은 위 rebase가 들인 것 — 맡기지 않고 7(감사 7c010d9 중간 1)
+  [ "$mgx_" != 1 ] || [ ! -f .claude/herdr-land.sh ] ||
+    { echo "hc-lane land: 기본 브랜치에 전용 착지 스크립트(.claude/herdr-land.sh)가 생겼다 — 병합기 MVP-1은 그 스크립트에 맡기지 않는다" >&2; exit 7; }
   if [ -f .claude/herdr-land.sh ]; then
     echo "hc-lane land: .claude/herdr-land.sh $base 에 맡긴다"
     llog_init
-    lrun env HERDR_LAND=1 bash .claude/herdr-land.sh "$base"; rc=$?
-    if [ $rc = 0 ]; then ! git remote get-url origin >/dev/null 2>&1 || ffmain "$(mainwt)" "$base"; else lfail $rc; fi
+    # 표식(과 임대 지우기)은 HERDR_LAND_PUSH_EXTRA(공백으로 나눈 refspec — 병합기가 넘긴 인자 뒤에)로 넘겨 그 스크립트가 main push에
+    # --atomic으로 싣게 한다 — 임대 지우기는 원격 임대가 이 레인 값일 때만 넣는다(없는 ref 지우기로 원자 push가 실패하지 않게). 못 실었으면 land_after가 따로
+    lmr_= lpx_=; if lmn_=$(lmname) && git remote get-url origin >/dev/null 2>&1; then
+      lmr_=refs/hc-landed/$lmn_/$(date -u +%s) lpx_="HEAD:$lmr_"
+      if [ -n "${HC_LANE_LEASE-}" ]; then lh_=$(git ls-remote origin "refs/hc-lanes/$lmn_" </dev/null 2>/dev/null) && [ "${lh_%%[[:space:]]*}" = "$HC_LANE_LEASE" ] && lpx_="$lpx_ :refs/hc-lanes/$lmn_"; fi
+    fi
+    ax_="${px_:+$px_${lpx_:+ }}$lpx_"
+    lrun env HERDR_LAND=1 ${ax_:+HERDR_LAND_PUSH_EXTRA="$ax_"} bash .claude/herdr-land.sh "$base"; rc=$?
+    if [ $rc = 0 ]; then ! git remote get-url origin >/dev/null 2>&1 || { ffmain "$(mainwt)" "$base"; land_after "$base" "$lmr_"; }; else lfail $rc; fi
     exit $rc
   fi
   # origin이 없는 저장소(맥의 game·hwanhon 등)는 로컬 <기본>이 기준이고 착지는 그것을 fast-forward로 올리는 것이다
@@ -1168,17 +1878,46 @@ land_cmd() {
       echo "hc-lane land: rebase 충돌. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 같은 줄(hc-lane land $base)을 다시" >&2
       exit 3
     fi
+    # 병합기 안 착지: rebase한 기본 브랜치에 전용 착지 스크립트가 생겼으면 내장 길로 넣지 않는다 — 종료 7, 병합기가 반송(3차 높음 7)
+    [ "$mgx_" != 1 ] || [ ! -f .claude/herdr-land.sh ] ||
+      { echo "hc-lane land: 기본 브랜치에 전용 착지 스크립트(.claude/herdr-land.sh)가 생겼다 — 병합기 MVP-1은 내장 길로 넣지 않는다" >&2; exit 7; }
     [ -f .claude/herdr-verify.sh ] ||
       die "land: .claude/herdr-verify.sh 가 없어 push하지 않았다(검증 없는 착지는 없다). 저장소에 검증 스크립트(또는 .claude/herdr-land.sh)를 두거나 지휘에 알린다"
     [ -n "$llog" ] || llog_init
     lrun bash .claude/herdr-verify.sh || { lfail $?; die "land: 검증 실패, push하지 않았다. 고쳐 커밋한 뒤 같은 줄을 다시"; }
     if [ $remote = 1 ]; then
-      if HERDR_LAND=1 git push origin "HEAD:refs/heads/$base"; then
-        echo "hc-lane land: 착지 $(git rev-parse --short HEAD) → origin/$base"
+      # 함께 실을 것 HERDR_LAND_PUSH_EXTRA = 공백으로 나눈 git push 인자(refspec — 왼쪽 HEAD는 기본 브랜치에 넣는 그 커밋 — 와
+      # --force-with-lease=<참조>:<SHA>). 있으면 기본 브랜치와 한 번의 --atomic push(전부 아니면 전무). 2026-11-20 지휘 t1cj — 착지 표식
+      # (fill-dup-guard 「HEAD:refs/hc-landed/<레인>/<UTC 초>」 — 내장 길은 아래 mx_로 직접 싣는다)과 병합기 큐 표식 삭제(「:<큐> --force-with-lease=<큐>:<SHA>」, 1차 높음 4·구조 B)가
+      # 한 이름·한 꼴. lease 걸린 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6
+      pa_=("HEAD:refs/heads/$base") ex_=
+      for e_ in $px_; do pa_+=("$e_"); ex_=--atomic; done
+      # 착지 표식 refs/hc-landed/<레인>/<UTC 초>와 이 레인 임대 지우기(HC_LANE_LEASE 값 lease)도 같은 --atomic push에(fill-dup-guard).
+      # 표식·임대 쪽으로 함께 실패했으면(임대를 손으로 놓았음 등) 검증을 다시 돌지 않고 기본 브랜치 + 병합기 인자만 한 번 더(병합기 lease가
+      # 바뀌었으면 이것도 실패해 아래 종료 6) — 표식·임대는 land_after가 따로. 병합기 안 착지(HERDR_MERGER=1)는 push를 병합기 판
+      # 그대로 둔다(전송 끊김 75·응답 유실 판정이 그 인자에 묶임) — 표식은 착지 뒤 land_after가 따로
+      lmr_= mx_=(); if lmn_=$(lmname); then
+        lmr_=refs/hc-landed/$lmn_/$(date -u +%s)
+        if [ "$mgx_" != 1 ]; then
+          mx_=("HEAD:$lmr_") ex_=--atomic
+          [ -z "${HC_LANE_LEASE-}" ] || mx_+=("--force-with-lease=refs/hc-lanes/$lmn_:$HC_LANE_LEASE" ":refs/hc-lanes/$lmn_")
+        fi
+      fi
+      if HERDR_LAND=1 git push $ex_ origin "${pa_[@]}" ${mx_[0]+"${mx_[@]}"} ||
+        { [ -n "${mx_[0]-}" ] && HERDR_LAND=1 git push ${pa_[1]+--atomic} origin "${pa_[@]}"; }; then
+        echo "hc-lane land: 착지 $(git rev-parse --short HEAD) → origin/$base${lmr_:+ (착지 표식 $lmr_)}"
         ffmain "$(mainwt)" "$base"
+        land_after "$base" "$lmr_"
         return 0
       fi
       fetchr git fetch -q origin || die "land: push 실패 뒤 git fetch 실패"
+      for e_ in $px_; do
+        case $e_ in --force-with-lease=?*:*) ;; *) continue ;; esac
+        r_=${e_#--force-with-lease=}; s_=${r_#*:}; r_=${r_%%:*}
+        xr_=$(git ls-remote origin "$r_") || die "land: push가 거절됐는데 lease 참조 $r_ 를 다시 보지 못했다(git ls-remote) — 같은 줄을 다시"
+        [ "$(printf '%s\n' "$xr_" | awk -v r="$r_" '$2 == r { print $1 }')" = "$s_" ] ||
+          { echo "hc-lane land: 함께 실은 lease 참조 $r_ 가 바뀌었다(다시 제출) — $base 를 올리지 않았다" >&2; exit 6; }
+      done
       git merge-base --is-ancestor "$bref" HEAD &&
         die "land: push 실패(다른 쪽 push가 앞선 것이 아니다 — 위 git 출력을 본다)"
     else
@@ -1257,7 +1996,9 @@ EOF
 
 case $cmd in
   land) land_cmd; exit $? ;;
+  merger) merger_cmd ${mga_[@]+"${mga_[@]}"}; exit $? ;;
   guard) guard_cmd; exit $? ;;
+  lease) lease_cmd; exit $? ;;
   fetch)
     fetchr zx "$repo" git fetch origin "$@" || die "fetch 실패: ${on:+$on:}$repo (위 git 출력을 본다)"
     echo "hc-lane fetch: 받음 ${on:+$on:}$repo origin${1:+ $*}"; exit 0 ;;
@@ -1320,6 +2061,7 @@ print_steps() {
   printf '   # 저장소에 .claude/herdr-land.sh가 있으면 그 스크립트가 fetch·rebase·검증·push를 하고, 없으면 hc-lane이 같은 순서로 하며 .claude/herdr-verify.sh가 없으면 push하지 않고 실패한다\n'
   printf '   # rebase가 충돌로 멈추면(종료 3) 양쪽 내용을 살려 풀고 고친 파일을 git add 한 뒤 git rebase --continue, 그다음 이 줄을 처음부터 다시\n'
   printf '   # 검증이 실패하면 고쳐 커밋하고 이 줄을 다시. push 거절 횟수(종료 4)나 잠금 기다림 상한(종료 75)으로 끝나면 이 줄을 다시, 최대 20번\n'
+  printf '   # 병합기가 켜진 저장소면 이 줄은 큐에 제출만 하고 끝난다(「제출 … 이 레인은 여기서 끝」) — 착지는 병합기가 알리고, report 착지는 적히지 않는다. 아래 clean은 원격 lane/레인이름 에 그대로 있는 가지를 「제출됨」으로 지워 자리를 바로 비운다\n'
   s "cd $(q "$repo") && hc-lane clean --repo $(q "$repo") --branch $branch"
   printf '   # teardown·검사·워크트리·브랜치 정리를 한 번에. clean이 종료 1로 멈추면 출력된 이유를 고치고 같은 줄을 다시 돈다\n'
   printf '   # 폴더를 rm -rf로 직접 지우지 않는다. 보고는 출력 그대로, 건너뜀은 통과가 아니다\n'
@@ -1411,6 +2153,7 @@ clean_cmd() {
   br=0; has_branch && br=1
   if [ $reg = 0 ] && [ $dir = 0 ] && [ $br = 0 ]; then
     echo "정리할 것 없음: 워크트리 $wt 와 브랜치 $branch 가 이미 없다"
+    clean_lease
     cj nothing
     return 0
   fi
@@ -1444,12 +2187,21 @@ clean_cmd() {
     [ -n "$h" ] || stop "워크트리 HEAD를 읽지 못했다: $wt"
     set -- "$@" "$h"
   fi
-  arch= btip=
+  arch= btip= subm= lrr_=-
   [ $br = 0 ] || btip=$(x git -C "$repo" rev-parse -q --verify "refs/heads/$branch^{commit}") || stop "브랜치를 읽지 못했다: $branch"
   for c in "$@"; do
     case $c in refs/heads/*) lab="브랜치 $branch" ;; *) lab="워크트리 HEAD $(printf %.12s "$c")" ;; esac
     x git -C "$repo" merge-base --is-ancestor "$c" "$bref"; ia=$?
     [ $ia != 0 ] || continue
+    # 병합기에 제출한 커밋: 원격에 지금(ls-remote — 낡은 추적 참조가 아니라) 그 SHA 그대로인 lane/* 참조가 있으면 원격이 그 커밋을 쥐고
+    # 있으니 지워도 된다 — 레인이 접수 뒤 바로 자리를 비운다(3차 중간 9, 지휘). 원격에서 그 참조가 지워졌거나 다른 커밋이면 지우지 않는다
+    # (2차 높음 4). 원격을 못 읽으면 멈춘다
+    if [ $ia = 1 ] && [ $remote = 1 ] && [ $br = 1 ]; then
+      [ "$lrr_" != - ] || lrr_=$(x git -C "$repo" ls-remote origin 'refs/heads/lane/*') || stop "git ls-remote 실패: $lab · origin lane/*"
+      s_=$(x git -C "$repo" rev-parse -q --verify "$c^{commit}") || stop "커밋을 읽지 못했다: $lab"
+      lh_=$(printf '%s\n' "$lrr_" | awk -v s="$s_" '$1 == s { print $2; exit }')
+      if [ -n "$lh_" ]; then echo "${P}제출됨: $lab 은 원격 $lh_ 에 그대로 있다(병합기가 넣는다)"; subm=1; continue; fi
+    fi
     if [ $ia = 1 ] && [ $archive = 1 ]; then   # 보관할 커밋(안 들어간 끝 커밋)으로 모은다 — 지우기 전 확인을 다 거친 뒤 push
       [ $remote = 1 ] || stop "원격(origin)이 없어 --archive로 보관할 수 없다: $repo"
       s_=$(x git -C "$repo" rev-parse -q --verify "$c^{commit}") || stop "커밋을 읽지 못했다: $lab"
@@ -1545,7 +2297,7 @@ clean_cmd() {
   if [ $br = 1 ]; then
     if [ $dry = 1 ]; then echo "[dry-run] git -C $(q "$repo") branch -d $branch"
     else
-      if [ -n "$arch" ]; then   # 보관했으니 병합 여부 대신 보관한 값 그대로일 때만 지운다
+      if [ -n "$arch$subm" ]; then   # 보관·제출했으니 병합 여부 대신 확인한 값 그대로일 때만 지운다
         x git -C "$repo" update-ref -d "refs/heads/$branch" "$btip" >&2 || stop "브랜치를 지우지 못했다(보관 뒤 값이 바뀌었나?): $branch"
       else x git -C "$repo" branch -q -d "$branch" >&2 || stop "git branch -d 실패: $branch"; fi
       did="${did:+$did, }브랜치 삭제"
@@ -1558,7 +2310,18 @@ clean_cmd() {
   if [ -z "$on" ] && [ $dry = 0 ]; then
     case "$PWD/|$here/" in "$wt"/*|*"|$wt"/*) echo "알림: 지금 셸 위치는 지운 폴더 안이었다. 다음 명령 전에 cd $(q "$repo")" ;; esac
   fi
+  clean_lease
   if [ $dry = 1 ]; then cj planned; else cj done; fi
+}
+# clean_lease: 정리가 끝난 레인의 임대 refs/hc-lanes/<레인>을 놓는다(지휘 결정 — 풀기는 land 성공·clean). 원격 없음·이미 없음은 조용히,
+# 못 놓으면 알리기만(정리는 됨 — 손으로 hc-lane lease drop)
+clean_lease() {
+  cl_=${name:-$branch}
+  case $cl_ in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 0 ;; esac
+  [ $remote = 1 ] || return 0
+  if [ $dry = 1 ]; then echo "[dry-run] 임대 refs/hc-lanes/$cl_ 가 있으면 놓음"; return 0; fi
+  clo_=$(lease_x drop "$cl_") || { echo "임대 refs/hc-lanes/$cl_ 를 놓지 못했다(정리는 됨) — hc-lane lease drop${on:+ --on $on} --repo $(q "$repo") --name $cl_" >&2; return 0; }
+  [ "$clo_" = no-origin ] || echo "임대 확인: refs/hc-lanes/$cl_ 없음(놓음)"
 }
 
 # gc: 끝난 레인의 작업 폴더·가지와 원격 중간 참조를 정리한다. 하나라도 맞지 않으면 「남김 <대상> <까닭>」, 지우지 않는다.
@@ -1760,6 +2523,9 @@ else
 fi
 strust=$(cfg lane.auto_trust on) || exit 1
 case $strust in on|off) ;; *) die "설정 lane.auto_trust는 on·off: $strust" ;; esac
+fwait=$(cfg lane.first_turn_wait 60) || exit 1
+case $fwait in ''|*[!0-9]*) die "설정 lane.first_turn_wait는 0 이상 정수(초): $fwait" ;; esac
+fwait=$((10#$fwait))   # 08처럼 앞 0이 붙어도 십진수로(셈에서 8진수로 읽혀 깨지지 않게)
 # lane.notify no: hc가 레인 종료·막힘을 지휘 입력에 넣지 않게(--no-notify). 알림은 hc-lane wait가 다 맡는다
 notify=$(cfg lane.notify yes) || exit 1
 case $notify in yes) nn= ;; no) nn=--no-notify ;; *) die "설정 lane.notify는 yes·no: $notify" ;; esac
@@ -1835,8 +2601,19 @@ else set -- env "HC_LANE=$name" "LANE_REPO=$repo" "LANE_WORKTREE=$wt" "LANE_BRAN
 start_check() {
   end=$(($(date +%s) + swait)) tr= why= im= ik=0 last=
   while :; do
-    g=$(hc get "$1" --json 2>/dev/null)
-    if printf %s "$g" | grep -Eq '"status" *: *\{'; then start=ok; return 0; fi
+    g=$(hc get "$1" --json 2>/dev/null) || g=
+    if printf %s "$g" | grep -Eq '"status" *: *\{'; then
+      start=ok
+      [ "$fwait" != 0 ] && command -v jq >/dev/null 2>&1 || return 0
+      if [ "${HC_LANE_FILL-}" = 1 ]; then
+        # hc-fill은 두 출력을 함께 받는다. 감시가 그 파이프를 쥐면 다음 기계 배치 판단이 늦어진다.
+        { turn_check "$1" </dev/null >&3 2>&1 3>&- & } 3>>"$evdir/watch.log" ||
+          { turn_check "$1" </dev/null >/dev/null 2>&1 & }
+      else
+        turn_check "$1"
+      fi
+      return 0
+    fi
     if printf %s "$g" | grep -Eq '"state" *: *"finished"'; then why="터미널이 끝났다"; break; fi
     scr=$(hc read "$1" 2>/dev/null)
     case $scr in *'Allow external CLAUDE.md file imports?'*)
@@ -1875,6 +2652,36 @@ start_check() {
   hit=$(printf %s "$hit" | sed 's/^[[:space:]]*//' | cut -c 1-160)
   echo "hc-lane: 시작 안 됨 $1: $why${k:+ — 막힘($k): $hit}. 터미널은 남겼다(hc read $1). 다른 기계로 옮기려면 이 레인 작업 폴더를 정리하고 다시 띄운다" >&2
   return $rc
+}
+
+# turn_check <주소>: 첫 턴 감시(알림 전용, launch-submit-check 2026-11-20). g는 방금 읽은 hc get, lo_는 레인 주인 지휘. start=ok|noturn, 늘 종료 0.
+# 첫 지시는 입력칸이 아니라 실행 인자로 넘긴다(hc-fill launch 틀의 {task}, --brief의 {brief}, 직접 띄울 때 위치 인자)라 입력칸에 남을 길이 없다.
+# 그래도 2026-11-19 원격 자동 감사에서 Claude가 인자 첫 지시를 244초 제출하지 않고 idle로 멈춘 드문 경합이 있어, lane.first_turn_wait초 안에
+# turn > 0 또는 status working(실측: 첫 턴 동안 working·turn 0, 턴이 끝나야 turn 1)을 한 번도 못 보면 사건 막힘 「첫 턴 없음 <주소>」 한 줄만 남긴다.
+# 키는 보내지 않고 화면도 읽지 않는다. 조회 실패·빈 값은 다음 조회로(마감까지). 놓치거나 늦게 알려도 띄우기 결과에는 영향이 없다.
+# lane.first_turn_wait 0·jq 없음이면 보지 않는다.
+turn_check() {
+  cap=$(($(date +%s) + fwait))
+  while :; do
+    if printf %s "$g" | jq -e '(.turn | type == "number" and . > 0) or (.status | type == "object" and .state == "working")' >/dev/null 2>&1; then
+      start=ok; return 0
+    fi
+    r_=$((cap - $(date +%s))); [ "$r_" -gt 0 ] || break
+    sleep "$(awk -v p="$poll" -v r="$r_" 'BEGIN { print (p < r ? p : r) }')"
+    r_=$((cap - $(date +%s))); [ "$r_" -gt 0 ] || break
+    g=$(capt "$r_" hc get "$1" --json 2>/dev/null) || g=
+    [ "$(date +%s)" -le "$cap" ] || break
+  done
+  start=noturn
+  local event_error=
+  lane_event 막힘 "첫 턴 없음 $1${on:+ @$on}" || event_error=" 막힘 사건을 적지 못했다."
+  echo "hc-lane: 첫 턴 없음 $1${on:+ @$on}: ${fwait}초 안에 turn > 0·working이 없었다.${event_error} 키는 보내지 않았다(화면은 hc read $1)" >&2
+  return 0
+}
+# lane_event <상태> <한 줄>: 띄운 레인 이름으로 이 기계 사건 기록에 한 줄(터미널 칸 -). 주인 지휘가 있으면 --to로 그 지휘 watch만. 실패면 1
+lane_event() {
+  to_=; [ "${lo_:--}" = - ] || to_=$lo_
+  env -u HC_TERMINAL_ID -u HC_LANE "$(cd "$(dirname "$0")" && pwd -P)/${0##*/}" report "$1" - "$2" --name "$name" ${to_:+--to "$to_"} >/dev/null 2>&1 </dev/null
 }
 
 # imports_q <주소>: 「Allow external CLAUDE.md file imports?」(CLAUDE.md의 @가져오기가 작업 폴더 밖 — 2026-11-17 .qa/… 폴더에서
@@ -1988,6 +2795,7 @@ if [ $dry = 1 ]; then
   if [ $read = 0 ]; then
     echo "[dry-run] git -C $(q "$repo") worktree add --track -b $branch $(q "$wt") $bref"
     echo "[dry-run] ($blab 에 .claude/herdr-setup.sh 가 있으면) 워크트리에서 bash .claude/herdr-setup.sh"
+    echo "[dry-run] 임대 잡기 refs/hc-lanes/$name (없을 때만 — 이미 있으면 종료 10, 원격 없음이면 임대 없이)"
   fi
   printf '[dry-run] hc run --bg --json%s --name %s --label hc-lane=1%s --cwd %s%s' "${nn:+ $nn}" "$name" "${hsp:+ --label herdr.space=$hsp}" "$(q "$cwd")" "${on:+ --on $on}"
   for a in "$@"; do printf ' %s' "$(q "$a")"; done
@@ -2011,8 +2819,22 @@ else
       fi
     fi
   fi
+  # 레인 임대(2026-11-20 fill-dup-guard, 지휘 결정 — 중복 실행 막기는 띄우는 쪽에서): 쓰기 레인은 hc run 직전에 프로젝트 원격
+  # refs/hc-lanes/<레인>을 없을 때만 만든다(원격이 원자적으로 판정). 이미 있으면 「이미 돎」 종료 10, 조회·push 실패도 안 띄움(모르면 안
+  # 띄움, 종료 1). origin 없음이 확인된 저장소만 임대 없이. 풀기는 land 성공(main과 같은 원자 push)·clean, 그 밖은 손으로 hc-lane lease drop
+  lsha=
+  if [ $read = 0 ]; then
+    lo_=$(lease_x take "$name" "${on:-$(hostname -s 2>/dev/null || echo -)}"); lr_=$?
+    case $lr_ in
+      0) lsha=$lo_ ;;
+      4) [ "$lo_" = no-origin ] || { echo "hc-lane: 임대를 잡지 못했다(종료 4, 원격 없음 확인 못 함 — 기계 조회 실패일 수 있다). 레인을 띄우지 않았다. $(rollback)" >&2; exit 1; } ;;
+      3) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다($lo_). 레인을 띄우지 않았다(그 실행이 끝났으면 hc-lane lease drop${on:+ --on $on} --repo $(q "$repo") --name $name). $(rollback)" >&2; exit 10 ;;
+      *) echo "hc-lane: 임대를 잡지 못했다(git ls-remote·push origin 실패, 종료 $lr_). 레인을 띄우지 않았다 — 원격이 닿으면 다시. $(rollback)" >&2; exit 1 ;;
+    esac
+    set -- env "HC_LANE_LEASE=$lsha" "${@:2}"   # 레인의 land가 이 값으로 임대를 지운다(main과 같은 원자 push)
+  fi
   out=$(hc run --bg --json $nn --name "$name" --label hc-lane=1 ${hsp:+--label "herdr.space=$hsp"} --cwd "$cwd" ${on:+--on "$on"} "$@") ||
-    die "hc run 실패, 레인을 띄우지 않았다.${wt:+ $(rollback)}"
+    die "hc run 실패, 레인을 띄우지 않았다.${wt:+ $(rollback)}${lsha:+ 임대 refs/hc-lanes/$name 은 남겨 둠(떴는지 모름 — 끝났으면 hc-lane lease drop${on:+ --on $on} --repo $(q "$repo") --name $name)}"
   addr=$(printf %s "$out" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$addr" ] || printf 'hc-lane: hc run 출력에서 주소를 읽지 못했다(hc ls --json 으로 확인): %s\n' "$out" >&2
   # 레인 기록: 이 레인의 지휘. HC_LANE_OWNER(hc-fill이 대기열에 넣은 지휘를 넘김)가 앞, 아니면 지휘 터미널에서 띄웠을 때 그 지휘.

@@ -25,7 +25,8 @@ sweep.orphan_kill  off
 
 # hc-lane: --brief 사본 자리(대상 기계 경로, ~ 는 그 기계 집. 없으면 지시문과 같은 폴더),
 # -- 뒤 명령이 없을 때 실행 명령 틀({brief} 자리에 사본 경로, 셸 문법. 없으면 -- 뒤 명령이 꼭 있어야 함),
-# 띄운 뒤 status를 기다릴 초(없으면 60, 0이면 신뢰 질문·시작 확인 끔), Claude 폴더 신뢰 질문 자동 넘김(on·off, 없으면 on)
+# 띄운 뒤 status를 기다릴 초(없으면 60, 0이면 신뢰 질문·시작 확인 끔), Claude 폴더 신뢰 질문 자동 넘김(on·off, 없으면 on),
+# status 뒤 첫 턴(turn > 0 또는 working)을 기다릴 초 — 넘으면 막힘 사건만, 알림 전용(없으면 60, 0이면 끔)
 # wait가 done·idle 레인을 멈춤으로 보기 전 쉰 분(없으면 10, 0이면 끔), 마지막 상태 줄의 배경 작업 표시(확장 정규식, 빈 값이면 끔),
 # 표시가 있어도 멈춤으로 볼 쉰 분(없으면 30), 상태 줄을 고르는 확장 정규식(없으면 ✻ 따위로 시작하는 Claude 턴 끝 줄),
 # 배경 작업으로 셀 자손 프로세스 명령 줄 글자(빈칸으로 나눈 목록, 없으면 shell-snapshots, 빈 값이면 화면 판정만),
@@ -34,6 +35,7 @@ lane.brief_dir     ~/.local/share/hc-lane/briefs
 lane.run           example-agent --model example-model "{brief} 를 읽고 진행하라"
 lane.start_wait    60
 lane.auto_trust    on
+lane.first_turn_wait 60
 lane.wait_grace    10
 lane.wait_busy     shells? still running|monitors? still running
 lane.wait_busy_max 30

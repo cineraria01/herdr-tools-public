@@ -450,11 +450,66 @@ reply_tick() {
   done 6<<<"$(awk -F'\t' '$6=="up" && $11!="" && $11!="-"' "$Q" 2>/dev/null)"
 }
 
+# 병합기(2026-11-20 land-merger-mvp). mqload <프로젝트>: 그 프로젝트 원격의 큐 표식·켬 표식(refs/merge-queue/*·refs/herdr/merger/*)을
+# 바퀴에 한 번 ls-remote로 MQS에(「프로젝트<TAB>참조」). 못 읽으면 MQBAD에 넣는다(모름 — 0·1로 읽지 않는다). 원격이 없는 저장소
+# (get-url 종료 2)는 큐가 없다. 이 기계 저장소 줄이 없으면 큐를 못 보니, 병합기 설정이 있거나 켠 적이 있는 프로젝트면 모름, 아니면
+# 없음(병합기 2차 중간 7 — 원격 부재와 조회 불가를 가른다)
+MQP= MQS= MQBAD=
+mqload() {
+  inlist "$1" "$MQP" && return 0
+  MQP="$MQP,$1"
+  r_=$(repo_of "$1" "$LOCAL")
+  if [ -z "$r_" ]; then
+    { awk -v p="$1" '$1 == "merger" && $2 == p { f = 1 } END { exit !f }' "$CONF" || cut -f 1 "$DATA/merger.tsv" 2>/dev/null | grep -Fxq -- "$1"; } &&
+      MQBAD="$MQBAD,$1"
+    return 0
+  fi
+  git -C "$r_" remote get-url origin >/dev/null 2>&1
+  case $? in 0) ;; 2) return 0 ;; *) MQBAD="$MQBAD,$1"; return 0 ;; esac
+  o_=$(git -C "$r_" ls-remote origin 'refs/merge-queue/*' 'refs/herdr/merger/*' 2>/dev/null) || { MQBAD="$MQBAD,$1"; return 0; }
+  MQS="$MQS$(printf '%s\n' "$o_" | awk -v p="$1" 'NF == 2 { print p "\t" $2 }')
+"
+}
+# mqueued <프로젝트> <레인>: 그 레인 제출이 큐에 있으면 0, 없으면 1, 못 읽으면 2(감사 land-merge-train-2 중간 1·병합기 1차 중간 5 —
+# 제출한 레인은 바로 끝나 터미널이 사라지지만 변경은 병합기가 넣기 전이다. 모르면 소유를 쥔다)
+mqueued() {
+  mqload "$1"; inlist "$1" "$MQBAD" && return 2
+  printf '%s' "$MQS" | awk -F'\t' -v p="$1" -v l="$2" '$1 == p { n = $2; if (sub(/^refs\/merge-queue\/[0-9]+-/, "", n) && n == l) f = 1 } END { exit !f }'
+}
+mgmach() { mqload "$1"; printf '%s' "$MQS" | awk -F'\t' -v p="$1" '$1 == p && sub(/^refs\/herdr\/merger\//, "", $2) { print $2 }'; }   # 켜진 병합기 기계
+# merger_tick: 설정 줄 「merger <프로젝트> <기계>」 하나가 그 프로젝트의 병합기를 켜고 끈다(병합기 1차 중간 10 — 지시문 「설정 한 곳」).
+# 레인 기계는 개인 설정을 못 읽으니 hc-fill이 그 줄을 원격 켬 표식 refs/herdr/merger/<기계>로 옮기고(레인의 hc-lane land는 그 표식만 본다),
+# 줄을 지우면 표식을 지운다. 손대는 것은 이 설정이 켠 적이 있는 프로젝트뿐($DATA/merger.tsv). dry-run은 할 일만 찍는다.
+# 대기열이 비어 일찍 끝나는 바퀴에도 돈다(병합기 2차 중간 9 — 빈 대기열에서 켜고 끈 설정이 원격에 안 갔다)
+merger_tick() {
+  mgf_=$DATA/merger.tsv
+  want_=$(awk '$1 == "merger" && NF >= 3 { print $2 "\t" $3 }' "$CONF")
+  for p_ in $( { printf '%s\n' "$want_" | cut -f 1; cut -f 1 "$mgf_" 2>/dev/null; } | awk 'NF && !s[$0]++'); do
+    w_=$(printf '%s\n' "$want_" | awk -F'\t' -v p="$p_" '$1 == p { print $2; exit }')
+    r_=$(repo_of "$p_" "$LOCAL"); [ -n "$r_" ] || { echo "병합기 $p_: 설정에 $LOCAL repo 줄이 없다 — 켬 표식을 못 고침"; continue; }
+    mqload "$p_"; inlist "$p_" "$MQBAD" && { echo "병합기 $p_: 원격을 못 읽음 — 켬 표식은 다음 바퀴에"; continue; }
+    cur_=$(mgmach "$p_")
+    set --
+    for c_ in $cur_; do [ "$c_" = "$w_" ] || set -- "$@" ":refs/herdr/merger/$c_"; done
+    [ -z "$w_" ] || printf '%s\n' "$cur_" | grep -Fxq -- "$w_" || set -- "$@" "+refs/remotes/origin/HEAD:refs/herdr/merger/$w_"
+    if [ $# -gt 0 ]; then
+      if [ $dry = 1 ]; then echo "${P}병합기 $p_: git push origin $*"
+      elif git -C "$r_" push -q origin "$@" 2>/dev/null; then echo "병합기 $p_: ${w_:+켬 → $w_}${w_:-끔}"
+      else echo "병합기 $p_: 켬 표식 push 실패 — 다음 바퀴에"; continue; fi
+    fi
+    [ $dry = 1 ] && continue
+    if [ -n "$w_" ]; then awk -F'\t' -v p="$p_" '$1 != p' "$mgf_" 2>/dev/null >"$mgf_.tmp"; printf '%s\t%s\n' "$p_" "$w_" >>"$mgf_.tmp"; mv -f "$mgf_.tmp" "$mgf_"
+    else awk -F'\t' -v p="$p_" '$1 != p' "$mgf_" >"$mgf_.tmp" && mv -f "$mgf_.tmp" "$mgf_"; fi
+  done
+  MQP= MQS= MQBAD=   # 켬 표식을 고쳤을 수 있으니 이 바퀴의 나머지는 다시 읽는다
+}
+
 # 자리 세기 전에 끝나는 바퀴(빈 대기열 + idle 0, die 등)는 held.tsv를 비운다 — 그동안 못 본 레인이 묵은 시각을 물려받지 않게
 # (감사 [낮음] 1). 다 세면 HELDW=1. dry-run은 건드리지 않는다
 HELDW=
 trap '[ $dry = 1 ] || [ -n "$HELDW" ] || : 2>/dev/null >"$DATA/held.tsv"' EXIT
 inbox_tick
+merger_tick
 IDLE=$(conf idle); IDLE=${IDLE:-10}
 case $IDLE in *[!0-9]*) echo "알림: 설정 idle은 분(숫자)이다, 놀고 있음 알림 끔: $IDLE"; IDLE=0 ;; esac
 IDLE=$((10#$IDLE))
@@ -659,12 +714,15 @@ audit_reap() {
 # 자동 감사(EV)와 마지막 보고가 함께 쓴다. 마지막 보고 $DATA/last.tsv(레인 상태 sha8 사건시각 한줄앞부분 읽은시각 fresh|old — 시각은
 # 이 기계 HH:MM): up 레인마다 그 터미널이 그 이름으로 적은 마지막 사건, 없으면 상태 -(보고 없음). 연결 안 됨·못 읽은(모름) 기계의
 # 레인은 지난 줄을 old로 남긴다. ls는 이 파일만 읽는다(원격 호출 없이 「끝남」이 착지인지 막힘인지 보이게). dry-run은 안 씀
-EV= EVBAD=
+EV= EVBAD= MGM=
 ev_tick() {
   [ -s "$Q" ] || return 0
   eups=$(awk -F'\t' -v OFS='\t' '$6=="up" {print $1, $7, $8}' "$Q"); [ -n "$eups" ] || return 0
   set --
-  for m in $(printf '%s\n' "$eups" | cut -f 2 | sort -u); do
+  # 병합기 기계도 읽는다: 제출한 레인의 착지·막힘은 병합기 터미널이 --name <레인>으로 적는다(병합기 1차 중간 5)
+  MGM=
+  for p_ in $(awk -F'\t' '$6=="up" {print $2}' "$Q" | sort -u); do MGM="$MGM $(mgmach "$p_")"; done
+  for m in $( { printf '%s\n' "$eups" | cut -f 2; printf '%s\n' $MGM; } | sort -u); do
     [ "$m" != "$LOCAL" ] && printf '%s\n' "$CONN" | grep -Fxq -- "$m" && set -- "$@" --on "$m"
   done
   EV=$(hc-lane events "$@" 2>/dev/null </dev/null) || { EVBAD=1; echo "레인 사건 읽기 실패(hc-lane events) — 다음 바퀴에"; return 0; }
@@ -676,6 +734,14 @@ ev_tick() {
     fi
     l=$(lastev "$n" "$a")
     if [ -z "$l" ]; then printf '%s\t-\t-\t-\t-\t%s\tfresh\n' "$n" "$enow"; continue; fi
+    # 제출한 레인(마지막 사건 「제출」)은 병합기 기계가 그 제출 ID로 적은 결과(착지·막힘)가 있으면 그것을 보인다(병합기 3차 중간 10 —
+    # ls가 제출자 터미널만 읽어 최종 결과를 놓쳤다)
+    if [ "$(printf %s "$l" | cut -f 5)" = 제출 ]; then
+      r_=$(printf '%s\n' "$EV" | awk -F'\t' -v n="$n" -v M="$MGM" -v sid="$(printf %s "$l" | cut -f 7 | awk '{ print $1 }')" \
+        'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
+         sid != "" && $4 == n && ($5 == "착지" || $5 == "막힘") && ($2 in m) && index($7, "제출 ID " sid) { r = $0 } END { print r }')
+      [ -z "$r_" ] || l=$r_
+    fi
     es=$(date -j -u -f %Y-%m-%dT%H:%M:%SZ "$(printf %s "$l" | cut -f 1)" +%s 2>/dev/null) && eh=$(date -r "$es" +%H:%M) || eh=?
     est=$(printf %s "$l" | cut -f 5) esha=$(printf %s "$l" | cut -f 6 | cut -c 1-8)
     emsg=$(printf %s "$l" | cut -f 7 | LC_ALL=en_US.UTF-8 cut -c 1-40)   # UTF-8 글자 단위(launchd처럼 LANG이 없어도 글자를 쪼개지 않게)
@@ -726,6 +792,22 @@ fetch_proj() {  # fetch_proj <프로젝트>: FR(local 저장소)·FB(기본 가�
   inlist "$1" "$FETCHBAD" && return 2
   FB=$(git -C "$FR" symbolic-ref --short -q refs/remotes/origin/HEAD); FB=${FB#origin/}; FB=${FB:-main}
 }
+# 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정 — carousel-save-race가 선행 main-split의 착지를 커밋 제목 머리로 못 알아봐(「feat(frontend):
+# main-split-1 …」) 먼저 띄움 기한을 넘겼다): hc-lane land가 main과 같은 원자 push에 refs/hc-landed/<레인>/<UTC 초>(= 착지 커밋)를 싣는다.
+# since <선행>: 그 선행 대기열 줄을 넣은 시각(10칸, 이 기계 시각 분)의 UTC 초 — 그보다 앞선 표식(같은 이름의 옛 실행)은 안 센다. 줄이 없으면 빈 값
+since() {
+  sa_=$(awk -F'\t' -v n="$1" '($1 "") == (n "") {print $10; exit}' "$Q" 2>/dev/null)
+  [ -n "$sa_" ] && [ "$sa_" != - ] || return 1
+  date -j -f %Y-%m-%dT%H:%M:%S "$sa_:00" +%s 2>/dev/null || date -d "$sa_:00" +%s 2>/dev/null   # 초를 0으로(-j -f는 빠진 칸을 지금 값으로 채운다)
+}
+# lmark <선행> <since 초>: 그 뒤의 표식 가운데 sha가 origin/<FB>의 조상인 것(LMS)이 있으면 0. 표식 없음·조상 아님·git 오류(ls-remote·
+# merge-base 하나라도)는 1 — 아직(풀지 않음). fetch_proj 뒤. ponytail: 시각은 분 단위라 같은 분에 착지한 옛 실행 표식도 센다
+lmark() {
+  lmo_=$(git -C "$FR" ls-remote origin "refs/hc-landed/$1/*" </dev/null 2>/dev/null) || return 1
+  LMS=$(printf '%s\n' "$lmo_" | awk -v p="refs/hc-landed/$1/" -v t="$2" 'index($2, p) == 1 { s = substr($2, length(p) + 1); if (s ~ /^[0-9]+$/ && s + 0 >= t + 0) print $1 }' |
+    while read -r s_; do git -C "$FR" merge-base --is-ancestor "$s_" "origin/$FB" 2>/dev/null && { echo "$s_"; break; }; done)
+  [ -n "$LMS" ]
+}
 after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 b), 2 판정 못 함
   fetch_proj "$2"
   case $? in
@@ -734,7 +816,9 @@ after_ok() {  # after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어�
   esac
   b=$FB ok=0
   for a in $(printf %s "$3" | tr , ' '); do
+    # 들어감 = 커밋 제목 머리 규칙(지금 그대로) 또는 그 선행 줄을 넣은 뒤의 착지 표식이 origin/<기본>의 조상(대기열에 그 줄이 있을 때)
     hit=$(landed "$a")
+    if [ -z "$hit" ] && st_=$(since "$a") && lmark "$a" "$st_"; then hit="$(printf %s "$LMS" | cut -c 1-8) — 착지 표식"; fi
     if [ -n "$hit" ]; then echo "선행 $1 ← $a: 들어감 ($hit)"; else echo "선행 $1 ← $a: 아직 (origin/$b)"; ok=1; fi
   done
   return $ok
@@ -824,7 +908,7 @@ ASEC='
 ## 감사·착지 (hc-fill 자동)
 이 절이 위 지시문 본문의 감사·착지 문구보다 앞선다. 감사는 hc-fill이 띄운다(지휘가 따로 띄우지 않는다).
 1. 구현·검증이 끝나면 착지하지 말고 `hc-lane report 완료 <sha> "<한 줄> (감사 hc-fill 자동)"`을 부른 뒤 턴을 끝내고 기다린다.
-2. hc-fill이 「감사 통과 …」를 보내면 위 착지 절차대로 main에 넣고 `hc-lane report 착지 <sha>`.
+2. hc-fill이 「감사 통과 …」를 보내면 위 착지 절차대로 main에 넣고 `hc-lane report 착지 <sha>`. 병합기가 켜진 저장소면 착지 줄이 큐에 제출만 하고 끝난다 — 그때 착지는 병합기가 알리니 report 착지 없이 끝낸다.
 3. 「감사 지적 … <보고서>」를 보내면 그 보고서를 읽고 높음·중간을 고친 뒤 다시 검증하고 `hc-lane report 완료 <새 sha> "<한 줄>"`, 그리고 다시 기다린다.
 '
 launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 실패면 1
@@ -935,8 +1019,13 @@ early_sec() {
   dls=$(date -r "$dl" '+%Y-%m-%d %H:%M' 2>/dev/null || date -d "@$dl" '+%Y-%m-%d %H:%M')
   re1='^([a-z]+(\([^)]*\))?!?: *)?' re2='([^a-z0-9_-]|$)'
   w='until git fetch -q origin'
-  for a in $(printf %s "$1" | tr , ' '); do w="$w &&
-  git log origin/$2 --format=%s | grep -Eq '$re1$a$re2'"; done
+  for a in $(printf %s "$1" | tr , ' '); do
+    # after_ok와 같은 판정: 제목 머리, 또는 그 선행 줄을 넣은 뒤의 착지 표식 sha가 origin/<기본>의 조상(ls-remote·merge-base 오류면 아직)
+    if st_=$(since "$a"); then w="$w &&
+  { git log origin/$2 --format=%s | grep -Eq '$re1$a$re2' || { o=\$(git ls-remote origin 'refs/hc-landed/$a/*') && printf '%s\\n' \"\$o\" | awk '{ s = \$2; sub(/^refs\\/hc-landed\\/$a\\//, \"\", s); if (s ~ /^[0-9]+\$/ && s + 0 >= $st_) print \$1 }' | { while read -r s; do git merge-base --is-ancestor \"\$s\" origin/$2 && exit 0; done; exit 1; }; }; }"
+    else w="$w &&
+  git log origin/$2 --format=%s | grep -Eq '$re1$a$re2'"; fi
+  done
   cat <<EOF
 
 ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, $(date '+%Y-%m-%d %H:%M'))
@@ -1070,13 +1159,27 @@ if [ "$OVM" != off ]; then
   while IFS=$'\t' read -r -u 3 on op ob oaf ost om; do
     [ -n "$on" ] || continue
     la_=$(printf '%s\n' "$TERMS" | awk -F'\t' -v n="$on" '$4==n {print $2}')
-    if [ -z "$la_" ]; then
+    mqs_=1; [ "$ost" != up ] || { mqueued "$op" "$on"; mqs_=$?; }   # 0 큐에 있음 · 1 없음 · 2 모름
+    if [ $mqs_ = 0 ]; then echo "겹침: $on 병합기 큐에 제출됨 — 들어가기 전이라 쓰기 소유 유지"
+    elif [ $mqs_ = 2 ]; then echo "겹침: $on 병합기 큐를 못 읽음 — 들어갔는지 몰라 쓰기 소유 유지"
+    elif [ -z "$la_" ]; then
       [ "$ost" = up ] && [ "$om" != "$LOCAL" ] && ! printf '%s\n' "$CONN" | grep -Fxq -- "$om" &&
         printf '%s\n' "$OSEEN" | grep -Fxq -- "$on" || continue   # 연결된 기계에서 사라졌거나 이미 풀린 줄: 풂
       echo "겹침: $on @$om 연결 안 됨 — 끝났는지 몰라 쓰기 소유 유지"
     else
-      lnd_=1; for x_ in $la_; do [ "$(lastev "$on" "$x_" | cut -f 5)" = 착지 ] || lnd_=; done
-      [ -z "$lnd_" ] || continue   # 이번 실행 터미널이 착지를 적었으면 풂
+      # 이번 실행 터미널마다: 그 터미널이 착지를 적었거나, 병합기 기계가 그 이름으로 그 터미널의 마지막 사건 뒤에 착지를 적었으면 끝
+      lnd_=1
+      for x_ in $la_; do
+        lx_=$(lastev "$on" "$x_"); [ "$(printf %s "$lx_" | cut -f 5)" = 착지 ] && continue
+        # 그 터미널이 아직 사건을 하나도 안 적었으면(비교 시각 없음) 같은 이름의 옛 착지로 풀지 않는다(병합기 2차 중간 6).
+        # 마지막 사건이 「제출」이면 그 제출 ID(한 줄 첫 낱말)가 든 병합기 착지로도 푼다 — 시각과 상관없이(3차 중간 11 — 같은 초·접수
+        # 확인 전에 병합기가 끝나면 「뒤」가 아니라 소유가 남았다)
+        printf '%s\n' "$EV" | awk -F'\t' -v n="$on" -v t="$(printf %s "$lx_" | cut -f 1)" -v M="$MGM" \
+          -v sid="$(printf %s "$lx_" | awk -F'\t' '$5 == "제출" { split($7, w, " "); print w[1] }')" \
+          'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
+           t != "" && $4 == n && $5 == "착지" && ($2 in m) && ($1 > t || (sid != "" && index($7, "제출 ID " sid))) { f = 1 } END { exit !f }' || lnd_=
+      done
+      [ -z "$lnd_" ] || continue
     fi
     ONOW="$ONOW$on
 "

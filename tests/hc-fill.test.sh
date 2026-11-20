@@ -10,6 +10,7 @@ EX=${HC_FILL_EXAMPLE:-$here/../config.example/hc-fill.tsv}
 EXA=${HC_FILL_AUDIT_EXAMPLE:-$here/../config.example/hc-fill-audit.md}   # 자동 감사 예시 틀
 [ -f "$EXA" ] || EXA=$here/../../share/hc-fill/hc-fill-audit.example.md
 T=$(mktemp -d "${TMPDIR:-/tmp}/hc-fill-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
+. "$here/isolate.sh"
 bg=
 tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }   # 손자까지(lockf가 띄운 안쪽 watch가 고아로 남지 않게)
 # killtree: 먼저 STOP으로 멈춰 새 자식(watch 루프의 sleep)을 못 띄우게 한 뒤 다시 세어 끈다 — 세고 끄는 사이에 뜬 sleep이
@@ -60,6 +61,7 @@ on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
 case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜 실패" >&2; exit 1 ;; esac
+case " ${HC_FAKE_LANE_HELD-} " in *" $name "*) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다" >&2; exit 10 ;; esac   # 임대가 남은 레인: 어느 기계든 10
 # $HC_FAKE_LANE_START의 「<기계>/<이름>=<종료>」: 띄우고 터미널은 남긴 채 시작 확인 실패(5·6·7)로 끝난다(진짜 hc-lane처럼 JSON 끝 줄)
 for x in ${HC_FAKE_LANE_START-}; do case $x in "${on:-here}/$name="*)
   echo "hc-lane: 시작 안 됨 ${on:+$on/}$name: 가짜 로그인 막힘" >&2; echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\",\"start\":\"login\"}"; exit "${x#*=}" ;; esac; done
@@ -73,8 +75,17 @@ cat >"$T/bin/git" <<'EOF'
 echo "$*" >>"$T_LOG/git.log"
 for a in "$@"; do case $a in
   fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1; exit 0 ;;
+  remote) [ -z "${HC_FAKE_NOORIGIN-}" ] || exit 2; exit 0 ;;   # NOORIGIN: 원격 없는 저장소(get-url 종료 2, ls-remote도 실패)
+  # 착지 표식: ls-remote origin 'refs/hc-landed/<레인>/*'는 $T/landed/<레인>(「sha<TAB>ref」 줄, 없으면 진짜처럼 빈 답·종료 0)에서 ·
+  # HC_FAKE_LSREMOTE_FAIL: 조회 실패(128) · HC_FAKE_MB_RC: merge-base --is-ancestor 종료(기본 0 = 조상)
+  ls-remote) case ${!#} in refs/hc-landed/*)
+      [ -z "${HC_FAKE_LSREMOTE_FAIL-}" ] || exit 128; r_=${!#}; r_=${r_#refs/hc-landed/}; cat "$T_LOG/landed/${r_%/\*}" 2>/dev/null; exit 0 ;; esac
+    [ -z "${HC_FAKE_MQ_FAIL-}${HC_FAKE_NOORIGIN-}" ] || exit 128   # 병합기 큐·켬 표식: 큐에 든 레인 · 켜진 병합기 기계
+    [ -z "${HC_FAKE_MQ-}" ] || printf '0123abcd\trefs/merge-queue/1700000000-%s\n' "$HC_FAKE_MQ"
+    [ -z "${HC_FAKE_MGM-}" ] || printf '0123abcd\trefs/herdr/merger/%s\n' "$HC_FAKE_MGM"; exit 0 ;;
   symbolic-ref) echo origin/main; exit 0 ;;
   --grep=*) grep -E -- "${a#--grep=}" "$T_LOG/commits" 2>/dev/null | head -n 1; exit 0 ;;
+  merge-base) exit "${HC_FAKE_MB_RC:-0}" ;;
 esac; done
 case " $* " in *" log "*) [ -z "${HC_FAKE_LOG_FAIL-}" ] || exit 128; cat "$T_LOG/commits" ;; esac   # LOG_FAIL: origin/<기본> 참조 없음
 EOF
@@ -365,6 +376,9 @@ export HC_FAKE_LANE_FAIL="box-1/lf"
 add lf
 run run
 t "hc-lane 실패: 다음 기계로" '[ "$(where lf)" = "up box-2 box-2/lf" ] && printf "%s" "$out" | grep -q "실패 lf @box-1"'
+unset HC_FAKE_LANE_FAIL
+fresh; export HC_FAKE_LANE_HELD=lh; add lh; run run; unset HC_FAKE_LANE_HELD
+t "hc-lane 종료 10(이미 돎 — 임대 남음): 못 띄움으로 읽어 다음 기계도 10이면 이번 바퀴 포기(줄은 wait 그대로)" '[ "$(where lh)" = "wait - -" ] && [ "$(grep -c "^lh$" "$T/lane.log")" -ge 2 ] && printf "%s" "$out" | grep -q "실패 lh @box-1" || { printf "%s\n" "$out"; false; }'
 fresh
 export HC_FAKE_LANE_START="box-1/s6=6"
 add s6
@@ -1170,6 +1184,62 @@ mj box-2 shared slow; lj; run run
 t "겹침 block: 앞 레인 기계가 연결 안 됨이면(끝났는지 모름) 소유 유지 — 대기(아스트라 높음 2)" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 @box-1 연결 안 됨" || { printf "%s\n" "$out"; false; }'
 mj box-1 box-2 shared slow; run run
 t "겹침 block: 연결된 기계에서 앞 레인 터미널이 사라지면 같은 줄이 wait → up" 'up o2 || { printf "%s\n" "$out"; false; }'
+# 병합기에 제출한 레인(2026-11-20 감사 land-merge-train-2 중간 1): 제출 뒤 터미널이 사라져도 원격 큐(refs/merge-queue/<초>-<레인>)에
+# 남아 있는 동안은 쓰기 소유 유지 — 병합기가 넣기 전에 같은 파일 레인이 뜨면 병합기에서 충돌한다
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+lj; HC_FAKE_MQ=o1 run run
+t "겹침 block: 앞 레인이 병합기 큐에 있으면 터미널이 사라져도 소유 유지 — 대기" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 병합기 큐에 제출됨" || { printf "%s\n" "$out"; false; }'
+run run
+t "겹침 block: 큐에서 빠지면(병합기가 넣음) 풀려 뜸" 'up o2 || { printf "%s\n" "$out"; false; }'
+# 병합기 1차 중간 5: 큐를 못 읽으면(모름) 소유를 쥔다 · 레인 터미널이 살아 있어도 병합기 기계가 그 이름으로 착지를 적으면 푼다
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+lj; HC_FAKE_MQ_FAIL=1 run run
+t "겹침 block: 병합기 큐를 못 읽으면 소유 유지 — 대기" '[ "$(where o2)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "o1 병합기 큐를 못 읽음" || { printf "%s\n" "$out"; false; }'
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+printf '2026-11-19T08:00:00Z\tm\tbox-1/o1\to1\t완료\tabc12345\t제출함\t2\n' >"$T/events"
+HC_FAKE_MGM=box-2 run run
+t "겹침 block: 제출한 레인 터미널이 살아 있고 병합기 착지 전이면 대기" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+printf '2026-11-19T09:00:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t병합기 착지\t-\n' >>"$T/events"
+HC_FAKE_MGM=box-2 run run
+t "겹침 block: 병합기 기계가 그 이름으로 착지를 적으면 레인 터미널이 살아 있어도 풂, 병합기 기계 사건도 읽음" 'up o2 && grep "^events " "$T/events.log" | grep -Fq -- "--on box-2" || { printf "%s\n" "$out"; cat "$T/events.log"; false; }'
+# 병합기 1차 중간 10: 설정 한 줄 「merger <프로젝트> <기계>」가 원격 켬 표식을 켜고, 줄을 지우면 끈다(켠 적 있는 프로젝트만)
+ofresh warn; echo "merger   app   box-2" >>"$T/conf/hc-fill.tsv"
+run run
+t "merger 줄: 켬 표식 refs/herdr/merger/box-2 push" 'grep "push" "$T/git.log" | grep -Fq "refs/remotes/origin/HEAD:refs/herdr/merger/box-2" && printf "%s" "$out" | grep -Fq "병합기 app: 켬 → box-2" || { printf "%s\n" "$out"; cat "$T/git.log"; false; }'
+: >"$T/git.log"; HC_FAKE_MGM=box-2 run run
+t "merger 줄: 이미 켜져 있으면 push 안 함" '! grep -q "push" "$T/git.log"'
+sed -i.bak '/^merger/d' "$T/conf/hc-fill.tsv"; HC_FAKE_MGM=box-2 run run
+t "merger 줄을 지우면 켬 표식을 지움" 'grep "push" "$T/git.log" | grep -Fq ":refs/herdr/merger/box-2" && printf "%s" "$out" | grep -Fq "병합기 app: 끔" || { printf "%s\n" "$out"; false; }'
+# 병합기 2차 중간 9: 대기열이 비고 idle 0이라 일찍 끝나는 바퀴에도 merger 줄을 원격에 옮긴다
+ofresh warn; echo "merger   app   box-2" >>"$T/conf/hc-fill.tsv"; sed -i '' 's/^idle .*/idle     0/' "$T/conf/hc-fill.tsv"
+run run
+t "merger 줄: 빈 대기열·idle 0에도 켬 표식 push" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "대기열 비었음" && grep "push" "$T/git.log" | grep -Fq "refs/herdr/merger/box-2" || { printf "%s\n" "$out"; cat "$T/git.log"; false; }'
+# 병합기 2차 중간 6: 새로 뜬 레인 터미널이 아직 사건을 하나도 안 적었으면 같은 이름의 옛 병합기 착지로 소유를 풀지 않는다
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+printf '2026-11-19T09:00:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t병합기 착지(지난 실행)\t-\n' >"$T/events"
+HC_FAKE_MGM=box-2 run run
+t "겹침 block: 새 터미널이 사건 없음 — 같은 이름의 옛 병합기 착지로 풀지 않고 대기" '[ "$(where o2)" = "wait - -" ] || { printf "%s\n" "$out"; false; }'
+# 병합기 2차 중간 7: 원격이 없는 저장소는 큐가 없다(조회 실패로 읽지 않는다) — 앞 레인 터미널이 사라지면 풀려 뜬다
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+lj; HC_FAKE_NOORIGIN=1 run run
+t "겹침 block: 원격 없는 저장소는 큐 없음 — 앞 레인이 사라지면 풀림" 'up o2 && ! printf "%s" "$out" | grep -Fq "병합기 큐를 못 읽음" || { printf "%s\n" "$out"; false; }'
+# 병합기 3차 중간 11: 마지막 사건이 「제출」인 레인은 그 제출 ID가 든 병합기 착지로 푼다 — 같은 초여도
+ofresh block
+oadd o1 '파일: bin/tool'; oadd o2 '파일: bin/tool'; run run; lj box-1/o1:claude-code:o1; run run
+printf '2026-11-19T10:00:00Z\tm\tbox-1/o1\to1\t제출\tabc12345\tbox-1-20261119T100000-7 → refs/merge-queue/1763546400-o1\t2\n2026-11-19T10:00:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t병합기 착지 — 제출 abc12345, 제출 ID box-1-20261119T100000-7 (갈래점 x)\t-\n' >"$T/events"
+HC_FAKE_MGM=box-2 run run
+t "겹침 block: 같은 초라도 그 제출 ID의 병합기 착지면 풂" 'up o2 || { printf "%s\n" "$out"; false; }'
+# 병합기 3차 중간 10: ls 마지막 보고 — 제출한 레인은 병합기 기계가 그 제출 ID로 적은 결과(착지·막힘)를 보인다
+ofresh warn
+add lr3 --only box-1; run run; lj "box-1/lr3:claude-code:lr3:done:/"
+printf '2026-11-19T10:00:00Z\tm\tbox-1/lr3\tlr3\t제출\tabc12345\tbox-1-20261119T100000-8 → refs/merge-queue/1763546400-lr3\t2\n2026-11-19T10:05:00Z\tbox-2\tbox-2/t9\tlr3\t착지\tdef45678\t병합기 착지 — 제출 ID box-1-20261119T100000-8\t-\n' >"$T/events"
+HC_FAKE_MGM=box-2 TZ=UTC run run; run ls
+t "ls 마지막 보고: 제출한 레인은 병합기 착지(sha·시각)를 보임" 'printf "%s\n" "$out" | grep "^lr3 " | grep -Fq "착지 def45678 10:05" || { printf "%s\n" "$out"; cat "$HOME/.local/share/hc-fill/last.tsv"; false; }'
 ofresh block
 oadd o1 '파일: bin/tool' --only box-1; run run; lj box-1/o1:claude-code:o1; run run
 lj; run run   # 연결된 동안 사라져 풀림(대기열 줄은 「끝남」 up 그대로)
@@ -1256,6 +1326,46 @@ oadd o1 '파일: bin/tool' --only box-1; oadd o2 '파일: bin/tool' --only box-1
 run run; back 2 700; rm -f "$T/report.log"; run run
 t "놀고 있음: 「겹침 대기 n줄」 사유는 그 줄을 받을 수 있는 기계(box-1)에만, 다른 기계는 「띄울 것 없음」(아스트라 중간 5)" 'grep -F "box-1 자리 1개" "$T/report.log" | grep -Fq "(겹침 대기 1줄) — 겹침 대기" && grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-2 자리 2개" && ! grep -F "대기열에 띄울 것 없음" "$T/report.log" | grep -Fq "box-1 " && ! grep -F "겹침 대기" "$T/report.log" | grep -Fq "box-2 " || { cat "$T/report.log"; printf "%s\n" "$out"; false; }'
 cp "$EX" "$T/conf/hc-fill.tsv"
+
+# 10z. 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정): 선행은 커밋 제목 머리 규칙 또는 그 선행 줄을 넣은 뒤의 착지 표식
+# refs/hc-landed/<선행>/<UTC 초>(hc-lane land가 main과 같은 원자 push에)의 sha가 origin/<기본>의 조상일 때 들어감. git 오류면 아직
+mark() { mkdir -p "$T/landed"; printf '%s\trefs/hc-landed/%s/%s\n' "$2" "$1" "$3" >>"$T/landed/$1"; }   # mark <레인> <sha> <UTC 초>
+later=$(( $(date +%s) + 600 ))
+# 실제 사례(carousel-save-race ← main-split): 선행 커밋 제목이 「feat(frontend): main-split-1 …」 꼴이라 제목 머리 규칙에 안 걸려 기한 초과
+fresh; rm -rf "$T/landed"; add main-split; add carousel-save-race --after main-split --no-early
+printf '%s\n' "aaa1111 feat(frontend): main-split-1 화면 나눔" "bbb2222 test(frontend): main-split-1 시험" >"$T/commits"; run run
+t "표식: 제목 머리가 레인 이름이 아닌 커밋(main-split-1)만 있고 표식이 없으면 아직" '[ "$(where carousel-save-race)" = "wait - -" ] && printf "%s" "$out" | grep -q "선행 carousel-save-race ← main-split: 아직"'
+mark main-split aaa11110000 1; run run
+t "표식: 그 선행 줄을 넣기 전의 옛 표식(같은 이름의 옛 실행)은 안 셈 — 아직" '[ "$(where carousel-save-race)" = "wait - -" ]'
+mark main-split aaa11112222 "$later"; export HC_FAKE_LSREMOTE_FAIL=1; run run; unset HC_FAKE_LSREMOTE_FAIL
+t "표식: ls-remote git 오류면 아직(풀지 않음)" '[ "$(where carousel-save-race)" = "wait - -" ] && printf "%s" "$out" | grep -q "선행 carousel-save-race ← main-split: 아직"'
+export HC_FAKE_MB_RC=1; run run
+t "표식: 표식 sha가 origin/main의 조상이 아니면(merge-base 1) 아직" '[ "$(where carousel-save-race)" = "wait - -" ]'
+export HC_FAKE_MB_RC=128; run run; unset HC_FAKE_MB_RC
+t "표식: merge-base git 오류(128)도 아직" '[ "$(where carousel-save-race)" = "wait - -" ]'
+run run
+t "표식: 제목이 「feat(frontend): main-split-1 …」이어도 줄을 넣은 뒤의 표식이 조상이면 들어감(carousel-save-race 사례)" '[ "$(where carousel-save-race | cut -d" " -f1)" = up ] && printf "%s" "$out" | grep -Fq "선행 carousel-save-race ← main-split: 들어감 (aaa11112 — 착지 표식)"'
+fresh; rm -rf "$T/landed"; add qx --after zz8 --no-early; mark zz8 cccc0000 "$later"; run run
+t "표식: 대기열에 없는 선행은 표식을 안 보고 커밋 제목 머리 규칙만(줄을 넣은 시각이 없다)" '[ "$(where qx)" = "wait - -" ]'
+echo "dddd0000 zz8: 끝" >"$T/commits"; run run
+t "표식: 제목 머리 규칙은 그대로(표식 없이도 들어감)" '[ "$(where qx | cut -d" " -f1)" = up ] && printf "%s" "$out" | grep -q "선행 qx ← zz8: 들어감 (dddd0000"'
+# 먼저 띄운 레인의 기다림 줄도 같은 판정 — 그 줄을 가짜 git 응답으로 실제로 돌린다(표식 있음·없음·옛 표식·ls-remote 오류·merge-base 1·128)
+fresh; rm -rf "$T/landed"; add ea --only box-1; add eb --after ea,ec --only slow; run run
+rf=$HOME/.local/share/hc-fill/runs/eb-run.md
+t "먼저 띄움 기다림 줄: 대기열 선행(ea)은 제목 머리 또는 refs/hc-landed/ea/* 표식, 대기열 밖(ec)은 제목 머리만" 'grep -Fq "git ls-remote origin '\''refs/hc-landed/ea/*'\''" "$rf" && ! grep -Fq "refs/hc-landed/ec/" "$rf" || { cat "$rf"; false; }'
+mkdir -p "$T/eg2"; printf '#!/bin/sh\ncase $1 in fetch) exit 0 ;; log) cat "$T_LOG/subjects" ;; ls-remote) [ ! -f "$T_LOG/lsrfail" ] || exit 128; cat "$T_LOG/lsr" 2>/dev/null; exit 0 ;; merge-base) exit "$(cat "$T_LOG/mbrc" 2>/dev/null || echo 0)" ;; esac\n' >"$T/eg2/git"; chmod +x "$T/eg2/git"
+cond=$(awk '/^until /{f=1; sub(/^until /, "")} f && /^do /{exit} f' "$rf")
+ew() {  # ew <표식 초|-> <mb 종료> <lsr 실패 1|-> <제목…>: 기다림 조건을 돌려 yes|no
+  rm -f "$T/lsr" "$T/lsrfail" "$T/mbrc"; [ "$1" = - ] || printf '9999aaaa0000\trefs/hc-landed/ea/%s\n' "$1" >"$T/lsr"; [ "$2" = 0 ] || echo "$2" >"$T/mbrc"; [ "$3" = - ] || : >"$T/lsrfail"
+  shift 3; printf '%s\n' "$@" >"$T/subjects"; PATH="$T/eg2:$PATH" sh -c "if $cond
+then echo yes; else echo no; fi" 2>&1
+}
+t "먼저 띄움 기다림: ea 표식(줄을 넣은 뒤)이 조상이면 ea 제목이 레인 이름이 아니어도 풀림(+ ec 제목)" '[ "$(ew "$later" 0 - "feat(frontend): ea-1 다른 제목" "ec: 고침")" = yes ] || { printf "%s\n" "$cond"; false; }'
+t "먼저 띄움 기다림: 표식이 없으면(빈 답·종료 0) 아직" '[ "$(ew - 0 - "feat(frontend): ea-1 다른 제목" "ec: 고침")" = no ]'
+t "먼저 띄움 기다림: 줄을 넣기 전의 옛 표식은 안 셈" '[ "$(ew 1 0 - "ec: 고침")" = no ]'
+t "먼저 띄움 기다림: ls-remote 오류면 아직" '[ "$(ew "$later" 0 1 "ec: 고침")" = no ]'
+t "먼저 띄움 기다림: merge-base 1(조상 아님)·128(오류)이면 아직" '[ "$(ew "$later" 1 - "ec: 고침")" = no ] && [ "$(ew "$later" 128 - "ec: 고침")" = no ]'
+t "먼저 띄움 기다림: 제목 머리 규칙은 그대로(ea: …, 표식 없이)" '[ "$(ew - 0 - "ea: 끝" "ec: 고침")" = yes ]'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh
