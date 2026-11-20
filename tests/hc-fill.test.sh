@@ -1284,6 +1284,19 @@ afresh; add d8 --only box-1; run run
 lj "box-1/d8:claude-code:d8:done:/"; ev box-1/d8 d8 완료 3939ddd "끝"; run run; D8=$(aidof d8)
 verd "box-1/audit-$D8" "$D8" 0 0 0; lj "box-1/d8:claude-code:other:done:/" "box-1/audit-$D8:claude-code:audit-$D8:done:/"; run run
 t "레인 주소에 다른 이름 터미널이 서 있으면 깨우지 않음(「깨우기 미룸」), 판정 파일은 둠" '[ ! -e "$T/send.log" ] && [ -f "$VD/d8/$D8.md" ] && printf "%s" "$out" | grep -Fq "깨우기 미룸 audit-$D8" || { printf "%s\n" "$out"; false; }'
+# fill-park-readopt(지휘 t30x, 2026-11-21 travel-script-ideas·panel-scrollbar): 통과 판정을 수거(hc-lane verdict) 없이 그 감사 sha 그대로
+# 병합기에 제출·착지하면 차수가 deliver로 남아 ack_max 뒤 「판정을 …분 넘게 수거하지 않는다」 막힘이 났다(레인이 끝나면 parent-ended도)
+afresh; add d9 --only box-1; run run
+lj "box-1/d9:claude-code:d9:done:/"; ev box-1/d9 d9 완료 4040aaa "끝"; run run; D9=$(aidof d9)
+verd "box-1/audit-$D9" "$D9" 0 0 0; lj "box-1/d9:claude-code:d9:done:/" "box-1/audit-$D9:claude-code:audit-$D9:done:/"; run run
+ev box-1/d9 d9 제출 "$(s40 4040aaa)" "box-1-x → refs/merge-queue/main/d9 (병합기 box-2 가 main 에 넣는다)"
+lj "box-1/audit-$D9:claude-code:audit-$D9:done:/"; export HC_FAKE_GONE=box-1/d9; run run; unset HC_FAKE_GONE
+t "통과 판정을 수거 없이 감사 sha로 제출(레인 터미널 닫힘) → 차수 taken, noack·parent-ended 막힘 없음" '[ "$(acol "$D9" 8)" = taken ] && [ "$(nrep "hf:$D9:noack")" = 0 ] && [ "$(nrep "hf:$D9:parent-ended")" = 0 ] && printf "%s" "$out" | grep -Fq "수거 없이 제출·착지" || { printf "%s\n" "$out"; cat "$AT" "$T/report.log"; false; }'
+afresh; add da --only box-1; run run
+lj "box-1/da:claude-code:da:done:/"; ev box-1/da da 완료 4141bbb "끝"; run run; DA=$(aidof da)
+verd "box-1/audit-$DA" "$DA" 0 0 0; lj "box-1/da:claude-code:da:done:/" "box-1/audit-$DA:claude-code:audit-$DA:done:/"; run run
+ev box-1/da da 착지 4141bbb0 "손으로 land"; run run; echo "ack_max 0" >>"$T/conf/hc-fill.tsv"; run run
+t "통과 판정을 수거 없이 감사 sha로 착지(sha8) → 차수 taken, 기한이 지나도 noack 없음" '[ "$(acol "$DA" 8)" = taken ] && [ "$(nrep "hf:$DA:noack")" = 0 ] || { printf "%s\n" "$out"; cat "$AT" "$T/report.log"; false; }'
 
 # 한 줄 전체가 판정 형식과 맞아야 한다. 잘린 줄과 상반된 숫자에서 통과를 만들지 않는다.
 for wording in '높음 0·중간 0' '높음 1·중간 0·낮음 0 (예시 높음 0)'; do
@@ -1395,7 +1408,8 @@ RPATH=$T/bin2:${PATH#"$T/bin:"}   # 가짜 hc만(진짜 git으로 HEAD를 읽게
 ( export PATH="$RPATH" XDG_STATE_HOME=$T/xdg-a HC_TERMINAL_ID=audit-$RL HC_LANE=audit-$RL HC_LANE_MACHINE=m; bash "$LANEB" report 판정 "$RS" "감사 완료 $RL 높음 1·중간 0·낮음 0" >/dev/null 2>&1 )
 awk -F'\t' -v OFS='\t' '{ $3 = "box-1/" $3; print }' "$T/xdg-a/hc-lane/events.tsv" >>"$T/events"
 lj "box-1/rl:claude-code:rl:done:$RR" "box-1/audit-$RL:claude-code:audit-$RL:done:/"; run run
-vo=$(cd "$RR" && PATH="$RPATH" HC_TERMINAL_ID=rl HC_LANE=rl bash "$LANEB" verdict "$RL" 2>&1)
+/usr/bin/git -C "$RR" worktree add -q --detach "$RR.wt" HEAD   # 레인은 연결 작업 트리에서 부른다(verdict는 그 밖이면 「작업 트리 없음」)
+vo=$(cd "$RR.wt" && PATH="$RPATH" HC_TERMINAL_ID=rl HC_LANE=rl bash "$LANEB" verdict "$RL" 2>&1)
 run run
 t "진짜 report 판정(배포 틀 꼴) → 소비 → 판정 파일 → 진짜 hc-lane verdict가 지적을 수거(taken) → 차수 taken" '[ "$(vkey rl verdict "$RL")" = fix ] && printf "%s" "$vo" | grep -Fq "감사 지적" && [ "$(cut -f 1 "$VD/rl/$RL.ack")" = taken ] && [ "$(acol "$RL" 8)" = taken ] || { printf "%s\n%s\n" "$out" "$vo"; cat "$AT"; false; }'
 
@@ -2249,6 +2263,32 @@ rm -f "$T/lane.log"; echo "aaaa1111 pz: 끝" >"$T/commits"; lj; unset HC_FAKE_LS
 t "선행 착지 뒤: hc-lane --resume으로 다시 띄우고 「이어 가기」 절(먼저 띄움 절 없음), 먼저 칸 resumed" '[ "$(where pk)" = "up box-1 box-1/pk" ] && grep -Fxq -- --resume "$T/lane.log" && grep -Fq "## 이어 가기" "$rf" && ! grep -Fq "## 먼저 띄움" "$rf" && [ "$(awk -F"\t" "\$1==\"pk\" {print \$14}" "$Q")" = resumed ] || { printf "%s\n" "$out"; cat "$rf"; false; }'
 t "이어 띄운 작업 지시문에도 자동 감사와 최종 감사 조건이 있음" 'grep -Fq "## 감사·착지 (hc-fill 자동)" "$rf" && grep -Fq "최종 감사(최종 확인)" "$rf"'
 cp "$EX" "$T/conf/hc-fill.tsv"
+lj "box-1/pk:claude-code:pk:working:/home/me/src/app.wt/pk"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/pk"}]}'
+printf '2026-11-20T03:00:00Z\tm\tbox-1/pk\tpk\t중간\tabcdef12\t이어 가는 중\t1\n' >>"$T/events"; run run
+t "resumed 줄: 이어 띄운 터미널(마지막 사건 주차 아님)은 지금처럼 떠 있음 그대로" '[ "$(where pk)" = "up box-1 box-1/pk" ] && [ "$(awk -F"\t" "\$1==\"pk\" {print \$14}" "$Q")" = resumed ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+# fill-park-readopt(2026-11-21 travel-photo-skip): 주차를 적은 터미널이 아직 차례를 마치는 중(working)이면 채택 고리가 done·idle만 거르는
+# 조건을 지나 그 터미널을 다시 잡아 up+parked로 되돌렸다 → 터미널이 닫히자 줄은 「끝남」인 채 영영 다시 안 떴다
+fresh; rm -f "$T/events"; add pq --after pz --only box-1; run run
+lj "box-1/pq:claude-code:pq:working:/home/me/src/app.wt/pq"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/pq"}]}'
+printf '2026-11-20T01:00:00Z\tm\tbox-1/pq\tpq\t주차\tabcdef12\tlane/pq 준비\t1\n' >"$T/events"; run run
+t "주차 사건 + 그 터미널이 아직 working: 채택하지 않고 대기·parked" '[ "$(where pq)" = "wait - -" ] && [ "$(awk -F"\t" "\$1==\"pq\" {print \$14}" "$Q")" = parked ] && ! printf "%s" "$out" | grep -q "이미 떠 있음 pq" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+rm -f "$T/events.log"; run run
+t "다음 바퀴도(working 그대로): 채택 안 함" '[ "$(where pq)" = "wait - -" ] && ! printf "%s" "$out" | grep -q "이미 떠 있음 pq" || { printf "%s\n" "$out"; false; }'
+# 이미 망가진 줄(up+parked, 주차를 적은 터미널은 hc-sweep이 닫으며 「정리됨」을 덧붙임 — 실측 꼴)은 run 바퀴가 스스로 대기·parked로
+# 되돌린다(같은 줄 ID). 정리됨은 report가 아니라 마지막 report(주차)를 가리지 않는다(hc-lane 규칙과 같게)
+rid=$(awk -F'\t' '$1=="pq" {print $17}' "$Q")
+awk -F'\t' -v OFS='\t' '$1=="pq" {$6 = "up"; $7 = "box-1"; $8 = "box-1/pq"} 1' "$Q" >"$Q.t" && mv "$Q.t" "$Q"; lj; unset HC_FAKE_LS_LANE
+printf '2026-11-20T01:30:00Z\tm\tbox-1/pq\tpq\t정리됨\t-\thc-sweep 쉰 지 30분\t2\n' >>"$T/events"
+run run --dry-run
+t "dry-run: up+parked 복구할 줄을 보이고 대기열은 그대로" '[ "$(where pq)" = "up box-1 box-1/pq" ] && printf "%s" "$out" | grep -Fq "주차로 되돌릴 pq (box-1/pq) (주차 뒤 다시 잡힌 줄 복구)" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+run run
+t "up+parked·터미널 사라짐·마지막 주차: 대기·parked로 복구(줄 ID 그대로), 선행 전이라 안 띄움" '[ "$(where pq)" = "wait - -" ] && [ "$(awk -F"\t" "\$1==\"pq\" {print \$14 \" \" \$17}" "$Q")" = "parked $rid" ] && printf "%s" "$out" | grep -Fq "주차 pq" || { printf "%s\n" "$out"; cat "$Q"; false; }'
+rm -f "$T/lane.log"; echo "aaaa1111 pz: 끝" >"$T/commits"; run run
+t "복구한 줄: 선행 착지 뒤 --resume으로 이어 띄움" '[ "$(where pq)" = "up box-1 box-1/pq" ] && grep -Fxq -- --resume "$T/lane.log" && [ "$(awk -F"\t" "\$1==\"pq\" {print \$14}" "$Q")" = resumed ] || { printf "%s\n" "$out"; cat "$Q"; false; }'
+# up+parked이고 그 터미널이 살아 있어도(working) 마지막 사건이 주차면 되돌리고 채택하지 않는다
+: >"$T/commits"; awk -F'\t' -v OFS='\t' '$1=="pq" {$14 = "parked"} 1' "$Q" >"$Q.t" && mv "$Q.t" "$Q"
+lj "box-1/pq:claude-code:pq:working:/home/me/src/app.wt/pq"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/pq"}]}'; run run
+t "up+parked·터미널 working·마지막 주차: 대기·parked, 채택 안 함" '[ "$(where pq)" = "wait - -" ] && [ "$(awk -F"\t" "\$1==\"pq\" {print \$14}" "$Q")" = parked ] && ! printf "%s" "$out" | grep -q "이미 떠 있음 pq" || { printf "%s\n" "$out"; cat "$Q"; false; }'
 
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh

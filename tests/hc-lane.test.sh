@@ -1336,7 +1336,15 @@ t "report --key: 키 글자가 아니면 종료 2" '[ $rc = 2 ]'
 VD=$T/.local/share/hc-fill/verdicts/lane-v; mkdir -p "$VD"
 vh=$(git -C "$R" rev-parse HEAD)
 vput() { printf 'aid\t%s\nlane\tlane-v\nrun\t%s\nsha\t%s\nverdict\t%s\nreport\t~/rep/%s.md\nround\t1\nbase\tmain\n' "$1" "$2" "$3" "$4" "$1" >"$VD/$1.md"; }
-vrun() { out=$(cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict "$@" 2>"$T/err"); rc=$?; }
+VW=$T/vwt-lane-v; git -C "$R" worktree add -q --detach "$VW" HEAD   # 레인은 늘 연결 작업 트리(hc-lane이 만든 것)에서 부른다
+vrun() { out=$(cd "$VW" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict "$@" 2>"$T/err"); rc=$?; }
+# fill-park-readopt(지휘 t30x, 2026-11-21 travel-camera-moves): 병합기 제출 뒤 작업 트리를 지운 레인이 메인 폴더에서 verdict를 부르니 메인
+# HEAD를 레인 커밋으로 읽어 「착지·고침 안 함 → report 완료 <메인 sha>」 엉뚱한 지시를 냈다 → 작업 트리 없음으로 끝낸다(아무것도 안 씀)
+vput a6gone rv-1 "$(printf '%040d' 0)" pass
+out=$(cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict a6gone 2>"$T/err"); rc=$?
+t "verdict: 레인 작업 트리가 아닌 곳(메인 폴더)이면 메인 HEAD로 짐작하지 않고 「작업 트리 없음 — 제출·착지했으면 수거 불필요」, 표시 없음" '[ $rc = 0 ] && [ ! -e "$VD/a6gone.ack" ] && printf "%s" "$out" | grep -Fq "작업 트리 없음 — 제출·착지했으면 수거 불필요" && ! printf "%s" "$out" | grep -Fq "report 완료" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+out=$(cd "$T" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict a6gone 2>"$T/err"); rc=$?
+t "verdict: git 밖(지운 작업 트리 자리 등)이어도 「작업 트리 없음」(종료 0, 다시 부르라 하지 않음)" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "작업 트리 없음" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 vput a1pass rv-1 "$vh" pass
 vput a0other rv-0 "$vh" pass
 vrun a1pass
@@ -1351,9 +1359,9 @@ vput a2stale rv-1 "$(printf '%040d' 0)" fix   # 40자 0을 이어 만든다(공�
 vrun a2stale
 t "verdict: HEAD ≠ 승인 sha → 아무것도 안 쓰고 「지금 커밋으로 완료」" '[ $rc = 0 ] && [ ! -e "$VD/a2stale.ack" ] && printf "%s" "$out" | grep -Fq "report 완료" || { printf "%s\n" "$out"; false; }'
 vput a3fix rv-1 "$vh" fix
-out=$(cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v "$LANE" verdict a3fix 2>"$T/err"); rc=$?
+out=$(cd "$VW" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v "$LANE" verdict a3fix 2>"$T/err"); rc=$?
 t "verdict: HC_LANE_JOB 없고 hc get created_ms도 없으면(모름) 종료 75, 표시 없음" '[ $rc = 75 ] && [ ! -e "$VD/a3fix.ack" ]'
-for p_ in 1 2 3 4 5; do (cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict a3fix >"$T/vpar.$p_" 2>&1) & done
+for p_ in 1 2 3 4 5; do (cd "$VW" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict a3fix >"$T/vpar.$p_" 2>&1) & done
 wait
 t "verdict 지적: 동시 다섯 번 → 표시 하나(taken), 모두 같은 지적 지시, 임시 파일 안 남음" '[ "$(cut -f1 "$VD/a3fix.ack")" = taken ] && [ "$(cat "$T"/vpar.* | grep -c "감사 지적 1번째 a3fix")" = 5 ] && [ -z "$(ls -A "$VD" | grep "^\.ack\.")" ] || { cat "$T"/vpar.*; ls -A "$VD"; false; }'
 a3=$(cat "$VD/a3fix.ack"); vrun a3fix

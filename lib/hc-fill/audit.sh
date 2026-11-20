@@ -45,6 +45,16 @@ joblast() {
   elif pget "$2" && [ "$PNAME" = "$1" ]; then runlast "$1" "$2" "$PRUN" "${3-}"
   else lastev "$@"; fi
 }
+# parkev <레인> <주소> <기계>: 그 실행(joblast)이 마지막 report로 「주차」를 적었나(fill-park-readopt — park_tick이 early·parked 줄에 쓴다).
+# 0 주차, 1 아님, 2 모름(사건을 못 읽음·끊긴·못 읽은 기계). hc-sweep이 닫으며 덧붙인 「정리됨」은 report가 아니라 건너뛴다(hc-lane 규칙과
+# 같게 — 실측: 주차 → 정리됨 순이라 마지막 사건만 보면 닫힌 주차 줄을 못 살렸다). PKL = 그 마지막 report 줄
+parkev() {
+  PKL=
+  [ -z "$EVBAD" ] || return 2
+  [ "$3" = "$LOCAL" ] || { printf '%s\n' "$CONN" | grep -Fxq -- "$3" && ! printf '%s\n' "$EV" | sed -n 's/^모름 //p' | grep -Fxq -- "$3"; } || return 2
+  PKL=$(EV=$(printf '%s\n' "$EV" | LC_ALL=C awk -F'\t' '$5 != "정리됨"'); joblast "$1" "$2")
+  [ "$(printf %s "$PKL" | cut -f 5)" = 주차 ]
+}
 # pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms> — 레인 report 10칸과 같은 꼴)·PNAME. 0 살아 있음, 3 끝남 확정(not_found·finished), 1 모름
 pget() {
   PRUN= PNAME=
@@ -203,8 +213,23 @@ a_queued() {
   echo "판정 받음 $an → $ln ($av, 높음 ${h_}·중간 ${md_}·낮음 ${lw_:-?})"
   ast=deliver alc= alw=; a_deliver
 }
+# a_landed: 이 차수의 부모 실행이 감사 sha로 「제출」(병합기 큐)이나 「착지」를 적었나 — 통과 판정을 수거(hc-lane verdict) 없이 그 커밋
+# 그대로 넣은 레인(fill-park-readopt, 지휘 t30x — deliver로 남아 noack·parent-ended 막힘이 났다). ponytail: 사건만 본다 — report 없이
+# 손으로 push한 착지는 못 본다(그때는 지금처럼 noack가 지휘에)
+a_landed() {
+  for s_ in 제출 착지; do
+    h_=$(runlast "$ln" "$pa" "$prun" "$s_" | cut -f 6)
+    [ ${#h_} -ge 7 ] || continue
+    case $(printf %s "$sha" | tr A-F a-f) in "$(printf %s "$h_" | tr A-F a-f)"*) return 0 ;; esac
+  done
+  return 1
+}
 a_deliver() {
   if ! aok "$am"; then [ -z "$alc" ] || [ "$alc" = - ] || aupd "$aid" 13 -; return 0; fi   # 끊긴 동안은 기다린 시간을 세지 않는다
+  if [ "$av" = pass ] && a_landed; then
+    [ $dry = 0 ] || { echo "${P}수거된 것으로 닫을 $aid ($ln 이 수거 없이 제출·착지 ${sha:0:8})"; return 0; }
+    aupd "$aid" 8 taken; echo "판정 수거됨 $an → $ln (수거 없이 제출·착지 ${sha:0:8})"; a_cleanup_now; return 0
+  fi
   [ $dry = 0 ] || { echo "${P}둘 판정 $aid → $am:verdicts/$ln/"; return 0; }
   IFS=$'\t' read -r _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ rep <<<"$(arow "$aid")"
   # 파일 공개 전에 부모 실행·최신 완료를 재확인한다. 이미 수거했으면 a_void가 그 표시를 보존한다.
@@ -401,16 +426,17 @@ ev_tick() {
 # 주차(2026-11-20 fill-existing-defects, 사용자 「노는 워크트리 없이」): 먼저 띄운(early) up 줄의 터미널이 그 이름으로 마지막에 「주차」를
 # 적었으면(hc-lane park — 가지는 원격 lane/<레인>, 임대는 놓음) 그 줄을 대기(wait)·먼저 칸 parked로 되돌린다 — 자리를 비우고, 선행이
 # 들어가면 아래 바퀴가 hc-lane --resume으로 그 가지에서 다시 띄운다. 끊긴·못 읽은 기계는 다음 바퀴에(사건을 모름)
+# up+parked도 본다(fill-park-readopt): 옛 채택 고리가 주차하고 차례를 마치던 터미널을 다시 잡아 생긴 줄 — 그 터미널이 살았든 닫혔든
+# 마지막 사건이 주차면 같은 줄 ID로 대기·parked로 되돌린다(그 줄은 run이 wait만 띄워 영영 안 떴다)
 park_tick() {
   [ -z "$EVBAD" ] && [ -s "$Q" ] || return 0
-  punk=$(printf '%s\n' "$EV" | sed -n 's/^모름 //p')
-  while IFS=$'\t' read -r -u 6 n m a st r; do
+  while IFS=$'\t' read -r -u 6 n m a st r ef_; do
     [ -n "$n" ] || continue
-    [ "$m" = "$LOCAL" ] || { printf '%s\n' "$CONN" | grep -Fxq -- "$m" && ! printf '%s\n' "$punk" | grep -Fxq -- "$m"; } || continue
-    l=$(joblast "$n" "$a"); [ "$(printf %s "$l" | cut -f 5)" = 주차 ] || continue
-    if [ $dry = 1 ]; then echo "${P}주차로 되돌릴 $n ($a)"; continue; fi
-    QRID=$r qset "$n" wait - - "$st" parked && echo "주차 $n: $a 가 lane/$n ($(printf %s "$l" | cut -f 6 | cut -c 1-8))에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움"
-  done 6<<<"$(awk -F'\t' -v OFS='\t' '$6=="up" && $14=="early" {print $1, $7, $8, $9, $17}' "$Q")"
+    parkev "$n" "$a" "$m" || continue
+    w_=; [ "$ef_" = early ] || w_=" (주차 뒤 다시 잡힌 줄 복구)"
+    if [ $dry = 1 ]; then echo "${P}주차로 되돌릴 $n ($a)$w_"; continue; fi
+    QRID=$r qset "$n" wait - - "$st" parked && echo "주차 $n: $a 가 lane/$n ($(printf %s "$PKL" | cut -f 6 | cut -c 1-8))에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움$w_"
+  done 6<<<"$(awk -F'\t' -v OFS='\t' '$6=="up" && ($14=="early" || $14=="parked") {print $1, $7, $8, $9, $17, $14}' "$Q")"
 }
 
 wcnt() { printf '%s\n' "$WC" | awk -F'\t' -v n="$1" '($1 "")==n {print $2; f=1; exit} END {if (!f) print 0}'; }

@@ -348,6 +348,11 @@ verdict_cmd() {
     taken) echo "이미 받음 $vaid ($(tr '\t' ' ' <"$vx"))"
       echo "감사 지적 ${vo:+${vo}번째 }$vaid — ${vs}. ${vp}를 읽고 높음·중간을 고친 뒤 다시 검증하고 hc-lane report 완료 <새 sha>, 그리고 기다린다"; return 0 ;;
   esac
+  # 레인 작업 트리(hc-lane이 만든 연결 작업 트리)가 아니면 HEAD로 짐작하지 않는다(fill-park-readopt — 병합기 제출 뒤 작업 트리를 지운
+  # 레인이 메인 폴더에서 부르자 메인 HEAD를 레인 커밋으로 읽어 「report 완료 <메인 sha>」를 냈다). 제출·착지 뒤의 판정은 hc-fill이 닫는다
+  vg_=$(git rev-parse --absolute-git-dir --git-common-dir 2>/dev/null) && vc_=$(cd "$(printf '%s\n' "$vg_" | sed -n 2p)" 2>/dev/null && pwd -P) &&
+    [ "$(cd "$(printf '%s\n' "$vg_" | sed -n 1p)" && pwd -P)" != "$vc_" ] ||
+    { echo "판정 $vaid: 작업 트리 없음 — 제출·착지했으면 수거 불필요(hc-fill이 닫는다). 아무것도 안 했다(여기 $PWD 는 레인 작업 트리가 아니다)"; return 0; }
   vh=$(git rev-parse --verify -q HEAD) || { echo "hc-lane verdict: HEAD를 못 읽었다(git 실패) — 아무것도 안 했다, 작업 트리에서 다시 부른다" >&2; exit 75; }
   if [ "$vs" != "$vh" ]; then
     echo "판정 $vaid 는 ${vs:0:8}의 것인데 HEAD가 ${vh:0:8} — 착지·고침 안 한다. 지금 커밋으로 hc-lane report 완료 ${vh:0:8} 를 부르고 기다린다"; return 0
