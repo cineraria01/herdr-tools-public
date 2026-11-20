@@ -126,7 +126,7 @@ EOF
 chmod +x "$T/bin/herdr-app"
 ln -s "$LANE" "$T/bin/hc-lane"   # 착지 절차의 hc-lane clean이 이 사본을 쓰게
 export PATH="$T/bin:$PATH" HCLOG="$T/hc.log" HC_LANE_POLL=0.1
-unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_COORD HC_LANE_FILL HC_LANE_LEASE HC_LANE_JOB   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
+unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_COORD HC_LANE_FILL HC_LANE_LEASE HC_LANE_JOB HERDR_LAND_PRIORITY   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 HOME="$T"
 printf 'export HL_ZSHRC=read\ncd /\n' >"$T/.zshrc"   # --on 설정 단계만 읽어야 하고, 안의 cd가 setup 위치를 바꾸면 안 된다
 printf 'export HL_ZPROFILE=read\n' >"$T/.zprofile"     # --on은 로그인 셸(.zprofile의 brew shellenv 등)도
@@ -2502,6 +2502,37 @@ run --name lh-b --repo "$R" -- claude; lh_=$(lref lh-b); wt="$R.wt/lh-b"; (cd "$
 out=$(cd "$wt" && HC_LANE_LEASE=$lh_ "$LANE" land main 2>"$T/err"); rc=$?
 m_=$(git -C "$D/origin.git" rev-parse main)
 t "herdr-land.sh가 EXTRA를 안 실어도: 착지 뒤 표식을 따로 두고(그 커밋이 origin/main에 들어갔을 때) 임대를 놓음" '[ $rc = 0 ] && [ "$(otop)" = lh-b ] && mrefs lh-b | grep -Fq " $m_" && [ -z "$(lref lh-b)" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+
+# fill-dep-needs(2026-11-19 사용자 「① 선행 사슬 기다림 (추천)」): 먼저 띄움 레인이 기한에 닿으면 hc-fill이 이 기계에 써 준
+# 선행 상태(~/.local/share/hc-fill/after.tsv: 선행 판정 까닭 쓴시각)를 early-wait가 본다 — 다 go이고 15분 안 기록이면 계속 기다림
+AF=$T/.local/share/hc-fill/after.tsv; mkdir -p "${AF%/*}"; now=$(date +%s)
+printf 'pa\tgo\t진행 중(working)\t%s\npb\tgo\t대기열에서 기다림\t%s\npz\tstop\t터미널 없음\t%s\n' "$now" "$now" "$now" >"$AF"
+run early-wait pa pb
+t "early-wait: 선행이 모두 go·새 기록이면 0, 선행마다 까닭 한 줄" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "pa: 진행 중(working)" && printf "%s" "$out" | grep -Fq "pb: 대기열에서 기다림" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+printf 'pa\tgo\tx\t%s\npb\tstop\t막힘: 시험 실패\t%s\n' "$now" "$now" >"$AF"; run early-wait pa pb
+t "early-wait: stop 선행이 하나라도 있으면 1, 그 선행과 까닭" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "pb: 막힘: 시험 실패" || { printf "%s\n" "$out"; false; }'
+run early-wait pa zz
+t "early-wait: 기록에 없는 선행은 1(상태 모름)" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "zz: " || { printf "%s\n" "$out"; false; }'
+printf 'pa\tgo\tx\t%s\n' "$((now - 1200))" >"$AF"; run early-wait pa
+t "early-wait: 기록이 15분 넘게 묵으면 1(hc-fill이 안 돎 — 예전처럼 멈춤)" '[ $rc = 1 ] && printf "%s" "$out" | grep -Fq "묵" || { printf "%s\n" "$out"; false; }'
+rm -f "$AF"; run early-wait pa
+t "early-wait: 기록 파일이 없으면 1" '[ $rc = 1 ]'
+run early-wait
+t "early-wait: 선행 없이 부르면 종료 2" '[ $rc = 2 ]'
+
+# 착지 줄 우선: hc-fill이 띄울 때 넣은 HERDR_LAND_PRIORITY(그 레인을 기다리는 대기열 줄 수)를 herdr-land.sh에 넘긴다(숫자 아니면 0)
+mk t15p
+seed .claude/herdr-land.sh 'echo "land-prio ${HERDR_LAND_PRIORITY-없음}"'
+mklane l-lp
+HERDR_LAND_PRIORITY=3 lnd "$wt" main
+t "land: HERDR_LAND_PRIORITY를 herdr-land.sh에 넘김" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq "land-prio 3" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+HERDR_LAND_PRIORITY='1;x' lnd "$wt" main
+t "land: 숫자가 아니면 0" 'printf "%s" "$out" | grep -Fxq "land-prio 0" || { printf "%s\n" "$out"; false; }'
+lnd "$wt" main
+t "land: 없으면 0" 'printf "%s" "$out" | grep -Fxq "land-prio 0" || { printf "%s\n" "$out"; false; }'
+rm -f "$HCLOG"
+HERDR_LAND_PRIORITY=2 HC_LANE_FILL=1 HC_FAKE_RUN_ADDR=t9lp run --start-wait 0 --name lane-lp --repo "$R" -- claude
+t "띄우기: HERDR_LAND_PRIORITY를 레인 환경에" '[ $rc = 0 ] && has HERDR_LAND_PRIORITY=2 || { cat "$T/err"; false; }'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

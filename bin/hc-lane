@@ -72,9 +72,13 @@ usage() {
   fetch         그 기계 저장소에서 git fetch origin [<참조…>]. --on이면 hc exec로, zsh·~/.zshrc가 있으면 그걸 읽은 셸에서
                 (맨 ssh·hc 코어 환경에는 git 자격 도우미 PATH가 없다). 종료 0 받음, 1 실패
 레인 환경: HC_LANE LANE_REPO LANE_WORKTREE LANE_BRANCH LANE_BASE (--read는 HC_LANE LANE_REPO LANE_BASE), HC_LANE_OWNER가 있으면 그것도
-(주인 지휘 — 레인 기록 셋째 칸, 레인 안에서 띄운 하위 레인도 물려받음). hc run 라벨 hc-lane=1
+(주인 지휘 — 레인 기록 셋째 칸, 레인 안에서 띄운 하위 레인도 물려받음), HERDR_LAND_PRIORITY가 있으면 그것도(hc-fill이 넣는
+착지 줄 우선 — 이 레인을 기다리는 대기 줄 수). hc run 라벨 hc-lane=1
+       hc-lane early-wait <선행 레인>…   (먼저 띄움 레인의 기다림 블록이 기한 뒤에 부른다)
+  early-wait    hc-fill이 이 기계에 써 준 선행 상태(~/.local/share/hc-fill/after.tsv)로 선행마다 「<선행>: <까닭>」. 모두 go이고 기록이
+                15분 안이면 「선행이 살아 진행 중 …」과 종료 0(계속 기다림), 기록 없음·묵음·stop이면 1, 인자 없으면 2
        hc-lane land [<기본 브랜치>]   (레인 작업 폴더 안에서)
-  land          착지: .claude/herdr-land.sh가 있으면 HERDR_LAND=1 bash .claude/herdr-land.sh <기본>. 없으면
+  land          착지: .claude/herdr-land.sh가 있으면 HERDR_LAND=1 HERDR_LAND_PRIORITY=<수, 없거나 숫자 아니면 0> bash .claude/herdr-land.sh <기본>. 없으면
                 fetch → rebase origin/<기본> → .claude/herdr-verify.sh(없으면 실패, push 안 함) →
                 HERDR_LAND=1 git push origin HEAD:<기본>(fast-forward만, 거절이면 fetch부터 HERDR_LAND_TRIES번, 기본 5)
                 origin이 없으면 fetch·push 대신 로컬 <기본> 기준으로 rebase하고, 메인 클론의 로컬 <기본>을 fast-forward로 올린다
@@ -95,12 +99,13 @@ usage() {
                 HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 원격 lane/*에 그 SHA 그대로 있는 가지를 「제출됨」으로 지운다.
                 HERDR_LAND_PUSH_EXTRA="<git push 인자> …"(refspec — 왼쪽 HEAD = 기본 브랜치에 넣는 커밋 — 와 --force-with-lease=<참조>:<SHA>;
                 병합기는 「:<큐> --force-with-lease=<큐>:<SHA>」와 HEAD:refs/hc-landed/<제출 ID>)면 기본 브랜치와 한 번의 --atomic push로
-                싣고, lease 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6. 병합기 안 착지(HERDR_MERGER=1)에서 rebase한 기본
-                브랜치에 .claude/herdr-land.sh가 생겼으면 종료 7. 이 둘(과 HERDR_MERGER)은 검증 자식에 물려주지 않는다
+                싣고, lease 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6. 병합기 안 착지(HERDR_MERGER=1)는 기본 브랜치에
+                .claude/herdr-land.sh가 있으면 그 기본 브랜치 판(제출 트리 속 판 아님)에 맡기고, 기본 브랜치에 없는 스크립트가 작업 트리에
+                있거나 rebase로 막 생겼으면 종료 7. 이 둘(과 HERDR_MERGER)은 검증 자식에 물려주지 않는다
        hc-lane merger --repo <병합기 전용 클론> [--once] [--tick <초>] [<기본 브랜치>]   (병합기 기계에서 하나만)
-  merger        MVP-1: 전용 착지 스크립트(.claude/herdr-land.sh)가 없는 저장소의 큐(refs/merge-queue/*)를 이름 순으로 하나씩 —
+  merger        큐(refs/merge-queue/*)를 이름 순으로 하나씩 — 새 임시 작업 트리에서 준비 훅(.claude/herdr-setup.sh, 있으면) 뒤
                 레인 이름 그대로의 로컬 가지로 HERDR_MERGER=1 hc-lane land, 큐 표식은 HERDR_LAND_PUSH_EXTRA로 기본 브랜치 push가 함께
-                지운다. 제출 트리에 .claude/herdr-land.sh가 있으면 그 제출은 반송(MVP-2). 바퀴마다 켬 표식이 이 기계(HC_LANE_MACHINE,
+                지운다. 기본 브랜치에 없는 .claude/herdr-land.sh를 제출이 새로 들이면 반송, 종료 7은 일시 실패. 바퀴마다 켬 표식이 이 기계(HC_LANE_MACHINE,
                 없으면 hostname -s)인지 보고, 꺼졌으면 쉬고 다른 기계면 멈춘다. 표식은 길 안내일 뿐 — 정확성은 기본 브랜치 CAS
                 (큐 참조를 건드리는 원격 쓰기는 모두 그 큐의 지금 SHA에 lease). 후보는 매번 새 임시 작업 트리(<git 폴더>/hc-merger/wt).
                 착지 전에 일지(<git 폴더>/hc-merger/cur: 가지·기준·후보·제출)를 쓰고, 바퀴마다 새로 고르기 전에 그 일지부터 정리
@@ -944,7 +949,26 @@ EOF
   echo "보냄 $ok_ · 실패 $bad_"
   [ $bad_ = 0 ]
 }
+# early-wait <선행…>: 먼저 띄움 레인의 기다림 블록이 기한에 닿았을 때. hc-fill이 바퀴마다 이 기계에 써 주는 선행 상태
+# (~/.local/share/hc-fill/after.tsv: 선행 go|stop 까닭 쓴시각(초))를 읽어 선행마다 「<선행>: <까닭>」. 모두 go이고 기록이 15분 안이면 0
+# (계속 기다림), 기록 없음·묵음(hc-fill이 안 돎)·stop이 하나라도 있으면 1(예전처럼 멈춤), 인자 없으면 2
+early_wait_cmd() {
+  [ $# -gt 0 ] || { echo "사용법: hc-lane early-wait <선행 레인>…" >&2; return 2; }
+  af_=$HOME/.local/share/hc-fill/after.tsv now_=$(date +%s) bad_=0
+  for p_ in "$@"; do
+    l_=$(awk -F'\t' -v n="$p_" '$1 == n { l = $0 } END { print l }' "$af_" 2>/dev/null)
+    IFS=$'\t' read -r _ s_ w_ t_ <<<"$l_"
+    case $t_ in '' | *[!0-9]*) t_= ;; esac
+    if [ -z "$l_" ]; then echo "$p_: 기록 없음(선행 상태 모름 — $af_)"; bad_=1
+    elif [ -z "$t_" ] || [ $((now_ - t_)) -gt 900 ]; then echo "$p_: 기록이 $(( (now_ - ${t_:-0}) / 60 ))분 묵음(hc-fill이 안 돎) — $w_"; bad_=1
+    elif [ "$s_" = go ]; then echo "$p_: $w_"
+    else echo "$p_: $w_"; bad_=1; fi
+  done
+  [ $bad_ = 0 ] || return 1
+  echo "선행이 살아 진행 중 — 기한이 지나도 계속 기다린다"
+}
 case ${1-} in
+  early-wait) shift; early_wait_cmd "$@"; exit $? ;;
   report) shift; report_cmd "$@"; exit $? ;;
   send) shift; send_cmd "$@"; exit $? ;;
   broadcast) shift; send_cmd --all "$@"; exit $? ;;
@@ -1342,10 +1366,9 @@ merger_cmd() {
   base=${mb_:-$(origin_base .)}
   plain "$base" || die "merger: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: $base"
   # 켜졌는지는 바퀴마다 본다(mround — 켬 표식이 이 기계가 아니면 큐를 건드리지 않는다)
-  # MVP-1이 받는 저장소 = 전용 착지 스크립트(.claude/herdr-land.sh)가 없는 저장소(기본 hc-lane land 길). 있는 저장소의 제출은 반송한다
-  # (2026-11-20 지휘 t1cj 2차 — 제출 트리 속 훅을 병합기가 실행하지 않게, 2차 높음 1. 그런 저장소는 MVP-2)
-  [ ! -f .claude/herdr-land.sh ] ||
-    echo "hc-lane merger: 경고 — 이 저장소에는 전용 착지 스크립트(.claude/herdr-land.sh)가 있다. 병합기 MVP-1은 그런 제출을 반송한다(MVP-2)" >&2
+  # 전용 착지 스크립트(.claude/herdr-land.sh)가 있는 저장소도 받는다 — 착지는 그 스크립트의 origin/<기본> 판을 쓴다(제출 트리 속 판이
+  # 아니다, 2단계 2026-11-20 지휘 t1cj). 새 임시 작업 트리의 준비 훅(LANE_REPO)은 이 클론을 메인 폴더로 본다
+  mtop_=$top
   mkdir -p "$evdir" || die "merger: 상태 폴더를 만들지 못했다: $evdir"
   # 잠금 = 이 셸의 열린 파일(fd 19)에 건 flock(구조 C, 검증 잠금 단순판과 같은 꼴): 착지 자식·검증 손자까지 같은 열린 파일을 물려받아
   # 트리가 다 끝나야 풀린다 — 병합기만 SIGKILL돼도 살아 있는 착지와 새 병합기가 같은 클론을 쓰지 않는다(1차 높음 9). pid를 보지 않는다.
@@ -1442,11 +1465,17 @@ mround() {
     mbn_=1; mi_=${bi_[0]}; mdone "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "${bs_[0]}" "제출이 이미 $base 에 있음" || { mer_=1; mq_=; }
     return 0
   fi
-  # 전용 착지 스크립트가 든 제출, 또는 지금 기본 브랜치에 그 스크립트가 생겼으면 반송(2차 높음 1·3차 높음 7 — MVP-1은 기본 착지 길만.
-  # rebase 뒤에 생기면 착지가 종료 7로 멈춘다 — 아래 mjudge)
+  # 제출 내용이 이미 기본 브랜치에 다 들었으면(같은 패치가 다른 SHA로 — 합친 트리 = 기본 브랜치 트리) 착지·검증 없이 정리만
+  # (2026-11-20 지휘 t1cj — 이미 든 커밋을 rebase 뒤 main과 같은 트리로 전체 검증했다)
+  if mt_=$(git merge-tree --write-tree "$B_" "${bs_[0]}" 2>/dev/null) && [ "$mt_" = "$(git rev-parse "$B_^{tree}")" ]; then
+    mbn_=1; mi_=${bi_[0]}; mdone "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$B_" "제출 내용이 이미 $base 에 있음(합친 트리가 같음)" || { mer_=1; mq_=; }
+    return 0
+  fi
+  # 착지 스크립트는 기본 브랜치 판을 쓰니(land_cmd) 제출이 그 스크립트를 고쳐도 된다. 다만 기본 브랜치에 없는 스크립트를 제출이 새로
+  # 들이면 반송 — 병합기가 제출 트리 속 착지 코드를 실행하지 않게(2차 높음 1)
   hl_=$(git ls-tree --name-only "${bs_[0]}" -- .claude/herdr-land.sh) && hb_=$(git ls-tree --name-only "$B_" -- .claude/herdr-land.sh) ||
     die "merger: git ls-tree 실패(${bs_[0]} · $B_)"
-  if [ -n "$hl_$hb_" ]; then
+  if [ -n "$hl_" ] && [ -z "$hb_" ]; then
     mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" - "$mhook_" || mer_=1
     return 0
   fi
@@ -1469,15 +1498,22 @@ mround() {
   } >"$mj_/cur.tmp" && mv -f "$mj_/cur.tmp" "$mj_/cur" || die "merger: 일지를 쓰지 못했다"
   # 후보는 매번 새 임시 작업 트리(병합기 자기 폴더 hc-merger/wt/)에서 레인 이름 가지로 — 병합기 클론의 작업 트리는 건드리지 않는다.
   # 만들다 꺼져도 다음 바퀴가 그 폴더의 작업 트리를 지우고 다시 만든다(3차 높음 6 — 클론에서 체크아웃하다 꺼지면 더러운 클론으로 큐 전체가 멈췄다)
-  mwt_=$(mktemp -d "$mj_/wt/c.XXXXXX") && git worktree add -q -f -B "$br_" "$mwt_" "$C0_" || die "merger: 후보 작업 트리를 만들지 못했다($br_)"
+  # 이름의 .train-: 저장소 준비 훅이 코드 색인을 건너뛰는 표시(곧 지울 폴더를 후보마다 색인하지 않게)
+  mwt_=$(mktemp -d "$mj_/wt/.train-c.XXXXXX") && git worktree add -q -f -B "$br_" "$mwt_" "$C0_" || die "merger: 후보 작업 트리를 만들지 못했다($br_)"
   echo "hc-lane merger: 착지 시작 — $mlab_ (기준 $(printf %.8s "$B_"))"
   mbn_=1 ls0_=$(date +%s)
-  (cd "$mwt_" && HERDR_MERGER=1 HC_LANE=$br_ HERDR_LAND_PUSH_EXTRA="$ex_" exec "$self_" land "$base") >>"$lgf_" 2>&1 </dev/null; lr_=$?
+  # 새 작업 트리라 준비 훅(.claude/herdr-setup.sh — 의존성·빌드 산출물)을 레인을 만들 때처럼 먼저. 실패는 일시 실패로(75 — 망 등)
+  if [ -f "$mwt_/.claude/herdr-setup.sh" ] &&
+    ! (cd "$mwt_" && LANE_REPO=$mtop_ LANE_BASE=$base exec bash .claude/herdr-setup.sh) >>"$lgf_" 2>&1 </dev/null; then
+    echo "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패" >>"$lgf_"; lr_=75
+  else
+    (cd "$mwt_" && HERDR_MERGER=1 HC_LANE=$br_ HERDR_LAND_PUSH_EXTRA="$ex_" exec "$self_" land "$base") >>"$lgf_" 2>&1 </dev/null; lr_=$?
+  fi
   ls1_=$(date +%s)
   tail -n 5 "$lgf_"
   mjudge
 }
-mhook_="전용 착지 스크립트(.claude/herdr-land.sh)가 든 제출·기본 브랜치 — 병합기 MVP-1은 받지 않는다(이 저장소는 병합기를 끄고 레인이 직접 착지, MVP-2에서 받음)"
+mhook_="기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
 # mwtclean: 병합기 자기 임시 작업 트리(hc-merger/wt/ 아래)를 모두 지운다 — 앞 실행이 남긴 것 포함(병합기 것만이라 지워도 된다)
 mwtclean() {
   mkdir -p "$mj_/wt" || die "merger: 작업 트리 폴더를 만들지 못했다: $mj_/wt"
@@ -1503,7 +1539,6 @@ mjudge() {
   case $lr_ in
     0) lr_="0(그런데 $base 에 없음)" ;;
     6) echo "hc-lane merger: 함께 실은 lease 참조가 바뀜(그새 다시 제출함) — 후보를 버리고 다음 바퀴에" >&2; mfin; return 0 ;;
-    7) mfin; mi_=${bi_[0]}; mfail "${bq_[0]}" "${bs_[0]}" "${bl_[0]}" "${bm_[0]}" "$lgf_" "$mhook_(rebase한 기본 브랜치에 생김)" || mer_=1; return 0 ;;
   esac
   if mtrans "$lr_" "$lgf_" && mtry "${bq_[0]}" "${bl_[0]}"; then
     # 일시 실패(기다림 상한·push 거절 횟수·원격 받기 실패)는 큐에 그대로 두고 쉰다(1차 중간 2 — 3번 넘으면 돌려보냄).
@@ -1588,7 +1623,8 @@ rbabort() { if [ -e "$(git rev-parse --git-path rebase-merge)" ] || [ -e "$(git 
 # 횟수), 원격 받기 실패(내장 착지 「land: git fetch 실패」·「push 결과 모름」, 착지 스크립트 「git fetch origin 실패」). 충돌·검증 실패는 1
 # 내장 착지의 「push 실패(다른 쪽 push가 앞선 것이 아니다」도 — push 전송만 끊기고 원격은 후보를 받지 않은 꼴(3차 중간 8 — 한 번 만에
 # 반송했다. 들어갔으면 mjudge가 먼저 착지로, lease가 바뀌었으면 종료 6으로 가린다)
-mtrans() { case $1 in 75|4) return 0 ;; esac; grep -Eq 'git fetch( origin)? 실패|push 결과 모름|push 실패\(다른 쪽' "$2" 2>/dev/null; }
+# 7: 착지가 rebase로 기본 브랜치에 막 생긴 착지 스크립트를 만남 — 다음 바퀴에는 그 판으로 맡긴다(2단계)
+mtrans() { case $1 in 75|4|7) return 0 ;; esac; grep -Eq 'git fetch( origin)? 실패|push 결과 모름|push 실패\(다른 쪽' "$2" 2>/dev/null; }
 # mtry <큐> <레인>: 그 제출의 일시 실패를 하나 세어 3번까지면 0(큐에 두고 쉼), 넘으면 1(돌려보냄 — 같은 실패를 끝없이 되풀이하지 않게)
 mtry() {
   tf_=$mj_/$2.tr tc_=
@@ -1826,6 +1862,18 @@ land_cmd() {
   lf_=.claude/herdr-land.sh
   if git remote get-url origin >/dev/null 2>&1; then ob_=refs/remotes/origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패"
   else ob_=refs/heads/$base; fi
+  # 병합기 안 착지: 기본 브랜치에 전용 착지 스크립트가 있으면 그 기본 브랜치 판(방금 받은 것)을 꺼내 맡긴다 — 제출 트리 속 판(레인이
+  # 고쳤을 수 있음)은 실행하지 않는다(2단계 2026-11-20 지휘 t1cj). 스크립트는 자기 자리($0)를 쓰지 않는 것을 전제로 임시 파일에서 돈다
+  if [ "$mgx_" = 1 ] && git cat-file -e "$ob_:$lf_" 2>/dev/null; then
+    mls_=$(mktemp "${TMPDIR:-/tmp}/hc-merger-land.XXXXXX") && git show "$ob_:$lf_" >"$mls_" || die "land: 기본 브랜치의 $lf_ 를 꺼내지 못했다"
+    echo "hc-lane land: 병합기 — ${ob_#refs/remotes/} 판 $lf_ 에 맡긴다"
+    llog_init
+    lrun env HERDR_LAND=1 ${px_:+HERDR_LAND_PUSH_EXTRA="$px_"} bash "$mls_" "$base"; rc=$?
+    rm -f "$mls_"
+    # 내장 길의 병합기 안 착지와 같게: push는 병합기 인자 그대로, 착지 표식 refs/hc-landed/<레인>/<UTC 초>는 착지 뒤 따로(fill-dup-guard)
+    if [ $rc = 0 ]; then lmr_=; ! lmn_=$(lmname) || lmr_=refs/hc-landed/$lmn_/$(date -u +%s); land_after "$base" "$lmr_"; else lfail $rc; fi
+    exit $rc
+  fi
   lb_() { git rev-parse -q --verify "$1:$lf_" 2>/dev/null; }   # 그 판의 스크립트 blob(없으면 빈 값)
   if mb_=$(git merge-base HEAD "$ob_" 2>/dev/null) && [ "$(lb_ HEAD)" = "$(lb_ "$mb_")" ] && [ "$(lb_ "$mb_")" != "$(lb_ "$ob_")" ]; then
     echo "▸ hc-lane land: 가지의 $lf_ 가 ${ob_#refs/remotes/} 보다 낡음 → 먼저 rebase" >&2
@@ -1852,7 +1900,8 @@ land_cmd() {
       if [ -n "${HC_LANE_LEASE-}" ]; then lh_=$(git ls-remote origin "refs/hc-lanes/$lmn_" </dev/null 2>/dev/null) && [ "${lh_%%[[:space:]]*}" = "$HC_LANE_LEASE" ] && lpx_="$lpx_ :refs/hc-lanes/$lmn_"; fi
     fi
     ax_="${px_:+$px_${lpx_:+ }}$lpx_"
-    lrun env HERDR_LAND=1 ${ax_:+HERDR_LAND_PUSH_EXTRA="$ax_"} bash .claude/herdr-land.sh "$base"; rc=$?
+    lp_=${HERDR_LAND_PRIORITY-}; case $lp_ in '' | *[!0-9]*) lp_=0 ;; esac   # 착지 줄 우선(README 계약): 0 이상 정수, 아니면 0
+    lrun env HERDR_LAND=1 HERDR_LAND_PRIORITY="$lp_" ${ax_:+HERDR_LAND_PUSH_EXTRA="$ax_"} bash .claude/herdr-land.sh "$base"; rc=$?
     if [ $rc = 0 ]; then ! git remote get-url origin >/dev/null 2>&1 || { ffmain "$(mainwt)" "$base"; land_after "$base" "$lmr_"; }; else lfail $rc; fi
     exit $rc
   fi
@@ -2594,6 +2643,8 @@ else set -- env "HC_LANE=$name" "LANE_REPO=$repo" "LANE_WORKTREE=$wt" "LANE_BRAN
 # 레인 안에서도 주인 지휘를 알게. 값은 hc-lane을 부른 기계(지휘 기계)의 주소라 원격 레인에서 hc send 하려면 <지휘 기계>/<주소>.
 # 레인이 이 환경에서 hc-lane으로 띄운 하위 레인(감사 등)도 물려받아 같은 지휘가 주인이 된다
 [ -z "${HC_LANE_OWNER-}" ] || set -- env "HC_LANE_OWNER=$HC_LANE_OWNER" "${@:2}"
+# 착지 줄 우선(hc-fill이 넣음 — 이 레인을 --after로 기다리는 대기 줄 수): 레인의 hc-lane land가 herdr-land.sh에 넘긴다
+[ -z "${HERDR_LAND_PRIORITY-}" ] || set -- env "HERDR_LAND_PRIORITY=$HERDR_LAND_PRIORITY" "${@:2}"
 
 # start_check <주소>: 띄운 직후 Claude 폴더 신뢰 질문을 넘기고 hc get status가 잡히는지 본다.
 # start=ok|no_status|login|keychain, 종료 0·5·6·7. 실패여도 터미널은 남긴다(사람이 로그인하면 이어질 수 있다 — hc-fill 「상태 안 잡힘」과 같다).

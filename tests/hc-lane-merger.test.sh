@@ -610,22 +610,62 @@ lane a l-off2 off2.txt off2
 land a l-off2
 t "끄기: 표식을 지우면 착지 그대로" '[ $rc = 0 ] && [ "$(mainlog | head -n 1)" = l-off2 ] && ! qrefs | grep -q l-off2 || { cat "$T/err"; false; }'
 
-# 3차 높음 7: 검증하는 사이 기본 브랜치에 전용 착지 스크립트가 생기면, rebase로 그것을 가져온 착지는 내장 길로 넣지 않고(종료 7) 반송
-on_
+# 2단계(2026-11-20 지휘 t1cj): 전용 착지 스크립트(.claude/herdr-land.sh)가 있는 저장소도 받는다 — 착지는 그 스크립트의 기본 브랜치 판.
+# 기본 브랜치 판 = 큐 lease를 싣는 진짜 꼴(HERDR_LAND_PUSH_EXTRA를 main push에 --atomic), 레인이 고친 판 = 표시만 남기고 아무것도 안 함
 export O
-printf '#!/bin/sh\nrm -f "$T/vhook.l-nh"\nd=$(mktemp -d "$T/nh.XXXXXX") && git clone -q "$O" "$d/c" && cd "$d/c" && printf "exit 0\\n" >.claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm l-ls && git push -q origin main\n' >"$T/vhook.l-nh"; chmod +x "$T/vhook.l-nh"
+cat >"$T/land-main.sh" <<'EOF'
+#!/bin/bash
+echo "LAND_MAIN $(git rev-parse --abbrev-ref HEAD)" >>"$T/landscript.log"
+git fetch -q origin && git rebase -q "origin/$1" || exit 3
+pa=("HEAD:refs/heads/$1"); for e in ${HERDR_LAND_PUSH_EXTRA-}; do pa+=("$e"); done
+HERDR_LAND=1 git push -q --atomic origin "${pa[@]}"
+EOF
+printf '#!/bin/bash\necho "LAND_LANE $(git rev-parse --abbrev-ref HEAD)" >>"$T/landscript.log"\n' >"$T/land-lane.sh"
+# opush <저장소 안 경로> <원본 파일>: 새 클론에서 main에 그 파일 하나를 커밋해 push(시험 밖 손 착지)
+opush() { (d=$(mktemp -d "$T/op.XXXXXX") && git clone -q "$O" "$d/c" && cd "$d/c" && mkdir -p "$(dirname "$1")" && cp "$2" "$1" && git add -- "$1" && git commit -qm "o-$1" && git push -q origin main); }
+on_
+# 기본 브랜치에 없는 착지 스크립트를 제출이 새로 들이면 반송 — 그 스크립트는 돌지 않는다
+(cd "$W/a/proj" && git fetch -q origin && git checkout -q -B l-add origin/main && cp "$T/land-lane.sh" .claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm l-add)
+land a l-add
+merge
+t "기본 브랜치에 없는 착지 스크립트를 들이는 제출: 반송, 그 스크립트는 안 돎" '[ $mrc = 0 ] && og for-each-ref refs/merge-failed/ | grep -q l-add && ! mainlog | grep -Fxq l-add && ! grep -qs LAND_LANE "$T/landscript.log" && awk -F"\t" "\$4 == \"l-add\" && \$5 == \"막힘\"" "$EV" | grep -Fq "들이는 제출" || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+
+# 검증하는 사이 기본 브랜치에 착지 스크립트가 생기면 그 바퀴는 일시 실패(종료 7 — 반송 아님), 다음 바퀴가 기본 브랜치 판으로 넣는다
+printf '#!/bin/sh\nrm -f "$T/vhook.l-nh"\nd=$(mktemp -d "$T/nh.XXXXXX") && git clone -q "$O" "$d/c" && cd "$d/c" && cp "$T/land-main.sh" .claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm o-land && git push -q origin main\n' >"$T/vhook.l-nh"; chmod +x "$T/vhook.l-nh"
 lane a l-nh nh.txt nh; land a l-nh
 merge
-t "기본 브랜치에 생긴 전용 착지 스크립트: 반송, main에 안 들어감" '! mainlog | grep -Fxq l-nh && og for-each-ref refs/merge-failed/ | grep -q l-nh && awk -F"\t" "\$4 == \"l-nh\" && \$5 == \"막힘\"" "$EV" | grep -Fq "rebase한 기본 브랜치에 생김" || { echo "rc=$mrc"; cat "$T/merr"; false; }'
-
-# 40. 아스트라 2차 높음 1: MVP-1이 받는 저장소 = 전용 착지 스크립트(.claude/herdr-land.sh)가 없는 저장소. 제출 트리에 그 스크립트가
-#     있으면(병합기가 그 안의 옛 훅을 lease 없이 실행할 수 있다) 그 제출을 반송하고 병합기는 계속(지휘 t1cj 2차, MVP-2에서 받음)
-on_
-(cd "$W/a/proj" && git fetch -q origin && git checkout -q -B l-ls origin/main && printf 'exit 0\n' >.claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm l-ls && git push -q origin HEAD:main)
-git -C "$W/m/proj" fetch -q origin && git -C "$W/m/proj" checkout -q --detach origin/main
-lane a l-hs hs.txt hs; land a l-hs
+t "검증 중 기본 브랜치에 생긴 착지 스크립트: 그 바퀴는 일시 실패(75), 큐에 그대로, 반송 아님" '[ $mrc = 75 ] && qrefs | grep -q l-nh && ! og for-each-ref refs/merge-failed/ | grep -q l-nh && ! mainlog | grep -Fxq l-nh || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 merge
-t "전용 착지 스크립트가 든 제출: 반송(merge-failed·막힘), main에 안 들어감, 병합기 계속(0)" '[ $mrc = 0 ] && og for-each-ref refs/merge-failed/ | grep -q l-hs && ! mainlog | grep -Fxq l-hs && awk -F"\t" "\$4 == \"l-hs\" && \$5 == \"막힘\"" "$EV" | grep -Fq "전용 착지 스크립트" || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+t "다음 바퀴: 기본 브랜치 판 착지 스크립트로 넣음(큐 lease·제출 ID 표식 함께)" '[ $mrc = 0 ] && mainlog | grep -Fxq l-nh && grep -Fxq "LAND_MAIN l-nh" "$T/landscript.log" && [ -z "$(qrefs)" ] && og rev-parse -q --verify refs/merge-done/l-nh >/dev/null && [ -n "$(og for-each-ref refs/hc-landed/)" ] || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+
+# 레인이 착지 스크립트를 고친 제출: 기본 브랜치 판으로 넣는다(제출 트리 속 판은 안 돎), 고친 판은 내용으로 들어간다
+: >"$T/landscript.log"
+(cd "$W/a/proj" && git fetch -q origin && git checkout -q -B l-hs origin/main && cp "$T/land-lane.sh" .claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm l-hs)
+land a l-hs
+merge
+t "착지 스크립트를 고친 제출: 기본 브랜치 판으로 착지, 레인 판은 안 돎" '[ $mrc = 0 ] && mainlog | grep -Fxq l-hs && grep -Fxq "LAND_MAIN l-hs" "$T/landscript.log" && ! grep -q LAND_LANE "$T/landscript.log" && [ -z "$(qrefs)" ] || { echo "rc=$mrc"; cat "$T/merr"; cat "$T/landscript.log"; false; }'
+t "착지 스크립트 길도 착지 뒤 레인 표식 refs/hc-landed/<레인>/<초> = main에 든 커밋(fill-dup-guard)" 'r=$(og for-each-ref --format="%(refname) %(objectname)" "refs/hc-landed/l-hs/" | head -n 1); [ -n "$r" ] && og merge-base --is-ancestor "${r#* }" main || { og for-each-ref refs/hc-landed/; false; }'
+opush .claude/herdr-land.sh "$T/land-main.sh"   # 다음 시험을 위해 기본 브랜치 판으로 되돌림
+
+# 새 임시 작업 트리마다 준비 훅(.claude/herdr-setup.sh)을 먼저 — 메인 폴더(LANE_REPO)는 병합기 클론, 폴더 이름에 .train-(색인 건너뜀).
+# 실패하면 일시 실패(큐에 그대로)
+printf '#!/bin/bash\necho "$LANE_REPO $LANE_BASE $(basename "$PWD")" >>"$T/setup.log"\n[ ! -e "$T/setupfail" ]\n' >"$T/setup.sh"
+opush .claude/herdr-setup.sh "$T/setup.sh"
+touch "$T/setupfail"
+lane a l-su su.txt su; land a l-su
+merge
+mtop=$(cd "$W/m/proj" && pwd -P)
+t "준비 훅 실패: 일시 실패(75), 큐에 그대로, 착지 안 함" '[ $mrc = 75 ] && qrefs | grep -q l-su && ! mainlog | grep -Fxq l-su && grep -q "^$mtop main \.train-c\." "$T/setup.log" || { echo "rc=$mrc"; cat "$T/merr"; cat "$T/setup.log"; false; }'
+rm -f "$T/setupfail"
+merge
+t "준비 훅 성공: 착지" '[ $mrc = 0 ] && mainlog | grep -Fxq l-su && [ -z "$(qrefs)" ] || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+
+# 제출 내용이 이미 기본 브랜치에 있으면(같은 변경이 다른 커밋으로 먼저 들어감) 준비·검증 없이 정리만(지휘 t1cj)
+lane a l-dup same-dup.txt samedup; land a l-dup
+printf 'samedup\n' >"$T/dup.src"; opush same-dup.txt "$T/dup.src"
+: >"$T/setup.log"; v0=$(grep -c . "$T/verify.log")
+merge
+t "이미 든 내용의 제출: 검증·준비 없이 큐 정리, merge-done, 착지 사건 「이미」" '[ $mrc = 0 ] && [ -z "$(qrefs)" ] && og rev-parse -q --verify refs/merge-done/l-dup >/dev/null && [ "$(grep -c . "$T/verify.log")" = "$v0" ] && [ ! -s "$T/setup.log" ] && awk -F"\t" "\$4 == \"l-dup\" && \$5 == \"착지\"" "$EV" | grep -Fq "합친 트리가 같음" || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 
 # 격리(2026-11-20 지휘 t1cj): 바깥 병합기 잠금을 fd 19로 물려받아 쥔 채 돌려도 병합기는 시험 HOME 아래 자기 잠금을 쓰고 끝난다
 off_; og update-ref refs/herdr/merger/box main

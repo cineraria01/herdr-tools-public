@@ -68,12 +68,15 @@ echo dirty >>"$D/l/x.txt"
 lnd
 t "커밋 안 된 변경: 멈춤, 옛 판 안 돌림" '[ $rc = 1 ] && grep -Fq "커밋 안 된 변경" "$T/err" && ! printf "%s" "$out" | grep -Fq land-old'
 
-# 7. 병합기 안 착지(HERDR_MERGER=1): 4와 같은 꼴이면 먼저 rebase가 들인 스크립트에 맡기지 않고 종료 7(병합기가 반송)
-#    — 감사 7c010d9 중간 1: 맡기면 큐 lease(HERDR_LAND_PUSH_EXTRA)를 모르는 스크립트가 main을 올렸다
-mk g; sd .claude/herdr-verify.sh 'echo verify-ran'; lane
-sd .claude/herdr-land.sh "$LAND_NEW"
-out=$(cd "$D/l" && HERDR_MERGER=1 HERDR_LAND_PUSH_EXTRA=':refs/merge-queue/x' "$LANE" land main 2>"$T/err"); rc=$?
-t "병합기 안 착지: rebase로 들인 전용 착지 스크립트는 안 돌리고 종료 7, main 그대로" '[ $rc = 7 ] && ! printf "%s" "$out" | grep -Fq land-new && grep -Fq "전용 착지 스크립트" "$T/err" && ! otree | grep -Fxq lane'
+# 7. 병합기 안 착지(HERDR_MERGER=1): 기본 브랜치에 스크립트가 있으면 그 기본 브랜치 판에 맡긴다 — 가지가 고친 판(land-lane)이 아니라
+#    (2단계 2026-11-20 지휘 t1cj. 감사 7c010d9 중간 1의 「먼저 rebase가 들인 스크립트」도 이 길 — 기본 브랜치 판이다)
+mk g; sd .claude/herdr-verify.sh 'echo verify-ran'; sd .claude/herdr-land.sh "$LAND_NEW"; lane 'echo land-lane' .claude/herdr-land.sh
+out=$(cd "$D/l" && HERDR_MERGER=1 "$LANE" land main 2>"$T/err"); rc=$?
+t "병합기 안 착지: 가지가 고친 판이 아니라 기본 브랜치 판 스크립트로 착지" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq land-new && ! printf "%s" "$out" | grep -Fq land-lane && otree | grep -Fxq lane'
+# 8. 병합기 안 착지인데 기본 브랜치에 없는 스크립트가 작업 트리에 있으면(가지가 새로 들임) 맡기지 않고 종료 7
+mk h; sd .claude/herdr-verify.sh 'echo verify-ran'; lane 'echo land-lane' .claude/herdr-land.sh
+out=$(cd "$D/l" && HERDR_MERGER=1 "$LANE" land main 2>"$T/err"); rc=$?
+t "병합기 안 착지: 기본 브랜치에 없는 스크립트는 안 돌리고 종료 7, main 그대로" '[ $rc = 7 ] && ! printf "%s" "$out" | grep -Fq land-lane && ! otree | grep -Fxq lane'
 
 echo "1..$n (실패 $fails)"
 [ $fails = 0 ]

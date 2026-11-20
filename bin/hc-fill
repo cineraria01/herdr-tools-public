@@ -46,7 +46,8 @@ usage() {
   ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과 보냄·감사 지적 n번째·지휘로 넘김·
          겹침 대기(<앞 레인>: <키>)·겹침 봄 끔)
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
-         대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 넣은 차례) 보며, --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
+         대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 그 줄을 --after로 기다리는 줄이 많은 것 — 감사 줄은 그 레인 몫 —,
+         그다음 넣은 차례) 보며(기다리는 줄 수는 레인 환경 HERDR_LAND_PRIORITY로 — 착지 스크립트가 착지 줄 차례에 쓴다), --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
          들어갔으면(안 풀린 것은 건너뛰고 다음 것을 본다) 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
          hc get status가 안 잡히면 그 기계를 그 레인에서 빼고 다음 기계로 간다(그 터미널은 끄지 않고 ls 비고에 남긴다).
          남긴 터미널이 나중에 살아나면 「중복 위험」을 찍고 그 레인은 더 띄우지 않는다.
@@ -55,7 +56,11 @@ usage() {
          먼저 띄움: 그러고도 자리가 남으면 --after에만 묶인 대기 레인(--no-early 빼고, 선행 가운데 대기열에서 아직 안 뜬 레인이
          있는 것도 빼고 — 그 선행이 자리를 먼저)을 같은 차례로 띄운다 — run 지시문 끝에
          「먼저 띄움」 절(준비만 → 선행마다 판정 줄로 기다림, 상한 설정 early_wait시간 → 착지 뒤 rebase·본 작업)을 붙이고
-         ls에 「먼저 띄움(선행 …)」. 살아 있는 먼저 띄움 레인 수 상한은 설정 early(빈 값이면 남은 자리 전부, 0이면 끔)
+         ls에 「먼저 띄움(선행 …)」. 살아 있는 먼저 띄움 레인 수 상한은 설정 early(빈 값이면 남은 자리 전부, 0이면 끔).
+         기한 뒤에는 hc-lane early-wait가 선행 상태(hc-fill이 바퀴마다 그 레인 기계 ~/.local/share/hc-fill/after.tsv에 씀)를 보고
+         선행이 살아 진행 중이면 계속 기다린다(막힘·끝남·사라짐·모름이면 멈춤)
+         기계 능력: 지시문 「필요: <능력>, …」 줄이 있으면 설정 machine-has <기계> <능력,…>에 다 있는 기계에만. 하나도 없으면 대기로 두고
+         주인 지휘에 막힘 한 번(ls 「필요 …」). 빈 지시문: 부록 절(착지·정리 등) 앞에 본문 줄이 없으면 add·받은편지 거절, run은 안 띄움
          놀고 있음: 바퀴 끝에도 자리가 남은 기계가 설정 idle분(기본 10, 0이면 끔) 넘게 이어지면 hc-lane report --name hc-fill-idle
          「<기계> 자리 n개 m분째 빔 — 대기열에 띄울 것 없음」 사건을 대기 줄 주인 지휘들(살아 있는 것, 주인 없는 줄이 있거나
          대기 줄이 없으면 모든 지휘)의 watch에 보낸다. 대기열에 띄울 것 없음이면 비기 시작한 뒤 한 번만(자리가 하나라도 찼다가
@@ -101,12 +106,28 @@ kindwhy() {
   printf '레인 이름이 커밋 종류(%s)와 같으면 착지·선행 판정이 아무 %s: 커밋에나 맞는다 — 다른 이름을 쓴다' "$1" "$1"
 }
 inlist() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }   # inlist <값> <쉼표 목록>
+# 기계 능력(2026-11-19 fill-dep-needs — railway CLI 없는 기계에 웹 배포 레인이 떠 막혔다). needs <지시문>: 「필요: <능력>, …」 줄(목록 머리
+# -·* 허용, 능력 이름은 a-z 0-9 _ - 낱말을 쉼표로 — 다른 글이 섞인 줄은 문장으로 보고 안 셈)의 능력을 쉼표 목록으로(여러 줄이면 합침)
+needs() {
+  sed -n -E 's/^[[:space:]]*([-*][[:space:]]*)?필요:[[:space:]]*//p' "$1" 2>/dev/null |
+    awk '{ g = $0; gsub(/[ \t]*,[ \t]*/, ",", g); sub(/[ \t]+$/, "", g); if (g ~ /^[a-z0-9_-]+(,[a-z0-9_-]+)*$/) print g }' |
+    tr , '\n' | awk 'NF && !s[$0]++' | paste -sd , -
+}
+mhas() {  # mhas <기계> <능력 쉼표 목록|빈 값>: 설정 machine-has <기계> <능력,…>(여러 줄이면 합침)에 다 있으면 0
+  [ -n "$2" ] || return 0
+  hv_=$(awk -v m="$1" '$1=="machine-has" && $2==m { for (i = 3; i <= NF; i++) print $i }' "$CONF" | tr , '\n')
+  for c_ in $(printf %s "$2" | tr , ' '); do printf '%s\n' "$hv_" | grep -Fxq -- "$c_" || return 1; done
+}
 # brief_bad <지시문>: 실제로 열어 읽어 본다(launchd 프로그램은 TCC로 ~/Documents가 stat은 되고 읽기만 막힌다).
 # 못 읽거나 비었으면 까닭을 찍고 0, 읽히면 1
 brief_bad() {
   [ -f "$1" ] || { echo 없음; return 0; }
   e=$(cat -- "$1" 2>&1 >/dev/null) || { e=${e##*: }; echo "${e:-읽기 실패}"; return 0; }
   grep -q '[^[:space:]]' -- "$1" || { echo "빈 파일"; return 0; }   # 공백·줄바꿈만 든 것도 빈 것
+  # 본문 없음(2026-11-16 travel-ta: 본문 없이 착지 부록만 든 run 지시문으로 레인이 떴다): 첫 부록 절(hc-lane·hc-fill이 붙이는 착지·정리·
+  # 감사·착지·먼저 띄움·결과 보고) 앞에 제목(#) 아닌 글 줄이 없으면
+  awk '/^#+[ \t]*(착지·정리|감사·착지|먼저 띄움|결과 보고)/ { a = 1; exit } /[^[:space:]]/ && !/^[ \t]*#/ { f = 1; exit } END { exit (a && !f) }' <"$1" ||
+    { echo "본문 없음(제목·부록 절만)"; return 0; }
   return 1
 }
 
@@ -278,6 +299,8 @@ case $cmd in
       [ "${ovk:--}" = - ] || note="$note 겹침 봄 끔"
       # 겹침 대기: run이 바퀴마다 적은 overlap.tsv(레인 앞레인 파일)
       [ "$state" != wait ] || note="$note$(awk -F'\t' -v n="$name" '$1==n { print " 겹침 대기(" $2 ": " $3 ")"; exit }' "$DATA/overlap.tsv" 2>/dev/null)"
+      # 능력 막힘: run이 바퀴마다 적은 need.tsv(레인 능력 보냄)
+      [ "$state" != wait ] || note="$note$(awk -F'\t' -v n="$name" '$1==n { print " 필요 " $2 " — 가진 기계 없음"; exit }' "$DATA/need.tsv" 2>/dev/null)"
       note=${note# }; note=${lr:+$lr${note:+ · }}$note
       printf '%-24s %-10s %-14s %-24s %-8s %-4s %s\n' "$name" "$proj" "$s" "$a" "${owner:--}" "$(plabel "${prio-}")" "$note"
     done 3<"$Q"
@@ -351,6 +374,11 @@ onm() {  # onm [-i] <기계> <sh 본문> <경로> [인자…]: 그 기계에서(
 # <이름>.brief.md를 $DATA/briefs/<기계>/<이름>.md로 복사하고 대기열에 넣은 뒤(되돌릴곳 <기계>:<폴더>/done/<이름>.md)
 # 그 기계에서 둘을 taken/으로 옮긴다. 검사에 걸리면 둘을 rejected/로 옮기고 rejected/<이름>.why에 사유 한 줄.
 # 실행 명령·경로·모델은 받지 않는다(설정이 정한다). 연결 안 된 기계는 건너뛴다(요청은 그 기계에 그대로 쌓인다)
+irej() {  # irej <사유>: 받은편지 요청 $n(기계 $im 폴더 $idir)을 rejected/로 옮기고 사유 한 줄
+  onm "$im" 'mkdir -p "$d/rejected" && for e in req brief.md; do [ ! -f "$d/$1.$e" ] || mv -f "$d/$1.$e" "$d/rejected/" || exit 1; done &&
+    printf "%s\n" "$2" >"$d/rejected/$1.why.tmp" && mv -f "$d/rejected/$1.why.tmp" "$d/rejected/$1.why"' "$idir" "$n" "$1" &&
+    echo "거절 $im $n: $1" || echo "받은편지 $im $n: 거절($1)을 쓰지 못했다, 다음 바퀴에"
+}
 inbox_tick() {
   awk '$1=="inbox" {f=1} END {exit !f}' "$CONF" || return 0
   ICON=$(connected)
@@ -401,16 +429,14 @@ inbox_tick() {
       fi
       if [ -n "$why" ]; then
         if [ $dry = 1 ]; then echo "${P}거절할 $im $n: $why"; continue; fi
-        onm "$im" 'mkdir -p "$d/rejected" && for e in req brief.md; do [ ! -f "$d/$1.$e" ] || mv -f "$d/$1.$e" "$d/rejected/" || exit 1; done &&
-          printf "%s\n" "$2" >"$d/rejected/$1.why.tmp" && mv -f "$d/rejected/$1.why.tmp" "$d/rejected/$1.why"' "$idir" "$n" "$why" &&
-          echo "거절 $im $n: $why" || echo "받은편지 $im $n: 거절($why)을 쓰지 못했다, 다음 바퀴에"
-        continue
+        irej "$why"; continue
       fi
       if [ $dry = 1 ]; then echo "${P}받을 $im $n ($p)"; continue; fi
       if [ -z "$had" ]; then   # 이미 있으면(지난 바퀴에 넣고 옮기지 못함) 옮기기만
         bf=$DATA/briefs/$im/$n.md
         mkdir -p "${bf%/*}" && onm "$im" 'cat "$d/$1.brief.md"' "$idir" "$n" >"$bf.tmp" && mv -f "$bf.tmp" "$bf" ||
           { echo "받은편지 $im $n: 지시문을 가져오지 못했다, 다음 바퀴에"; continue; }
+        if why=$(brief_bad "$bf"); then rm -f "$bf"; irej "지시문 $n.brief.md: $why"; continue; fi   # 본문 없음(부록만) 등
         qlock _add "$n" "$p" "$bf" "$a" "$o" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$im:$idir/done/$n.md" - "$pr" - - || continue
         echo "받음 $im $n → 대기열 ($p, 우선 $(plabel "$pr"))"
       fi
@@ -431,6 +457,20 @@ reply_tick() {
     if ! up_ok "$m" || ! up_ok "$rq"; then echo "되돌려 주기 미룸 $n: $m 또는 $rq 연결 안 됨"; continue; fi
     st=$(printf '%s\n' "$TERMS" | awk -F'\t' -v a="$a" '$2==a {print $5; f=1; exit} END {if (!f) print "gone"}')
     case $st in gone | done | idle) ;; *) continue ;; esac
+    # 병합기에 제출하고 끝난 레인(마지막 사건 「제출」)은 그 제출 ID의 병합기 결과(착지·막힘)가 정해진 뒤에 회신하고, 그 결과를 끝 줄로
+    # 붙인다(병합기 2차 높음 6·2단계 — 제출만 하고 끝난 터미널을 「끝」으로 보면 착지 전에 회신했다)
+    mline_=
+    lx_=$(lastev "$n" "$a")
+    if [ "$(printf %s "$lx_" | cut -f 5)" = 제출 ]; then
+      [ -z "$EVBAD" ] || { echo "되돌려 주기 미룸 $n: 레인 사건을 못 읽어 병합기 결과를 모름"; continue; }
+      sid_=$(printf %s "$lx_" | cut -f 7 | awk '{ print $1 }')
+      mr_=$(mgres "$n" "$sid_")
+      [ -n "$mr_" ] || { echo "되돌려 주기 미룸 $n: 병합기 결과 기다림(제출 ID $sid_)"; continue; }
+      case $(printf %s "$mr_" | cut -f 5) in
+        착지) mline_="착지 $(printf %s "$mr_" | cut -f 6 | cut -c 1-12) (병합기 $(printf %s "$mr_" | cut -f 2), 제출 ID $sid_)" ;;
+        *) mline_="결과: 실패 병합기 막힘 — $(printf %s "$mr_" | cut -f 7)" ;;
+      esac
+    fi
     rep=$(onm "$m" 'if [ -f "$d" ]; then echo HAVE; cat "$d"; else echo NONE; fi' "~/.local/share/hc-fill/reports/$n.md") ||
       { echo "되돌려 주기 미룸 $n: $m 에서 보고를 읽지 못했다"; continue; }
     case $rep in
@@ -441,6 +481,8 @@ reply_tick() {
         body="결과: 실패 보고 없음" ;;
       *) echo "되돌려 주기 미룸 $n: $m 에서 보고를 읽지 못했다"; continue ;;
     esac
+    [ -z "$mline_" ] || body="$body
+$mline_"
     last=$(printf '%s\n' "$body" | tail -n 1)
     if [ $dry = 1 ]; then echo "${P}되돌려 줄 $n → $rp ($last)"; continue; fi
     printf '%s\n' "$body" | onm -i "$rq" 'mkdir -p "${d%/*}" && cat >"$d.tmp" && mv -f "$d.tmp" "$d"' "$rpath" ||
@@ -540,7 +582,6 @@ printf '%s\n' "$TERMS" | awk -F'\t' -v g="$AGENT" '$3==g {f=1} END {exit !f}' ||
   die "경고: hc ls에 $AGENT 종류가 하나도 없다(지휘 자신도 그 종류라 늘 하나는 있어야 한다). 설정 agent 값이나 hc의 이름이 바뀌었는지 본다. 이번 바퀴는 띄우지 않았다"
 CONN=$(printf '%s\n' "$raw" | jq -er '.machines | arrays | map(select(.state == "connected") | .name) | join("\n")') ||
   die "hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다"
-reply_tick
 # 자동 감사(설정 audit — 2026-11-19 fill-auto-audit: 완료 → 지휘가 감사를 띄움 → 판정을 봄 → 착지 지시 왕복이 지휘 한 사람에게
 # 줄을 서 레인이 3~10시간 자리를 붙잡았다). 감사·착지 절을 붙여 띄운 쓰기 레인(감사 칸 auto)이 「완료 <sha>」를 적으면 그 기계에
 # 긴급 감사 줄 audit-<레인>을 넣고, 감사 줄의 「판정」을 읽어 레인에 통과·지적을 hc send. 사건은 hc-lane events 한 번(볼 기계마다 --on).
@@ -715,6 +756,13 @@ audit_reap() {
 # 이 기계 HH:MM): up 레인마다 그 터미널이 그 이름으로 적은 마지막 사건, 없으면 상태 -(보고 없음). 연결 안 됨·못 읽은(모름) 기계의
 # 레인은 지난 줄을 old로 남긴다. ls는 이 파일만 읽는다(원격 호출 없이 「끝남」이 착지인지 막힘인지 보이게). dry-run은 안 씀
 EV= EVBAD= MGM=
+# mgres <레인> <제출 ID>: 병합기 기계(MGM)가 그 레인 이름·그 제출 ID로 적은 마지막 결과(착지·막힘) 사건 줄, 없으면 빈 값
+mgres() {
+  [ -n "$2" ] || return 0
+  printf '%s\n' "$EV" | awk -F'\t' -v n="$1" -v M="$MGM" -v sid="$2" \
+    'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
+     $4 == n && ($5 == "착지" || $5 == "막힘") && ($2 in m) && index($7, "제출 ID " sid) { r = $0 } END { print r }'
+}
 ev_tick() {
   [ -s "$Q" ] || return 0
   eups=$(awk -F'\t' -v OFS='\t' '$6=="up" {print $1, $7, $8}' "$Q"); [ -n "$eups" ] || return 0
@@ -737,9 +785,7 @@ ev_tick() {
     # 제출한 레인(마지막 사건 「제출」)은 병합기 기계가 그 제출 ID로 적은 결과(착지·막힘)가 있으면 그것을 보인다(병합기 3차 중간 10 —
     # ls가 제출자 터미널만 읽어 최종 결과를 놓쳤다)
     if [ "$(printf %s "$l" | cut -f 5)" = 제출 ]; then
-      r_=$(printf '%s\n' "$EV" | awk -F'\t' -v n="$n" -v M="$MGM" -v sid="$(printf %s "$l" | cut -f 7 | awk '{ print $1 }')" \
-        'BEGIN { k = split(M, a, " "); for (i = 1; i <= k; i++) m[a[i]] = 1 }
-         sid != "" && $4 == n && ($5 == "착지" || $5 == "막힘") && ($2 in m) && index($7, "제출 ID " sid) { r = $0 } END { print r }')
+      r_=$(mgres "$n" "$(printf %s "$l" | cut -f 7 | awk '{ print $1 }')")
       [ -z "$r_" ] || l=$r_
     fi
     es=$(date -j -u -f %Y-%m-%dT%H:%M:%SZ "$(printf %s "$l" | cut -f 1)" +%s 2>/dev/null) && eh=$(date -r "$es" +%H:%M) || eh=?
@@ -749,6 +795,7 @@ ev_tick() {
   done <<<"$eups" >"$LRT.tmp" && mv -f "$LRT.tmp" "$LRT"
 }
 ev_tick
+reply_tick   # 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다(병합기 2단계)
 audit_tick
 audit_reap
 # 자리에서 뺄 done·idle 터미널: 자동 감사 레인(이름이 감사 줄 — 판정 뒤, 지난 바퀴 것 포함) · 감사에 넘겨진 쓰기 레인 가운데 그 감사
@@ -771,8 +818,20 @@ AUDN= AWT=
   AWT=$(awk -F'\t' -v h="$ahold" 'NR==FNR { if ($5 == "queued") w[$1] = 1; next }
     $6=="up" && $15=="auto" && ($1 in w) && index(h, "," $1 ",") {print $8}' "$AT" "$Q" 2>/dev/null)
 }
-# 우선순위 높은 것부터, 같으면 넣은 차례(정렬은 안정: 둘째 키가 줄 번호). 옛 줄·빈 칸은 보통
-ROWS=$([ ! -f "$Q" ] || awk -F'\t' '{ r = ($13 == "urgent") ? 0 : ($13 == "high") ? 1 : ($13 == "low") ? 3 : 2; print r "\t" NR "\t" $0 }' "$Q" | sort -t "$(printf '\t')" -k1,1n -k2,2n | cut -f 3-)
+# 기다리는 줄 수(2026-11-19 fill-dep-needs 사용자 「① 선행 사슬 기다림 (추천)」 — 선행 하나가 늦자 뒤 레인들이 3~5시간 기다렸다):
+# 줄마다 그 줄을 --after로 기다리는 줄(대기 wait, 떠 있는 먼저 띄움 up·early) 수. --then으로 이어 붙인 이름은 그 이름을 품은 줄 몫,
+# 감사 줄(audit=<레인>)은 그 레인 몫. 같은 우선순위 안에서 많은 줄이 먼저 뜨고, 띄울 때 레인 환경 HERDR_LAND_PRIORITY(착지 줄 우선)로 넘긴다
+TAL=$([ ! -f "$Q" ] || awk -F'\t' '{print $1 "\t" $3}' "$Q" | while IFS=$'\t' read -r tn tb; do
+  awk -v t="$tn" '/^## 이어서: [a-z0-9_-]+ / {print $3 "\t" t}' "$tb" 2>/dev/null; done)
+WC=$([ ! -f "$Q" ] || TAL_=$TAL awk -F'\t' 'BEGIN { n = split(ENVIRON["TAL_"], L, "\n"); for (i = 1; i <= n; i++) if (split(L[i], f, "\t") == 2) al[f[1]] = f[2] }
+  ($6 == "wait" || ($6 == "up" && $14 == "early")) && $4 != "" && $4 != "-" {
+    k = split($4, a, ","); for (j = 1; j <= k; j++) { x = a[j]; if (x in al) x = al[x]; if (!((NR, x) in s)) { s[NR, x] = 1; w[x]++ } } }
+  END { for (x in w) print x "\t" w[x] }' "$Q")
+wcnt() { printf '%s\n' "$WC" | awk -F'\t' -v n="$1" '$1==n {print $2; f=1; exit} END {if (!f) print 0}'; }
+# 우선순위 높은 것부터, 같으면 기다리는 줄이 많은 것, 그다음 넣은 차례(셋째 키가 줄 번호). 옛 줄·빈 칸은 보통
+ROWS=$([ ! -f "$Q" ] || WC_=$WC awk -F'\t' 'BEGIN { n = split(ENVIRON["WC_"], L, "\n"); for (i = 1; i <= n; i++) if (split(L[i], f, "\t") == 2) w[f[1]] = f[2] }
+  { r = ($13 == "urgent") ? 0 : ($13 == "high") ? 1 : ($13 == "low") ? 3 : 2; k = $1; if ($15 ~ /^audit=/) k = substr($15, 7)
+    print r "\t" (w[k] + 0) "\t" NR "\t" $0 }' "$Q" | sort -t "$(printf '\t')" -k1,1n -k2,2nr -k3,3n | cut -f 4-)
 NOW=   # 이번 바퀴에 띄운 기계(한 줄에 하나)
 NOWL=  # 이번 바퀴에 띄운 레인의 기계(hc-fill 레인 수)
 OFF=   # 이번 바퀴에 연결 안 됨으로 알린 기계
@@ -954,7 +1013,7 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
     wco=$(hc-lane coord 2>&1 </dev/null) || { echo "알림: 지휘 없음 — 감시(hc-lane watch)를 띄우지 않음, $lane 사건은 events에 남아 지휘가 wait/watch를 걸면 받는다 ($(printf %s "$wco" | tail -n 1))"; wco=; }
   fi
   # HC_LANE_FILL=1: hc-lane이 레인 기록에 fill로 적는다(hc-lane wait가 「완료」를 마지막 보고로 봄)
-  out=$(HC_LANE_COORD=$wco HC_LANE_OWNER=$own HC_LANE_FILL=1 hc-lane $rd ${on:+--on "$on"} --name "$lane" --repo "$repo" -- "$@" 2>&1); lr=$?
+  out=$(HC_LANE_COORD=$wco HC_LANE_OWNER=$own HC_LANE_FILL=1 HERDR_LAND_PRIORITY=$(wcnt "$lane") hc-lane $rd ${on:+--on "$on"} --name "$lane" --repo "$repo" -- "$@" 2>&1); lr=$?
   # 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로(stuck 기록, 그 기계 빼고 다음으로)
   case $lr in 0|5|6|7) ;; *) echo "실패 $lane @${on:-$LOCAL}: hc-lane: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"; return 1 ;; esac
   SWHY=; [ $lr = 0 ] || SWHY=$(printf '%s\n' "$out" | grep -m 1 '^hc-lane: 시작 안 됨' | cut -c 1-200)
@@ -977,6 +1036,7 @@ place() {
   placed= bad=
   while read -r -u 4 m cap lcap _; do
     [ "$4" = - ] || inlist "$m" "$4" || continue
+    mhas "$m" "${NEED-}" || continue   # 지시문 「필요:」 능력이 없는 기계
     stk=$(printf '%s\n' "$stuck" | tr , '\n' | grep -c "^$m=")
     [ "$stk" = 0 ] || continue
     repo=$(repo_of "$2" "$m"); [ -n "$repo" ] || continue
@@ -1032,11 +1092,12 @@ early_sec() {
 자리가 비어 hc-fill이 이 레인을 선행 레인($(printf %s "$1" | sed 's/,/, /g'))이 origin/$2에 들어가기 **전에** 띄웠다. 위 지시문의 본 작업은 선행이 들어간 뒤에 한다.
 1. 지금은 준비만: 지시문·계약 읽기, 이 레인 몫 파일의 실패 시험·골든 고정(커밋해도 된다), 선행 레인이 무엇을 바꾸는지 미리 읽기. 선행 레인이 고칠 파일은 아직 고치지 않는다.
 2. 준비가 끝나면 아래 블록을 그대로 한 번에 돌려 선행을 기다린다. 배경 실행 금지(\`&\`·nohup도, 도구의 배경 실행 run_in_background도). 명령 시간 한도는 도구가 허락하는 최대로 준다(예: Bash 도구 timeout 600000). 선행마다 판정 줄이 따로다 — 합치거나 줄을 고치지 않는다. 그래도 한도로 끊기면 같은 블록을 다시 돌린다(기한은 고정 시각이다).
+   기한($dls)이 지나면 블록이 \`hc-lane early-wait\`로 hc-fill이 이 기계에 바퀴마다 써 주는 선행 상태를 본다 — 선행이 살아 진행 중이면(작업 중·감사·착지 기다림·대기열에서 기다림) 멈추지 않고 계속 기다린다.
 \`\`\`sh
 $w
-do [ "\$(date +%s)" -lt $dl ] || { echo "선행 대기 초과"; break; }; sleep 180; done
+do [ "\$(date +%s)" -lt $dl ] || hc-lane early-wait $(printf %s "$1" | tr , ' ') || { echo "선행 대기 초과"; break; }; sleep 180; done
 \`\`\`
-3. 「선행 대기 초과」가 찍혔으면(기한 $dls, ${EWAIT}시간) \`hc-lane report 막힘 - "선행 대기 초과: <아직 안 들어간 선행>"\`을 부르고 멈춘다. 이 레인의 대기열 줄은 「떠 있음」으로 남아 hc-fill이 다시 띄우지 않으니, 지휘가 \`hc-fill rm <레인>\` 뒤 다시 넣는다.
+3. 「선행 대기 초과」가 찍혔으면(기한 ${dls}·${EWAIT}시간이 지났고 선행이 막힘·끝남·사라짐이거나 상태를 모름) 그 바로 앞 줄들(\`<선행>: <까닭>\`)을 붙여 \`hc-lane report 막힘 - "선행 대기 초과: <선행>: <까닭>"\`을 부르고 멈춘다. 이 레인의 대기열 줄은 「떠 있음」으로 남아 hc-fill이 다시 띄우지 않으니, 지휘가 \`hc-fill rm <레인>\` 뒤 다시 넣는다.
 4. 선행이 모두 들어갔으면 \`git rebase origin/$2\` 뒤 본 작업을 한다(준비 커밋은 그대로 둔다).
 EOF
 }
@@ -1226,6 +1287,24 @@ ovl_placed() {
   done
 }
 
+# nd_block <레인> <기계제한|-> <주인|->: 지시문 「필요:」 능력(NEED)을 가진 기계가 (기계 제한 안에) 하나도 없으면 「막힘」 한 줄을 찍고
+# 그 레인 주인 지휘에 막힘 사건 한 번(need.tsv: 레인 능력 보냄1|0 — 같은 레인·능력이면 다시 안 보냄)을 보내고 0(대기 그대로). 있으면 1
+NDOLD=$(cat "$DATA/need.tsv" 2>/dev/null) NDNOW=
+nd_block() {
+  [ -n "$NEED" ] || return 1
+  for nm_ in $(machines | awk '{print $1}'); do
+    [ "$2" = - ] || inlist "$nm_" "$2" || continue
+    mhas "$nm_" "$NEED" && return 1
+  done
+  nl_="그 능력을 가진 기계가 없다(설정 machine-has)"; [ "$2" = - ] || nl_="기계 제한 $2 안에 $nl_"
+  echo "막힘 $1: 필요 $NEED — $nl_. 대기로 둠"
+  ns_=0
+  if printf '%s\n' "$NDOLD" | grep -Fxq -- "$1	$NEED	1"; then ns_=1
+  elif [ $dry = 0 ] && aesc "$1" "$3" "$1: 필요 $NEED — $nl_. 설정에 능력을 더하거나 지시문의 「필요:」 줄을 고친다(hc-fill ls)"; then ns_=1; fi
+  NDNOW="$NDNOW$1	$NEED	$ns_
+"
+  return 0
+}
 ELIST=   # 선행에만 묶여 건너뛴 대기 레인: 「,<레인>=<기본 가지>」 — 먼저 띄움 후보(--no-early 빼고)
 UPNOW=   # 이번 바퀴에 띄운 레인(「,<레인>」 — 먼저 띄움 포함, dry-run은 띄울 것)
 ECAPHIT= # 먼저 띄움 상한에 걸려 남긴 후보가 있음(놀고 있음 알림 사유)
@@ -1243,6 +1322,7 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
   fi
   [ "$state" = wait ] || continue
   [ -z "$dupr" ] || { echo "건너뜀 $name: 중복 위험이라 더 띄우지 않음"; continue; }
+  NEED=; case ${ak:--} in audit=*) ;; *) NEED=$(needs "$brief") ;; esac   # 감사 줄은 그 레인 기계에(능력 안 봄)
   # 같은 이름이 살아 있으면(지휘가 손으로 띄웠거나 지난 바퀴의 것) 다시 띄우지 않고 떠 있음으로 표시. 상태 안 잡혀 남긴 기계는 빼고 본다
   # 자동 감사 줄은 지난 바퀴의 감사 터미널(판정 뒤 done·idle로 남음)을 새 바퀴로 잡지 않는다
   live=$(printf '%s\n' "$TERMS" | awk -F'\t' -v n="$name" -v k="${ak:--}" '$4==n && !(k ~ /^audit=/ && ($5 == "done" || $5 == "idle")) {print $1, $2}' | while read -r lm la; do
@@ -1255,6 +1335,7 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
     fi
     continue
   fi
+  nd_block "$name" "$only" "${owner:--}" && continue
   if [ "$after" != - ]; then
     after_ok "$name" "$proj" "$after"; ar=$?
     if [ $ar != 0 ]; then [ $ar != 1 ] || [ "${ef:--}" != - ] || ELIST="$ELIST,$name=$b"; continue; fi
@@ -1290,15 +1371,76 @@ if [ -n "$ELIST" ] && [ "$ECAP" != 0 ]; then
     why=$(brief_bad "$brief") && { echo "실패 $name: 지시문을 읽지 못함($why): $brief"; continue; }
     ovl_check "$name" "$proj" "$brief" "$after" "${ak:--}" "${ovk:--}" "$only" || continue
     ESEC=$(early_sec "$after" "$eb")
+    NEED=; case ${ak:--} in audit=*) ;; *) NEED=$(needs "$brief") ;; esac
     AK=${ak:--}; place "$name" "$proj" "$brief" "$only" "${reply:--}" "${owner:--}" "$after"
     ESEC=
     [ -z "$placed" ] || ovl_placed "$name" "$proj" "$brief" "$after" "${ak:--}"
     [ -z "$placed" ] || ELIVE=$((ELIVE + 1))
   done 3<<<"$ROWS"
 fi
-# 겹침 대기 기록(ls 비고): 이번 바퀴 것으로 바꾼다
+# 겹침 대기·능력 막힘 기록(ls 비고): 이번 바퀴 것으로 바꾼다
 [ $dry = 1 ] || { printf '%s' "$OVWAIT" >"$DATA/overlap.tsv.tmp" && mv -f "$DATA/overlap.tsv.tmp" "$DATA/overlap.tsv"; }
+[ $dry = 1 ] || { printf '%s' "$NDNOW" >"$DATA/need.tsv.tmp" && mv -f "$DATA/need.tsv.tmp" "$DATA/need.tsv"; }
 [ $dry = 1 ] || [ "$OVM" = off ] || { printf '%s' "$ONOW" >"$DATA/own.tsv.tmp" && mv -f "$DATA/own.tsv.tmp" "$DATA/own.tsv"; }   # 이번 바퀴 쓰기 소유 이름
+
+# 선행 상태(2026-11-19 fill-dep-needs 사용자 「① 선행 사슬 기다림 (추천)」 — 먼저 띄움 레인은 선행이 살아 진행 중이어도 기한에 「선행 대기
+# 초과」로 멈춰 지휘를 불렀다, 막힘 31건 중 11건): 떠 있는 먼저 띄움 줄(up·early)의 기계마다 그 줄 선행의 판정을
+# ~/.local/share/hc-fill/after.tsv(선행 go|stop 까닭 쓴시각(초))로 원자 쓰기 — 대기열은 이 기계에만 있어 레인 기계의 hc-lane early-wait는
+# 이 파일을 본다. 판정 차례(pred_state → PSV): 들어감 go · 대기열에 없음 stop(착지 안 하고 끝남 — 지운 줄) · 대기 go · up 아님(sent 등) stop ·
+# 기계 연결 안 됨 go(모름) · 그 주소에 그 이름 터미널 없음 stop · done·idle 아님(working 등) go · 자동 감사 queued|pass|fix go ·
+# 그 터미널의 마지막 사건 완료·착지·제출 go, 막힘 stop · 사건 없이 쉼: hold분 안 go, 넘으면 stop. 생존은 이 바퀴 hc ls(TERMS — 이름 대조)로
+# 본다(원격 임대 refs/hc-lanes/<레인>은 끝난 뒤 clean 전까지 남아 「살아 있음」으로 못 쓴다). fetch 실패면 들어감 판정만 건너뛴다. dry-run은 찍기만
+pred_state() {  # pred_state <선행> <기다리는 줄 프로젝트>: PSV=「go|stop<TAB>까닭」
+  if fetch_proj "$2" >/dev/null; then
+    h_=$(landed "$1")
+    [ -n "$h_" ] || ! st_=$(since "$1") || ! lmark "$1" "$st_" || h_="$(printf %s "$LMS" | cut -c 1-8) 착지 표식"
+    [ -z "$h_" ] || { PSV="go	들어감(${h_%% *})"; return; }
+  fi
+  r_=$(awk -F'\t' -v n="$1" '$1==n {print; exit}' "$Q")
+  [ -n "$r_" ] || { tf_=$(thenof "$1"); [ -z "$tf_" ] || r_=$(awk -F'\t' -v n="$tf_" '$1==n {print; exit}' "$Q"); }   # --then 이름
+  [ -n "$r_" ] || { PSV="stop	대기열에 없음(착지 안 하고 끝남)"; return; }
+  IFS=$'\t' read -r pn_ _ _ _ _ pq_ pm_ pa_ _ <<<"$r_"
+  case $pq_ in wait) PSV="go	대기열에서 기다림(아직 안 뜸)"; return ;; up) ;; *) PSV="stop	대기열 상태 $pq_(떠 있지 않음)"; return ;; esac
+  [ "$pm_" = "$LOCAL" ] || printf '%s\n' "$CONN" | grep -Fxq -- "$pm_" || { PSV="go	모름($pm_ 연결 안 됨)"; return; }
+  lalive "$pa_" "$pn_" || { PSV="stop	터미널 없음($pa_)"; return; }
+  ts_=$(alive "$pa_")
+  case $ts_ in done | idle) ;; *) PSV="go	진행 중($ts_)"; return ;; esac
+  case $(aget "$pn_" | cut -f 5) in
+    queued) PSV="go	자동 감사 중"; return ;; pass) PSV="go	감사 통과 — 착지 중"; return ;; fix) PSV="go	감사 지적 고치는 중"; return ;;
+  esac
+  if [ -z "$EVBAD" ]; then
+    l_=$(lastev "$pn_" "$pa_")
+    case $(printf %s "$l_" | cut -f 5) in
+      완료) PSV="go	완료 보고(감사·착지 기다림)"; return ;; 착지 | 제출) PSV="go	$(printf %s "$l_" | cut -f 5) 보고"; return ;;
+      막힘) PSV="stop	막힘: $(printf %s "$l_" | cut -f 7)"; return ;;
+    esac
+  fi
+  hs_=$(printf '%s' "$HNEW" | awk -F'\t' -v a="$pa_" '$1==a {print $2; exit}'); case $hs_ in '' | *[!0-9]*) hs_=$HNOW ;; esac
+  hm_=$(((HNOW - hs_) / 60))
+  if [ "$HOLD" != 0 ] && [ $((HNOW - hs_)) -ge $((HOLD * 60)) ]; then PSV="stop	쉰 지 ${hm_}분 — 사건 없음(hold ${HOLD}분)"
+  else PSV="go	쉼(${hm_}분, 사건 없음)"; fi
+}
+after_tick() {
+  [ -s "$Q" ] || return 0
+  atn_=$(date +%s)
+  for am_ in $(awk -F'\t' '$6=="up" && $14=="early" {print $7}' "$Q" | sort -u); do
+    [ "$am_" = "$LOCAL" ] || printf '%s\n' "$CONN" | grep -Fxq -- "$am_" || { echo "선행 상태 미룸 @$am_: 연결 안 됨"; continue; }
+    ab_=
+    while IFS=$'\t' read -r ap_ aa_; do
+      for x_ in $(printf %s "$aa_" | tr , ' '); do
+        printf '%s' "$ab_" | cut -f 1 | grep -Fxq -- "$x_" && continue
+        pred_state "$x_" "$ap_"
+        ab_="$ab_$x_	$PSV	$atn_
+"
+      done
+    done <<<"$(awk -F'\t' -v OFS='\t' -v m="$am_" '$6=="up" && $14=="early" && $7==m && $4!="-" {print $2, $4}' "$Q")"
+    [ -n "$ab_" ] || continue
+    if [ $dry = 1 ]; then printf '%s' "$ab_" | cut -f 1-3 | sed "s|^|${P}선행 상태 @$am_: |"; continue; fi
+    printf '%s' "$ab_" | onm -i "$am_" 'mkdir -p "${d%/*}" && cat >"$d.tmp" && mv -f "$d.tmp" "$d"' "~/.local/share/hc-fill/after.tsv" ||
+      echo "선행 상태 쓰기 실패 @$am_ — 다음 바퀴에"
+  done
+}
+after_tick
 
 # 놀고 있음: 바퀴 끝에도 자리가 남은 기계(연결됨, 그 기계 repo 줄이 있음)가 설정 idle분 넘게 이어지면 사건 한 번.
 # 사유가 「대기열에 띄울 것 없음」이면 비기 시작한 뒤 그 한 번뿐(2026-11-19 idle-once, 사용자 「알림 대기열 빌 때 한 번만 오게 해줘」 —

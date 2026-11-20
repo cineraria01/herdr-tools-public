@@ -56,6 +56,12 @@ machine  shared   3   2   all
 machine  slow     1   -
 machine  here     5   -
 #
+# machine-has  기계  능력,…   그 기계가 가진 능력(설치된 CLI·도구 이름 — a-z 0-9 _ - 낱말). 여러 줄이면 합친다. 지시문에
+#   「필요: railway, xcode」 줄이 있는 레인은 그 능력을 다 가진 기계에만 띄우고, 가진 기계가 하나도 없으면 대기로 두고
+#   주인 지휘에 막힘 한 번. 「필요:」 줄이 없는 레인은 이 줄과 상관없다. 빼면 능력 없음
+#machine-has  slow   railway,xcode
+#machine-has  box-2  xcode
+#
 # repo  프로젝트  기계  그 기계의 저장소 경로   (경로가 없는 기계에는 그 프로젝트를 띄우지 않는다.
 #       local 기계의 경로로 --after 선행 판정을 한다)
 repo     app    box-1    /home/me/src/app
