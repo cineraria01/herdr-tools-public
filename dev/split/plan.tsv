@@ -6,6 +6,8 @@ common die
 report report_cmd
 watch emit
 land x
+verdict lpatch
+land land_cmd
 merger submit_cmd
 merger-result mjrec
 land lease_core
@@ -17,7 +19,7 @@ start start_check
 = bin/hc-fill lib/hc-fill hf
 common die
 tick gc_tick
-audit aget
+audit arow
 launch cnt
 overlap kpre
 tick idle_tick

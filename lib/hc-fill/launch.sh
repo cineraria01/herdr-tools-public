@@ -92,20 +92,31 @@ old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 �
   onm "$1" '[ ! -f "$d" ] || mv -f "$d" "$d.old-$1"' "~/.local/share/hc-fill/reports/$2.md" "$(date +%Y%m%d%H%M%S)"
 }
 
+# 설정 audit_final <안내>(2026-11-20 지휘 — 레인이 hc-fill 「감사 통과」만 보고 최종 감사 전에 착지했다): 그 뒤에 최종 감사가 따로 있으면
+# 3번을 「통과여도 착지하지 않는다 — 최종 감사 통과 알림 뒤에만」으로. 이 절이 본문보다 앞서므로 본문의 최종 감사 규칙을 덮지 않게
+afin_sec() {
+  ASEC=${ASEC/"3. 출력이 「감사 통과 …」면 그 출력의 착지 줄"/"3. 출력이 「감사 통과 …」여도 착지하지 않는다 — 최종 감사($AFIN)의 통과 알림을 기다린다. 그 전에는 hc-lane report도 하지 않는다. 최종 통과를 받으면 그 출력의 착지 줄"}
+  ASEC=${ASEC/"4. 출력이 「감사 지적"/"최종 감사가 지적하면 4번처럼 고친다.
+4. 출력이 「감사 지적"}
+}
+
 launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 실패면 1
   # 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다(종료 2 = 이 레인은 이번 바퀴에 그만)
   body=$(cat -- "$2" 2>&1) && [ -n "$body" ] || { body=${body##*: }; echo "실패 $1: 지시문을 읽지 못함(${body:-빈 파일}): $2"; return 2; }
   on=; [ "$3" = "$LOCAL" ] || on=$3
+  # 받은편지 줄: 보고 경로에 요청 ID(되돌릴곳 #<ID>) — 같은 이름의 옛 보고가 이 요청 결과로 나가지 않게. 옛 줄(# 없음)은 <레인>.md
+  rid=; case ${5:--} in *'#'*) rid=${5##*#} ;; esac
   rsec=; [ "${5:--}" = - ] || rsec="
 ## 결과 보고 (hc-fill 받은편지 레인)
-끝나면(착지했든 못 했든) 이 기계 \`~/.local/share/hc-fill/reports/$1.md\`에 결과를 쓴다. 마지막 줄은 셋 중 하나다:
-\`결과: 고침 <sha>\` · \`결과: 넘김 <사유>\` · \`결과: 실패 <사유>\`. hc-fill이 이 파일을 요청한 기계로 되돌려 준다.
+끝나면(착지했든 못 했든) 이 기계 \`~/.local/share/hc-fill/reports/$1${rid:+.$rid}.md\`에 결과를 쓴다 — 같은 폴더의 다른 이름에 다 쓴 뒤
+\`mv\`로 그 이름에 둔다(반쯤 쓴 파일이 보이지 않게). 마지막 줄은 셋 중 하나다:
+\`결과: 고침 <sha>\` · \`결과: 넘김 <사유>\` · \`결과: 실패 <사유>\`. hc-fill은 마지막 줄이 이 꼴일 때만 요청한 기계로 되돌려 준다(착지·터미널 상태와 상관없이).
 "
   # 자동 감사(설정 audit): 감사 줄은 --read, 쓰기 줄(받은편지·--no-audit 빼고)은 「감사·착지」 절을 붙이고 감사 칸 auto
   rd= asec= LAUTO=
   case ${AK:--} in audit=*) rd=--read ;; -) [ -z "$AUD" ] || [ "${5:--}" != - ] || { asec=$ASEC LAUTO=auto; } ;; esac
   steps=$(hc-lane --print-steps $rd ${on:+--on "$on"} --name "$1" --repo "$4") || { echo "실패 $1 @$3: hc-lane --print-steps"; return 1; }
-  [ -z "$rsec" ] || old_report "$3" "$1" || { echo "실패 $1 @$3: 그 기계의 옛 보고를 비켜 두지 못했다"; return 1; }
+  [ -z "$rsec" ] || [ -n "$rid" ] || old_report "$3" "$1" || { echo "실패 $1 @$3: 그 기계의 옛 보고를 비켜 두지 못했다"; return 1; }
   runmd() { printf '%s\n\n%s\n' "$body" "$steps"; printf %s "$rsec"; printf %s "$asec"; printf %s "${ESEC-}"; printf %s "${RSEC-}"; }
   sz=$(runmd | wc -c | tr -d ' ')   # 쓴 run 지시문의 크기가 이것과 같아야 한다(본문이 다 들어갔는지)
   if [ -z "$on" ]; then
@@ -192,7 +203,6 @@ place() {
       if QRID=$RID qset "$1" up "$m" "$ADDR" "$stuck" "$pe_" "$LAUTO"; then
         if [ -n "${7-}" ]; then echo "먼저 띄움 $1 → $m $ADDR ($repo, 선행 $7)"; else echo "띄움 $1 → $m $ADDR ($repo${RESUME:+, 주차한 가지 lane/$1 에서 이어})"; fi
         trydel "$1"
-        [ "$LAUTO" != auto ] || adel "$1"   # 새로 띄운 쓰기 줄: 같은 이름의 지난 일 감사 기록을 물려받지 않게(재감사 [중간] 3)
       else echo "줄 바뀜 $1: 띄우는 동안 대기열 줄이 빠지거나 다시 들어왔다 — 띄운 $m $ADDR 은 옛 줄의 실행이라 새 줄에 적지 않음(지휘가 정리)"; fi
       placed=1 UPNOW="$UPNOW,$1"; break
     fi

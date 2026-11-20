@@ -247,8 +247,11 @@ pred_state() {  # pred_state <선행> <기다리는 줄 프로젝트>: PSV=「go
   lalive "$pa_" "$pn_" || { PSV="stop	터미널 없음($pa_)"; return; }
   ts_=$(alive "$pa_")
   case $ts_ in done | idle) ;; *) PSV="go	진행 중($ts_)"; return ;; esac
-  case $(aget "$pn_" | cut -f 5) in
-    queued) PSV="go	자동 감사 중"; return ;; pass) PSV="go	감사 통과 — 착지 중"; return ;; fix) PSV="go	감사 지적 고치는 중"; return ;;
+  # 그 레인의 마지막 감사 차수(audit.tsv 17칸 줄 — fill-handoff-integrity): 상태·판정
+  case $(awk -F'\t' -v n="$pn_" 'NF >= 17 && ($2 "")==n {s = $8 " " $10} END {print s}' "$AT" 2>/dev/null) in
+    'opening '* | 'queued '*) PSV="go	자동 감사 중"; return ;;
+    'deliver pass' | 'taken pass') PSV="go	감사 통과 — 착지 중"; return ;;
+    'deliver fix' | 'taken fix') PSV="go	감사 지적 고치는 중"; return ;;
   esac
   if [ -z "$EVBAD" ]; then
     l_=$(lastev "$pn_" "$pa_")

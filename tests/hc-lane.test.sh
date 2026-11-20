@@ -28,7 +28,8 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
   [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
   [ -z "${HC_FAKE_GET_SLEEP-}" ] || exec sleep "$HC_FAKE_GET_SLEEP"   # 응답 없는 코어(alarm이 이 프로세스를 끝내 고아가 안 남게 exec)
   # $HC_FAKE_GET_NAME이면 맨 위 name도(앞의 foreground.name은 다른 값 — 진짜 hc 꼴)
-  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"},\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
+  # $HC_FAKE_GET_CREATED면 created_ms도(report 10칸 발행 실행·verdict의 실행 키)
+  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"}${HC_FAKE_GET_CREATED:+,\"created_ms\":$HC_FAKE_GET_CREATED},\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
   # 띄운 터미널(t9zz): 기본은 status가 잡힘. HC_FAKE_NOSTATUS=1 늘 null, =untilkeys 키를 받기 전까지 null, =finished 끝남,
   # =idle 늘 idle·turn 0(첫 지시가 입력칸에 남은 꼴). 아래 둘은 이 주소 get이 $HC_FAKE_IDLE_GETS번(기본 5)이 될 때까지 idle·turn 0이고 그 뒤
   # =idleuntil working·turn 0(첫 턴 진행 중 — 실측: 첫 턴 동안 working·turn 0, 턴이 끝나야 turn 1), =idleturn idle·turn 1(working을 못 본 채 첫 턴이 끝난 꼴)
@@ -716,6 +717,47 @@ run --name l-ro1 --repo "$R" -- true
 run --name l-ro2 --repo "$R" -- true; wt="$R.wt/l-ro2"
 t "rerere: 일반 레인 다음에 띄운 조건부 false 가지는 그 가지에서 false 그대로(앞 레인이 가리지 않음)" '[ $rc = 0 ] && [ "$(git -C "$wt" config --get rerere.enabled)" = false ] && [ -z "$(git -C "$R" config --local --get-regexp "^rerere\\.")" ] || { git -C "$R" config --local --list; false; }'
 rm -f "$T/.gitconfig"
+# fill-handoff-integrity × 병합기(지휘 2026-11-20): 승인 착지(HERDR_LAND_PATCHID — 병합기가 제출 기록에서 넘김)에서도 rerere 자동
+# 이어 가기는 그대로. 승인 변경과 다른 곳이 rerere가 실제로 풀어 색인에 올린 경로뿐이면 착지하고 「rerere로 바뀐 경로 n개」, 그 밖의 차이는 종료 2
+pidof() { git -C "$1" diff -U0 --binary "$(git -C "$1" merge-base "$2" "${3:-origin/main}")" "$2" | git patch-id --stable | cut -d' ' -f1; }
+mk t15rv
+seed x base; seed z base-z
+seed .claude/herdr-verify.sh 'exit 0'
+run --name l-rv --repo "$R" -- true; wt="$R.wt/l-rv"
+(cd "$wt" && echo lane >x && echo lane-z >z && git commit -qm l-rv -- x z); l0=$(git -C "$wt" rev-parse HEAD)
+P0=$(pidof "$wt" "$l0")
+seed x other
+lnd "$wt" main   # 처음 충돌 — 사람이 풀어 rerere가 풀이를 적는다
+(cd "$wt" && printf 'lane\nother\n' >x && git add -- x && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$wt" reset -q --hard "$l0"
+out=$(cd "$wt" && HERDR_LAND_PATCHID=$P0 HERDR_LAND_SHA=$l0 HERDR_LAND_VERDICT=ax "$LANE" land main 2>"$T/err"); rc=$?
+t "승인 착지 + rerere: 다른 곳이 rerere가 푼 경로(x)뿐이면 착지하고 「rerere로 바뀐 경로 1개」" '[ $rc = 0 ] && [ "$(otop)" = l-rv ] && [ "$(git -C "$D/origin.git" show main:x | paste -sd , -)" = lane,other ] && printf "%s\n%s" "$out" "$(cat "$T/err")" | grep -Fq "rerere로 바뀐 경로 1개" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+(cd "$wt" && echo lane-z2 >z && git commit -qm l-rv2 -- z); l1=$(git -C "$wt" rev-parse HEAD); o1=$(git -C "$D/origin.git" rev-parse main)
+out=$(cd "$wt" && HERDR_LAND_PATCHID=$P0 HERDR_LAND_SHA=$l0 "$LANE" land main 2>"$T/err"); rc=$?
+t "승인 착지: HEAD가 제출 SHA가 아니면 종료 2, push 없음" '[ $rc = 2 ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o1" ]'
+out=$(cd "$wt" && HERDR_LAND_PATCHID=$P0 "$LANE" land main 2>"$T/err"); rc=$?
+t "승인 착지: 착지할 커밋이 승인 변경이 아니면(승인 뒤 커밋 섞임) 종료 2, push 없음" '[ $rc = 2 ] && grep -Fq "승인 변경이 아니다" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o1" ] || { cat "$T/err"; false; }'
+# --verdict(레인 경로): rerere가 x를 풀었고, 검증 실패 뒤 레인이 z를 고쳐 커밋 → x는 rerere라 괜찮지만 z는 승인 밖 → 종료 2(z만 이름)
+mk t15rw
+seed x base; seed z base-z
+seed .claude/herdr-verify.sh '[ ! -e "$HOME/verify.fail" ]'
+run --name l-rw --repo "$R" -- true; wt="$R.wt/l-rw"
+(cd "$wt" && echo lane >x && echo lane-z >z && git commit -qm l-rw -- x z); l0=$(git -C "$wt" rev-parse HEAD)
+seed x other
+lnd "$wt" main
+(cd "$wt" && printf 'lane\nother\n' >x && git add -- x && GIT_EDITOR=true git rebase --continue >/dev/null 2>&1)
+git -C "$wt" reset -q --hard "$l0"
+VD=$T/.local/share/hc-fill/verdicts/l-rw; mkdir -p "$VD"
+printf 'aid\tarw\nlane\tl-rw\nrun\trw-1\nsha\t%s\nverdict\tpass\nreport\t-\nround\t1\nbase\tmain\n' "$l0" >"$VD/arw.md"
+: >"$T/verify.fail"
+out=$(cd "$wt" && HC_LANE=l-rw HC_LANE_JOB=rw-1 "$LANE" land main --verdict arw 2>"$T/err"); rc=$?
+rm -f "$T/verify.fail"
+t "승인 착지(--verdict) + rerere: rerere가 x를 풀고 검증 실패 → push 없음(종료 1)" '[ $rc = 1 ] && grep -Fq rerere "$T/err" && [ "$(otop)" = x ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+(cd "$wt" && echo lane-z-fixed >z && git commit -qm l-rw-fix -- z)
+out=$(cd "$wt" && HC_LANE=l-rw HC_LANE_JOB=rw-1 "$LANE" land main --verdict arw 2>"$T/err"); rc=$?
+t "승인 착지(--verdict): rerere 경로(x) 밖의 차이(z 고침)는 종료 2 — z만 이름, push 없음" '[ $rc = 2 ] && grep -F "rerere가 푼 곳 밖" "$T/err" | grep -Fq " z)" && ! grep -F "rerere가 푼 곳 밖" "$T/err" | grep -Fq "x," && [ "$(otop)" = x ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+rm -rf "$T/.local/share/hc-fill"
+rm -f "$T/.local/state/hc-lane/events.tsv"   # 위 land 실패가 레인 이름(HC_LANE)으로 남긴 사건 — 뒤 report 시험은 빈 파일에서
 
 mk t15l   # .claude/herdr-land.sh가 있으면 그것에 맡긴다
 seed .claude/herdr-verify.sh 'echo should-not-run; exit 9'
@@ -1214,7 +1256,7 @@ fld() { printf '%s\n' "$1" | cut -f"$2"; }   # fld <줄> <칸>
 HC_LANE_MACHINE=mac HC_TERMINAL_ID=t5 HC_LANE=lane-q run report 완료 abc1234 "$(printf '요약\t탭\n줄')"
 ln1=$(cat "$EV" 2>/dev/null)
 t "report: 종료 0, events.tsv에 한 줄" '[ $rc = 0 ] && [ "$(grep -c . "$EV")" = 1 ] || { cat "$T/err"; false; }'
-t "report: 여덟 칸(시각 UTC·기계·터미널·레인·상태·sha·한 줄·turn)" '[ "$(printf "%s\n" "$ln1" | awk -F"\t" "{print NF}")" = 8 ] && fld "$ln1" 1 | grep -Eq "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" && [ "$(fld "$ln1" 2)|$(fld "$ln1" 3)|$(fld "$ln1" 4)|$(fld "$ln1" 5)|$(fld "$ln1" 6)" = "mac|t5|lane-q|완료|abc1234" ]'
+t "report: 열두 칸(시각 UTC·기계·터미널·레인·상태·sha·한 줄·turn·--to·발행 실행·수신 지휘·키)" '[ "$(printf "%s\n" "$ln1" | awk -F"\t" "{print NF}")" = 12 ] && [ "$(fld "$ln1" 9)|$(fld "$ln1" 12)" = "-|-" ] &&fld "$ln1" 1 | grep -Eq "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" && [ "$(fld "$ln1" 2)|$(fld "$ln1" 3)|$(fld "$ln1" 4)|$(fld "$ln1" 5)|$(fld "$ln1" 6)" = "mac|t5|lane-q|완료|abc1234" ]'
 t "report: 한 줄의 탭·줄바꿈은 지움" '[ "$(fld "$ln1" 7)" = "요약 탭 줄" ]'
 t "report: 화면에도 같은 사건" 'printf "%s" "$out" | grep -Fq "lane-q 완료" && printf "%s" "$out" | grep -Fq abc1234'
 HC_LANE=lane-q run report 막힘 "이유만 있음"
@@ -1252,10 +1294,116 @@ t "report: 이름이 없고 가지가 기본 가지(main)면 레인 칸은 -" '[
 long=$(printf '가%.0s' $(seq 1 450))
 for p_ in 1 2 3 4; do ( for i_ in $(seq 1 25); do HC_LANE=lane-c$p_ "$LANE" report 중간 - "$long" >/dev/null; done ) & done
 wait
-t "report: 긴 줄 동시 100건이 모두 8칸 한 줄" '[ "$(grep -c . "$EV")" = 100 ] && [ -z "$(awk -F"\t" "NF != 8" "$EV")" ]'
+t "report: 긴 줄 동시 100건이 모두 12칸 한 줄" '[ "$(grep -c . "$EV")" = 100 ] && [ -z "$(awk -F"\t" "NF != 12" "$EV")" ]'
 t "report: 줄은 1000바이트 안, 끝 UTF-8 글자 온전" '[ -z "$(LC_ALL=C awk "length > 1000" "$EV")" ] && iconv -f UTF-8 -t UTF-8 "$EV" >/dev/null 2>&1 && [ "$(LC_ALL=C tail -n 1 "$EV" | cut -f7 | LC_ALL=C wc -c | tr -d " ")" -gt 600 ]'
 HC_LANE=$(printf 'n%.0s' $(seq 1 300)) HC_LANE_MACHINE=$(printf 'm%.0s' $(seq 1 300)) run report 완료 abc1234 "$long"
-t "report: 긴 이름·기계 칸도 잘려 8칸·1000바이트 안" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | awk -F"\t" "{print NF}")" = 8 ] && [ "$(LC_ALL=C tail -n 1 "$EV" | LC_ALL=C wc -c | tr -d " ")" -le 1001 ] && [ "$(tail -n 1 "$EV" | cut -f6)" = abc1234 ]'
+t "report: 긴 이름·기계 칸도 잘려 12칸·1000바이트 안" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | awk -F"\t" "{print NF}")" = 12 ] && [ "$(LC_ALL=C tail -n 1 "$EV" | LC_ALL=C wc -c | tr -d " ")" -le 1001 ] && [ "$(tail -n 1 "$EV" | cut -f6)" = abc1234 ]'
+# 10칸 발행 실행(HC_LANE_JOB을 주면 그 값, 없으면 <터미널>@<created_ms>), 11칸 수신 지휘(HC_LANE_OWNER@HC_LANE_OWNER_RUN — fill-handoff-integrity), 12칸 키
+: >"$EV"
+HC_TERMINAL_ID=t5 HC_FAKE_GET_TURN=2 HC_LANE_JOB=j1120-a1b2 HC_LANE_OWNER=tq9 HC_LANE=lane-q run report 중간 - 실행칸
+t "report: 10칸 작업 ID, 11칸 수신 지휘 tq9, 12칸 -" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f10-12)" = "j1120-a1b2${tab}tq9${tab}-" ] || { tail -n 1 "$EV"; cat "$T/err"; false; }'
+HC_TERMINAL_ID=t5 HC_FAKE_GET_TURN=2 HC_LANE_JOB=j1120-a1b2~a2 HC_LANE_OWNER=tq9 HC_LANE_OWNER_RUN=1700000000555 HC_LANE=lane-q run report 중간 - 실행아이디
+t "report: 물결(~) 든 작업 ID도 10칸, 11칸은 <지휘>@<지휘 실행>" '[ "$(tail -n 1 "$EV" | cut -f10-11)" = "j1120-a1b2~a2${tab}tq9@1700000000555" ] || { tail -n 1 "$EV"; false; }'
+HC_TERMINAL_ID=t5 HC_FAKE_GET_TURN=2 HC_LANE=lane-q run report 완료 abc1234 작업없음
+t "report: HC_LANE_JOB이 없고 created_ms도 모르면 10칸 -, 경고" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f10)" = - ] && grep -Fq "발행 실행(10칸)을 못 적었다" "$T/err"'
+HC_TERMINAL_ID=box-1/t5 HC_FAKE_GET_TURN=2 HC_FAKE_GET_CREATED=1700000000123 HC_LANE=lane-q run report 완료 abc1234 실행키
+t "report: HC_LANE_JOB이 없으면 10칸 = <기계 접두 없는 터미널>@<created_ms>(작업 ID 장치는 없다 — fill-dup-guard가 범위를 좁힘)" '[ $rc = 0 ] && [ "$(tail -n 1 "$EV" | cut -f10)" = t5@1700000000123 ] || { tail -n 1 "$EV"; cat "$T/err"; false; }'
+env -u HC_TERMINAL_ID -u HC_LANE_OWNER HC_LANE=lane-q "$LANE" report 중간 - 터미널밖 >/dev/null
+t "report: 터미널 밖이면 10·11칸 -" '[ "$(tail -n 1 "$EV" | cut -f10-11)" = "-${tab}-" ]'
+HC_LANE=lane-q run report 막힘 - "넘김 글" --name lane-x --to tq1 --key hf:a1:coord
+HC_LANE=lane-q run report 막힘 - "넘김 글 다시" --name lane-x --to tq1 --key hf:a1:coord
+t "report --key: 같은 키 두 번째는 더하지 않고 「이미 있음」(종료 0)" '[ $rc = 0 ] && [ "$(awk -F"\t" "\$12 == \"hf:a1:coord\"" "$EV" | grep -c .)" = 1 ] && printf "%s" "$out" | grep -Fq "이미 있음" || { cat "$EV"; printf "%s" "$out"; false; }'
+for p_ in 1 2 3 4 5 6; do HC_LANE=lane-q "$LANE" report 막힘 - 동시 --key hf:a2:coord >/dev/null & done
+wait
+t "report --key: 동시 여섯 번도 한 줄" '[ "$(awk -F"\t" "\$12 == \"hf:a2:coord\"" "$EV" | grep -c .)" = 1 ] || { cat "$EV"; false; }'
+HC_LANE=lane-q run report 중간 - "본문에 hf:a3:coord 인용"
+HC_LANE=lane-q run report 막힘 - 키는칸만 --key hf:a3:coord
+t "report --key: 본문에 같은 글이 있어도 12칸만 견줌(더함)" '[ $rc = 0 ] && [ "$(awk -F"\t" "\$12 == \"hf:a3:coord\"" "$EV" | grep -c .)" = 1 ] || { cat "$EV"; false; }'
+chmod 000 "$EV"; HC_LANE=lane-q run report 막힘 - 못읽음 --key hf:a4:coord; chmod 644 "$EV"
+t "report --key: events.tsv를 못 읽으면 종료 1, 안 더함" '[ $rc = 1 ] && ! grep -Fq 못읽음 "$EV"'
+HC_LANE=lane-q run report 막힘 - x --key 'a;b'
+t "report --key: 키 글자가 아니면 종료 2" '[ $rc = 2 ]'
+
+# fill-handoff-integrity: verdict <ID> — hc-fill이 둔 판정 하나를 그 작업(HC_LANE_JOB)이 HEAD = 승인 sha일 때 연다.
+# 통과는 아무것도 안 쓰고 착지 줄(land --verdict)만, 지적은 <ID>.ack taken을 한 번. 표시 하나를 수거·착지·취소가 배타적으로 다툼
+VD=$T/.local/share/hc-fill/verdicts/lane-v; mkdir -p "$VD"
+vh=$(git -C "$R" rev-parse HEAD)
+vput() { printf 'aid\t%s\nlane\tlane-v\nrun\t%s\nsha\t%s\nverdict\t%s\nreport\t~/rep/%s.md\nround\t1\nbase\tmain\n' "$1" "$2" "$3" "$4" "$1" >"$VD/$1.md"; }
+vrun() { out=$(cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict "$@" 2>"$T/err"); rc=$?; }
+vput a1pass rv-1 "$vh" pass
+vput a0other rv-0 "$vh" pass
+vrun a1pass
+t "verdict 통과: 착지 줄(land main --verdict a1pass)만 찍고 아무것도 안 씀" '[ $rc = 0 ] && [ ! -e "$VD/a1pass.ack" ] && printf "%s" "$out" | grep -Fq "hc-lane land main --verdict a1pass" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+vrun a0other
+t "verdict: 다른 실행의 판정은 손대지 않음(종료 1, 표시 없음)" '[ $rc = 1 ] && [ ! -e "$VD/a0other.ack" ] && printf "%s" "$out" | grep -Fq "다른 실행"'
+vrun
+t "verdict: 판정 ID 없이는 거절(종료 2 — 지시 폴더를 훑지 않는다)" '[ $rc = 2 ]'
+vrun a9none
+t "verdict: 없는 판정은 종료 1" '[ $rc = 1 ]'
+vput a2stale rv-1 "$(printf '%040d' 0)" fix   # 40자 0을 이어 만든다(공개 검사의 16진 꼴에 안 걸리게)
+vrun a2stale
+t "verdict: HEAD ≠ 승인 sha → 아무것도 안 쓰고 「지금 커밋으로 완료」" '[ $rc = 0 ] && [ ! -e "$VD/a2stale.ack" ] && printf "%s" "$out" | grep -Fq "report 완료" || { printf "%s\n" "$out"; false; }'
+vput a3fix rv-1 "$vh" fix
+out=$(cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v "$LANE" verdict a3fix 2>"$T/err"); rc=$?
+t "verdict: HC_LANE_JOB 없고 hc get created_ms도 없으면(모름) 종료 75, 표시 없음" '[ $rc = 75 ] && [ ! -e "$VD/a3fix.ack" ]'
+for p_ in 1 2 3 4 5; do (cd "$R" && HC_TERMINAL_ID=t9vv HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" verdict a3fix >"$T/vpar.$p_" 2>&1) & done
+wait
+t "verdict 지적: 동시 다섯 번 → 표시 하나(taken), 모두 같은 지적 지시, 임시 파일 안 남음" '[ "$(cut -f1 "$VD/a3fix.ack")" = taken ] && [ "$(cat "$T"/vpar.* | grep -c "감사 지적 1번째 a3fix")" = 5 ] && [ -z "$(ls -A "$VD" | grep "^\.ack\.")" ] || { cat "$T"/vpar.*; ls -A "$VD"; false; }'
+a3=$(cat "$VD/a3fix.ack"); vrun a3fix
+t "verdict 지적: 다시 부르면 「이미 받음」·같은 지시, 표시 그대로" '[ $rc = 0 ] && [ "$(cat "$VD/a3fix.ack")" = "$a3" ] && printf "%s" "$out" | grep -Fq "이미 받음 a3fix" && printf "%s" "$out" | grep -Fq "감사 지적"'
+vput a4void rv-1 "$vh" fix; printf 'void\t2026\n' >"$VD/a4void.ack"
+vrun a4void
+t "verdict: hc-fill이 취소(void)한 판정은 아무것도 안 함" '[ $rc = 0 ] && [ "$(cut -f1 "$VD/a4void.ack")" = void ] && printf "%s" "$out" | grep -Fq "취소" && ! printf "%s" "$out" | grep -Fq "감사 지적"'
+
+# fill-handoff-integrity: land --verdict <ID> — 승인 변경(patch-id)만, 차이가 rebase뿐일 때 push. 응답 유실은 다시 부르면 끝냄
+oD=$D oR=$R oB=$B   # 아래 절은 t20 저장소를 쓰니 이 시험 뒤 되돌린다
+mk tvd
+lv() { out=$(cd "$R" && HC_LANE=lane-v HC_LANE_JOB=rv-1 "$LANE" land main --verdict "$1" 2>"$T/err"); rc=$?; }
+VD=$T/.local/share/hc-fill/verdicts/lane-v; rm -rf "$VD"; mkdir -p "$VD"
+(cd "$R" && mkdir -p .claude && printf '#!/bin/bash\n[ ! -e "$HOME/verify.fail" ]\n' >.claude/herdr-verify.sh && printf 'lane\n' >lane.txt &&
+  git add .claude/herdr-verify.sh lane.txt && git commit -qm "lane-v: 일")
+S1=$(git -C "$R" rev-parse HEAD)
+seed other.txt 남의착지   # 기준이 앞서 나감 — rebase가 필요(내용 충돌 없음)
+vput a5 rv-1 "$S1" pass
+lv a5
+t "land --verdict: 차이가 rebase뿐이면 push, <ID>.done, 시작 표시 landing" '[ $rc = 0 ] && git -C "$D/origin.git" show main:lane.txt >/dev/null 2>&1 && git -C "$D/origin.git" show main:other.txt >/dev/null 2>&1 && [ -e "$VD/a5.done" ] && [ "$(cut -f1 "$VD/a5.ack")" = landing ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+rm -f "$VD/a5.done"; lv a5
+t "land --verdict: 끝 표시 전 응답 유실 꼴(이미 기준에 들어감)은 다시 부르면 끝 표시만" '[ $rc = 0 ] && [ -e "$VD/a5.done" ] && printf "%s" "$out" | grep -Fq "이미" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+lv a5
+t "land --verdict: 끝난 판정을 다시 부르면 「이미 착지」(종료 0)" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "이미 착지"'
+(cd "$R" && printf 'lane2\n' >lane2.txt && git add lane2.txt && git commit -qm "lane-v: 이어서")
+S2=$(git -C "$R" rev-parse HEAD); o1=$(git -C "$D/origin.git" rev-parse main)
+vput a6 rv-1 "$S2" pass
+: >"$T/verify.fail"; lv a6; rm -f "$T/verify.fail"
+t "land --verdict: 검증 실패면 push 안 함(시작 표시는 남음)" '[ $rc = 1 ] && [ "$(cut -f1 "$VD/a6.ack")" = landing ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o1" ]'
+(cd "$R" && printf 'fixed\n' >>lane2.txt && git commit -qam "lane-v: 검증 고침")
+lv a6
+t "land --verdict: 시작 뒤 내용을 바꾼 커밋(고침)은 patch-id가 달라 push 안 함(종료 2, 새 감사)" '[ $rc = 2 ] && grep -Fq "승인 내용과 다르다" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o1" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+vput a7 rv-1 "$S2" pass
+lv a7
+t "land --verdict: 처음 부를 때 HEAD가 승인 커밋이 아니면 종료 2, 표시 없음" '[ $rc = 2 ] && grep -Fq "승인 커밋이 아니다" "$T/err" && [ ! -e "$VD/a7.ack" ]'
+S3=$(git -C "$R" rev-parse HEAD)
+vput a8 rv-0 "$S3" pass; lv a8
+t "land --verdict: 다른 실행의 판정이면 종료 2, 표시 없음" '[ $rc = 2 ] && [ ! -e "$VD/a8.ack" ]'
+vput a9 rv-1 "$S3" pass; printf 'void\tx\n' >"$VD/a9.ack"; lv a9
+t "land --verdict: 취소된(void) 판정이면 종료 2, push 없음" '[ $rc = 2 ] && grep -Fq "취소" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o1" ]'
+vput a10 rv-1 "$S3" fix; lv a10
+t "land --verdict: 지적 판정으로는 착지 안 함(종료 2)" '[ $rc = 2 ]'
+# 위임 경로(.claude/herdr-land.sh — 문서 접기처럼 착지 스크립트가 내용을 더 바꿀 수 있다): 위임 전에 같은 기준으로 rebase해 대조하고
+# 맞으면 맡긴다(스크립트의 접기는 대조 뒤라 막지 않는다). 시작 뒤 승인 밖 커밋이 끼면 위임 전에 종료 2(스크립트 안 부름)
+(cd "$R" && printf '#!/bin/bash\n: >"$HOME/land.called"\n[ ! -e "$HOME/land.fail" ] || exit 1\ngit fetch -q origin && git rebase -q "origin/$1" && echo 접음 >>lane.txt && git commit -qam 접기 && git push -q origin "HEAD:refs/heads/$1"\n' >.claude/herdr-land.sh && git add .claude/herdr-land.sh && git commit -qm "lane-v: 위임")
+S4=$(git -C "$R" rev-parse HEAD); vput a11 rv-1 "$S4" pass
+seed other2.txt 또남의착지
+rm -f "$T/land.called"; lv a11
+t "land --verdict 위임: 위임 전 rebase·대조가 맞으면 맡김(스크립트의 접기 포함 push), <ID>.done" '[ $rc = 0 ] && [ -e "$T/land.called" ] && git -C "$D/origin.git" show main:lane.txt | grep -Fq 접음 && [ -e "$VD/a11.done" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+(cd "$R" && git fetch -q origin && git reset -q --hard origin/main && printf 'x\n' >w.txt && git add w.txt && git commit -qm "lane-v: 다음")
+S5=$(git -C "$R" rev-parse HEAD); vput a12 rv-1 "$S5" pass; o2=$(git -C "$D/origin.git" rev-parse main)
+: >"$T/land.fail"; lv a12; rm -f "$T/land.fail"
+(cd "$R" && printf 'y\n' >>w.txt && git commit -qam "lane-v: 승인 뒤 고침")
+rm -f "$T/land.called"; lv a12
+t "land --verdict 위임: 시작 뒤 승인 밖 커밋이 끼면 위임 전에 종료 2(스크립트 안 부름, push 없음)" '[ $rc = 2 ] && [ ! -e "$T/land.called" ] && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o2" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+rm -rf "$T/.local/share/hc-fill"
+D=$oD R=$oR B=$oB
 
 # events: 이 기계 + 연결된 기계를 시각 순으로, 연결 안 된 기계는 「모름」
 : >"$EV"
@@ -1613,7 +1761,7 @@ unset HC_FAKE_MACH_HOME HC_FAKE_MACHINES HC_FAKE_LS
 run --print-steps --name lane-p --repo "$R"
 t "print-steps: 쓰기 레인에 hc-lane report 줄(중간·완료·착지·막힘)" 'printf "%s" "$out" | grep -F "hc-lane report" | grep -Fq 완료 && printf "%s" "$out" | grep -F "hc-lane report" | grep -Fq 착지'
 run --print-steps --read --name lane-pr --repo "$R"
-t "print-steps --read: 판정 줄은 hc-lane report 판정 -" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "hc-lane report 판정 - " && ! printf "%s" "$out" | grep -Fq "hc-lane land" || { cat "$T/err"; false; }'
+t "print-steps --read: 판정 줄은 hc-lane report 판정 <대상 커밋 40자 sha, 아니면 ->(sha는 구조 칸)" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fq "hc-lane report 판정 <대상 커밋 40자 sha, 커밋이 아니면 ->" &&! printf "%s" "$out" | grep -Fq "hc-lane land" || { cat "$T/err"; false; }'
 t "print-steps --read: rm 변수·와일드카드 경로 금지 줄(mktemp -d)" 'printf "%s" "$out" | grep -F "mktemp -d" | grep -F "rm -rf" | grep -Fq "\"\${X:?}\""'
 run --print-steps --name lane-p --repo "$R"
 t "print-steps: 쓰기 레인에도 rm 변수·와일드카드 경로 금지 줄 한 번" '[ "$(printf "%s\n" "$out" | grep -F "mktemp -d" | grep -c "와일드카드")" = 1 ]'
@@ -1622,7 +1770,7 @@ run --name lane-e --repo "$R" -- true
 t "띄우기: HC_LANE=<이름>을 넘기고 라벨 hc-lane=1" '[ $rc = 0 ] && has HC_LANE=lane-e && pair --label hc-lane=1'
 rm -f "$HCLOG"
 run --read --name lane-er --repo "$R" -- true
-t "띄우기 --read: HC_LANE·라벨, 판정 줄 안내" '[ $rc = 0 ] && has HC_LANE=lane-er && pair --label hc-lane=1 && printf "%s" "$out" | grep -Fq "hc-lane report 판정 - "'
+t "띄우기 --read: HC_LANE·라벨, 판정 줄 안내" '[ $rc = 0 ] && has HC_LANE=lane-er && pair --label hc-lane=1 && printf "%s" "$out" | grep -Fq "hc-lane report 판정 <대상 커밋"'
 # 21. --brief(지시문 사본·{brief}), 신뢰 질문 자동 넘김, 시작 확인(종료 5·6·7), fetch(로그인 셸 꼴)
 mk t18
 BD="$W/지시 폴더"; mkdir -p "$BD"; printf '# 할 일\n본문 줄\n' >"$BD/BRIEF.md"
@@ -2268,6 +2416,30 @@ sleep 2.5
 t "주인이 사라진 레인: 살아 있는 두 지휘 모두 한 번씩, 다음 사건도 둘 다(넘겨받지 않음)" '[ "$(grep -F 주인사라짐1 "$HCLOG.send" | cut -f1 | sort | tr "\n" " ")" = "tb2 tc3 " ] && [ "$(grep -F 주인사라짐2 "$HCLOG.send" | cut -f1 | sort | tr "\n" " ")" = "tb2 tc3 " ] || { cat "$HCLOG.send" "$T/web" "$T/wec"; false; }'
 t "주인이 사라진 레인: 레인 기록 주인은 그대로 ta1(한 지휘가 영구히 넘겨받지 않음)" '[ "$(awk -F"\t" "\$1 == \"t9jj\" { o = \$3 } END { print o }" "$WD/lanes.tsv")" = ta1 ] || { cat "$WD/lanes.tsv"; false; }'
 stopw $wb; stopw $wc
+# fill-handoff-integrity 할 것 4: 사건 수신자는 사건에 실린 수신 지휘(11칸 — 보고 때의 HC_LANE_OWNER). 같은 주소를 새 주인(tb2)이 다시
+# 띄운 뒤 옛 실행(주인 ta1)의 늦은 사건은 ta1에게만. 11칸 없는 옛 사건은 그 주소 주인이 둘이면 귀속하지 않고 두 지휘 모두
+rm -f "$HCLOG.send"
+printf 'ta1 1111\ntb2 2222\n' >"$HCLOG.live"
+printf 't9kk\tlane-mk\tta1\nt9kk\tlane-mk\ttb2\n' >>"$WD/lanes.tsv"
+"$LANE" watch --to ta1 >"$T/woa" 2>"$T/wea" &
+wa=$!
+"$LANE" watch --to tb2 >"$T/wob" 2>"$T/web" &
+wb=$!
+upto '[ -s "$WD/watch.ta1/pid" ] && [ -s "$WD/watch.tb2/pid" ]'
+HC_TERMINAL_ID=t9kk HC_LANE=lane-mk HC_LANE_OWNER=ta1 "$LANE" report 완료 kkkk1111 옛실행늦은것 >/dev/null
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" mac t9kk lane-mk 중간 - 옛꼴모호 3 - >>"$WD/events.tsv"
+upto 'grep -Fq 옛실행늦은것 "$HCLOG.send" 2>/dev/null && [ "$(grep -c 옛꼴모호 "$HCLOG.send")" = 2 ]'
+sleep 2.5
+t "수신자: 11칸 주인(ta1) 사건은 주소를 새로 쥔 지휘(tb2)가 아니라 ta1만" '[ "$(grep -F 옛실행늦은것 "$HCLOG.send" | cut -f1 | tr "\n" " ")" = "ta1 " ] || { cat "$HCLOG.send" "$T/wea" "$T/web"; false; }'
+t "수신자: 11칸 없는 옛 사건 + 그 주소 주인 둘 → 귀속 안 함(두 지휘 모두)" '[ "$(grep -F 옛꼴모호 "$HCLOG.send" | cut -f1 | sort | tr "\n" " ")" = "ta1 tb2 " ] || { cat "$HCLOG.send"; false; }'
+HC_TERMINAL_ID=t9kk HC_LANE=lane-mk HC_LANE_OWNER='*' "$LANE" report 중간 - 주인없음별 >/dev/null
+upto '[ "$(grep -c 주인없음별 "$HCLOG.send" 2>/dev/null)" = 2 ]'
+t "수신자: 11칸 *(주인 없음)은 모든 지휘" '[ "$(grep -F 주인없음별 "$HCLOG.send" | cut -f1 | sort | tr "\n" " ")" = "ta1 tb2 " ] || { cat "$HCLOG.send"; false; }'
+stopw $wa; stopw $wb
+HC_TERMINAL_ID=t9kk HC_LANE=lane-mk HC_LANE_OWNER=tb2 "$LANE" report 중간 - 비주인만 >/dev/null
+HC_TERMINAL_ID=t9kk HC_LANE=lane-mk HC_LANE_OWNER=ta1 "$LANE" report 중간 - 에이주인만 >/dev/null
+HC_TERMINAL_ID=ta1 run wait --mine --timeout 0 --state 중간
+t "wait --mine: 11칸 주인이 tb2인 사건은 ta1에 안 보이고, ta1인 사건은 보임" '! printf "%s\n" "$out" | grep -Fq 비주인만 && printf "%s\n" "$out" | grep -Fq 에이주인만 || { printf "%s\n" "$out"; false; }'
 printf 'ta1 1111\n' >"$HCLOG.live"
 run coord --check ta1
 t "coord --check: 살아 있고 지휘 정보와 맞으면 0, 아무것도 안 씀" '[ $rc = 0 ]'

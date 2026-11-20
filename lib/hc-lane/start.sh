@@ -34,7 +34,7 @@ print_steps() {
 read_steps() {  # --read(감사·조사) 레인: 판정은 사건으로
   printf '### 판정 알림 (hc-lane이 채움)\n'
   rm_rule
-  printf -- '- 판정이 나오면 보고 파일과 함께 이 한 줄을 부른다: hc-lane report 판정 - "<판정 한 줄(예: 감사 완료 <대상 sha8> 높음 0·중간 0·낮음 n)>"\n'
+  printf -- '- 판정이 나오면 보고 파일과 함께 이 한 줄을 부른다: hc-lane report 판정 <대상 커밋 40자 sha, 커밋이 아니면 -> "<판정 한 줄(예: 감사 완료 높음 0·중간 0·낮음 n)>". 위 지시문이 판정 줄 꼴을 정했으면 그 꼴이 앞선다\n'
   printf -- '- 막히면 hc-lane report 막힘 - "<까닭>". 지휘는 hc-lane wait로 이 사건만 기다린다\n'
 }
 

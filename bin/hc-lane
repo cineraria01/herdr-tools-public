@@ -11,7 +11,7 @@ set -u
 hl_s=$0
 while [ -L "$hl_s" ]; do hl_l=$(readlink "$hl_s"); case $hl_l in /*) hl_s=$hl_l ;; *) hl_s=$(dirname "$hl_s")/$hl_l ;; esac; done
 hl_d=$(dirname "$hl_s")/../lib/hc-lane
-for hl_f in common report watch land merger merger-result guard start clean gc; do
+for hl_f in common report watch land merger merger-result verdict guard start clean gc; do
   . "$hl_d/$hl_f.sh" || { printf 'hc-lane: 함수 파일을 못 읽었다: %s (herdr-sync가 lib도 까는지)\n' "$hl_d/$hl_f.sh" >&2; exit 1; }
 done
 
@@ -45,6 +45,7 @@ function lrep(s, h, t, k) { if (k == "") k = "x"
   lst[k] = s; ltn[k] = t; delete lsh[k]; if (s == "착지" || s == "판정") { lsh[k] = h; lt0[k] = t } }
 '
 case ${1-} in
+  verdict) shift; verdict_cmd "$@"; exit $? ;;
   early-wait) shift; early_wait_cmd "$@"; exit $? ;;
   report) shift; report_cmd "$@"; exit $? ;;
   send) shift; send_cmd "$@"; exit $? ;;
@@ -67,7 +68,7 @@ case ${1-} in
     coord_default; c_=$?; [ $c_ = 0 ] && { echo "$cad_"; exit 0; }; echo "hc-lane coord: 지휘 없음 — $cwhy" >&2; exit 1 ;;
 esac
 
-on= read=0 direct=0 resume=0 archive=0 branch= dry=0 steps=0 name= repo= cmd=launch lbase= act= integ= minage= brief= swarg= rb=0
+on= read=0 direct=0 resume=0 archive=0 branch= dry=0 steps=0 name= repo= cmd=launch lbase= act= integ= minage= brief= swarg= rb=0 lvd=
 case ${1-} in
   clean) cmd=clean; shift ;;
   fetch) cmd=fetch; shift ;;
@@ -96,6 +97,9 @@ while [ $# -gt 0 ]; do
     --min-age) val "$@"; minage=$2; shift 2 ;;
     --remote-branches) rb=1; shift ;;
     --archive) archive=1; shift ;;
+    --verdict) val "$@"; [ $cmd = land ] || die "--verdict는 land에서만 쓴다"
+      case $2 in ''|*[!A-Za-z0-9_-]*) die "--verdict 판정 ID 글자: $2" ;; esac
+      lvd=$2; shift 2 ;;
     -h|--help) usage ;;
     --) shift; break ;;
     -*) die "알 수 없는 인자: $1" ;;
@@ -150,6 +154,10 @@ case $name in *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) die "--name은 a-z 0-
 [ $cmd != launch ] || [ $steps = 1 ] || [ $# -gt 0 ] || [ -n "$brief" ] || die "-- 뒤에 실행 명령이 없다"
 
 mhook_="기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
+# lverdict_check: <기준>..HEAD의 patch-id가 승인 변경과 같으면 통과. 다르면 경로마다 견줘, 다른 경로가 모두 rerere가 이 승인 착지에서
+# 실제로 풀어 색인에 올린 경로(hc-lane-rerere 기록 — rr_ok가 확인한 것만)면 통과하고 LRRN에 그 수(지휘 2026-11-20: rerere 자동
+# 이어가기는 끄지 않는다 — 「리베이스 충돌 없이 빠르게」. 결과는 이어지는 전체 검증이 본다). 그 밖의 차이(새 변경·사라진 변경)는 종료 2
+LRRN=0
 
 # guard: 클론의 공용 git 폴더 hooks/pre-push에 관문. 표지 줄로 자기가 넣은 것을 알아보고, 남의 훅은 건드리지 않는다.
 gmark='# hc-lane guard v1'
@@ -314,7 +322,24 @@ if [ $read = 1 ]; then set -- env "HC_LANE=$name" "LANE_REPO=$repo" "LANE_BASE=$
 else set -- env "HC_LANE=$name" "LANE_REPO=$repo" "LANE_WORKTREE=$wt" "LANE_BRANCH=$branch" "LANE_BASE=$base" "$@"; fi
 # 레인 안에서도 주인 지휘를 알게. 값은 hc-lane을 부른 기계(지휘 기계)의 주소라 원격 레인에서 hc send 하려면 <지휘 기계>/<주소>.
 # 레인이 이 환경에서 hc-lane으로 띄운 하위 레인(감사 등)도 물려받아 같은 지휘가 주인이 된다
-[ -z "${HC_LANE_OWNER-}" ] || set -- env "HC_LANE_OWNER=$HC_LANE_OWNER" "${@:2}"
+# fill-handoff-integrity: 늘 넣는다 — report가 사건 11칸(수신 지휘)에 싣는다(주소가 재사용돼도 옛 실행 사건이 새 주인에게 안 가게).
+# 지휘 터미널에서 바로 띄우면 그 지휘(아래 레인 기록의 주인과 같은 판정, 기록 없이 미리 봄), 모르면 *(주인 없음 — 모든 지휘)
+lenv_o=${HC_LANE_OWNER-}
+[ -n "$lenv_o" ] || [ -n "${HC_LANE_COORD-}" ] || [ -z "${HC_TERMINAL_ID-}" ] || [ $dry = 1 ] || ! coord_is "$HC_TERMINAL_ID" || lenv_o=$HC_TERMINAL_ID
+# 그 지휘의 실행(created_ms)도 — 사건 11칸 <주소>@<실행>: 지휘 주소를 나중에 다른 지휘가 쥐어도 옛 실행 사건이 새 지휘에게 안 가게.
+# 레인 안에서 띄운 하위 레인은 물려받은 값 그대로. 못 읽으면 넣지 않는다(11칸은 주소만 — 지금과 같은 판정)
+lenv_r=
+if [ -n "$lenv_o" ] && [ "$lenv_o" != '*' ]; then
+  if [ "$lenv_o" = "${HC_LANE_OWNER-}" ] && [ -n "${HC_LANE_OWNER_RUN-}" ]; then lenv_r=$HC_LANE_OWNER_RUN
+  elif [ $dry = 0 ]; then
+    lg_=$(capt 10 hc get "$lenv_o" --json </dev/null 2>/dev/null)
+    ! printf '%s\n' "$lg_" | grep -q '"state" *: *"live"' || lenv_r=$(printf '%s\n' "$lg_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+  fi
+fi
+set -- env "HC_LANE_OWNER=${lenv_o:-*}" ${lenv_r:+"HC_LANE_OWNER_RUN=$lenv_r"} "${@:2}"
+# HC_LANE_JOB을 주면(발급 장치는 없다 — fill-dup-guard가 범위를 좁혀 뺐다) 레인 환경에 넣는다. 레인 report 10칸·verdict·land --verdict가
+# 「같은 실행」을 이 값으로, 없으면 <터미널>@<created_ms>로 안다
+case ${HC_LANE_JOB-} in '') ;; *[!a-z0-9~-]*) die "HC_LANE_JOB 글자(a-z0-9~-): $HC_LANE_JOB" ;; *) set -- env "HC_LANE_JOB=$HC_LANE_JOB" "${@:2}" ;; esac
 # 착지 줄 우선(hc-fill이 넣음 — 이 레인을 --after로 기다리는 대기 줄 수): 레인의 hc-lane land가 herdr-land.sh에 넘긴다
 [ -z "${HERDR_LAND_PRIORITY-}" ] || set -- env "HERDR_LAND_PRIORITY=$HERDR_LAND_PRIORITY" "${@:2}"
 

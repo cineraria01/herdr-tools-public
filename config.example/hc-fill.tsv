@@ -20,10 +20,17 @@
 #          쉬기 시작한 때는 ~/.local/share/hc-fill/held.tsv. 0이면 끔(늘 셈), 빼면 60. 착지한 레인은 이 값과 상관없이 안 센다
 # audit    자동 감사 지시문 틀 파일(맥 경로, ~ 펼침. 예시 config.example/hc-fill-audit.md). 키가 없거나 빈 값이면 끔(지휘가 감사를 띄운다).
 #          켜면 쓰기 레인(받은편지·add --no-audit 줄 빼고)의 run 지시문 끝에 「감사·착지 (hc-fill 자동)」 절을 붙이고, 레인의
-#          hc-lane report 완료 <sha> 뒤 그 기계에 긴급 감사 줄 audit-<레인>(hc-lane --read, 레인 작업 트리)을 넣어, 판정의
-#          높음·중간이 0이면 레인에 「감사 통과」, 아니면 「감사 지적」을 hc send. 틀 자리: {lane} {machine} {worktree} {branch}
-#          {sha} {base} {brief}(그 기계의 레인 run 지시문) {report}(그 기계 ~/.local/share/hc-fill/reports/audit-<레인>.md)
+#          hc-lane report 완료 <sha> 뒤 그 실행·그 커밋에 묶인 감사 차수(ID a…)를 열어 그 기계에 긴급 감사 줄 audit-<차수 ID>
+#          (hc-lane --read, 레인 작업 트리)을 넣고, 판정(6칸 40자 sha·본문 「감사 완료 <차수 ID> …」)을 레인 기계
+#          ~/.local/share/hc-fill/verdicts/<레인>/<차수 ID>.md에 두고 hc send로 깨운다(레인이 hc-lane verdict <ID>로 수거).
+#          틀 자리: {lane} {machine} {worktree} {branch} {sha}(40자) {audit_id} {base} {brief}(그 기계의 레인 run 지시문)
+#          {report}(그 기계 ~/.local/share/hc-fill/reports/audit-<차수 ID>.md). {audit_id}가 없는 옛 틀은 새 판정 줄 절이 덧붙는다
 # audit_max  감사 지적 뒤 고침 바퀴 상한(빼면 2). 넘으면 그 레인 주인 지휘에 hc-lane report 막힘 「… 지휘 판단」
+# audit_final  <안내 한 줄> 자동 감사 뒤에 최종 감사가 따로 있으면 그 안내(예: 「지휘 최종 감사」). 있으면 hc-fill 감사 통과는 착지
+#          허가가 아니다 — run 지시문 감사 절 3번이 「최종 감사 통과 알림 뒤에만 착지」, ls 비고 「감사 통과 받음(최종 대기)」.
+#          빼면 감사 통과 = 착지
+# wake_every  판정을 둔 뒤 레인이 수거(hc-lane verdict)할 때까지 깨우는 간격, 분(빼면 10). 깨우기는 여러 번 가도 무해하다
+# ack_max  수거를 기다리는 상한, 분(빼면 30 — 기계가 연결된 동안만 센다). 넘으면 그 레인 주인 지휘에 한 번(기다림은 계속)
 # overlap  겹침: warn|block|off(빼거나 키 혼자면 warn). 대기 줄을 띄우기 전에 같은 프로젝트의 쓰기 소유 레인(대기열에서 띄운
 #          쓰기 줄 — 터미널이 살아 있고 착지 전)과 견준다. 예약 = 지시문 「파일:」·「쓰기:」 줄의 경로(새 파일도)·FR ID, 언급 = 본문의
 #          저장소 경로·FR ID. warn은 띄우고 경고만(~/.local/share/hc-fill/overlap-warn.log), block은 예약끼리 겹치면 대기(언급은 경고)

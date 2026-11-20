@@ -3,7 +3,7 @@
 # 기계 차례·상한·저장소 경로·실행 명령 틀·지휘 주소는 모두 설정 파일(${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv,
 # 예시는 저장소 config.example/hc-fill.tsv)에서 읽는다. 코드에는 기계·계정·경로 같은 개인 값을 두지 않는다.
 # 의존: hc·hc-lane·git·jq·lockf(macOS). 맥 /bin/bash 3.2에서 돈다. 아무것도 지우거나 끄지 않는다
-# (하나 예외: 자동 감사가 판정을 레인에 보낸 뒤의 그 감사 터미널 — audit_reap).
+# (감사 터미널도 — 차수가 끝나면 정리할 주소를 지휘에 한 번 알린다).
 set -u
 shopt -u patsub_replacement 2>/dev/null   # bash 5.2+: ${x//a/b}의 b 안 & 를 글자 그대로
 # 문자열 비교는 바이트로: macOS awk의 ==는 strcoll이라 en_US.UTF-8에서 "판정"=="완료"가 참(2026-11-19 fill-then 작업 중 발견)
@@ -32,12 +32,13 @@ done
 
 [ -f "$CONF" ] || die "설정 파일이 없다: $CONF (저장소 config.example/hc-fill.tsv를 복사해 값을 고친다)"
 # 한 값 키: 키 혼자면 빈 값, 같은 키가 두 줄이면 멈춘다
-dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold|audit|audit_max|overlap)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
+dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold|audit|audit_max|audit_final|wake_every|ack_max|overlap)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
 [ -z "$dup" ] || die "설정에 $(echo $dup) 줄이 두 번 있다: $CONF"
 LOCAL=$(conf local) AGENT=$(conf agent)
 AGENT=${AGENT:-claude-code}
 [ -n "$LOCAL" ] || die "설정에 local 줄이 없다: $CONF"
 
+LED=$DATA/inbox.tsv
 cmd=${1-}; [ $# = 0 ] || shift
 case $cmd in
   _set) qset "$@"; exit ;;
@@ -71,15 +72,11 @@ case $cmd in
     awk -F'\t' -v n="$1" '($1 "")==n {f=1} END {exit !f}' "$Q" 2>/dev/null && die "이미 대기열에 있다: $1 (hc-fill ls)"
     [ -z "${HC_FILL_BRIEF_TMP-}" ] || mv -f "$HC_FILL_BRIEF_TMP" "$3" || die "지시문 사본을 두지 못했다: $3"   # add: 이름이 새것일 때만 사본을 제자리에
     pad16 "$@"; (IFS=$'\t'; printf '%s\n' "${ROW[*]}") >>"$Q"; exit ;;
-  _put)   # 자동 감사 줄: 같은 이름 줄(지난 바퀴의 감사)을 새 줄로 바꾼다 — 이름 충돌로 막히지 않게.
-    # 옛 줄의 남긴것(9칸 — 상태 안 잡혀 남긴 감사 터미널)은 이어 받는다: 덮으면 그 터미널이 살아나도 「중복 위험」을 못 본다(기존 5)
-    pad16 "$@"
-    ok_=$(awk -F'\t' -v n="$1" '($1 "")==n && $9 != "" && $9 != "-" {print $9; exit}' "$Q" 2>/dev/null)
-    [ -z "$ok_" ] || if [ "${ROW[8]}" = - ]; then ROW[8]=$ok_; else ROW[8]=$ok_,${ROW[8]}; fi
-    awk -F'\t' -v n="$1" '($1 "")!=n' "$Q" >"$Q.tmp" && (IFS=$'\t'; printf '%s\n' "${ROW[*]}") >>"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
-  _rm)
-    awk -F'\t' -v n="$1" '($1 "")==n {f=1} END {exit !f}' "$Q" 2>/dev/null || die "대기열에 없다: $1"
-    awk -F'\t' -v n="$1" '($1 "")!=n' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"; exit ;;
+  _rmx) q_rmx "$@"; exit ;;
+  _lset) lset "$@"; exit ;;
+  _recover) rmigrate; exit ;;
+  _inadd) q_inadd "$@"; exit ;;
+  _rm) q_rm "$1"; exit ;;
   _prio)
     st=$(awk -F'\t' -v n="$1" '($1 "")==n {print $6; exit}' "$Q" 2>/dev/null)
     [ -n "$st" ] || die "대기열에 없다: $1"
@@ -190,9 +187,7 @@ case $cmd in
       case ${ak:--} in
         no-audit) note="$note 자동 감사 끔" ;;
         audit=*) note="$note 감사 대상 ${ak#audit=}" ;;
-        auto) note="$note $(cat "$DATA/audit.tsv" 2>/dev/null | awk -F'\t' -v n="$name" '($1 "")==n { r = $3; f = $4; s = $5 } END {
-            if (s == "queued") print "감사 중(" r "번째)"; else if (s == "pass") print "감사 통과 보냄"
-            else if (s == "fix") print "감사 지적 " f "번째"; else if (s == "coord") print "지휘로 넘김"; else if (s == "nosha") print "지휘로 넘김(완료에 sha 없음)"; else print "자동 감사(완료 기다림)" }')" ;;
+        auto) note="$note $(anote "$name")" ;;
       esac
       case ${ovk:--} in overlap-ok) note="$note 겹침 봄 끔" ;; solo) note="$note 단독" ;; esac
       # 겹침 대기: run이 바퀴마다 적은 overlap.tsv(레인 앞레인 파일)
@@ -244,19 +239,24 @@ MQP= MQS= MQBAD=
 # (감사 [낮음] 1). 다 세면 HELDW=1. dry-run은 건드리지 않는다
 HELDW= SNAPD=   # SNAPD: 이번 바퀴 지시문 사본 폴더(겹침 검사·띄우기가 같은 사본을 — 아스트라 2차 중간 1)
 trap '[ $dry = 1 ] || [ -n "$HELDW" ] || : 2>/dev/null >"$DATA/held.tsv"; [ -z "$SNAPD" ] || rm -rf "$SNAPD"' EXIT
+[ $dry = 1 ] || qlock _recover || die "대기열 복구(받은편지 줄 옮기기) 실패, 이번 바퀴는 띄우지 않았다"
 inbox_tick
 merger_tick
 IDLE=$(conf idle); IDLE=${IDLE:-10}
 case $IDLE in *[!0-9]*) echo "알림: 설정 idle은 분(숫자)이다, 놀고 있음 알림 끔: $IDLE"; IDLE=0 ;; esac
 IDLE=$((10#$IDLE))
 # 대기열이 비어도 놀고 있음 알림은 자리를 봐야 한다(그때가 「띄울 것 없음」의 바로 그 꼴)
-[ -s "$Q" ] || { echo "대기열 비었음"; [ "$IDLE" != 0 ] || { gc_tick; exit 0; }; }
+# 넘기기가 남았으면(장부 open·deliver, 끝나지 않은 감사 차수) 대기열이 비어도 바퀴를 돈다 — 복구가 빈 대기열 조기 종료보다 먼저
+HPEND=; { awk -F'\t' '$4=="deliver" || $4=="open" {f=1} END {exit !f}' "$LED" 2>/dev/null ||
+  awk -F'\t' 'NF >= 17 && $8 !~ /^(taken|superseded|coord|nosha|legacy)$/ {f=1} END {exit !f}' "$DATA/audit.tsv" 2>/dev/null; } && HPEND=1
+[ -s "$Q" ] || [ -n "$HPEND" ] || { echo "대기열 비었음"; [ "$IDLE" != 0 ] || { gc_tick; exit 0; }; }
 
 TASK=$(conf task) LAUNCH=$(conf launch) COORD=${HC_FILL_COORD:-$(conf coord)}
 [ -n "$TASK" ] || TASK='{run}'
 case $LAUNCH in *'{task}'*) ;; *) die "설정 launch 줄에 {task} 자리가 없다: $CONF" ;; esac
 case $TASK in *'{run}'*) ;; *) die "설정 task 줄에 {run} 자리가 없다: $CONF" ;; esac
 AUD=$(conf audit); case $AUD in "~/"*) AUD=$HOME/${AUD#"~/"} ;; esac
+AFIN=$(conf audit_final)   # 최종 감사 안내(있으면 hc-fill 「감사 통과」는 착지 허가가 아니다 — 아래 ASEC 2번·통과 글)
 AMAX=$(conf audit_max); AMAX=${AMAX:-2}
 case $AMAX in *[!0-9]*) echo "알림: 설정 audit_max는 횟수(숫자)다, 2로: $AMAX"; AMAX=2 ;; esac
 [ -z "$AUD" ] || ! why=$(brief_bad "$AUD") || die "설정 audit 틀을 읽지 못함($why): $AUD"
@@ -276,13 +276,8 @@ printf '%s\n' "$TERMS" | awk -F'\t' -v g="$AGENT" '$3==g {f=1} END {exit !f}' ||
   die "경고: hc ls에 $AGENT 종류가 하나도 없다(지휘 자신도 그 종류라 늘 하나는 있어야 한다). 설정 agent 값이나 hc의 이름이 바뀌었는지 본다. 이번 바퀴는 띄우지 않았다"
 CONN=$(printf '%s\n' "$raw" | jq -er '.machines | arrays | map(select(.state == "connected") | .name) | join("\n")') ||
   die "hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다"
-# 자동 감사(설정 audit — 2026-11-19 fill-auto-audit: 완료 → 지휘가 감사를 띄움 → 판정을 봄 → 착지 지시 왕복이 지휘 한 사람에게
-# 줄을 서 레인이 3~10시간 자리를 붙잡았다). 감사·착지 절을 붙여 띄운 쓰기 레인(감사 칸 auto)이 「완료 <sha>」를 적으면 그 기계에
-# 긴급 감사 줄 audit-<레인>을 넣고, 감사 줄의 「판정」을 읽어 레인에 통과·지적을 hc send. 사건은 hc-lane events 한 번(볼 기계마다 --on).
-# 레인·감사의 사건은 그 터미널(대기열 주소)이 그 이름으로 적은 것만 본다(hc-fill이 --name으로 남긴 막힘 등은 안 셈).
-# 기록 $DATA/audit.tsv: 레인 sha 몇번째 지적수 상태 보내기실패 판정없음(바퀴) — 상태 queued(감사에 넘김)·pass(통과 보냄)·fix(지적 보냄)·
-# coord(지휘로 넘김)·nosha(완료에 sha 없음을 지휘에). 쓰기 줄을 새로 띄울 때 그 레인 줄을 지운다(같은 이름 새 일이 옛 기록을 안 물려받게)
 AT=$DATA/audit.tsv
+aconf
 # 레인 사건은 바퀴에 한 번(2026-11-19 fill-ls-early-state): up 줄의 기계(local과 연결된 원격)를 hc-lane events --on 하나로 묶어 읽고
 # 자동 감사(EV)와 마지막 보고가 함께 쓴다. 마지막 보고 $DATA/last.tsv(레인 상태 sha8 사건시각 한줄앞부분 읽은시각 fresh|old — 시각은
 # 이 기계 HH:MM): up 레인마다 그 터미널이 그 이름으로 적은 마지막 사건, 없으면 상태 -(보고 없음). 연결 안 됨·못 읽은(모름) 기계의
@@ -299,7 +294,6 @@ ev_tick
 park_tick
 reply_tick   # 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다(병합기 2단계)
 audit_tick
-audit_reap
 # 자리에서 뺄 done·idle 터미널: 자동 감사 레인(이름이 감사 줄 — 판정 뒤, 지난 바퀴 것 포함) · 감사에 넘겨진 쓰기 레인 가운데 그 감사
 # 줄이 자리를 쥔 것(감사 줄이 아직 안 뜸 wait — 이번 바퀴 긴급으로 그 자리에 뜬다 —, 또는 감사 터미널이 done·idle·없음이 아님).
 # 감사가 끝났는데 아직 queued(판정을 다시 보냄·판정 없음 세 바퀴)면 레인을 다시 센다 — 둘 다 자리를 안 쥐는 사이 다른 레인이 그
@@ -317,7 +311,7 @@ AUDN= AWT=
     esac
     ahold="$ahold${ak#audit=},"
   done <<<"$(awk -F'\t' '$15 ~ /^audit=/ {print $6, $8, $15, $5, $9}' "$Q")"
-  AWT=$(awk -F'\t' -v h="$ahold" 'NR==FNR { if ($5 == "queued") w[$1] = 1; next }
+  AWT=$(awk -F'\t' -v h="$ahold" 'NR==FNR { if (NF >= 17 && ($8 == "queued" || $8 == "opening")) w[$2] = 1; next }
     $6=="up" && $15=="auto" && ($1 in w) && index(h, "," $1 ",") {print $8}' "$AT" "$Q" 2>/dev/null)
 }
 # 기다리는 줄 수(2026-11-19 fill-dep-needs 사용자 「① 선행 사슬 기다림 (추천)」 — 선행 하나가 늦자 뒤 레인들이 3~5시간 기다렸다):
@@ -386,10 +380,12 @@ HELDW=1
 ASEC='
 ## 감사·착지 (hc-fill 자동)
 이 절이 위 지시문 본문의 감사·착지 문구보다 앞선다. 감사는 hc-fill이 띄운다(지휘가 따로 띄우지 않는다).
-1. 구현·검증이 끝나면 착지하지 말고 `hc-lane report 완료 <sha> "<한 줄> (감사 hc-fill 자동)"`을 부른 뒤 턴을 끝내고 기다린다.
-2. hc-fill이 「감사 통과 …」를 보내면 위 착지 절차대로 main에 넣고 `hc-lane report 착지 <sha>`. 병합기가 켜진 저장소면 착지 줄이 큐에 제출만 하고 끝난다 — 그때 착지는 병합기가 알리니 report 착지 없이 끝낸다.
-3. 「감사 지적 … <보고서>」를 보내면 그 보고서를 읽고 높음·중간을 고친 뒤 다시 검증하고 `hc-lane report 완료 <새 sha> "<한 줄>"`, 그리고 다시 기다린다.
+1. 구현·검증이 끝나면 착지하지 말고 `hc-lane report 완료 <sha> "<한 줄> (감사 hc-fill 자동)"`을 부른 뒤 턴을 끝내고 기다린다. 판정이 올 때까지 다른 hc-lane report는 하지 않는다.
+2. hc-fill이 「감사 판정이 왔다 — … hc-lane verdict <ID> …」로 깨우면 이 작업 트리에서 `hc-lane verdict <ID>`를 돌리고 그 출력대로만 한다(판정은 도구가 정한다 — 글로 짐작하지 않는다). 같은 글이 또 와도 같은 줄을 다시 돌리면 된다(판정은 한 번만 받힌다).
+3. 출력이 「감사 통과 …」면 그 출력의 착지 줄 `hc-lane land <기본> --verdict <ID>`로(위 착지 절차의 land 줄 대신 — 정리 절차는 그대로) main에 넣고 `hc-lane report 착지 <sha>`. 병합기가 켜진 저장소면 착지 줄이 큐에 제출만 하고 끝난다 — 그때 착지는 병합기가 알리니 report 착지 없이 끝낸다.
+4. 출력이 「감사 지적 … <보고서>」면 그 보고서를 읽고 높음·중간을 고친 뒤 다시 검증하고 `hc-lane report 완료 <새 sha> "<한 줄>"`, 그리고 다시 기다린다. 출력이 「지금 커밋으로 hc-lane report 완료 …」면 그 줄을 부르고 기다린다.
 '
+[ -z "$AFIN" ] || afin_sec
 
 # 겹침(2026-11-19 lane-overlap-guard, 사용자 「rebase 충돌을 근본적으로」 — 같은 파일을 고치는 레인이 동시에 떠 착지마다 충돌·재검증):
 # 대기 줄(감사 줄·--overlap-ok 빼고)을 띄우기 전에 같은 프로젝트의 쓰기 소유 레인과 견준다(일반·먼저 띄움·같은 바퀴에 앞서 띄운 줄 같은 판정).
@@ -490,6 +486,11 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
   fi
   [ "$state" = wait ] || continue
   [ -z "$dupr" ] || { echo "건너뜀 $name: 중복 위험이라 더 띄우지 않음"; continue; }
+  # 받은편지 줄은 장부가 open일 때만(결과·취소가 이미 고정된 줄은 띄우지 않는다)
+  case ${reply:--} in *'#'*) [ "$(lget "${reply##*#}" | cut -f 4)" = open ] || { echo "건너뜀 $name: 받은편지 요청 ${reply##*#} 결과가 이미 고정됐다"; continue; } ;; esac
+  # 같은 이름의 끝나지 않은 감사 차수가 있으면 넘기기가 끝난 뒤에(새 실행이 옛 판정을 받지 않게)
+  ax_=$(awk -F'\t' -v n="$name" 'NF >= 17 && ($2 "")==n && $8 !~ /^(taken|superseded|coord|nosha|legacy)$/ {print $1; exit}' "$AT" 2>/dev/null)
+  [ -z "$ax_" ] || { echo "건너뜀 $name: 감사 $ax_ 넘기기 중 — 끝난 뒤에"; continue; }
   NEED=; case ${ak:--} in audit=*) ;; *) NEED=$(needs "$brief") ;; esac   # 감사 줄은 그 레인 기계에(능력 안 봄)
   # 같은 이름이 살아 있으면(지휘가 손으로 띄웠거나 지난 바퀴의 것) 다시 띄우지 않고 떠 있음으로 표시. 상태 안 잡혀 남긴 기계는 빼고 본다
   # 자동 감사 줄은 지난 바퀴의 감사 터미널(판정 뒤 done·idle로 남음)을, 주차한 줄은 주차하고 쉬는 터미널을 새 실행으로 잡지 않는다.
@@ -512,8 +513,9 @@ while IFS=$'\t' read -r -u 3 name proj brief after only state m0 a0 stuck added 
       # 띄울 때 이미 비켜 뒀으니 다시 치우지 않는다(이번 실행이 쓴 받은편지 결과를 .old-로 보내지 않게 — 아스트라 2차 ⑤⑥)
       tg_=$(tryget "$name" "$rid" "${live%% *}") te_= tu_=
       [ -z "$tg_" ] || { te_=${tg_%%	*} tu_=${tg_#*	}; [ "$te_" != - ] || te_=; [ "$tu_" != - ] || tu_=; }
-      if [ -z "$tg_" ] && [ "${reply:--}" != - ]; then
-        old_report "${live%% *}" "$name" || { echo "건너뜀 $name: ${live%% *} 의 옛 보고를 비켜 두지 못했다"; continue; }
+      # 받은편지 줄(요청 ID #r…)의 보고는 요청 ID마다 다른 파일이라 치우지 않는다(옛 꼴 되돌릴곳만)
+      if [ -z "$tg_" ]; then
+        case ${reply:--} in -|*'#'*) ;; *) old_report "${live%% *}" "$name" || { echo "건너뜀 $name: ${live%% *} 의 옛 보고를 비켜 두지 못했다"; continue; } ;; esac
       fi
       QRID=$rid qset "$name" up "${live%% *}" "${live#* }" "$stuck" "$te_" "$tu_" && trydel "$name"
       [ -z "$tg_" ] || echo "이미 떠 있음 $name: 띄운 뒤 멈춘 이번 시도 — 시도 기록대로(먼저 ${te_:-아님}·감사 ${tu_:-아님})"

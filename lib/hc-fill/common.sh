@@ -24,7 +24,7 @@ usage() {
          도는 run이 끝나기를 기다렸다가(run.lock) 붙인다. 겹치는 파일 때문에 순서만 필요한 일은 그대로 --after
          --after에 대기 중인 같은 프로젝트 레인을 주면 넣기는 그대로 하고 --then을 알리는 한 줄
   prio   대기 중인 레인의 우선순위를 바꾼다(떠 있는 레인은 거절)
-  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과 보냄·감사 지적 n번째·지휘로 넘김·
+  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과/지적 — 수거 기다림·감사 통과 받음·감사 지적 n번째·지휘로 넘김·
          겹침 대기(<앞 레인>: <키>|단독)·겹침 봄 끔·단독)
   run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
          대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 그 줄을 --after로 기다리는 줄이 많은 것 — 감사 줄은 그 레인 몫 —,
@@ -50,9 +50,13 @@ usage() {
          다시 비면 또 한 번). 먼저 띄움 상한 사유면 계속 비는 동안 처음 알림 포함 30분 간격으로 세 번, 그 뒤 2시간마다. 사유가 바뀌면 바로 다시.
          먼저 띄움 상한에 걸려 남긴 자리면 사유를 「먼저 띄움 상한(early n)에 걸려 남김」으로
          자동 감사(설정 audit = 감사 지시문 틀): 쓰기 레인(받은편지·--no-audit 줄 빼고) run 지시문 끝에 「감사·착지 (hc-fill 자동)」 절.
-         레인이 hc-lane report 완료 <sha>를 하면 그 기계에 긴급 감사 줄 audit-<레인>(hc-lane --read, 작업 트리에서)을 넣고,
-         감사의 판정(「감사 완료 <sha> 높음 n·중간 n·낮음 n」)이 높음·중간 0이면 레인에 「감사 통과」, 아니면 「감사 지적」을
-         hc send(지적은 audit_max번까지, 기본 2). 상한·판정 못 읽음·보내기 세 번 실패는 그 레인 주인 지휘에 hc-lane report 막힘
+         레인이 hc-lane report 완료 <sha>를 하면 그 실행(<터미널>@<created_ms>)의 그 커밋(40자)에 묶인 감사 차수(ID a…)를 열어 그 기계에
+         긴급 감사 줄 audit-<차수 ID>(hc-lane --read, 작업 트리에서)를 넣는다. 판정(6칸 40자 sha, 「감사 완료 <차수 ID> 높음 n·중간 n·낮음 n」)은
+         부모 실행이 그대로이고 그 실행의 최신 완료가 같은 커밋일 때만 받아 레인 기계 verdicts/<레인>/<차수 ID>.md에 두고 hc send로 깨운다
+         (레인이 hc-lane verdict <ID>로 수거 — 높음·중간 0이면 통과, 아니면 지적, 지적은 audit_max번까지, 기본 2). 깨움은 설정 wake_every분
+         (기본 10)마다, ack_max분(기본 30, 연결된 동안만 셈) 넘게 수거가 없으면 지휘에 한 번. 부모가 끝났거나 새 커밋을 보고했으면 그 판정은
+         쓰지 않는다(새 커밋은 새 차수). 감사 터미널은 끄지 않는다 — 차수가 끝나면 정리할 주소를 지휘에 한 번.
+         상한·판정 못 읽음·판정 없음 세 바퀴·부모 끝남·감사 줄 rm은 그 레인 주인 지휘에 hc-lane report 막힘(--key hf:<차수 ID>:<까닭>, 한 번)
          겹침(설정 overlap, 기본 block): 대기 줄을 띄우기 전에 같은 프로젝트의 쓰기 소유 레인과 견준다. 쓰기 소유 = 실행 기록
          (~/.local/share/hc-fill/own.tsv): 쓰기 터미널 주소를 받은 때(상태 안 잡힘 포함) 적고, 그 기계가 연결된 채 그 주소에 그 이름
          터미널이 없거나(병합기 큐에 있으면 유지) 그 터미널이 시작 뒤 착지를 적으면 지운다 — 기계가 연결 안 됨이면 유지, hold·rm·sent와 따로.
@@ -122,7 +126,7 @@ qset() {  # qset <레인> <상태> <기계> <주소> <남긴것> [<먼저>] [<�
   [ $qr_ -le 1 ] || return 2   # awk가 못 읽음 — 대기열을 그대로 둔다
   mv "$Q.tmp" "$Q" && return $qr_
 }
-# 줄 ID(17칸): _add·_put이 매긴다(r<초>-<pid>-<난수> — 같은 이름 줄이라도 넣을 때마다 다르다). 16칸까지의 옛 줄은 빈 값
+# 줄 ID(17칸): _add·_inadd가 매긴다(r<초>-<pid>-<난수> — 같은 이름 줄이라도 넣을 때마다 다르다). 16칸까지의 옛 줄은 빈 값
 rowid() { echo "r$(date +%s)-$$-$RANDOM"; }
 pad16() { ROW=("$@"); while [ ${#ROW[@]} -lt 16 ]; do ROW+=(-); done; ROW+=("$(rowid)"); }
 
@@ -131,4 +135,84 @@ thenof() {
   awk -F'\t' '{print $1 "\t" $3}' "$Q" 2>/dev/null | while IFS=$'\t' read -r tn tb; do
     grep -q "^## 이어서: $1 " -- "$tb" 2>/dev/null && { echo "$tn"; break; }
   done
+}
+
+crash() { [ "${HC_FILL_CRASH_AT-}" != "$1" ] || { echo "$1" >>"$DATA/crash.log"; kill -9 $$; }; }   # 시험: 그 지점에서 죽는다(중단 주입)
+b36() { b_=$1 o_=; while :; do o_=$(printf %s 0123456789abcdefghijklmnopqrstuvwxyz | cut -c $((b_ % 36 + 1)))$o_; b_=$((b_ / 36)); [ $b_ != 0 ] || break; done; printf %s "$o_"; }
+newid() { printf '%s%s-%s' "$1" "$(b36 "$(date +%s)")" "$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | cut -c 1-6)"; }   # newid <머리 글자> (입력이 끝이 있어야 SIGPIPE를 무시한 셸에서도 끝난다)
+flat1() { printf %s "$1" | tr '\t\n' '  '; }
+
+# 받은편지 장부 $DATA/inbox.tsv — 한 줄 = 한 요청(9칸, 탭): 요청ID 레인 되돌릴곳 상태 종류 해시 크기 비고 시각
+#   상태 open(결과 기다림) → deliver(고정본 replies/<요청ID>.md 확정, 공개 기다림) → sent(요청자에 공개됨) · held(다른 결과가 그 자리 — 지휘)
+#   종류 result(레인 보고) · noreport(보고 없이 끝남) · cancel(rm). 비고 legacy = 옛 줄(레인이 옛 보고 경로 reports/<레인>.md에 쓴다)
+# 쓰기는 모두 대기열 잠금 안에서(rm·접수·되돌려 주기가 서로 덮지 않게)
+lget() { awk -F'\t' -v r="$1" '$1==r' "$LED" 2>/dev/null | tail -n 1; }
+lset() {  # lset <요청ID> <칸> <값> [<칸> <값>…]
+  [ "${HC_FILL_Q-}" = 1 ] || { qlock _lset "$@"; return; }
+  ls_r=$1; shift; kv_=
+  while [ $# -ge 2 ]; do kv_="$kv_$1	$(flat1 "${2:--}")	"; shift 2; done   # 빈 값은 -(탭 read가 빈 칸을 뭉개 칸이 밀리지 않게)
+  awk -F'\t' -v OFS='\t' -v r="$ls_r" -v kv="$kv_" -v t="$(date +%Y-%m-%dT%H:%M)" 'BEGIN { n = split(kv, x, "\t") }
+    $1==r { for (i = 1; i + 1 <= n; i += 2) $(x[i]) = x[i+1]; $9 = t } 1' "$LED" >"$LED.tmp" && mv -f "$LED.tmp" "$LED"
+}
+# rmigrate: 옛 받은편지 줄(11칸에 #요청ID 없음)에 결정적 요청 ID(이름·되돌릴곳 해시)를 주고 장부 줄을 만든다(sent는 sent, 그 밖은 open —
+# 이미 떠 있던 줄은 legacy: 옛 보고 경로). 장부가 open이 아닌 대기(wait) 줄은 지운다(rm이 결과를 고정하고 줄을 지우기 전에 죽음). 잠금 안에서
+rmigrate() {
+  [ -s "$Q" ] || return 0
+  awk -F'\t' '$11!="" && $11!="-" && !index($11, "#") {f=1} END {exit !f}' "$Q" && {
+    while IFS=$'\t' read -r -u 9 rn_ rs_ rd_; do
+      rr_=rl$(printf '%s %s' "$rn_" "$rd_" | cksum | awk '{printf "%08x", $1}')
+      [ -n "$(lget "$rr_")" ] || printf '%s\t%s\t%s\t%s\t-\t-\t-\t%s\t%s\n' "$rr_" "$rn_" "$rd_" "$([ "$rs_" = sent ] && echo sent || echo open)" \
+        "$([ "$rs_" = up ] && echo legacy || echo -)" "$(date +%Y-%m-%dT%H:%M)" >>"$LED" || return 1
+      awk -F'\t' -v OFS='\t' -v n="$rn_" -v r="$rr_" '($1 "")==n && !index($11, "#") { $11 = $11 "#" r } 1' "$Q" >"$Q.tmp" && mv -f "$Q.tmp" "$Q" || return 1
+    done 9<<<"$(awk -F'\t' -v OFS='\t' '$11!="" && $11!="-" && !index($11, "#") {print $1, $6, $11}' "$Q")"
+  }
+  [ -s "$LED" ] || return 0
+  awk -F'\t' 'NR==FNR { if ($4 != "open") x[$1] = 1; next } $6=="wait" && index($11, "#") { r = $11; sub(/^.*#/, "", r); if (r in x) f = 1 } END {exit !f}' "$LED" "$Q" || return 0
+  awk -F'\t' 'NR==FNR { if ($4 != "open") x[$1] = 1; next } { r = $11; sub(/^.*#/, "", r) } !($6=="wait" && index($11, "#") && (r in x))' "$LED" "$Q" >"$Q.tmp" &&
+    mv -f "$Q.tmp" "$Q" && echo "대기열 복구: 결과를 고정한 받은편지 대기 줄을 뺐다(rm 중단 뒤)"
+}
+# rfix <요청 ID> <종류> <본문>: 고정본을 배타 생성(이미 있으면 그것이 확정본)하고 장부 deliver(종류·해시·크기). 0 됨
+rfix() {
+  mkdir -p "$DATA/replies" || return 1
+  rf_=$DATA/replies/$1.md
+  if [ ! -e "$rf_" ]; then
+    rt_=$(mktemp "$DATA/replies/.fix.XXXXXX") || return 1
+    printf '%s\n' "$3" >"$rt_" && { ln "$rt_" "$rf_" 2>/dev/null; rm -f "$rt_"; }
+    [ -e "$rf_" ] || return 1
+  fi
+  crash after-reply-fix
+  lset "$1" 4 deliver 5 "$2" 6 "$(shasum -a 256 "$rf_" | cut -d ' ' -f 1)" 7 "$(wc -c <"$rf_" | tr -d ' ')"
+}
+# 대기열 잠금 안에서 부르는 것들(qlock _rmx·_inadd·_rm)
+q_rmx() {  # q_rmx <이름> <상태>: 그 줄이 그 상태일 때만 뺀다(감사 줄 정리 — 그 사이 뜬 줄은 그대로). 없으면 1
+  awk -F'\t' -v n="$1" -v s="$2" '($1 "")==n && $6==s {f=1} END {exit !f}' "$Q" 2>/dev/null || return 1
+  awk -F'\t' -v n="$1" -v s="$2" '!(($1 "")==n && $6==s)' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"
+}
+q_inadd() {  # q_inadd <이름> <프로젝트> <지시문> <선행> <기계제한> <우선> <되돌릴곳> <요청ID>: 대기열 줄과 장부 open을 한 잠금에서(멱등)
+  ex=$(awk -F'\t' -v n="$1" '($1 "")==n {print ($11 == "" ? "-" : $11); exit}' "$Q" 2>/dev/null)
+  if [ -n "$ex" ]; then [ "$ex" = "$7#$8" ] || die "이미 대기열에 있다(다른 요청): $1"; ia=HAD
+  else pad16 "$1" "$2" "$3" "$4" "$5" wait - - - "$(date +%Y-%m-%dT%H:%M)" "$7#$8" - "$6"; (IFS=$'\t'; printf '%s\n' "${ROW[*]}") >>"$Q" || exit 1; ia=ADDED; fi
+  [ -n "$(lget "$8")" ] || printf '%s\t%s\t%s\topen\t-\t-\t-\t-\t%s\n' "$8" "$1" "$7" "$(date +%Y-%m-%dT%H:%M)" >>"$LED" || exit 1
+  echo "$ia"
+}
+q_rm() {  # q_rm <이름>: 받은편지 줄은 결과가 아직 없으면 취소문을 고정해 요청자에게 간다(결과가 먼저 고정됐으면 그 결과가 간다)
+  awk -F'\t' -v n="$1" '($1 "")==n {f=1} END {exit !f}' "$Q" 2>/dev/null || die "대기열에 없다: $1"
+  rmigrate || die "받은편지 줄 옮기기 실패"
+  rc11=$(awk -F'\t' -v n="$1" '($1 "")==n {print $11; exit}' "$Q")
+  case $rc11 in *'#'*) rrid=${rc11##*#}
+    [ "$(lget "$rrid" | cut -f 4)" != open ] || rfix "$rrid" cancel "결과: 실패 취소 — hc-fill rm $(date +%Y-%m-%dT%H:%M)" || die "취소 결과를 두지 못했다: $1"
+    crash rm-after-cancel ;; esac
+  awk -F'\t' -v n="$1" '($1 "")!=n' "$Q" >"$Q.tmp" && mv "$Q.tmp" "$Q"
+}
+anote() {  # anote <레인>: ls 비고의 자동 감사 상태(그 레인의 마지막 감사 차수)
+  awk -F'\t' -v n="$1" -v fin="$(conf audit_final)" 'NF >= 17 && ($2 "")==n { r = $3; s = $8; f = $9; v = $10; g = 1 }
+    NF >= 5 && NF < 17 && ($1 "")==n { r = $3; f = $4; s = "old"; g = 1 } END {
+    if (!g) print "자동 감사(완료 기다림)"
+    else if (s == "opening" || s == "queued") print "감사 중(" r "번째)"
+    else if (s == "deliver") print (v == "pass" ? "감사 통과" : "감사 지적 " f "번째") " — 수거 기다림"
+    else if (s == "taken") print (v == "pass" ? "감사 통과 받음" (fin != "" ? "(최종 대기)" : "") : "감사 지적 " f "번째")
+    else if (s == "superseded") print "새 완료 — 다음 감사 기다림"
+    else if (s == "nosha" || s == "escalate:nosha") print "지휘로 넘김(완료 sha 없음)"
+    else if (s == "coord" || s ~ /^escalate:/) print "지휘로 넘김"
+    else print "옛 감사 기록" }' "$DATA/audit.tsv" 2>/dev/null
 }

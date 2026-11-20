@@ -17,7 +17,7 @@ emit() {
   # ponytail: 늘기만 하는 파일(사건마다 한 줄) — 커지면 since 바닥보다 오래된 줄을 잘라 낸다
   # sent에는 이 watch가 주인인 사건만 적는다: 주인 모름(-)·주인 사라짐 사건은 다른 지휘 watch도 자기 커서로 한 번씩 보내게(wfilter)
   if [ $ec = watch ]; then
-    s_=$(printf '%s\n' "$1" | while IFS= read -r l_; do [ "$(owner "$(printf '%s\n' "$l_" | cut -f3)")" != "${wto##*/}" ] || printf '%s\n' "$l_"; done |
+    s_=$(printf '%s\n' "$1" | while IFS= read -r l_; do [ "$(evowner "$l_")" != "${wto##*/}" ] || printf '%s\n' "$l_"; done |
       LC_ALL=C awk -F'\t' "$evkey$nkf"'{ print nk(key()) }')
     [ -z "$s_" ] || printf '%s\n' "$s_" >>"$evdir/sent" || echo "hc-lane $ec: 보냄 표시를 쓰지 못했다: $evdir/sent" >&2
   fi
@@ -32,7 +32,7 @@ emit() {
 #  보낼지는 「주인이 나(또는 모름·사라짐) + sent·내 커서에 없음」(앞의 사건 awk가 거름) watch 자신의 알림 줄(hc-lane-wait)은 늘 보냄.
 #  확인은 이 부름 안에서 지휘마다 한 번(hc get)
 wfilter() {
-  w0_=${wto##*/} occ_=
+  w0_=${wto##*/} occ_= orc_=
   printf '%s\n' "$1" | while IFS= read -r l_; do
     [ -n "$l_" ] || continue
     a_=$(printf '%s\n' "$l_" | cut -f3) n_=$(printf '%s\n' "$l_" | cut -f4)
@@ -40,8 +40,23 @@ wfilter() {
     # 아홉째 칸(report --to): 받을 지휘를 정한 사건은 그 지휘들의 watch만(주인 판정 안 함)
     t_=$(printf '%s\n' "$l_" | cut -f9)
     if [ -n "$t_" ] && [ "$t_" != - ]; then case ",$t_," in *",$w0_,"* | *"/$w0_,"*) printf '%s\n' "$l_" ;; esac; continue; fi
-    o_=$(owner "$a_")
+    o_=$(evowner "$l_")
     [ "$o_" != - ] || { printf '%s\n' "$l_"; continue; }
+    # 11칸에 지휘 실행(<주소>@<created_ms>)이 실렸으면 그 주소의 지금 터미널이 그 실행일 때만 주인(주소를 새 지휘가 쥐었으면 주인 사라짐).
+    # 못 읽으면(hc get 실패) 모름 — 그 지휘 몫으로 두고 보내지 않는다(지금 coord_check 모름과 같은 쪽)
+    om_=$(printf '%s\n' "$l_" | cut -f11 -s); case $om_ in *@*) om_=${om_##*@} ;; *) om_= ;; esac
+    if [ -n "$om_" ]; then
+      case " $orc_ " in *" $o_="*) oc_=${orc_##*" $o_="}; oc_=${oc_%% *} ;;
+        *) og_=$(capt 10 hc get "$o_" --json </dev/null 2>&1)
+           if printf '%s\n' "$og_" | grep -q '"state" *: *"live"'; then
+             oc_=$(printf '%s\n' "$og_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1); oc_=${oc_:-unk}
+           elif printf '%s\n' "$og_" | grep -Eq '"kind" *: *"not_found"|"address" *:'; then oc_=gone
+           else oc_=unk; fi
+           orc_="$orc_ $o_=$oc_" ;;
+      esac
+      [ "$oc_" != unk ] || continue
+      [ "$oc_" = "$om_" ] || { prevseen "$a_" "$l_" "$o_" || printf '%s\n' "$l_"; continue; }
+    fi
     [ "$o_" != "$w0_" ] || { prevseen "$a_" "$l_" "$o_" || printf '%s\n' "$l_"; continue; }
     case " $occ_ " in *" $o_=0 "*) r_=0 ;; *" $o_=1 "*) r_=1 ;; *" $o_=2 "*) r_=2 ;; *) coord_check "$o_"; r_=$?; occ_="$occ_ $o_=$r_" ;; esac
     [ $r_ = 1 ] || continue
@@ -71,6 +86,17 @@ owner() {
   [ -n "$o_" ] && [ "$o_" != - ] || o_=$(printf '%s\n' "$pmap" | awk -F'\t' -v a="$1" '$1 == a { print $2; exit }')
   o_=${o_:--}; [ "$o_" = - ] || o_=${o_##*/}
   printf %s "$o_"
+}
+# evowner <사건 줄>: 그 사건의 주인 지휘(fill-handoff-integrity). 11칸(보고 때의 HC_LANE_OWNER)이 있으면 그것(* = 주인 없음 → -),
+# 없거나 -이면 레인 기록으로(owner). 레인 기록에 그 주소의 주인이 둘 이상(주소 재사용)이고 사건에 11칸이 없으면 어느 쪽 사건인지
+# 모른다 — 지금 주인에게 귀속하지 않고 -(모든 지휘가 받음, 놓치지 않는 쪽)
+evowner() {
+  e11_=$(printf '%s\n' "$1" | cut -f11 -s)
+  case $e11_ in '*') printf %s -; return ;; ''|-) ;; *) e11_=${e11_%%@*}; printf %s "${e11_##*/}"; return ;; esac
+  e3_=$(printf '%s\n' "$1" | cut -f3)
+  [ "$(awk -F'\t' -v a="$e3_" '$1 == a && $3 != "-" && $3 != "" { o[$3] = 1 } END { n = 0; for (k in o) n++; print n }' "$evdir/lanes.tsv" 2>/dev/null)" -le 1 ] ||
+    { printf %s -; return; }
+  owner "$e3_"
 }
 # wsend <글>: 지휘 터미널에 붙여 넣고 Enter. 사람이 쓰던 초안이 있으면 hc가 기다리니 60초 상한(넘으면 실패 — 다음 바퀴에 다시)
 # 보내기 전마다 coord_check: 지휘 정보와 다르거나 없으면 보내지 않고(남의 터미널 send 0) 「지휘 없음」을 남기고 끝낸다 — 커서에 안
@@ -260,4 +286,67 @@ early_wait_cmd() {
   done
   [ $bad_ = 0 ] || return 1
   echo "선행이 살아 진행 중 — 기한이 지나도 계속 기다린다"
+}
+# ---- 자동 감사 판정 수거(fill-handoff-integrity) ----
+# hc-fill은 레인 기계 ${HC_FILL_VERDICTS:-~/.local/share/hc-fill/verdicts}/<레인>/<aid>.md(키<탭>값: aid lane run sha verdict report
+# round base)를 두고 hc send로 깨우기만 한다(몇 번 가도 무해). 판정 하나에 표시 파일 <aid>.ack 하나 — 먼저 만든 쪽만 이긴다(ln):
+#   taken(지적을 받음) · landing<탭>시각<탭>실행<탭>patch-id(통과 착지를 시작) · void(hc-fill이 취소). 통과 착지가 끝나면 <aid>.done.
+# 실행은 <기계 접두 없는 터미널>@<hc get created_ms>(hc-fill이 띄운 뒤 같은 값을 적는다. $HC_LANE_JOB을 주면 그 값).
+# 지시의 run이 이 실행이 아니면 손대지 않는다
+vmyrun() {  # 이 터미널의 실행 ID를 vme에. 모르면 1
+  vme=${HC_LANE_JOB-}; [ -z "$vme" ] || return 0
+  [ -n "${HC_TERMINAL_ID-}" ] || return 1
+  vc_=$(capt 10 hc get "$HC_TERMINAL_ID" --json </dev/null 2>/dev/null | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+  [ -n "$vc_" ] || return 1
+  vme=${HC_TERMINAL_ID##*/}@$vc_
+}
+vload() {  # vload <레인> <aid>: 지시를 읽어 vf va vr vs vv vp vb vo, 표시 vx·끝 vdn. 1 없음, 2 꼴 틀림
+  case $1$2 in *[!A-Za-z0-9_-]*|'') return 2 ;; esac
+  vd=${HC_FILL_VERDICTS:-$HOME/.local/share/hc-fill/verdicts}/$1 vf=$vd/$2.md vx=$vd/$2.ack vdn=$vd/$2.done
+  [ -f "$vf" ] || return 1
+  vget() { awk -F'\t' -v k="$1" '$1 == k { print $2; exit }' "$vf"; }
+  va=$(vget aid) vr=$(vget run) vs=$(vget sha) vv=$(vget verdict) vp=$(vget report) vb=$(vget base) vo=$(vget round)
+  [ "$va" = "$2" ] && [ -n "$vr" ] && [ ${#vs} = 40 ] || return 2
+  case $vs in *[!0-9a-f]*) return 2 ;; esac
+  case $vv in pass|fix) ;; *) return 2 ;; esac
+  case ${vb:-main} in *[!A-Za-z0-9_./-]*) return 2 ;; esac
+}
+vmark() {  # vmark <표시 글>: 표시를 배타적으로 만든다. 0 만듦, 1 이미 있음(누군가 먼저), 2 실패
+  vt_=$(mktemp "$vd/.ack.XXXXXX") || return 2
+  printf '%s\n' "$1" >"$vt_" || { rm -f "$vt_"; return 2; }
+  if ln "$vt_" "$vx" 2>/dev/null; then rm -f "$vt_"; return 0; fi
+  rm -f "$vt_"; [ -e "$vx" ] && return 1; return 2
+}
+vstate() { [ -e "$vx" ] || { echo none; return; }; cut -f1 "$vx" | head -n 1; }   # none|taken|landing|void
+# verdict <aid>: 그 판정 하나만 연다. 통과는 아무것도 쓰지 않고 착지 줄(land --verdict)을 찍는다 — 착지가 시작 표시를 남긴다.
+# 지적은 taken을 남기고 고칠 일을 찍는다. HEAD가 승인 sha가 아니면 아무것도 안 쓰고 「지금 커밋으로 완료」. hc get·git 실패는 종료 75
+verdict_cmd() {
+  vn=${HC_LANE-} vaid=
+  while [ $# -gt 0 ]; do case $1 in --name) val "$@"; vn=$2; shift 2 ;; -h|--help) usage ;; -*) die "verdict: 알 수 없는 인자: $1" ;; *) [ -z "$vaid" ] || die "verdict: 판정 ID는 하나: $1"; vaid=$1; shift ;; esac; done
+  [ -n "$vaid" ] || { echo "hc-lane verdict: 판정 ID를 준다(hc-fill이 깨운 글의 「판정 <ID>」): hc-lane verdict <ID>" >&2; exit 2; }
+  case $vn in ''|*[!A-Za-z0-9_-]*) echo "hc-lane verdict: 레인 이름이 없거나 이상하다(\$HC_LANE 또는 --name): $vn" >&2; exit 2 ;; esac
+  vload "$vn" "$vaid"; case $? in 1) echo "hc-lane verdict: 판정 $vaid 가 없다($vf)" >&2; exit 1 ;; 2) echo "hc-lane verdict: 판정 파일 꼴이 틀렸다: $vf — 지휘에 알린다(hc-lane report 막힘)" >&2; exit 1 ;; esac
+  vmyrun || { echo "hc-lane verdict: 이 터미널의 실행을 못 읽었다(\$HC_LANE_JOB·hc get) — 아무것도 안 했다, 다시 부른다" >&2; exit 75; }
+  [ "$vr" = "$vme" ] || { echo "hc-lane verdict: 판정 $vaid 는 다른 실행($vr)의 것 — 손대지 않았다(이 실행 $vme)"; exit 1; }
+  case $(vstate) in
+    void) echo "판정 $vaid 는 hc-fill이 취소했다 — 아무것도 하지 않는다. 다음 지시를 기다린다"; return 0 ;;
+    landing) [ -e "$vdn" ] && { echo "판정 $vaid: 이미 착지함($(cut -f2 "$vdn" | cut -c 1-8))"; return 0; }
+      echo "판정 $vaid: 착지를 시작했다 — 같은 착지 줄을 다시: hc-lane land ${vb:-main} --verdict $vaid"; return 0 ;;
+    taken) echo "이미 받음 $vaid ($(tr '\t' ' ' <"$vx"))"
+      echo "감사 지적 ${vo:+${vo}번째 }$vaid — ${vs}. ${vp}를 읽고 높음·중간을 고친 뒤 다시 검증하고 hc-lane report 완료 <새 sha>, 그리고 기다린다"; return 0 ;;
+  esac
+  vh=$(git rev-parse --verify -q HEAD) || { echo "hc-lane verdict: HEAD를 못 읽었다(git 실패) — 아무것도 안 했다, 작업 트리에서 다시 부른다" >&2; exit 75; }
+  if [ "$vs" != "$vh" ]; then
+    echo "판정 $vaid 는 ${vs:0:8}의 것인데 HEAD가 ${vh:0:8} — 착지·고침 안 한다. 지금 커밋으로 hc-lane report 완료 ${vh:0:8} 를 부르고 기다린다"; return 0
+  fi
+  if [ "$vv" = pass ]; then
+    echo "감사 통과 ${vo:+${vo}번째 }$vaid — ${vs}. 착지: 이 작업 트리에서 hc-lane land ${vb:-main} --verdict $vaid (run 지시문의 착지 줄 대신 이 줄), 그 뒤 hc-lane report 착지 ${vs:0:8}"
+    return 0
+  fi
+  vmark "taken$tab$(utc)$tab$vme"; case $? in 2) echo "hc-lane verdict: 표시를 두지 못했다 — 다시 부른다" >&2; exit 75 ;; esac
+  case $(vstate) in
+    void) echo "판정 $vaid 는 hc-fill이 취소했다 — 아무것도 하지 않는다"; return 0 ;;
+    taken) echo "감사 지적 ${vo:+${vo}번째 }$vaid — ${vs}. ${vp}를 읽고 높음·중간을 고친 뒤 다시 검증하고 hc-lane report 완료 <새 sha>, 그리고 기다린다" ;;
+    *) echo "hc-lane verdict: 표시가 예상 밖이다($(vstate)): $vx — 지휘에 알린다" >&2; exit 1 ;;
+  esac
 }

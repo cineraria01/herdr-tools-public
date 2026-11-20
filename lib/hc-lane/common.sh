@@ -65,13 +65,24 @@ usage() {
        hc-lane fetch [--on <기계>] --repo <저장소 경로> [<참조…>]
   fetch         그 기계 저장소에서 git fetch origin [<참조…>]. --on이면 hc exec로, zsh·~/.zshrc가 있으면 그걸 읽은 셸에서
                 (맨 ssh·hc 코어 환경에는 git 자격 도우미 PATH가 없다). 종료 0 받음, 1 실패
-레인 환경: HC_LANE LANE_REPO LANE_WORKTREE LANE_BRANCH LANE_BASE (--read는 HC_LANE LANE_REPO LANE_BASE), HC_LANE_OWNER가 있으면 그것도
-(주인 지휘 — 레인 기록 셋째 칸, 레인 안에서 띄운 하위 레인도 물려받음), HERDR_LAND_PRIORITY가 있으면 그것도(hc-fill이 넣는
+레인 환경: HC_LANE LANE_REPO LANE_WORKTREE LANE_BRANCH LANE_BASE (--read는 HC_LANE LANE_REPO LANE_BASE), HC_LANE_OWNER
+(주인 지휘 — 레인 기록 셋째 칸, 레인 안에서 띄운 하위 레인도 물려받음. 늘 넣는다: 받은 HC_LANE_OWNER → 지휘 터미널에서 띄우면 그 지휘
+→ 모르면 *(주인 없음). report가 사건 11칸에 싣는다), HERDR_LAND_PRIORITY가 있으면 그것도(hc-fill이 넣는
 착지 줄 우선 — 이 레인을 기다리는 대기 줄 수). hc run 라벨 hc-lane=1
        hc-lane early-wait <선행 레인>…   (먼저 띄움 레인의 기다림 블록이 기한 뒤에 부른다)
   early-wait    hc-fill이 이 기계에 써 준 선행 상태(~/.local/share/hc-fill/after.tsv)로 선행마다 「<선행>: <까닭>」. 모두 go이고 기록이
                 15분 안이면 「선행이 살아 진행 중 …」과 종료 0(계속 기다림), 기록 없음·묵음·stop이면 1, 인자 없으면 2
-       hc-lane land [<기본 브랜치>]   (레인 작업 폴더 안에서)
+       hc-lane land [<기본 브랜치>] [--verdict <판정 ID>]   (레인 작업 폴더 안에서)
+  --verdict     hc-fill 자동 감사가 승인한 변경만 착지: 그 판정(~/.local/share/hc-fill/verdicts/<레인>/<ID>.md)이 이 실행의 통과
+                판정이고 처음 부를 때 HEAD가 승인 커밋이어야 한다(아니면 종료 2). 시작 표시(<ID>.ack landing + 승인 변경 patch-id)를 남기고,
+                push 직전 <기준>..HEAD의 patch-id가 같을 때만 push한다(차이가 rebase뿐 — 다르면 종료 2, 새 커밋으로 report 완료).
+                push 응답만 잃었으면 다시 부를 때 끝을 마친다. 끝나면 <ID>.done. hc-fill이 취소한 판정(void)은 종료 2.
+                .claude/herdr-land.sh 위임 경로는 push 관문(hc-lane guard, patchid 판)이 push 범위를 대조한다(관문 없으면 거절)
+       hc-lane verdict <판정 ID> [--name <레인>]   (레인 안에서 — hc-fill이 「감사 판정이 왔다 … 판정 <ID>」로 깨우면)
+  verdict       그 판정 하나를 연다. 이 레인 실행(<터미널>@<created_ms>, $HC_LANE_JOB을 주면 그 값)의 판정이고 HEAD가 승인 커밋일 때:
+                통과는 착지 줄(hc-lane land <기본> --verdict <ID>)만 찍고(착지가 시작 표시를 남긴다), 지적은 <ID>.ack에 taken을 한 번
+                남기고 고칠 일을 찍는다. HEAD가 다르면 아무것도 안 쓰고 「지금 커밋으로 report 완료」. 다른 실행의 판정은 손대지 않는다(종료 1).
+                취소된(void) 판정은 아무것도 안 함. hc get·git 실패는 아무것도 안 쓰고 종료 75(다시 부른다)
   land          착지: .claude/herdr-land.sh가 있으면 HERDR_LAND=1 HERDR_LAND_PRIORITY=<수, 없거나 숫자 아니면 0> bash .claude/herdr-land.sh <기본>. 없으면
                 fetch → rebase origin/<기본> → .claude/herdr-verify.sh(없으면 실패, push 안 함) →
                 HERDR_LAND=1 git push origin HEAD:<기본>(fast-forward만, 거절이면 fetch부터 HERDR_LAND_TRIES번, 기본 5)
@@ -141,10 +152,13 @@ usage() {
                 선행이 들어가면 hc-fill이 그 가지에서 다시 띄운다(--resume). 종료 0 주차, 1 실패(같은 줄을 다시), 3 원격 없음(기다림으로)
   --resume      (띄울 때) 새 작업 트리를 origin/<기본>이 아니라 주차한 가지 origin/lane/<브랜치>에서 만든다(upstream은 origin/<기본>).
                 그 가지가 없으면 띄우지 않는다. 레인은 git rebase origin/<기본> 뒤 이어 간다(hc-fill이 지시문에 적음)
-       hc-lane report <중간|완료|착지|막힘|판정|제출|주차> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]]   (레인 안에서)
+       hc-lane report <중간|완료|착지|막힘|판정|제출|주차> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]] [--key <키>]   (레인 안에서)
   report        이 기계 ${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv에 한 줄을 더한다(지우지 않음):
                 시각(UTC)·기계(HC_LANE_MACHINE, 없으면 hostname)·터미널($HC_TERMINAL_ID)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·
-                그때의 hc turn(터미널 밖이면 -). 옛 7칸 줄도 읽는다.
+                그때의 hc turn(터미널 밖이면 -)·--to(없으면 -)·발행 실행(<터미널>@<hc get created_ms 초>, 모르면 -)·
+                수신 지휘($HC_LANE_OWNER, 없으면 -)·키(없으면 -) — 12칸. 옛 7~9칸 줄도 읽는다.
+                --key: 같은 키(12칸) 줄이 이미 있으면 더하지 않고 「이미 있음」(종료 0). 확인과 더하기는 events.lock 잠금 안에서 한 번
+                (재시도가 사건을 두 번 내지 않게 — hc-fill 지휘 넘김). events.tsv를 못 읽으면 종료 1
                 레인 이름은 --name → $HC_LANE(hc-lane이 띄울 때 넣음) → hc 터미널 이름 → 작업 트리 가지(기본 가지면 -) 순. sha 자리가 sha가 아니면 한 줄로 본다
                 --to: 받을 지휘를 정한다(아홉째 칸) — 그 지휘들의 watch만 보낸다(레인 주인 판정 대신. hc-fill 「놀고 있음」 알림)
        hc-lane watch --to <지휘 주소> [--all | --on <기계>…] [--state <상태,…>] [--since <시각>] [--mine]

@@ -1,14 +1,16 @@
 # hc-lane 함수: report (bin/hc-lane가 읽는다. 함수는 bin/hc-lane 안 원래 정의 순서 그대로)
 
 report_cmd() {
-  rn= st= sha= msg= k=0 to_=
+  rn= st= sha= msg= k=0 to_= key_=
   while [ $# -gt 0 ]; do
-    case $1 in --name) val "$@"; rn=$2; shift 2; continue ;; --to) val "$@"; to_=$2; shift 2; continue ;; -h|--help) usage ;; esac
+    case $1 in --name) val "$@"; rn=$2; shift 2; continue ;; --to) val "$@"; to_=$2; shift 2; continue ;;
+      --key) val "$@"; key_=$2; shift 2; continue ;; -h|--help) usage ;; esac
     k=$((k + 1)); case $k in 1) st=$1 ;; 2) sha=$1 ;; 3) msg=$1 ;; *) msg="$msg $1" ;; esac; shift
   done
   case " $evstates " in *" $st "*) [ -n "$st" ] ;; *) false ;; esac ||
     { echo "hc-lane report: 상태는 $evstates 가운데 하나: ${st:-(없음)}" >&2; exit 2; }
   case $to_ in *[!A-Za-z0-9_.,/-]*) echo "hc-lane report: --to 지휘 주소 글자: $to_" >&2; exit 2 ;; esac
+  case $key_ in *[!A-Za-z0-9_.:/-]*) echo "hc-lane report: --key 글자(A-Za-z0-9_.:/-): $key_" >&2; exit 2 ;; esac
   # 대문자 sha도 sha로(소문자로 적음). 7~40자가 아닌 16진 낱말(DB·CAFE)은 한 줄 칸으로 그대로
   case $sha in
     ''|-) sha=- ;;
@@ -47,12 +49,40 @@ report_cmd() {
     echo "hc-lane report: $sha 는 병합기 큐에 제출만 됐다(lane/$lane) — 착지는 병합기가 사건(착지·막힘 --name $lane)으로 적는다. 아무것도 적지 않음"
     return 0
   fi
-  tail_="$tab${tn:--}${to_:+$tab$to_}"
+  # 10~12칸(fill-handoff-integrity): 10 발행 실행 = <터미널>@<hc get created_ms>(기계 접두 없는 주소 — 주소가 재사용돼도 실행은
+  # 안 겹친다. $HC_LANE_JOB이 있으면 그 값). 모르면 -(터미널 밖·hc get 실패 — 실행을 모르는 완료는 hc-fill이 감사를 열지 않는다).
+  # 11 수신 지휘 = 보고 때의 HC_LANE_OWNER에 @<그 지휘 created_ms>(HC_LANE_OWNER_RUN — hc-lane이 띄울 때 넣음).
+  # 없으면 - = 레인 기록으로 찾음, * = 주인 없음 — 모든 지휘. 12 키(--key, 없으면 -). 9칸 --to는 없어도 -로 적는다(칸 번호가 늘 같게)
+  rk_=${HC_LANE_JOB-}; case $rk_ in *[!a-z0-9~-]*) rk_= ;; esac
+  if [ -z "$rk_" ]; then
+    cm_=$(printf '%s\n' "$g_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+    rk_=-; [ -z "${HC_TERMINAL_ID-}" ] || [ -z "$cm_" ] || rk_=$(bcut 64 "$(flat "${HC_TERMINAL_ID##*/}")")@$cm_
+    [ "$rk_" != - ] || [ -z "${HC_TERMINAL_ID-}" ] ||
+      echo "hc-lane report: 경고 — 발행 실행(10칸)을 못 적었다(hc get created_ms 없음). 완료라면 잠시 뒤 같은 줄을 다시 부른다(실행을 모르는 완료는 자동 감사가 열지 않는다)" >&2
+  fi
+  ow_=${HC_LANE_OWNER:--}; case $ow_ in *[!A-Za-z0-9_./*-]*) ow_=- ;; esac
+  case $ow_ in -|'*') ;; *) case ${HC_LANE_OWNER_RUN-} in ''|*[!0-9]*) ;; *) ow_=$ow_@$HC_LANE_OWNER_RUN ;; esac ;; esac
+  tail_="$tab${tn:--}$tab${to_:--}$tab$rk_$tab$(bcut 64 "$ow_")$tab${key_:--}"
   line="$(utc)$tab$(bcut 64 "$(flat "${m:--}")")$tab$(bcut 64 "$(flat "${HC_TERMINAL_ID:--}")")$tab$(bcut 64 "$(flat "${lane:--}")")$tab$st$tab$(flat "$sha")$tab"
   line=$(bcut $((1000 - ${#tail_})) "$line$(flat "${msg:--}")")$tail_
   mkdir -p "$evdir" || die "report: 폴더를 만들지 못했다: $evdir"
-  # 더하기만 한다(O_APPEND 한 번). ponytail: 늘기만 하는 파일 — 수만 줄이 되면 오래된 줄을 옮겨 자르는 단계를 더한다
-  printf '%s\n' "$line" >>"$evdir/events.tsv" || die "report: 쓰지 못했다: $evdir/events.tsv"
+  if [ -n "$key_" ]; then
+    # --key: 같은 12칸 키 줄이 있으면 더하지 않는다(재시도가 사건을 두 번 내지 않게). 확인과 더하기를 한 잠금 안에서(두 발행자 경합).
+    # 읽기 실패는 「키 없음」이 아니다 — 종료 1
+    r_=$(K=$key_ L=$line F=$evdir/events.tsv lockf -k -t 30 "$evdir/events.lock" sh -c '
+      if [ -e "$F" ]; then
+        [ -r "$F" ] || exit 3
+        awk -F"\t" -v k="$K" "NF >= 12 && \$12 == k { f = 1 } END { exit !f }" "$F"; r=$?
+        [ $r -le 1 ] || exit 3
+        [ $r = 1 ] || { echo HAVE; exit 0; }
+      fi
+      printf "%s\n" "$L" >>"$F" || exit 4
+      echo ADDED') || die "report: 키 확인·쓰기 실패(--key $key_): $evdir/events.tsv"
+    [ "$r_" != HAVE ] || { echo "$(printf %s "$line" | cut -f4) $st: 이미 있음(키 $key_)"; return 0; }
+  else
+    # 더하기만 한다(O_APPEND 한 번). ponytail: 늘기만 하는 파일 — 수만 줄이 되면 오래된 줄을 옮겨 자르는 단계를 더한다
+    printf '%s\n' "$line" >>"$evdir/events.tsv" || die "report: 쓰지 못했다: $evdir/events.tsv"
+  fi
   echo "$(printf %s "$line" | cut -f4) $st: $sha $(printf %s "$line" | cut -f7)"
 }
 # pick: --all이면 hc machine ls에서 연결된 기계를 ems에, 아닌 기계를 unk에. --on으로 준 기계는 늘 ems에
@@ -433,7 +463,8 @@ ev_cmd() {
         if (nk("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
         $5 = "멈춤"; $6 = "-"; $7 = "뜻밖의 종료(정리됨) " $7 }
       $5 != "멈춤" { lrep($5, $6, NF >= 8 ? $8 : "-", t2) }
-      ENVIRON["MY"] != "" && ($3 in par) && par[$3] != "-" && par[$3] != ENVIRON["MY"] && substr(par[$3], length(par[$3]) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"] { next }
+      ENVIRON["MY"] != "" && NF >= 11 && $11 != "-" { if ($11 != "*" && $11 != ENVIRON["MY"] && substr($11, length($11) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"]) next }
+      ENVIRON["MY"] != "" && (NF < 11 || $11 == "-") && ($3 in par) && par[$3] != "-" && par[$3] != ENVIRON["MY"] && substr(par[$3], length(par[$3]) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"] { next }
       $1 >= ENVIRON["S"] && $1 >= fl && (ENVIRON["W"] == ",," || index(ENVIRON["W"], "," $5 ",")) && !(nk(key()) in seen) && !(nk(key()) in done) { done[nk(key())] = 1; print }' |
       sort -s -t "$tab" -k1,1)
     if [ -n "$new" ] && emit "$new"; then [ $ec = watch ] || return 0; idle0=$(date +%s); fi
