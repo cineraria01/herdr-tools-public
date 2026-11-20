@@ -310,16 +310,26 @@ merge
 t "병합기 멈춤: 종료 1, 막힘 사건 「병합기 멈춤」" '[ $mrc = 1 ] && awk -F"\t" "\$4 == \"merger\" && \$5 == \"막힘\"" "$EV" | grep -Fq "병합기 멈춤" || { cat "$T/merr"; false; }'
 rm -f "$W/m/proj/stray.txt"
 
-# 30. SIGKILL(구조 A·C): 검증 중 병합기만 죽어도 착지 자식이 잠금을 쥐고 끝까지 간다 — 새 병합기는 75(같은 클론을 안 씀, 1차 높음 9),
-#     그 착지가 끝난 뒤 다음 병합기가 일지로 완료 처리(다시 검증 안 함)
+# 30a. 병합기 잠금은 착지·검증 자식에 물리지 않는다 — 검증이 남긴 고아(배경 프로세스)가 살아 있어도 병합기가 끝나면 새 병합기가 바로
+#      잠금을 얻는다(2026-11-20 mini-m6-2: 끊긴 착지의 go 시험 고아가 잠금 fd를 쥐어 새 병합기가 종료 75, 지휘 t1cj)
+lane a l-orph orph.txt orph; land a l-orph
+printf '#!/bin/sh\nsleep 30 >/dev/null 2>&1 </dev/null &\necho $! >"$T/orph.pid"\nrm -f "$T/vhook.l-orph"\n' >"$T/vhook.l-orph"; chmod +x "$T/vhook.l-orph"
+merge
+lane a l-orph2 orph2.txt orph2; land a l-orph2
+merge
+t "고아: 검증이 남긴 배경 프로세스가 살아 있어도 다음 병합기는 잠금을 얻어 착지(75 아님)" 'mainlog | grep -Fxq l-orph && kill -0 "$(cat "$T/orph.pid")" && [ $mrc = 0 ] && mainlog | grep -Fxq l-orph2 || { echo "rc=$mrc"; cat "$T/merr"; false; }'
+kill "$(cat "$T/orph.pid")" 2>/dev/null
+
+# 30. SIGKILL(구조 A): 검증 중 병합기만 죽으면 잠금은 바로 놓인다(착지 자식이 살아 있어도 — 30a와 같은 까닭, 지휘 t1cj). 살아 있는
+#     착지는 끝까지 가고, 그 뒤 다음 병합기가 일지로 완료 처리(다시 검증 안 함)
 lane a l-kill kill.txt kill; land a l-kill
 # 기다림 상한 3분 — 시험이 꼬여도 검증 손자가 끝없이 남지 않게(2026-11-20 병합기 첫 착지에서 이 줄이 15분 멈췄다)
 printf '#!/bin/sh\n: >"$T/inverify"\ni=0; while [ ! -e "$T/go" ] && [ $i -lt 900 ]; do sleep 0.2; i=$((i + 1)); done\nrm -f "$T/vhook.l-kill"\n' >"$T/vhook.l-kill"; chmod +x "$T/vhook.l-kill"
 (cd "$W/m/proj" && exec "$LANE" merger --repo "$W/m/proj" --once) >"$T/mk.out" 2>&1 & mkp=$!
 for i in $(seq 300); do [ -e "$T/inverify" ] && break; sleep 0.1; done
 kill -9 "$mkp"; wait "$mkp" 2>/dev/null
-merge
-t "SIGKILL: 착지 자식이 살아 있으면 새 병합기는 75" '[ -e "$T/inverify" ] && [ $mrc = 75 ] || { cat "$T/merr"; cat "$T/mk.out"; false; }'
+perl -e 'use Fcntl qw(:flock); open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 75; exit 0' "$T/.local/state/hc-lane/merger.$ck.lock"; krc=$?
+t "SIGKILL: 착지 자식이 살아 있어도 병합기 잠금은 바로 놓인다" '[ -e "$T/inverify" ] && [ ! -e "$T/go" ] && [ $krc = 0 ] || { echo "krc=$krc"; cat "$T/mk.out"; false; }'
 : >"$T/go"
 for i in $(seq 300); do mainlog | grep -Fxq l-kill && break; sleep 0.1; done
 for i in $(seq 100); do merge; [ $mrc != 75 ] && break; sleep 0.1; done

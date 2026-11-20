@@ -118,9 +118,9 @@ usage() {
                 들어가면 제출 기록을 refs/merge-done/<레인>으로 옮기고 lane 가지를 지운 뒤 「착지」 사건(--name <레인>, 제출 때 지휘가
                 있으면 --to, 레인 터미널이 살아 있으면 hc send). 실패면 표식을 refs/merge-failed/<이름>으로 옮기고
                 (lane 가지는 둠) 「막힘」 사건(까닭·로그 …/hc-lane/merger-logs/). 사건은 보낼 함(hc-merger/out)을 거쳐 끊겨도 다음
-                바퀴가 보내고, 한 제출에 한 번만(사건·일지에 「제출 ID <ID>」 열쇠가 이미 있으면 안 적음). 잠금은 잠금 파일의 flock(착지 자식까지 물려받음). GOCACHE가 없으면
+                바퀴가 보내고, 한 제출에 한 번만(사건·일지에 「제출 ID <ID>」 열쇠가 이미 있으면 안 적음). 잠금은 잠금 파일의 flock(준비 훅·착지 자식에는 안 물림 — 병합기가 죽으면 바로 놓임). GOCACHE가 없으면
                 ~/.cache/go-build. 빈 바퀴는 --tick초(기본 30) 쉼, --once는 큐가 빌 때까지(원격 오류·일시 실패로 남긴 바퀴면 75).
-                전용 클론 = 레인 작업 트리를 두지 않는 클론. 종료 75 이미 돎(또는 그 착지가 아직 돎)
+                전용 클론 = 레인 작업 트리를 두지 않는 클론. 종료 75 이미 돎
        hc-lane gc [--on <기계>] [--dry-run] [--integ[=<접두>]] [--remote-branches] [--min-age <시간>] --repo <저장소 경로>
   gc            끝난 레인 정리: 연결된 작업 폴더마다 HEAD가 origin/<기본>에 다 들어갔고(조상이거나 git cherry에 + 없음)
                 깨끗하고(추적 변경·untracked 없음, 무시된 보관물 .qa/ 없음) 그 폴더를 cwd로 쓰는 hc 터미널이 없고
@@ -1417,9 +1417,11 @@ merger_cmd() {
   # 아니다, 2단계 2026-11-20 지휘 t1cj). 새 임시 작업 트리의 준비 훅(LANE_REPO)은 이 클론을 메인 폴더로 본다
   mtop_=$top
   mkdir -p "$evdir" || die "merger: 상태 폴더를 만들지 못했다: $evdir"
-  # 잠금 = 이 셸의 열린 파일(fd 19)에 건 flock(구조 C, 검증 잠금 단순판과 같은 꼴): 착지 자식·검증 손자까지 같은 열린 파일을 물려받아
-  # 트리가 다 끝나야 풀린다 — 병합기만 SIGKILL돼도 살아 있는 착지와 새 병합기가 같은 클론을 쓰지 않는다(1차 높음 9). pid를 보지 않는다.
-  # macOS엔 flock 명령이 없어 perl의 flock(2)로 같은 fd를 잠근다
+  # 잠금 = 이 셸의 열린 파일(fd 19)에 건 flock(구조 C). pid를 보지 않는다. macOS엔 flock 명령이 없어 perl의 flock(2)로 같은 fd를 잠근다.
+  # 오래 사는 자식(준비 훅·착지·빈 바퀴 sleep)은 fd 19를 닫고 부른다 — 병합기가 죽으면 잠금도 바로 놓인다(자식이 살아 있어도). 물려주면
+  # 끊긴 착지의 검증이 남긴 고아(go 시험의 sleep 등, ppid 1)가 잠금을 쥐어 새 병합기가 75로 끝났다(2026-11-20 mini-m6-2, 지휘 t1cj —
+  # 옛 1차 높음 9의 「착지가 끝날 때까지 쥠」을 버림. 살아 남은 옛 착지와 새 병합기가 겹쳐도 기본 브랜치·큐 lease CAS가 지킨다)
+  # ponytail: 짧은 git 자식은 그대로 물려받음 — ssh ControlPersist처럼 오래 남는 손자가 생기면 그 호출에도 19>&-
   lk=$evdir/merger.$(ckey "$top").lock
   # 먼저 닫는다: macOS bash 3.2는 이미 열린 fd 19에 exec 19>>파일을 해도 fd를 바꾸지 않는다 — 다른 병합기 아래(그 착지가 돌린 시험 등)에서
   # 뜨면 물려받은 바깥 잠금(같은 열린 파일이라 flock도 성공)을 쥐고 자기 잠금은 비운 채 돌았다(2026-11-20 병합기 첫 착지 15분 멈춤)
@@ -1429,7 +1431,7 @@ merger_cmd() {
   else perl -e 'use Fcntl qw(:flock); open(my $f, ">&=", 19) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 75; exit 0'; lr_=$?; fi
   case $lr_ in
     0) ;;
-    75) echo "hc-lane merger: 이 클론의 병합기(또는 그 착지)가 아직 돈다 — 잠금 $lk" >&2; exit 75 ;;
+    75) echo "hc-lane merger: 이 클론의 병합기가 아직 돈다 — 잠금 $lk" >&2; exit 75 ;;
     *) die "merger: 잠금을 걸지 못했다(종료 $lr_): $lk" ;;
   esac
   mgrun_=1   # 여기부터 die는 막힘 사건도 남긴다
@@ -1454,7 +1456,7 @@ merger_cmd() {
     if [ $mo_ = 1 ] && [ -z "$mq_" ]; then [ -z "$mer_" ] || exit 75; break; fi
     # 쉼 값은 매번 숫자인지 본다(아니면 30) — 어떤 함수가 덮어도 쉬지 않고 원격을 두드리지 않게
     case $mtick_ in ''|*[!0-9]*) mtick_=30 ;; esac
-    [ -n "$mq_" ] || sleep "$mtick_"
+    [ -n "$mq_" ] || sleep "$mtick_" 19>&-
   done
 }
 # 한 바퀴. mq_ = 처리한 큐 참조(없거나 원격 오류로 쉬면 빈 값), mer_ = 원격 오류로 못 본 것이 있음.
@@ -1604,10 +1606,10 @@ mround() {
   # ponytail: 도구 이름 하나로 거름, 준비 훅이 다른 색인 길을 쓰면 그때 LANE_MERGER 같은 표시로
   mpath_=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r d_; do [ -x "$d_/codebase-memory-mcp" ] || printf '%s:' "$d_"; done); mpath_=${mpath_%:}
   if [ -f "$mwt_/.claude/herdr-setup.sh" ] &&
-    ! (cd "$mwt_" && PATH=$mpath_ LANE_REPO=$mtop_ LANE_BASE=$base exec bash .claude/herdr-setup.sh) >>"$lgf_" 2>&1 </dev/null; then
+    ! (cd "$mwt_" && PATH=$mpath_ LANE_REPO=$mtop_ LANE_BASE=$base exec bash .claude/herdr-setup.sh) >>"$lgf_" 2>&1 </dev/null 19>&-; then
     echo "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패" >>"$lgf_"; lr_=75
   else
-    (cd "$mwt_" && HERDR_MERGER=1 HC_LANE=$br_ HERDR_LAND_PUSH_EXTRA="$ex_" exec "$self_" land "$base") >>"$lgf_" 2>&1 </dev/null; lr_=$?
+    (cd "$mwt_" && HERDR_MERGER=1 HC_LANE=$br_ HERDR_LAND_PUSH_EXTRA="$ex_" exec "$self_" land "$base") >>"$lgf_" 2>&1 </dev/null 19>&-; lr_=$?
   fi
   ls1_=$(date +%s)
   tail -n 5 "$lgf_"
