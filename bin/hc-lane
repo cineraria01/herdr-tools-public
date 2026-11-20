@@ -154,7 +154,7 @@ case $name in *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) die "--name은 a-z 0-
 [ $cmd != launch ] || [ $steps = 1 ] || [ $# -gt 0 ] || [ -n "$brief" ] || die "-- 뒤에 실행 명령이 없다"
 
 mhook_="기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
-# lverdict_check: <기준>..HEAD의 patch-id가 승인 변경과 같으면 통과. 다르면 경로마다 견줘, 다른 경로가 모두 rerere가 이 승인 착지에서
+# lverdict_check: 현재 기준과 승인 원본을 합친 트리를 후보와 견준다. 다른 경로가 모두 rerere가 이 승인 착지에서
 # 실제로 풀어 색인에 올린 경로(hc-lane-rerere 기록 — rr_ok가 확인한 것만)면 통과하고 LRRN에 그 수(지휘 2026-11-20: rerere 자동
 # 이어가기는 끄지 않는다 — 「리베이스 충돌 없이 빠르게」. 결과는 이어지는 전체 검증이 본다). 그 밖의 차이(새 변경·사라진 변경)는 종료 2
 LRRN=0
@@ -185,15 +185,7 @@ top=$(x git -C "$repo" worktree list --porcelain | sed -n '1s/^worktree //p')
 [ -n "$top" ] || die "git 저장소가 아니다: $repo${on:+ (기계 $on)}"
 repo=$top
 # origin이 없는 저장소는 fetch 없이 로컬 <기본>(main, 없으면 master)이 기준이다
-if x git -C "$repo" remote get-url origin >/dev/null 2>&1; then
-  remote=1
-  base=$(x git -C "$repo" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null)
-  base=${base#origin/}
-else
-  remote=0 base=
-  x git -C "$repo" show-ref -q --verify refs/heads/main || ! x git -C "$repo" show-ref -q --verify refs/heads/master || base=master
-fi
-[ -n "$base" ] || base=main
+repo_defaults "$repo" || die "원격·기본 브랜치 조회 실패: $repo"
 if [ $remote = 1 ]; then bref=refs/remotes/origin/$base blab=origin/$base; else bref=refs/heads/$base blab="로컬 $base"; fi
 plain "$base" || die "기본 브랜치 이름에 쓸 수 없는 글자가 있다: $base"
 if [ $cmd != gc ]; then
@@ -291,12 +283,15 @@ else
   x git -C "$repo" rev-parse -q --verify "$bref^{commit}" >/dev/null || die "$blab 가 없다: $repo"
   [ $dry = 1 ] || [ $remote = 0 ] || ffmain "$repo" "$base"
 fi
-# --resume: 주차한 가지(hc-lane park가 올린 origin/lane/<브랜치>)에서 작업 트리를 만든다 — fetch가 받은 추적 참조
+# --resume: park가 레인 이름으로 올린 원격 가지를 직접 받는다. 일반 fetch는 지워진 가지의 추적 참조를 남길 수 있다.
 wfrom=$bref
 if [ $resume = 1 ]; then
   [ $remote = 1 ] || die "--resume: 원격(origin)이 없는 저장소에는 주차한 가지가 없다: $repo"
-  wfrom=refs/remotes/origin/lane/$branch
-  x git -C "$repo" rev-parse -q --verify "$wfrom^{commit}" >/dev/null || die "--resume: 주차한 가지 origin/lane/$branch 가 없다(hc-lane park 전이거나 지워짐): $repo"
+  wfrom=refs/remotes/origin/lane/$name
+  if [ $dry = 0 ]; then
+    fetchr x git -C "$repo" fetch -q origin "+refs/heads/lane/$name:$wfrom" || die "--resume: 주차한 가지 origin/lane/$name 가 없거나 받지 못했다: $repo"
+  fi
+  x git -C "$repo" rev-parse -q --verify "$wfrom^{commit}" >/dev/null || die "--resume: 주차한 가지 origin/lane/$name 가 없다: $repo"
 fi
 
 # --brief: 지시문(+착지·정리 절차)을 대상 기계 사본 자리에 두고, 실행 명령의 {brief}를 그 경로로(~는 그 기계 집으로 펼친 것)
@@ -332,8 +327,7 @@ lenv_r=
 if [ -n "$lenv_o" ] && [ "$lenv_o" != '*' ]; then
   if [ "$lenv_o" = "${HC_LANE_OWNER-}" ] && [ -n "${HC_LANE_OWNER_RUN-}" ]; then lenv_r=$HC_LANE_OWNER_RUN
   elif [ $dry = 0 ]; then
-    lg_=$(capt 10 hc get "$lenv_o" --json </dev/null 2>/dev/null)
-    ! printf '%s\n' "$lg_" | grep -q '"state" *: *"live"' || lenv_r=$(printf '%s\n' "$lg_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+    lg_=$(capt 10 hc get "$lenv_o" --json </dev/null 2>/dev/null) && lenv_r=$(live_created_ms <<<"$lg_") || lenv_r=
   fi
 fi
 set -- env "HC_LANE_OWNER=${lenv_o:-*}" ${lenv_r:+"HC_LANE_OWNER_RUN=$lenv_r"} "${@:2}"
@@ -403,8 +397,13 @@ else
     esac
     set -- env "HC_LANE_LEASE=$lsha" "${@:2}"   # 레인의 land가 이 값으로 임대를 지운다(main과 같은 원자 push)
   fi
-  out=$(hc run --bg --json $nn --name "$name" --label hc-lane=1 ${hsp:+--label "herdr.space=$hsp"} --cwd "$cwd" ${on:+--on "$on"} "$@") ||
-    die "hc run 실패, 레인을 띄우지 않았다.${wt:+ $(rollback)}${lsha:+ 임대 refs/hc-lanes/$name 은 남겨 둠(떴는지 모름 — 끝났으면 hc-lane lease drop${on:+ --on $on} --repo $(q "$repo") --name $name)}"
+  out=$(hc run --bg --json $nn --name "$name" --label hc-lane=1 ${hsp:+--label "herdr.space=$hsp"} --cwd "$cwd" ${on:+--on "$on"} "$@" 2>&1) || {
+    printf '%s\n' "$out" >&2
+    if jq -es 'length == 1 and (.[0].error.kind == "name_taken" or .[0].error.kind == "spawn_failed")' <<<"$out" >/dev/null 2>&1; then
+      die "hc run이 실행을 거절했다.${wt:+ $(rollback)}${lsha:+ 임대 refs/hc-lanes/$name 은 hc-lane lease show로 확인한다}"
+    fi
+    die "hc run 결과를 확인하지 못했다.${wt:+ 작업 트리 $wt 를 보존했다.}${lsha:+ 임대 refs/hc-lanes/$name 도 보존했다.} hc ls --json으로 실행을 확인한다"
+  }
   addr=$(printf %s "$out" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$addr" ] || printf 'hc-lane: hc run 출력에서 주소를 읽지 못했다(hc ls --json 으로 확인): %s\n' "$out" >&2
   # 레인 기록: 이 레인의 지휘. HC_LANE_OWNER(hc-fill이 대기열에 넣은 지휘를 넘김)가 앞, 아니면 지휘 터미널에서 띄웠을 때 그 지휘.

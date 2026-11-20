@@ -2,14 +2,19 @@
 
 guard_cmd() {
   common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "guard: git 저장소가 아니다: $repo"
-  hp=$(git -C "$repo" config --get core.hooksPath)
+  hp=
+  if [ "$act" != remove ]; then
+    hp=$(git -C "$repo" config --get core.hooksPath)
+    case $? in 0|1) ;; *) die "guard: core.hooksPath 조회 실패" ;; esac
+    remotes=$(git -C "$repo" remote) || die "guard: 원격 목록 조회 실패"
+    if [ -z "$remotes" ]; then
+      echo "guard: 원격이 없는 저장소라 push가 없다. 설치할 것 없음(착지는 hc-lane land가 로컬 <기본>을 fast-forward로 올린다): $repo"
+      return 0
+    fi
+  fi
   f=$common/hooks/pre-push
   st=none
   if [ -e "$f" ] || [ -L "$f" ]; then if grep -Fqx "$gmark" "$f" 2>/dev/null; then st=ours; else st=other; fi; fi
-  if [ -z "$(git -C "$repo" remote)" ] && [ $act != remove ]; then
-    echo "guard: 원격이 없는 저장소라 push가 없다. 설치할 것 없음(착지는 hc-lane land가 로컬 <기본>을 fast-forward로 올린다): $repo"
-    return 0
-  fi
   case $act in
     status)
       case $st in
@@ -22,7 +27,7 @@ guard_cmd() {
     install)
       [ -z "$hp" ] || die "guard: core.hooksPath=$hp 라 $f 는 git이 부르지 않는다. 건드리지 않았다(그 훅 폴더에 연결할지 지휘가 정한다)"
       [ $st != other ] || die "guard: 다른 pre-push 훅이 있다: $f. 덮지 않았다(그 훅에 관문을 이을지 지휘가 정한다)"
-      b=${branch:-$(origin_base "$repo")}
+      b=${branch:-$(origin_base "$repo")} || die "guard: 기본 브랜치 조회 실패"
       plain "$b" || die "guard: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: $b"
       mkdir -p "$common/hooks" || die "guard: 훅 폴더를 만들지 못했다: $common/hooks"
       tmp=$f.hc-lane.$$

@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 LANE=${HC_LANE_BIN:-$here/../bin/hc-lane}
 T=$(mktemp -d "${TMPDIR:-/tmp}/hc-lane-stale.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
-. "$here/isolate.sh"
+. "$here/isolate.sh" || exit 1
 mkdir -p "$T/bin"
 printf '#!/bin/bash\n[ "$1" = ls ] && echo %s\nexit 0\n' "'{\"terminals\":[]}'" >"$T/bin/hc"; chmod +x "$T/bin/hc"
 export PATH="$T/bin:$PATH" HOME="$T" GIT_CONFIG_NOSYSTEM=1 \

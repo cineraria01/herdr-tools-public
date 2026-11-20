@@ -11,7 +11,9 @@ LANE=${HC_LANE_BIN:-}
 [ -f "$LANE" ] || LANE=$here/../hc-lane       # 깔린 사본(~/.local/bin/tests/)
 T=$(mktemp -d "${TMPDIR:-/tmp}/hc-lane-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
-. "$here/isolate.sh"
+isolate_file=$here/../lib/hc-lane/test-isolate.sh
+[ -f "$isolate_file" ] || isolate_file=$here/../../lib/hc-lane/test-isolate.sh
+. "$isolate_file" || exit 1
 W="$T/공백 있는 폴더"   # 모든 저장소를 공백·한글 경로 아래에 둔다
 mkdir -p "$T/bin" "$W"
 # 가짜 hc: run 인자는 $HCLOG, exec 인자는 $HCLOG.exec에 한 줄씩. exec는 -- 뒤 명령을 그 자리에서 돌린다(--on 시험용).
@@ -127,7 +129,7 @@ EOF
 chmod +x "$T/bin/herdr-app"
 ln -s "$LANE" "$T/bin/hc-lane"   # 착지 절차의 hc-lane clean이 이 사본을 쓰게
 export PATH="$T/bin:$PATH" HCLOG="$T/hc.log" HC_LANE_POLL=0.1
-unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_COORD HC_LANE_FILL HC_LANE_LEASE HC_LANE_JOB HERDR_LAND_PRIORITY   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
+unset HC_LANE HC_TERMINAL_ID HC_TERMINAL_SOCKET HC_SCOPE HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HC_LANE_OWNER_RUN HC_LANE_COORD HC_LANE_FILL HC_LANE_LEASE HC_LANE_JOB HERDR_LAND_PRIORITY   # 레인 안에서 돌려도 물려받은 값이 시험을 바꾸지 않게
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 HOME="$T"
 printf 'export HL_ZSHRC=read\ncd /\n' >"$T/.zshrc"   # --on 설정 단계만 읽어야 하고, 안의 cd가 setup 위치를 바꾸면 안 된다
 printf 'export HL_ZPROFILE=read\n' >"$T/.zprofile"     # --on은 로그인 셸(.zprofile의 brew shellenv 등)도
@@ -806,7 +808,7 @@ run --name s-ar --repo "$R" -- true; wt="$R.wt/s-ar"   # 검증 스크립트가 
 ar0=$(git -C "$D/origin.git" rev-parse main); rm -f "$T/ar.log" "$T/vc.log"
 PATH="$T/gs-ar:$PATH" lnd "$wt"
 vc1=$(wc -l <"$T/vc.log" 2>/dev/null | tr -d ' ')
-t "land: rebase는 고정한 기준 SHA(그때 origin/main)로, push는 원격 이름 origin에 후보 SHA:refs/heads/main으로(HEAD·참조 이름·주소가 아니라)" '[ $rc = 0 ] && [ "$(otop)" = s-ar ] && [ "$vc1" = 1 ] && grep -qx "rebase -q $ar0" "$T/ar.log" && m_=$(git -C "$D/origin.git" rev-parse main) && grep -Eqx "push --atomic origin $m_:refs/heads/main $m_:refs/hc-landed/s-ar/[0-9]{10}" "$T/ar.log" || { echo "rc=$rc ar0=$ar0 vc1=$vc1"; cat "$T/ar.log"; cat "$T/err"; false; }'
+t "land: rebase는 고정한 기준 SHA(그때 origin/main)로, push는 원격 이름 origin에 후보 SHA:refs/heads/main으로(HEAD·참조 이름·주소가 아니라)" '[ $rc = 0 ] && [ "$(otop)" = s-ar ] && [ "$vc1" = 1 ] && grep -qx "rebase -q --reapply-cherry-picks $ar0" "$T/ar.log" && m_=$(git -C "$D/origin.git" rev-parse main) && grep -Eqx "push --atomic origin $m_:refs/heads/main $m_:refs/hc-landed/s-ar/[0-9]{10}" "$T/ar.log" || { echo "rc=$rc ar0=$ar0 vc1=$vc1"; cat "$T/ar.log"; cat "$T/err"; false; }'
 # 아스트라 4차 중간 5·5차 중간 2: 이미 반영된 깨끗한 레인을 다시 부르면 검증·push 없이 「이미 들어가 있다」·종료 0 — 검증 횟수는 스크립트가 남긴 수로
 rm -f "$T/ar.log"
 PATH="$T/gs-ar:$PATH" lnd "$wt"
@@ -842,7 +844,7 @@ mkdir -p "$T/gs-st" "$T/gs-lost" "$T/gs-pf" "$T/gs-mb"
 printf '#!/bin/sh\n[ "$1" = status ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gs-st/git"
 printf '#!/bin/sh\nif [ "$1" = push ]; then "%s" "$@" >/dev/null 2>&1; exit 1; fi\nexec "%s" "$@"\n' "$rg_" "$rg_" >"$T/gs-lost/git"   # 들어갔는데 응답이 사라짐
 printf '#!/bin/sh\nm='"'"'%s'"'"'\nif [ "$1" = push ]; then "%s" "$@" >/dev/null 2>&1; : >"$m"; exit 1; fi\ncase $1 in fetch|ls-remote) [ -e "$m" ] && exit 128 ;; esac\nexec "%s" "$@"\n' "$T/gs-pf.mark" "$rg_" "$rg_" >"$T/gs-pf/git"   # 응답 유실 + 다시 볼 ls-remote·fetch도 실패
-printf '#!/bin/sh\n[ "$1" = push ] && exit 1\n[ "$1" = merge-base ] && exit 128\nexec "%s" "$@"\n' "$rg_" >"$T/gs-mb/git"   # push 실패 뒤 견주기 실패
+printf '#!/bin/sh\nm='"'"'%s'"'"'\nif [ "$1" = push ]; then : >"$m"; exit 1; fi\n[ "$1" = merge-base ] && [ -e "$m" ] && exit 128\nexec "%s" "$@"\n' "$T/gs-mb.mark" "$rg_" >"$T/gs-mb/git"   # push 실패 뒤 견주기 실패(push 전 착지 훅 갈래점 조회는 진짜 git — 그 조회가 실패하면 push 전에 멈춘다)
 chmod +x "$T/gs-st/git" "$T/gs-lost/git" "$T/gs-pf/git" "$T/gs-mb/git"
 mklane s-st
 PATH="$T/gs-st:$PATH" lnd "$wt"
@@ -872,9 +874,14 @@ mklane s-pf
 rm -f "$T/gs-pf.mark"
 PATH="$T/gs-pf:$PATH" lnd "$wt"
 t "land: push 응답이 사라지고 다시 볼 fetch도 실패하면 착지·거절로 정하지 않고 「모름」으로 멈춤" '[ $rc != 0 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" || { cat "$T/err"; false; }'
-mklane s-mb; o0=$(git -C "$D/origin.git" rev-parse main)
+mklane s-mb; o0=$(git -C "$D/origin.git" rev-parse main); rm -f "$T/gs-mb.mark"
 PATH="$T/gs-mb:$PATH" lnd "$wt"
-t "land: push 실패 뒤 원격과 견주기(merge-base)가 실패하면 「거절」로 읽어 다시 하지 않고 「모름」으로 멈춤" '[ $rc != 0 ] && [ $rc != 4 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/err"; false; }'
+t "land: push 실패 뒤 원격과 견주기(merge-base)가 실패하면 「거절」로 읽어 다시 하지 않고 「모름」으로 멈춤" '[ -e "$T/gs-mb.mark" ] && [ $rc != 0 ] && [ $rc != 4 ] && grep -Fq 모름 "$T/err" && ! grep -Fq 거절됨 "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/err"; false; }'
+# push 전 착지 훅 갈래점 조회(merge-base)부터 실패하면 push를 시도하지 않고 멈춘다
+mklane s-mb0; o0=$(git -C "$D/origin.git" rev-parse main); mkdir -p "$T/gs-mb0"; rm -f "$T/gs-mb0.mark"
+printf '#!/bin/sh\nif [ "$1" = push ]; then : >"%s"; exit 1; fi\n[ "$1" = merge-base ] && exit 128\nexec "%s" "$@"\n' "$T/gs-mb0.mark" "$rg_" >"$T/gs-mb0/git"; chmod +x "$T/gs-mb0/git"
+PATH="$T/gs-mb0:$PATH" lnd "$wt"
+t "land: push 전 착지 훅 갈래점 조회(merge-base)가 실패하면 push를 시도하지 않고 멈춤" '[ $rc != 0 ] && [ ! -e "$T/gs-mb0.mark" ] && grep -Fq "갈래점" "$T/err" && [ "$(git -C "$D/origin.git" rev-parse main)" = "$o0" ] || { echo "rc=$rc"; cat "$T/err"; false; }'
 # push만 실패(원격은 닿고 그대로) — 원격 기본이 후보 안에 있으니 앞선 다른 push가 아니다: 「push 실패」로 멈추고 다시 하지 않음
 mkdir -p "$T/gs-pn"; printf '#!/bin/sh\n[ "$1" = push ] && exit 1\nexec "%s" "$@"\n' "$rg_" >"$T/gs-pn/git"; chmod +x "$T/gs-pn/git"
 mklane s-pn; o0=$(git -C "$D/origin.git" rev-parse main)
@@ -2870,7 +2877,7 @@ run --name lh-a --repo "$R" -- claude; lh_=$(lref lh-a); wt="$R.wt/lh-a"; (cd "$
 : >"$T/useextra"
 out=$(cd "$wt" && HC_LANE_LEASE=$lh_ "$LANE" land main 2>"$T/err"); rc=$?; rm -f "$T/useextra"
 m_=$(git -C "$D/origin.git" rev-parse main)
-t "herdr-land.sh: HERDR_LAND_PUSH_EXTRA = 「HEAD:refs/hc-landed/<레인>/<초> :refs/hc-lanes/<레인>」, 실으면 표식·임대 지우기가 main과 함께" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Eq "^extra=HEAD:refs/hc-landed/lh-a/[0-9]{10} :refs/hc-lanes/lh-a$" && mrefs lh-a | grep -Fq " $m_" && [ -z "$(lref lh-a)" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "herdr-land.sh: 표식·임대 삭제·소유 SHA를 main과 함께 보냄" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Eq "^extra=HEAD:refs/hc-landed/lh-a/[0-9]{10} :refs/hc-lanes/lh-a --force-with-lease=refs/hc-lanes/lh-a:${lh_}$" && mrefs lh-a | grep -Fq " $m_" && [ -z "$(lref lh-a)" ] || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 run --name lh-b --repo "$R" -- claude; lh_=$(lref lh-b); wt="$R.wt/lh-b"; (cd "$wt" && echo h >lh-b.txt && git add -- lh-b.txt && git commit -qm lh-b -- lh-b.txt)
 out=$(cd "$wt" && HC_LANE_LEASE=$lh_ "$LANE" land main 2>"$T/err"); rc=$?
 m_=$(git -C "$D/origin.git" rev-parse main)

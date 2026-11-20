@@ -3,10 +3,42 @@
 die() {
   printf 'hc-lane: %s\n' "$*" >&2; [ "${cmd-}" != clean ] || cj stopped "$*"
   # 병합기가 멈추면 막힘 사건(감사 land-merge-train-2 중간 4 — main에 쓰는 곳이 하나라 조용히 서면 전체 착지가 선다)
-  [ -z "${mgrun_-}" ] || (mgrun_=; report_cmd 막힘 - "병합기 멈춤: $* (클론 ${top:-?})" --name merger) >/dev/null 2>&1
+  [ -z "${mgrun_-}" ] || (mgrun_=; report_cmd 막힘 - "병합기 멈춤: $* (클론 ${top:-?})" --name merger) >/dev/null 2>&1 18>&- 19>&-
   exit 1
 }
 j() { printf %s "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# 원격과 기본 가지를 같은 조회 결과로 정한다. 조회 오류는 기본값 선택과 구분한다.
+repo_defaults() {
+  local refs
+  x git -C "$1" remote get-url origin >/dev/null 2>&1
+  case $? in
+    0) remote=1
+       refs=$(x git -C "$1" for-each-ref --format='%(symref)' refs/remotes/origin/HEAD) || return 1
+       base=${refs#refs/remotes/origin/}; base=${base:-main} ;;
+    2) remote=0 base=main
+       refs=$(x git -C "$1" for-each-ref --format='%(refname)' refs/heads/main refs/heads/master) || return 1
+       if ! grep -Fxq refs/heads/main <<<"$refs" && grep -Fxq refs/heads/master <<<"$refs"; then base=master; fi ;;
+    *) return 1 ;;
+  esac
+}
+origin_base() { repo_defaults "$1" && printf '%s\n' "$base"; }
+# 병합 커밋은 기본 rebase에서 사라진다. fast-forward면 원본을 쓰고, 새 기준에는 자동으로 재현할 수 있는 병합만 다시 만든다.
+rebase_merge_flag() {
+  local merges merge details
+  merges=$(git rev-list --merges "$1..HEAD") || return 75
+  [ -n "$merges" ] || return 0
+  git merge-base --is-ancestor "$1" HEAD
+  case $? in 0) echo keep; return 0 ;; 1) ;; *) return 75 ;; esac
+  for merge in $merges; do
+    details=$(git show --remerge-diff --no-ext-diff --format=%P --name-only "$merge") || return 75
+    # 부모가 셋 이상이거나, 두 부모를 다시 합친 트리와 다른 경로가 있으면 원래 풀이를 잃을 수 있다.
+    case $details in *' '*' '*|*$'\n'*)
+      lerr "hc-lane land: 병합 커밋 ${merge:0:9}의 풀이를 자동으로 재현할 수 없다. 원본을 보존했다. 새 기준에서 풀이를 확인한 뒤 다시 제출한다"
+      return 2 ;;
+    esac
+  done
+  echo --rebase-merges
+}
 cj() {  # clean 결과 JSON 한 줄(앞에서 멈춰 아직 정하지 않은 값은 빈 값)
   printf '{"clean":"%s","reason":"%s","dry_run":%s,"on":"%s","repo":"%s","worktree":"%s","branch":"%s","base":"%s","teardown":"%s"}\n' \
     "$1" "$(j "${2-}")" "$([ "${dry-0}" = 1 ] && echo true || echo false)" "$(j "${on-}")" "$(j "${repo-}")" "$(j "${wt-}")" \
@@ -231,6 +263,13 @@ cfg() {
 }
 # capt <초> <명령…>: 그 초 안에 안 끝나면 끊는다(perl alarm, 없으면 그냥). 코어가 응답하지 않아도 멈추지 않게
 capt() { if command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @ARGV' "$@"; else shift; "$@"; fi; }
+
+# hc get의 최상위 터미널만 실행의 주인이다. 하위 foreground에도 시각이 있을 수 있다.
+live_created_ms() { jq -er 'select(.state == "live") | .created_ms | numbers | select(. >= 0 and . == floor)' 2>/dev/null; }
+terminal_created_ms() {
+  local info
+  [ -n "$1" ] && info=$(capt 3 hc get "$1" --json </dev/null 2>/dev/null) && live_created_ms <<<"$info"
+}
 
 utc() { if [ $# = 0 ]; then date -u +%Y-%m-%dT%H:%M:%SZ; else date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; fi; }
 flat() { printf %s "$1" | tr '\t\r\n' '   '; }

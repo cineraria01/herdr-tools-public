@@ -4,19 +4,22 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 LANE=${HC_LANE_BIN:-$here/../bin/hc-lane}
+[ -n "${HC_LANE_BIN:-}" ] || [ -f "$LANE" ] || LANE=$here/../hc-lane
 [ -f "$LANE" ] || { echo "hc-lane 없음: $LANE"; exit 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/hc-lane-merger-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
-. "$here/isolate.sh"
+isolate_file=$here/../lib/hc-lane/test-isolate.sh
+[ -f "$isolate_file" ] || isolate_file=$here/../../lib/hc-lane/test-isolate.sh
+. "$isolate_file" || exit 1
 W="$T/공백 있는 폴더"
 mkdir -p "$T/bin" "$W" "$T/vf"
 cat >"$T/bin/hc" <<'EOF'
 #!/bin/bash
 case $1 in
   get) case $2 in
-         t-live) echo '{"foreground":{"name":"node"},"name": "l-live","state":"live"}'; exit 0 ;;
-         box2/t-far) echo '{"name": "l-far","state":"live"}'; exit 0 ;;
-         t-fg) echo '{"foreground":{"name":"l-fg"},"name":"other","state":"live"}'; exit 0 ;;   # 레인 이름은 foreground에만
+         t-live) echo '{"foreground":{"name":"node"},"name": "l-live","state":"live","created_ms":11}'; exit 0 ;;
+         t-far|box2/t-far) echo '{"name": "l-far","state":"live","created_ms":12}'; exit 0 ;;
+         t-fg) echo '{"foreground":{"name":"l-fg"},"name":"other","state":"live","created_ms":13}'; exit 0 ;;   # 레인 이름은 foreground에만
        esac; echo '{"error":{"kind":"not_found"}}' >&2; exit 3 ;;
   ls) echo '{"terminals":[]}' ;;
   send) [ ! -e "$T/hcfail" ] || exit 1; printf '%s\t%s\n' "$2" "$3" >>"$T/hc.send" ;;
@@ -381,12 +384,12 @@ land a l-ut
 t "새 파일: 제출 안 함" '[ $rc = 1 ] && ! qrefs | grep -q l-ut && grep -Fq "새 파일" "$T/err"'
 rm -f "$W/a/proj/stray-new.txt"; land a l-ut; merge
 
-# 36. 기본은 한 건씩(1차 중간 11) — --batch 없이 띄우면 제출 둘에 검증 둘
+# 36. 위에서 HC_LANE_MERGER_BATCH=1로 설정했으므로 제출 둘을 따로 검증한다.
 lane a l-d1 d1.txt d1; land a l-d1
 lane a l-d2 d2.txt d2; land a l-d2
 v0=$(grep -c . "$T/verify.log")
 mout=$(cd "$W/m/proj" && "$LANE" merger --repo "$W/m/proj" --once 2>"$T/merr"); mrc=$?
-t "기본 하나씩: 검증 두 번" '[ $mrc = 0 ] && [ $(( $(grep -c . "$T/verify.log") - v0 )) = 2 ] && [ -z "$(qrefs)" ]'
+t "묶음 크기 1: 검증 두 번" '[ $mrc = 0 ] && [ $(( $(grep -c . "$T/verify.log") - v0 )) = 2 ] && [ -z "$(qrefs)" ]'
 
 # 37. 결과 알림(1차 중간 12): 제출한 레인 터미널이 이 기계에 살아 있고 이름이 맞으면 hc send, 사건은 제출 때 적은 지휘(--to)로
 lane a l-live live.txt live
@@ -442,23 +445,7 @@ mout=$(cd "$W/m/proj" && PATH="$T/fail:$PATH" "$LANE" merger --repo "$W/m/proj" 
 t "복구 중 후보 조회 실패: 일지를 두고 쉼(75), 큐 그대로" '[ $mrc = 75 ] && [ -e "$W/m/proj/.git/hc-merger/cur" ] && qrefs | grep -q l-rv && grep -Fq "후보 가지를 읽지 못했다" "$T/merr" || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 merge
 t "복구 중 후보 조회 실패 뒤: 다음 바퀴가 넣음" 'mainlog | grep -Fxq l-rv && [ -z "$(qrefs)" ] && [ ! -e "$W/m/proj/.git/hc-merger/cur" ] || { cat "$T/merr"; false; }'
-# 중간 3: 착지 뒤 lane·기록을 지우는 push가 실패하면 착지로 적지 않고 일지를 두고 쉰다(큐 표식은 main push가 이미 지웠다)
-printf '#!/bin/sh\ncase " $* " in *" push "*" :refs/heads/lane/l-cf "*) echo "fatal: unable to access" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$rg" >"$T/fail/git"
-lane a l-cf cf.txt cf; land a l-cf
-mout=$(cd "$W/m/proj" && PATH="$T/fail:$PATH" "$LANE" merger --repo "$W/m/proj" --once 2>"$T/merr"); mrc=$?
-t "정리 push 실패: main엔 들었지만 착지 사건 없음·일지 남음·lane 남음(75)" '[ $mrc = 75 ] && mainlog | grep -Fxq l-cf && ! awk -F"\t" "\$4 == \"l-cf\" && \$5 == \"착지\"" "$EV" | grep -q . && [ -e "$W/m/proj/.git/hc-merger/cur" ] && og rev-parse -q --verify refs/heads/lane/l-cf >/dev/null || { echo "rc=$mrc"; cat "$T/merr"; false; }'
-# 3차 중간 5: 정리가 계속 실패하는 동안에는 다음 바퀴에도 착지 사건이 나가지 않는다(정리 확인 뒤에만 보낼 함에)
-mout=$(cd "$W/m/proj" && PATH="$T/fail:$PATH" "$LANE" merger --repo "$W/m/proj" --once 2>"$T/merr"); mrc=$?
-t "정리 push가 또 실패: 착지 사건 아직 없음(75)" '[ $mrc = 75 ] && ! awk -F"\t" "\$4 == \"l-cf\" && \$5 == \"착지\"" "$EV" | grep -q . || { echo "rc=$mrc"; cat "$T/merr"; false; }'
-merge
-t "정리 push 실패 뒤: 다음 바퀴가 지우고 착지 사건 하나" '[ "$(awk -F"\t" "\$4 == \"l-cf\" && \$5 == \"착지\"" "$EV" | grep -c .)" = 1 ] && ! og rev-parse -q --verify refs/heads/lane/l-cf >/dev/null || { cat "$T/merr"; false; }'
-# 중간 5·3차 중간 6: 사건을 보낸 뒤 일지를 지우기 전에 끊겨(보낸 표시를 쓰기 전에 끊긴 것 포함) 다시 정리해도 착지 사건·일지 줄은 한 번
-ncf=$(awk -F"\t" '$3 == "l-cf" && $10 == "착지" { print $2 }' "$T/.local/state/hc-lane/merger-journal.tsv" | tail -n 1)
-mcf=$(og rev-parse main)
-printf '%s %s %s\n%s %s %s %s\n' l-cf "$mcf" "$mcf" "refs/merge-queue/$ncf" "$(git -C "$W/a/proj" rev-parse l-cf)" l-cf "$(git -C "$W/m/proj" rev-parse "refs/hc-merger/meta/$ncf")" >"$W/m/proj/.git/hc-merger/cur"
-find "$W/m/proj/.git/hc-merger/sent" -type f -delete 2>/dev/null   # 옛 판의 보낸 표시(사건 뒤 따로 쓰던 것)가 없는 꼴
-merge
-t "다시 정리: 착지 사건·병합기 일지 줄은 그대로 하나" '[ -n "$ncf" ] && [ $mrc = 0 ] && [ "$(awk -F"\t" "\$4 == \"l-cf\" && \$5 == \"착지\"" "$EV" | grep -c .)" = 1 ] && [ "$(awk -F"\t" "\$3 == \"l-cf\" && \$10 == \"착지\"" "$T/.local/state/hc-lane/merger-journal.tsv" | grep -c .)" = 1 ] || { cat "$T/merr"; false; }'
+# 착지 뒤 정리 push 실패·일지 재생은 hc-lane-merger-recovery.test.sh의 postpush_cleanup에서 검사한다.
 # 중간 4: 돌려보낼 기록이 잘려(빈 파일) 남아도 병합기는 멈추지 않고 그 기록만 버린다
 : >"$W/m/proj/.git/hc-merger/fail/1700000001-l-zz"
 merge
@@ -725,19 +712,6 @@ mout=$(cd "$W/m/proj" && exec 19>>"$T/outer.lock" && perl -e 'alarm 120; exec @A
 kill "$op" 2>/dev/null; wait "$op" 2>/dev/null
 t "격리: 바깥 잠금 fd 19를 쥔 채여도 병합기는 시험 HOME 아래 자기 잠금으로 큐를 처리(잠금에 안 막힘)" '[ $mrc = 0 ] && [ -z "$(qrefs)" ] && ! grep -Fq "아직 돈다" "$T/merr" && ls "$T"/.local/state/hc-lane/merger.*.lock >/dev/null 2>&1 || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 t "격리: 시험은 T 밖 저장소를 못 찾는다(GIT_CEILING_DIRECTORIES), 물려받은 fd 19는 닫힘" '! git -C "$T" rev-parse --git-dir >/dev/null 2>&1 && ! { : >&19; } 2>/dev/null'
-
-# 상주 루프(감사 7c010d9 이후 중간 1, 지휘 t1cj 긴급): 착지 한 번 뒤에도 빈 바퀴는 --tick초를 쉰다 — 빈 바퀴 쉼 값을 merge-tree 결과가
-# 덮어 sleep <SHA>가 바로 끝나 쉬지 않고 git ls-remote를 두드렸다(재현 12초에 240번). 감싼 git으로 ls-remote 횟수를 센다
-rgit=$(command -v git)
-mkdir -p "$T/gc"; printf '#!/bin/bash\n[ "$1" != ls-remote ] || echo x >>"$T/lsr.count"\nexec "%s" "$@"\n' "$rgit" >"$T/gc/git"; chmod +x "$T/gc/git"
-og update-ref refs/herdr/merger/box main
-lane a l-spin spin.txt spin; land a l-spin
-: >"$T/lsr.count"
-(cd "$W/m/proj" && PATH="$T/gc:$PATH" exec "$LANE" merger --repo "$W/m/proj" --tick 1) >"$T/spin.out" 2>&1 & sp=$!
-for i in $(seq 100); do mainlog | grep -Fxq l-spin && break; sleep 0.1; done
-sleep 6; kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null
-lc=$(grep -c . "$T/lsr.count")
-t "상주 루프: 착지 한 번 뒤 빈 바퀴는 --tick 1초를 쉰다 — 6초 남짓에 ls-remote가 몇십 번 안(쉬지 않으면 수백 번)" 'mainlog | grep -Fxq l-spin && [ "$lc" -le 40 ] || { echo "ls-remote ${lc}번"; tail -5 "$T/spin.out"; false; }'
 
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

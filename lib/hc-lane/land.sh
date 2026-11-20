@@ -113,15 +113,6 @@ ffmain() {
 # 출력하는 명령에 따옴표 없이 넣으므로 브랜치 이름은 이 글자만 받는다.
 plain() { case $1 in '' | *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_.-]*) return 1 ;; esac; }
 
-# origin_base <저장소>: origin/HEAD가 가리키는 기본 브랜치, 없으면 main. origin이 없으면(로컬 저장소) 로컬 main, 없으면 master
-origin_base() {
-  if git -C "$1" remote get-url origin >/dev/null 2>&1; then
-    b=$(git -C "$1" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null); b=${b#origin/}
-  elif ! git -C "$1" show-ref -q --verify refs/heads/main && git -C "$1" show-ref -q --verify refs/heads/master; then b=master
-  else b=; fi
-  echo "${b:-main}"
-}
-
 # land: 레인 작업 폴더에서 착지. 저장소의 .claude/herdr-land.sh가 있으면 그것에 맡기고, 없으면 같은 순서를 여기서 한다.
 # 검증 스크립트가 없으면 push하지 않는다(옛 착지 줄의 「건너뜀」 뒤 push를 막는다). push는 HERDR_LAND=1로(pre-push 관문 통과).
 # 착지 로그(2026-11-17 land-log — senior-web 착지 실패가 끝 15줄에 패키지 없는 FAIL만 남겨 어느 시험인지 몰랐다): 검증(또는
@@ -173,32 +164,35 @@ rr_ok() {
   # 두 확인 명령이 각각 성공했고 결과가 빌 때만(명령이 실패해 빈 출력이면 이어 가지 않는다 — 아스트라 감사 중간 1)
   u_=$(git diff --name-only --diff-filter=U) && [ -z "$u_" ] && u_=$(git rerere remaining) && [ -z "$u_" ]
 }
-# lerr <글>: 화면(오류 출력)과 착지 로그에(빈 글은 안 찍음)
 lerr() { [ -n "$1" ] || return 0; printf '%s\n' "$1" >&2; [ -z "$llog" ] || printf '%s\n' "$1" >>"$llog"; }
-# rb_ <기준>: land의 rebase 한 번 — rerere가 다 푼 충돌(rr_ok)은 이어 간다. 0 아니면 rebase는 멈춘 채(먼저 rebase·착지 반복 두 자리가
-# 같이 쓴다 — land-stale-lows 감사 낮음 1, 한쪽만 고쳐 갈라지지 않게)
+# rb_ <기준>: 승인 대조와 rerere는 같은 기준 커밋에서 수행한다.
 rb_() {
-  ro=$(LC_ALL=C git rebase -q "$1" 2>&1); rr=$?
+  local resolved= merge_flag onto
+  if [ -n "${lpid-}" ]; then
+    onto=$(git rev-parse --verify "$1^{commit}") || die "land: 승인 rebase 기준 조회 실패"
+    set -- "$onto"; lverdict_before_rebase "$onto"
+  fi
+  merge_flag=$(rebase_merge_flag "$1") || exit $?
+  [ "$merge_flag" != keep ] || return 0
+  ro=$(LC_ALL=C git rebase -q --reapply-cherry-picks ${merge_flag:+"$merge_flag"} "$1" 2>&1); rr=$?
   lerr "$ro"
   while [ $rr != 0 ] && rr_ok "$ro"; do
     lerr "hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다($(rr_paths "$ro" | paste -sd , -)) — rebase를 이어 간다"
-    # 승인 착지(lpid)면 그렇게 푼 경로를 승인 착지 기록(lrrf)에 — lverdict_check가 승인 변경과 다른 곳으로 받아 준다
-    [ -z "${lpid-}" ] || rr_paths "$ro" | awk -v p="$lpid" '{ print p "\t" $0 }' >>"$lrrf" ||
-      die "land: rerere 경로 기록을 쓰지 못했다: $lrrf — 착지하지 않았다"
+    [ -z "${lpid-}" ] || resolved="${resolved:+$resolved$'\n'}$(rr_paths "$ro")"
     ro=$(LC_ALL=C GIT_EDITOR=true git rebase --continue 2>&1); rr=$?
     lerr "$ro"
   done
+  if [ "$rr" != 0 ] && [ "${mgx_-}" = 1 ]; then
+    local unresolved
+    if ! unresolved=$(git ls-files --unmerged) || [ -z "$unresolved" ]; then
+      lerr "hc-lane land: rebase 실패. 미해결 충돌이 확인되지 않아 큐에서 다시 시도한다"; exit 75
+    fi
+  fi
+  [ "$rr" != 0 ] || [ -z "$resolved" ] || lverdict_resolved "$resolved" "$1"
   return $rr
 }
-# ---- 병합기(2026-11-20 레인 land-merger-mvp — 사용자 결정 「중앙 병합기, 브랜치만 (추천)」 → 「병합기 최소 버전을 먼저 만들어서
-# 전체 적용시키고 일단 사용부터」. 왜: 레인마다 fetch·rebase·검증·차례·push를 하니 rebase 충돌·차례 다툼·재검증으로 착지가 밀렸다.
-# main에 쓰는 프로세스를 하나로 하면 그 다툼이 통째로 없어진다) ----
-# 켜는 곳은 원격 하나: 원격 참조 refs/herdr/merger/<병합기 기계>(값은 아무 커밋)가 있으면 그 저장소의 hc-lane land는 제출(lane/<레인> +
-# 큐 표식)로 바뀌고, 그 기계의 hc-lane merger가 큐를 하나씩 기존 착지(HERDR_MERGER=1 hc-lane land)로 넣는다. 지우면 다음 착지부터 예전
-# 그대로. 개인 설정이 아닌 까닭: 워커 기계에는 개인 설정(herdr-tools-config)이 없어 레인이 도는 기계가 읽지 못한다. 원격 참조는
-# ls-remote 한 번으로 모든 기계·레인(rebase 안 해도)에 바로 닿고, 착지의 fetch 횟수를 늘리지 않는다.
-# 원격을 못 읽으면(켜졌는지 모름) 몇 번 다시 보고, 끝내 못 읽으면 직접 착지하지 않는다(아스트라 1차 높음 5 — 조회 한 번 실패로
-# 큐·차례를 건너뛰어 main을 올렸다). 「조회 성공 + 표식 없음」일 때만 예전 착지 길
+# 원격 refs/herdr/merger/<기계>가 있으면 land는 제출하고 그 기계가 착지한다.
+# 표식 조회에 성공해 꺼짐이 확인돼야 직접 착지한다.
 mgon() {  # 0 켜짐(병합기 기계를 mg_에), 1 꺼짐(조회 성공·표식 없음), 2 모름(조회 실패)
   # 원격 없는 저장소(get-url 종료 2)만 병합기가 없다. 그 밖의 실패는 모름(2차 높음 5 — 종료 128을 「꺼짐」으로 읽어 큐를 건너뛰었다)
   git remote get-url origin >/dev/null 2>&1
@@ -211,12 +205,11 @@ mgon() {  # 0 켜짐(병합기 기계를 mg_에), 1 꺼짐(조회 성공·표식
   mg_=$(printf '%s\n' "$mgt_" | awk 'NF == 2 { sub(/^refs\/herdr\/merger\//, "", $2); print $2; exit }')
   [ -n "$mg_" ]
 }
-# 레인 이름 = hc-fill 레인 이름 규칙(okname: a-z 0-9 _ - 32자) + git 가지 이름으로 쓸 수 있음(git check-ref-format --branch). 레인을 띄울
-# 때(hc-lane이 그 이름으로 가지를 만든다)와 같은 두 검사다(3차 중간 13 — 「_audit」을 받는 쪽과 거절하는 쪽이 갈렸다, 2차 중간 13 — 「-audit」).
+# 레인 이름은 hc-fill과 같은 알파벳과 길이로 검사한다. 이 글자 안에서 Git이 가지 이름으로 거절하는 것은 맨 앞의 -다.
 # 글자를 늘어놓는다: [a-z] 범위는 로캘에 따라 대문자도 받는다(시험 14에서 Bad_Name이 통과)
 lname_ok() {
-  case $1 in ''|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
-  [ ${#1} -le 32 ] && git check-ref-format --branch "$1" >/dev/null 2>&1
+  case $1 in ''|-*|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
+  [ ${#1} -le 32 ]
 }
 
 # ---- 레인 임대(2026-11-20 fill-dup-guard, 지휘 결정): 프로젝트 원격 ref refs/hc-lanes/<레인>(빈 트리 커밋, 제목 「hc-lane lease <레인>
@@ -243,6 +236,7 @@ lease_core() {
       lc_t=$(lc_g hash-object -t tree -w /dev/null) &&
         # 본문의 고유값: 같은 기계·같은 초·같은 이름이면 커밋 해시가 같아져 남의 임대를 자기 것으로 읽는다(응답 유실 판정)
         lc_c=$(printf 'hc-lane lease %s %s %s\n\n%s-%s-%s\n' "$lc_n" "${lc_x:--}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$RANDOM" "$RANDOM" | lc_g commit-tree "$lc_t") || return 1
+      lc_g update-ref "refs/hc-lease-owners/${5:-$lc_n}" "$lc_c" || return 1
       lc_g push -q --porcelain origin "--force-with-lease=$lc_ref:" "$lc_c:$lc_ref" </dev/null >/dev/null 2>&1 && { echo "$lc_c"; return 0; }
       lc_v=$(lc_cur) || return 5   # push 실패: 원격 값으로 판정(응답만 잃었을 수 있다)
       [ "$lc_v" != "$lc_c" ] || { echo "$lc_c"; return 0; }
@@ -260,7 +254,7 @@ lease_core() {
   return 1
 }
 # lease_x <take|show|drop> <레인> [<기계|기대값>]: 대상 기계($on)의 $repo에서 — 원격은 로그인 셸(zx: git 자격 도우미 PATH)로
-lease_x() { zx "$repo" bash -c "$(declare -f lease_core); lease_core \"\$@\"" hc-lane-lease "$1" "$repo" "$2" "${3-}"; }
+lease_x() { zx "$repo" bash -c "$(declare -f lease_core); lease_core \"\$@\"" hc-lane-lease "$1" "$repo" "$2" "${3-}" "${branch-}"; }
 # lease_cmd: hc-lane lease show|drop [--on <기계>] --repo <저장소> --name <레인> — 임대가 남아 다시 못 띄우면(레인이 죽음·지휘가 rm) 손으로
 lease_cmd() {
   lo_=$(lease_x "$act" "$name"); r_=$?
@@ -271,19 +265,27 @@ lease_cmd() {
     *) echo "hc-lane lease: ${act}하지 못했다(git ls-remote·push origin, 종료 $r_): ${on:+$on:}$repo" >&2; return 1 ;;
   esac
 }
-# ---- 착지 표식(2026-11-20 fill-dup-guard, 지휘 결정 「착지 증거를 하나로」 — carousel-save-race가 선행 main-split의 착지를 커밋 제목
-# 머리로 못 알아봐(「feat(frontend): main-split-1 …」) 먼저 띄움 기한을 넘겼다): land는 main과 같은 --atomic push에
-# refs/hc-landed/<레인>/<UTC 초>(값 = 착지한 커밋)과 그 레인 임대 지우기(HC_LANE_LEASE 값 lease)를 싣는다. 기다리는 쪽(hc-fill 선행
-# 판정·먼저 띄움 기다림 줄)은 그 선행 줄을 넣은 뒤의 표식 sha가 origin/<기본>의 조상인지 본다. 표식은 지우지 않는다(작고, 지우는 쪽 경합)
+# hc-fill은 선행 줄을 넣은 뒤의 refs/hc-landed/<레인>/<UTC 초>가 기본 브랜치의 조상인지 본다.
 # lmname: 이 레인 이름(레인 환경 HC_LANE, 없으면 가지 이름) — 표식·임대 ref에 쓸 수 있을 때만
 lmname() {
   lmn_=${HC_LANE:-$(git branch --show-current 2>/dev/null)}
   case $lmn_ in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
   echo "$lmn_"
 }
+# 기본 브랜치에 이미 들어간 경우에도 이 실행의 임대가 남아 있으면 표식과 함께 끝낸다.
+land_known() {
+  local name ref rows marker
+  [ -n "${HC_LANE_LEASE-}" ] && name=$(lmname) || return 0
+  ref=refs/hc-lanes/$name
+  rows=$(git ls-remote origin "$ref") || { echo "hc-lane land: 착지한 레인의 임대 조회 실패" >&2; return 75; }
+  [ "$(printf '%s\n' "$rows" | awk -v r="$ref" '$2==r {print $1}')" = "$HC_LANE_LEASE" ] || return 0
+  marker=refs/hc-landed/$name/$(date -u +%s)
+  git push -q --atomic origin "$1:$marker" ":$ref" "--force-with-lease=$ref:$HC_LANE_LEASE" || return 75
+}
 # land_after <기본> <표식 ref>: main push 뒤 — 표식이 그 push에 못 실렸으면 따로(그 커밋이 origin/<기본>에 들어갔을 때만), 임대가 남았으면
 # 놓는다. 못 하면 알리기만(착지는 됨 — 표식이 없으면 기다리는 쪽이 커밋 제목 규칙으로만 풀려 더 기다릴 뿐, 남은 임대는 clean·손으로)
 land_after() {
+  [ "${mgx_-}" != 1 ] || return 0   # 병합기는 제출 ID를 확인한 뒤 mdone에서 레인 표식을 둔다.
   if [ -n "${2-}" ]; then
     la_=$(git ls-remote origin "$2" </dev/null 2>/dev/null)
     if [ -z "$la_" ] && ! { git fetch -q origin </dev/null 2>/dev/null && git merge-base --is-ancestor HEAD "refs/remotes/origin/$1" &&
@@ -301,6 +303,12 @@ land_after() {
 tclean() {
   st_=$(git status --porcelain --untracked-files=no) || die "land: $1 git status 실패 — 작업 트리를 모른다, 보내지 않았다. 같은 줄을 다시"
   [ -z "$st_" ]
+}
+# 실행하는 훅은 그 커밋의 파일이어야 한다. status는 새 파일과 assume-unchanged 파일을 놓친다.
+committed_hook() {
+  local want actual
+  want=$(git rev-parse --verify "$1:$2") && actual=$(git hash-object --path="$2" -- "$2") &&
+    [ "$actual" = "$want" ] || die "land: $2 가 커밋 $1 의 파일과 일치하지 않아 실행하지 않았다"
 }
 # park [<한 줄>]: 먼저 띄운 레인이 준비를 끝내고 선행만 기다릴 때 자리를 쥐고 놀지 않게(2026-11-20 사용자 「노는 워크트리 없이」).
 # HEAD를 원격 refs/heads/lane/<레인>(지금 값에 lease)에, 이 레인 임대 지우기(HC_LANE_LEASE 값일 때만)와 한 번의 --atomic push로 —
@@ -322,6 +330,7 @@ park_cmd() {
   rs_=$(git ls-remote origin "$pr_" "$pl_" </dev/null) || die "park: 원격을 읽지 못했다(git ls-remote) — 같은 줄을 다시"
   cur_=$(printf '%s\n' "$rs_" | awk -v r="$pr_" '$2 == r { print $1 }')
   lv_=$(printf '%s\n' "$rs_" | awk -v r="$pl_" '$2 == r { print $1 }')
+  [ "$lv_" = "${HC_LANE_LEASE-}" ] || { [ -z "$lv_" ] && [ "$cur_" = "$sh_" ]; } || die "park: 이 실행의 임대가 아니다 — 주차하지 않았다"
   set -- "$sh_:$pr_" "--force-with-lease=$pr_:$cur_"
   dl_=; if [ -n "${HC_LANE_LEASE-}" ] && [ "$lv_" = "$HC_LANE_LEASE" ]; then dl_=1; set -- "$@" ":$pl_" "--force-with-lease=$pl_:$lv_"; fi
   [ "$cur_" = "$sh_" ] && [ -z "$dl_" ] || po_=$(git push -q --atomic --porcelain origin "$@" </dev/null 2>&1)
@@ -339,11 +348,9 @@ park_cmd() {
 
 land_cmd() {
   top=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$top" || die "land: git 작업 폴더 안에서 부른다(레인 워크트리): $PWD"
-  base=${lbase:-$(origin_base .)}
+  base=${lbase:-$(origin_base .)} || die "land: 원격·기본 브랜치 조회 실패"
   plain "$base" || die "land: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: $base"
-  # 병합기가 켜진 저장소(원격 refs/herdr/merger/<기계>)면 착지 대신 제출 — 병합기 안에서 부른 착지(HERDR_MERGER=1)는 아래 그대로.
-  # 켜졌는지 모르면 착지하지 않는다(종료 75 — 같은 줄을 다시). 이 분기만 병합기 몫이고 아래 본문은 착지 안전(land-safety) 몫이다
-  # (2026-11-20 t68과 정한 경계 — 나중에 착지하는 쪽이 rebase로 맞춘다)
+  # 병합기가 켜졌으면 큐에 제출한다. 켬 상태를 모르면 종료 75로 재시도를 기다린다.
   if [ "${HERDR_MERGER-}" != 1 ]; then
     mgon; case $? in 0) submit_cmd ;; 2) exit 75 ;; esac
   fi
@@ -357,61 +364,74 @@ land_cmd() {
   # main에 남았다. bash는 rebase 전에 읽은 옛 판을 끝까지 돈다). fetch는 스크립트가 없는 가지도 한다(<기본>에 새로 생긴 것을 보려고): 가지가 그 스크립트를 스스로 바꾸지 않았는데(HEAD 판 = 갈래점 판)
   # 갈래점 판이 <기본> 판과 다르면(새로 생기거나 지워진 것 포함) 먼저 rebase해 <기본> 판으로 이어 간다. 바꾼 가지는 제 판 그대로
   lf_=.claude/herdr-land.sh
-  if git remote get-url origin >/dev/null 2>&1; then ob_=refs/remotes/origin/$base obl_=origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패"
-  else ob_=refs/heads/$base obl_="로컬 $base"; fi
+  git remote get-url origin >/dev/null 2>&1
+  case $? in
+    0) ob_=refs/remotes/origin/$base obl_=origin/$base; fetchr git fetch -q origin || die "land: git fetch 실패" ;;
+    2) ob_=refs/heads/$base obl_="로컬 $base" ;;
+    *) die "land: git remote get-url 실패 — 착지 기준을 확인하지 못했다" ;;
+  esac
   # 승인 대조 patch-id: 레인이 부르면 --verdict(판정 파일), 병합기가 부르면 제출 기록에서 읽은 HERDR_LAND_PATCHID(land-merger-mvp와
   # 맞춤 — 병합기 기계에는 판정 파일이 없다). 있으면 rebase 뒤·push 직전 대조(rerere 이어 가기는 그대로 — lverdict_check).
-  # 대조 원본·갈림점은 rebase 전에 정하고, rebase(rb_)는 rerere가 푼 경로를 승인 착지 기록(lrrf)에 적는다
   bref=$ob_ blab=$obl_ remote=0; [ "$ob_" = "refs/heads/$base" ] || remote=1
   lpid=
-  if [ -n "${HERDR_LAND_PATCHID-}" ]; then
+  if [ -z "$lvd" ] && [ -n "${HERDR_LAND_PATCHID-}" ]; then
     case $HERDR_LAND_PATCHID in -|*[!0-9a-f-]*) [ "$HERDR_LAND_PATCHID" = - ] || die "land: HERDR_LAND_PATCHID 꼴: $HERDR_LAND_PATCHID" ;; esac
     lpid=$HERDR_LAND_PATCHID; echo "hc-lane land: 승인 착지(판정 ${HERDR_LAND_VERDICT:-?}) — 변경 patch-id ${lpid:0:12}"
     # 병합기는 제출 SHA(승인 S)를 꺼낸 작업 트리에서 부른다 — 그 S가 대조 원본. HERDR_LAND_SHA를 주면 그것과 같아야 한다
     lorig=$(git rev-parse --verify -q HEAD) || die "land: HEAD를 읽지 못했다(git 실패) — 착지하지 않았다"
     [ -z "${HERDR_LAND_SHA-}" ] || [ "$lorig" = "$HERDR_LAND_SHA" ] ||
       { echo "hc-lane land: 승인 착지인데 HEAD가 제출 SHA가 아니다(HEAD ${lorig:0:8}, 제출 ${HERDR_LAND_SHA:0:8}) — 착지하지 않았다" >&2; exit 2; }
-  elif [ -n "$lvd" ]; then lverdict_start; lorig=$vs; fi
+  elif [ -n "$lvd" ]; then lverdict_start; lorig=$vs; lverdict_recover; fi
+  unset HERDR_LAND_PATCHID HERDR_LAND_VERDICT HERDR_LAND_SHA
   if [ -n "$lpid" ]; then
     lmb=$(git merge-base "$lorig" "$bref") || die "land: 승인 커밋과 $blab 의 갈림점을 못 찾았다 — 착지하지 않았다"
-    lrrf=$(git rev-parse --absolute-git-dir)/hc-lane-rerere || die "land: git 폴더를 읽지 못했다 — 착지하지 않았다"
+    lrrf=$(git rev-parse --absolute-git-dir) && [ -n "$lrrf" ] || die "land: git 폴더를 읽지 못했다 — 착지하지 않았다"
+    lrrf=$lrrf/hc-lane-rerere
     # 대조 원본이 승인 변경 그 자체인가(경로별 대조의 기준이 된다 — 제출 커밋에 승인 뒤 커밋이 섞였으면 여기서 멈춤)
     lo_=$(lpatch "$lmb" "$lorig") || die "land: 승인 원본 patch-id를 못 구했다(git 실패) — 착지하지 않았다"
     [ "$lo_" = "$lpid" ] || { echo "hc-lane land: 착지할 커밋(${lorig:0:8})이 승인 변경이 아니다(patch-id ${lo_:0:12} ≠ 승인 ${lpid:0:12}) — 착지하지 않았다. 지금 커밋으로 hc-lane report 완료(새 감사)" >&2; exit 2; }
   fi
-  # 병합기 안 착지: 기본 브랜치에 전용 착지 스크립트가 있으면 그 기본 브랜치 판(방금 받은 것)을 꺼내 맡긴다 — 제출 트리 속 판(레인이
-  # 고쳤을 수 있음)은 실행하지 않는다(2단계 2026-11-20 지휘 t1cj). 스크립트는 자기 자리($0)를 쓰지 않는 것을 전제로 임시 파일에서 돈다
-  if [ "$mgx_" = 1 ] && git cat-file -e "$ob_:$lf_" 2>/dev/null; then
-    mls_=$(mktemp "${TMPDIR:-/tmp}/hc-merger-land.XXXXXX") && git show "$ob_:$lf_" >"$mls_" || die "land: 기본 브랜치의 $lf_ 를 꺼내지 못했다"
+  # 병합기의 전용 착지 훅은 기본 브랜치에서 읽은 blob으로 실행한다.
+  lb_() { git ls-tree --format='%(objectname)' "$1" -- "$lf_"; }   # 성공한 빈 목록만 훅 없음
+  basehook_=$(lb_ "$ob_") || die "land: $obl_ 착지 훅 조회 실패"
+  if [ "$mgx_" = 1 ] && [ -n "$basehook_" ]; then
+    mls_=$(mktemp "${TMPDIR:-/tmp}/hc-merger-land.XXXXXX") || die "land: 기본 브랜치의 $lf_ 임시 파일 생성 실패"
+    trap 'rm -f "$mls_"' EXIT
+    git cat-file blob "$basehook_" >"$mls_" || die "land: 기본 브랜치의 $lf_ 를 꺼내지 못했다"
     echo "hc-lane land: 병합기 — $obl_ 판 $lf_ 에 맡긴다"
     [ -z "$lpid" ] || lverdict_precheck   # 승인 착지면 맡기기 전에 차이가 rebase뿐인지
     lrun env HERDR_LAND=1 ${px_:+HERDR_LAND_PUSH_EXTRA="$px_"} bash "$mls_" "$base"; rc=$?
-    rm -f "$mls_"
-    # 내장 길의 병합기 안 착지와 같게: push는 병합기 인자 그대로, 착지 표식 refs/hc-landed/<레인>/<UTC 초>는 착지 뒤 따로(fill-dup-guard)
-    if [ $rc = 0 ]; then lmr_=; ! lmn_=$(lmname) || lmr_=refs/hc-landed/$lmn_/$(date -u +%s); land_after "$base" "$lmr_"; else lfail $rc; fi
+    [ $rc = 0 ] || lfail $rc
     exit $rc
   fi
-  lb_() { git rev-parse -q --verify "$1:$lf_" 2>/dev/null; }   # 그 판의 스크립트 blob(없으면 빈 값)
-  if mb_=$(git merge-base HEAD "$ob_" 2>/dev/null) && [ "$(lb_ HEAD)" = "$(lb_ "$mb_")" ] && [ "$(lb_ "$mb_")" != "$(lb_ "$ob_")" ]; then
+  mb_=$(git merge-base HEAD "$ob_") && headhook_=$(lb_ HEAD) && forkhook_=$(lb_ "$mb_") || die "land: 착지 훅의 갈래점·커밋 조회 실패"
+  if [ "$headhook_" = "$forkhook_" ] && [ "$forkhook_" != "$basehook_" ]; then
     lerr "▸ hc-lane land: 가지의 $lf_ 가 $obl_ 보다 낡음 → 먼저 rebase"
-    [ -z "$(git status --porcelain --untracked-files=no)" ] || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
+    tclean "먼저 rebase 전" || die "land: 커밋 안 된 변경이나 멈춘 rebase가 있다(git status). 커밋하거나 rebase를 마친 뒤 같은 줄을 다시"
     rb_ "$ob_" || { lerr "hc-lane land: rebase 충돌 — 양쪽 내용을 살려 풀고 git add → git rebase --continue 한 뒤 착지 줄(hc-lane land $base)을 다시"; exit 3; }
+    headhook_=$(lb_ HEAD) || die "land: rebase 뒤 착지 훅 조회 실패"
   fi
+  [ -z "$headhook_" ] || [ -f "$lf_" ] || die "land: 커밋의 $lf_ 가 작업 트리에 없다"
   # 병합기 안 착지: 제출·기준에 있던 스크립트는 병합기가 이미 반송하니, 여기 있는 것은 위 rebase가 들인 것 — 맡기지 않고 7(감사 7c010d9 중간 1)
   [ "$mgx_" != 1 ] || [ ! -f .claude/herdr-land.sh ] ||
     { echo "hc-lane land: 기본 브랜치에 전용 착지 스크립트(.claude/herdr-land.sh)가 생겼다 — 병합기 MVP-1은 그 스크립트에 맡기지 않는다" >&2; exit 7; }
   if [ -f .claude/herdr-land.sh ]; then
-    # 저장소 착지 스크립트에는 먼저 맡긴다(원격 조회 오류가 스크립트 착지를 막지 않게 — 아스트라 3차 중간 2). 원격 조회는 착지
-    # 성공 직후에 새로 해 메인 폴더 앞당김에만 쓰고(실행 전 결과를 쓰지 않는다 — 4차 중간 2), 못 읽었으면 앞당기지 않고 경고만
+    # 착지 성공 직후 원격을 다시 확인해 메인 폴더를 앞당긴다.
     echo "hc-lane land: .claude/herdr-land.sh $base 에 맡긴다"
     # 위임 경로: rebase·push는 그 스크립트가 하고 문서 접기 등이 내용을 바꾸므로 push 범위로는 대조 못 한다 — 승인 착지면 위임 전에
     # 같은 기준으로 rebase해 차이가 rebase뿐인지 먼저 본다(충돌은 종료 3, 다르면 종료 2)
     [ -z "$lpid" ] || lverdict_precheck
-    # 표식(과 임대 지우기)은 HERDR_LAND_PUSH_EXTRA(공백으로 나눈 refspec — 병합기가 넘긴 인자 뒤에)로 넘겨 그 스크립트가 main push에
-    # --atomic으로 싣게 한다 — 임대 지우기는 원격 임대가 이 레인 값일 때만 넣는다(없는 ref 지우기로 원자 push가 실패하지 않게). 못 실었으면 land_after가 따로
-    lmr_= lpx_=; if lmn_=$(lmname) && git remote get-url origin >/dev/null 2>&1; then
+    committed_hook HEAD "$lf_"
+    # 전용 훅도 main·착지 표식·이 실행의 임대 삭제를 같은 원자 push에 싣는다.
+    lmr_= lpx_=; if [ "$remote" = 1 ] && lmn_=$(lmname); then
       lmr_=refs/hc-landed/$lmn_/$(date -u +%s) lpx_="HEAD:$lmr_"
-      if [ -n "${HC_LANE_LEASE-}" ]; then lh_=$(git ls-remote origin "refs/hc-lanes/$lmn_" </dev/null 2>/dev/null) && [ "${lh_%%[[:space:]]*}" = "$HC_LANE_LEASE" ] && lpx_="$lpx_ :refs/hc-lanes/$lmn_"; fi
+      [ -z "$lvd" ] || lpx_="$lpx_ HEAD:refs/hc-verdict/$HC_LANE/$lvd"
+      if [ -n "${HC_LANE_LEASE-}" ]; then
+        lref_=refs/hc-lanes/$lmn_
+        lh_=$(git ls-remote origin "$lref_" </dev/null) || { lerr "hc-lane land: 임대 조회 실패 — 착지 훅을 실행하지 않았다"; exit 75; }
+        [ "${lh_%%[[:space:]]*}" = "$HC_LANE_LEASE" ] &&
+          lpx_="$lpx_ :$lref_ --force-with-lease=$lref_:$HC_LANE_LEASE"
+      fi
     fi
     ax_="${px_:+$px_${lpx_:+ }}$lpx_"
     lp_=${HERDR_LAND_PRIORITY-}; case $lp_ in '' | *[!0-9]*) lp_=0 ;; esac   # 착지 줄 우선(README 계약): 0 이상 정수, 아니면 0
@@ -455,11 +475,6 @@ land_cmd() {
     [ $remote = 0 ] || fetchr git fetch -q origin || die "land: git fetch 실패"
     # 기준 SHA를 이 바퀴에 고정해 그 SHA로 rebase(rebase 뒤 참조가 움직여도 기준이 바뀌지 않게)
     bs_=$(git rev-parse -q --verify "$bref^{commit}") || die "land: $blab 가 없다"
-    # 승인 착지: 지난 push의 응답만 잃었으면(HEAD가 이미 기준에 들어감) 같은 착지를 끝낸다
-    if [ -n "$lvd" ] && [ "$lpid" != - ] && [ "$(git rev-parse HEAD)" != "$vs" ] && git merge-base --is-ancestor HEAD "$bs_"; then
-      echo "hc-lane land: 판정 $lvd 착지가 이미 $blab 에 들어가 있다($(git rev-parse --short HEAD)) — 끝 표시만"
-      lverdict_done; [ $remote = 0 ] || ffmain "$(mainwt)" "$base"; return 0
-    fi
     if ! rb_ "$bs_"; then
       if [ -n "$lpid" ]; then
         lerr "hc-lane land: 승인 착지 중 rebase 충돌 — 풀면 내용이 승인과 달라진다. 양쪽 내용을 살려 풀고 git add → git rebase --continue 뒤 커밋으로 hc-lane report 완료 <sha>(새 감사)"
@@ -484,11 +499,14 @@ land_cmd() {
     # 함께 실을 것(HERDR_LAND_PUSH_EXTRA — 병합기 큐 표식 삭제·착지 표식)이 있으면 그것을 실으러 아래 push까지 간다(예전 그대로)
     if [ "$cand" = "$bs_" ] && [ -z "$px_" ]; then
       echo "hc-lane land: 이미 들어가 있다 ${cand:0:9} = $blab (보낼 것 없음)"
+      [ "$remote" = 0 ] || land_known "$cand" || return $?
+      [ -z "$lvd" ] || lverdict_done "$cand"
       [ $remote = 0 ] || ffmain "$(mainwt)" "$base"
       return 0
     fi
     [ -f .claude/herdr-verify.sh ] ||
       die "land: .claude/herdr-verify.sh 가 없어 push하지 않았다(검증 없는 착지는 없다). 저장소에 검증 스크립트(또는 .claude/herdr-land.sh)를 두거나 지휘에 알린다"
+    committed_hook "$cand" .claude/herdr-verify.sh
     lrun bash .claude/herdr-verify.sh || { lfail $?; die "land: 검증 실패, push하지 않았다. 고쳐 커밋한 뒤 같은 줄을 다시"; }
     # 검증한 그 커밋·그 파일만 보낸다: 검증하는 동안 HEAD가 바뀌었거나 검증이 추적 파일·색인을 고쳤으면 보내지 않는다
     h_=$(git rev-parse -q --verify HEAD) || die "land: 검증 뒤 HEAD를 읽지 못했다(git 실패) — 보내지 않았다. 같은 줄을 다시"
@@ -497,6 +515,7 @@ land_cmd() {
     tclean "검증 뒤" ||
       die "land: 검증이 추적 파일·색인을 바꿨다(git status) — 검증한 파일과 보낼 커밋이 달라 보내지 않았다. 검증 스크립트를 고치거나 바뀐 것을 커밋한 뒤 같은 줄을 다시"
     [ -z "$lpid" ] || lverdict_check   # push 직전: 검증 사이 커밋이 끼지 않았나
+    [ -z "$lvd" ] || lverdict_save "$cand" builtin
     if [ $remote = 1 ]; then
       # 검증 뒤 push 주소를 다시 읽어 시작 때와 다르면(검증이 설정을 바꿈) 보내지 않는다(아스트라 7차 높음). 진단에 주소는 찍지 않는다
       # (인증정보가 든 주소일 수 있다 — 8차 높음 3). push는 원격 이름으로: 주소를 넘기면 pushInsteadOf가 다시 적용되고 추적 ref가 안 바뀐다(8차)

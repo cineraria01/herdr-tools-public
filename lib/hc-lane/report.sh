@@ -1,5 +1,28 @@
 # hc-lane 함수: report (bin/hc-lane가 읽는다. 함수는 bin/hc-lane 안 원래 정의 순서 그대로)
 
+# 0은 큐에 제출만 됨, 1은 일반 착지 보고, 2는 확인 실패다. 저장소 밖에서도 사건을 적을 수 있다.
+report_pending() {
+  local gd target= ref=refs/remotes/origin/lane/$1 pending
+  gd=$(LC_ALL=C git rev-parse --git-common-dir 2>&1) || {
+    case $gd in 'fatal: not a git repository (or any '*) return 1 ;; *) return 2 ;; esac
+  }
+  if [ -f "$gd/hc-submitted" ]; then
+    target=$(awk -v l="$1" -v s="$2" '$1==l && index($2,s)==1 && $3!="" {b=$3} END {print b}' "$gd/hc-submitted") || return 2
+  fi
+  if [ -z "$target" ]; then
+    if [ -f "$gd/hc-submitting/$1" ]; then
+      read -r _ _ pending <"$gd/hc-submitting/$1" || return 2
+      case $pending in "$2"*) return 2 ;; esac
+    fi
+    git show-ref --exists "$ref" 2>/dev/null; case $? in 0) ;; 2) return 1 ;; *) return 2 ;; esac
+    git merge-base --is-ancestor "$2" "$ref"; case $? in 0) ;; 1) return 1 ;; *) return 2 ;; esac
+    target=$(git for-each-ref --format='%(symref:short)' refs/remotes/origin/HEAD) || return 2
+    target=${target#origin/}
+  fi
+  git merge-base --is-ancestor "$2" "refs/remotes/origin/${target:-main}"
+  case $? in 0) return 1 ;; 1) return 0 ;; *) return 2 ;; esac
+}
+
 report_cmd() {
   rn= st= sha= msg= k=0 to_= key_=
   while [ $# -gt 0 ]; do
@@ -22,7 +45,7 @@ report_cmd() {
   # 두 사건이 다 7칸이 아니게 된다(감사 실측). 앞 칸은 64바이트씩, 남는 자리를 한 줄 칸이 쓴다
   # 여덟째 칸 = 그때의 hc turn(그 턴이 끝나 쉬면 turn+1). wait가 「report 뒤 더 일하고 report 없이 쉼」을 가린다
   # 코어가 응답하지 않아도 report가 멈추지 않게 3초 상한(perl alarm, 없으면 그냥), 넘으면 turn -
-  g_=; [ -z "${HC_TERMINAL_ID-}" ] || g_=$(capt 3 hc get "$HC_TERMINAL_ID" --json 2>/dev/null)
+  g_=; [ -z "${HC_TERMINAL_ID-}" ] || g_=$(capt 3 hc get "$HC_TERMINAL_ID" --json 2>/dev/null) || g_=
   tn=$(printf '%s\n' "$g_" | sed -n 's/.*"turn" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
   # 레인 이름: --name → $HC_LANE → hc 터미널 이름(맨 위 "name" — 줄의 마지막 것, 앞의 foreground.name이 아니다) → 작업 트리 가지.
   # 가지가 기본 가지(origin/HEAD·main·master)면 쓰지 않는다: hc-lane clean으로 작업 트리를 지운 뒤 메인 폴더에서 report하면
@@ -39,15 +62,10 @@ report_cmd() {
   # 없을 때)에 있고, 기본 브랜치에는 없으면 착지는 병합기가 적는다. 거짓 착지는 겹침 소유를 풀고 지표에 남는다
   # 기본 브랜치는 제출 기록의 셋째 칸(제출 때의 대상), 없으면 origin/HEAD(2차 중간 8 — report는 origin_base 정의 전에 돌아 늘 main이었다)
   if [ "$st" = 착지 ] && [ "$sha" != - ] && [ -n "$lane" ]; then
-    sb_=$(awk -v l="$lane" -v s="$sha" '$1 == l && index($2, s) == 1 && $3 != "" { b = $3 } END { print b }' "$(git rev-parse --git-common-dir 2>/dev/null)/hc-submitted" 2>/dev/null)
-    [ -n "$sb_" ] || { sb_=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); sb_=${sb_#origin/}; }
-  fi
-  if [ "$st" = 착지 ] && [ "$sha" != - ] && [ -n "$lane" ] && {
-      git merge-base --is-ancestor "$sha" "refs/remotes/origin/lane/$lane" 2>/dev/null ||
-      awk -v l="$lane" -v s="$sha" '$1 == l && index($2, s) == 1 { f = 1 } END { exit !f }' "$(git rev-parse --git-common-dir 2>/dev/null)/hc-submitted" 2>/dev/null; } &&
-    ! git merge-base --is-ancestor "$sha" "refs/remotes/origin/${sb_:-main}" 2>/dev/null; then
-    echo "hc-lane report: $sha 는 병합기 큐에 제출만 됐다(lane/$lane) — 착지는 병합기가 사건(착지·막힘 --name $lane)으로 적는다. 아무것도 적지 않음"
-    return 0
+    report_pending "$lane" "$sha"; case $? in
+      0) echo "hc-lane report: $sha 는 병합기 큐에 제출만 됐다(lane/$lane) — 착지는 병합기가 사건(착지·막힘 --name $lane)으로 적는다. 아무것도 적지 않음"; return 0 ;;
+      1) ;; *) die "report: $lane 제출·착지 조회 실패 — 사건을 적지 않았다. 같은 줄을 다시" ;;
+    esac
   fi
   # 10~12칸(fill-handoff-integrity): 10 발행 실행 = <터미널>@<hc get created_ms>(기계 접두 없는 주소 — 주소가 재사용돼도 실행은
   # 안 겹친다. $HC_LANE_JOB이 있으면 그 값). 모르면 -(터미널 밖·hc get 실패 — 실행을 모르는 완료는 hc-fill이 감사를 열지 않는다).
@@ -55,7 +73,7 @@ report_cmd() {
   # 없으면 - = 레인 기록으로 찾음, * = 주인 없음 — 모든 지휘. 12 키(--key, 없으면 -). 9칸 --to는 없어도 -로 적는다(칸 번호가 늘 같게)
   rk_=${HC_LANE_JOB-}; case $rk_ in *[!a-z0-9~-]*) rk_= ;; esac
   if [ -z "$rk_" ]; then
-    cm_=$(printf '%s\n' "$g_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+    cm_=; [ -z "$g_" ] || cm_=$(live_created_ms <<<"$g_") || cm_=
     rk_=-; [ -z "${HC_TERMINAL_ID-}" ] || [ -z "$cm_" ] || rk_=$(bcut 64 "$(flat "${HC_TERMINAL_ID##*/}")")@$cm_
     [ "$rk_" != - ] || [ -z "${HC_TERMINAL_ID-}" ] ||
       echo "hc-lane report: 경고 — 발행 실행(10칸)을 못 적었다(hc get created_ms 없음). 완료라면 잠시 뒤 같은 줄을 다시 부른다(실행을 모르는 완료는 자동 감사가 열지 않는다)" >&2
@@ -451,7 +469,9 @@ ev_cmd() {
     # ponytail: 앞 report는 바퀴마다 보는 끝 500줄 안에서 찾는다 — 못 찾으면 알리는 쪽
     # 착지·판정 뒤라도 정리됨 turn이 그 report turn+1보다 뒤면(이어 받은 일) 또는 turn을 모르면 알린다. 같은 turn의 쉼으로 이미 알린 레인은 다시 안 알림.
     # parent 거름(PM: 「주소<탭>parent」 줄)은 찍을지에만 쓴다 — 마지막 report 추적은 모든 줄로
-    new=$(printf '%s\n' "$cand" | grep "$tab" | KM=$(lkinds) F=$cur SF=$wsf S=$since W=",$sts," PM=$pmap MY=$myp LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey$nkf$landed"'
+    my_created=
+    if [ -n "$myp" ] && [[ $cand == *@* ]]; then my_created=$(terminal_created_ms "$myp") || my_created=; fi
+    new=$(printf '%s\n' "$cand" | grep "$tab" | KM=$(lkinds) F=$cur SF=$wsf S=$since W=",$sts," PM=$pmap MY=$myp BORN=$my_created LC_ALL=C awk -F'\t' -v OFS='\t' "$evkey$nkf$landed"'
       BEGIN { fl = ""; while ((getline l < ENVIRON["F"]) > 0) { if (l ~ /^#since\t/) fl = substr(l, 8); else seen[nk(l)] = 1 }
               if (ENVIRON["SF"] != "") while ((getline l < ENVIRON["SF"]) > 0) seen[nk(l)] = 1
               nk_ = split(ENVIRON["KM"], kl, "\n"); for (i = 1; i <= nk_; i++) { split(kl[i], kf, "\t"); if (kf[1] != "") kind[kf[1] SUBSEP kf[2]] = kf[3] }
@@ -463,7 +483,11 @@ ev_cmd() {
         if (nk("멈춤\t" $3 "\t" $4 "\t쉼 turn " $8) in seen) next
         $5 = "멈춤"; $6 = "-"; $7 = "뜻밖의 종료(정리됨) " $7 }
       $5 != "멈춤" { lrep($5, $6, NF >= 8 ? $8 : "-", t2) }
-      ENVIRON["MY"] != "" && NF >= 11 && $11 != "-" { if ($11 != "*" && $11 != ENVIRON["MY"] && substr($11, length($11) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"]) next }
+      ENVIRON["MY"] != "" && NF >= 11 && $11 != "-" && $11 != "*" {
+        fields = split($11, owner, "@"); me = ENVIRON["MY"]; addr = owner[1]
+        if (addr != me && substr(addr, length(addr) - length(me)) != "/" me && substr(me, length(me) - length(addr)) != "/" addr) next
+        if (fields > 1 && (fields != 2 || !num(owner[2]) || ("@" owner[2]) != ("@" ENVIRON["BORN"]))) next
+      }
       ENVIRON["MY"] != "" && (NF < 11 || $11 == "-") && ($3 in par) && par[$3] != "-" && par[$3] != ENVIRON["MY"] && substr(par[$3], length(par[$3]) - length(ENVIRON["MY"])) != "/" ENVIRON["MY"] { next }
       $1 >= ENVIRON["S"] && $1 >= fl && (ENVIRON["W"] == ",," || index(ENVIRON["W"], "," $5 ",")) && !(nk(key()) in seen) && !(nk(key()) in done) { done[nk(key())] = 1; print }' |
       sort -s -t "$tab" -k1,1)

@@ -112,20 +112,37 @@ clean_cmd() {
     [ -n "$h" ] || stop "워크트리 HEAD를 읽지 못했다: $wt"
     set -- "$@" "$h"
   fi
+  local owner saved lane_ref done_ref receipt receipt_info=
   arch= btip= subm= lrr_=-
   [ $br = 0 ] || btip=$(x git -C "$repo" rev-parse -q --verify "refs/heads/$branch^{commit}") || stop "브랜치를 읽지 못했다: $branch"
   for c in "$@"; do
     case $c in refs/heads/*) lab="브랜치 $branch" ;; *) lab="워크트리 HEAD $(printf %.12s "$c")" ;; esac
     x git -C "$repo" merge-base --is-ancestor "$c" "$bref"; ia=$?
     [ $ia != 0 ] || continue
-    # 병합기에 제출한 커밋: 원격에 지금(ls-remote — 낡은 추적 참조가 아니라) 그 SHA 그대로인 lane/* 참조가 있으면 원격이 그 커밋을 쥐고
-    # 있으니 지워도 된다 — 레인이 접수 뒤 바로 자리를 비운다(3차 중간 9, 지휘). 원격에서 그 참조가 지워졌거나 다른 커밋이면 지우지 않는다
-    # (2차 높음 4). 원격을 못 읽으면 멈춘다
+    # 제출·주차한 레인 자신의 원격 가지가 원본을 쥘 때만 정리한다.
     if [ $ia = 1 ] && [ $remote = 1 ] && [ $br = 1 ]; then
-      [ "$lrr_" != - ] || lrr_=$(x git -C "$repo" ls-remote origin 'refs/heads/lane/*') || stop "git ls-remote 실패: $lab · origin lane/*"
+      if [ "$lrr_" = - ]; then
+        clean_owner || stop "레인 소유 기록 조회 실패: $branch"
+        lane_ref=refs/heads/lane/$owner done_ref=refs/merge-done/$owner
+        lrr_=$(x git -C "$repo" ls-remote origin "$lane_ref" "$done_ref") || stop "git ls-remote 실패: $lab · $lane_ref"
+        receipt=$(awk -v r="$done_ref" '$2 == r { print $1 }' <<<"$lrr_")
+      fi
       s_=$(x git -C "$repo" rev-parse -q --verify "$c^{commit}") || stop "커밋을 읽지 못했다: $lab"
-      lh_=$(printf '%s\n' "$lrr_" | awk -v s="$s_" '$1 == s { print $2; exit }')
+      lh_=$(printf '%s\n' "$lrr_" | awk -v s="$s_" -v r="$lane_ref" '$1 == s && $2 == r { print $2; exit }')
       if [ -n "$lh_" ]; then echo "${P}제출됨: $lab 은 원격 $lh_ 에 그대로 있다(병합기가 넣는다)"; subm=1; continue; fi
+      # 병합기가 먼저 rebase해 넣으면 원본은 완료 기록의 부모로 남는다.
+      if [ -n "$receipt" ]; then
+        if [ -z "$receipt_info" ]; then
+          if ! x git -C "$repo" cat-file -e "$receipt^{commit}" 2>/dev/null; then
+            [ "$dry" = 0 ] || stop "원격 완료 기록을 받아야 판정할 수 있다: $done_ref"
+            fetchr x git -C "$repo" fetch -q --no-tags --no-write-fetch-head origin "$done_ref" || stop "완료 기록 받기 실패: $done_ref"
+          fi
+          receipt_info=$(x git -C "$repo" show -s --format='%P %s' "$receipt") || stop "완료 기록 조회 실패: $receipt"
+        fi
+        case $receipt_info in "$s_ merge-queue lane=$owner "*" orig=$s_ "*)
+          echo "${P}착지됨: $done_ref 에 $lab 의 원본이 있다"; subm=1; continue ;;
+        esac
+      fi
     fi
     if [ $ia = 1 ] && [ $archive = 1 ]; then   # 보관할 커밋(안 들어간 끝 커밋)으로 모은다 — 지우기 전 확인을 다 거친 뒤 push
       [ $remote = 1 ] || stop "원격(origin)이 없어 --archive로 보관할 수 없다: $repo"
@@ -238,13 +255,32 @@ clean_cmd() {
   clean_lease
   if [ $dry = 1 ]; then cj planned; else cj done; fi
 }
-# clean_lease: 정리가 끝난 레인의 임대 refs/hc-lanes/<레인>을 놓는다(지휘 결정 — 풀기는 land 성공·clean). 원격 없음·이미 없음은 조용히,
-# 못 놓으면 알리기만(정리는 됨 — 손으로 hc-lane lease drop)
+# 가지 별칭으로 정리할 때도 띄울 때 기록한 레인 이름과 임대 커밋을 쓴다.
+clean_owner() {
+  local title rc
+  owner=${name:-$branch}
+  if [ -z "$name" ] && [ "${LANE_BRANCH-}" = "$branch" ]; then owner=${HC_LANE:-$branch}; fi
+  saved=$(x git -C "$repo" rev-parse -q --verify "refs/hc-lease-owners/$branch"); rc=$?
+  case $rc in 0|1) ;; *) return 1 ;; esac
+  if [ -n "$saved" ]; then
+    title=$(x git -C "$repo" log -1 --format=%s "$saved") || return 1
+    case $title in 'hc-lane lease '*) owner=${title#hc-lane lease }; owner=${owner%% *} ;; *) return 1 ;; esac
+  fi
+}
+# 정리가 끝나면 이 실행의 임대만 놓는다.
 clean_lease() {
-  cl_=${name:-$branch}
-  case $cl_ in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) return 0 ;; esac
   [ $remote = 1 ] || return 0
-  if [ $dry = 1 ]; then echo "[dry-run] 임대 refs/hc-lanes/$cl_ 가 있으면 놓음"; return 0; fi
-  clo_=$(lease_x drop "$cl_") || { echo "임대 refs/hc-lanes/$cl_ 를 놓지 못했다(정리는 됨) — hc-lane lease drop${on:+ --on $on} --repo $(q "$repo") --name $cl_" >&2; return 0; }
-  [ "$clo_" = no-origin ] || echo "임대 확인: refs/hc-lanes/$cl_ 없음(놓음)"
+  local ref=refs/hc-lease-owners/$branch saved owner token rc
+  clean_owner || { echo "hc-lane clean: 임대 기록 조회 실패 — 임대를 보존한다" >&2; return 0; }
+  token=$saved
+  if [ "${HC_LANE-}" = "$owner" ] && [ -n "${HC_LANE_LEASE-}" ]; then token=$HC_LANE_LEASE; fi
+  [ -n "$token" ] || return 0
+  if [ $dry = 1 ]; then echo "[dry-run] 이 실행의 임대 refs/hc-lanes/$owner 확인"; return 0; fi
+  lease_x drop "$owner" "$token" >/dev/null; rc=$?
+  case $rc in
+    0) echo "임대 확인: refs/hc-lanes/$owner 없음(놓음)" ;;
+    3) echo "임대 보존: refs/hc-lanes/$owner 는 다른 실행의 것" ;;
+    *) echo "hc-lane clean: 임대를 확인하지 못했다 — 같은 clean으로 다시 시도" >&2; return 0 ;;
+  esac
+  [ "$token" != "$saved" ] || x git -C "$repo" update-ref -d "$ref" "$saved" || echo "hc-lane clean: 이전 임대 기록 정리 실패" >&2
 }

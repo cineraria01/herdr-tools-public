@@ -32,14 +32,23 @@ emit() {
 #  보낼지는 「주인이 나(또는 모름·사라짐) + sent·내 커서에 없음」(앞의 사건 awk가 거름) watch 자신의 알림 줄(hc-lane-wait)은 늘 보냄.
 #  확인은 이 부름 안에서 지휘마다 한 번(hc get)
 wfilter() {
+  local recipient_run= intended
   w0_=${wto##*/} occ_= orc_=
   printf '%s\n' "$1" | while IFS= read -r l_; do
     [ -n "$l_" ] || continue
     a_=$(printf '%s\n' "$l_" | cut -f3) n_=$(printf '%s\n' "$l_" | cut -f4)
     [ "$n_" != hc-lane-wait ] || { printf '%s\n' "$l_"; continue; }
-    # 아홉째 칸(report --to): 받을 지휘를 정한 사건은 그 지휘들의 watch만(주인 판정 안 함)
+    # --to가 원래 주인 한 곳을 가리키고 실행까지 기록했으면 그 실행만 받는다.
     t_=$(printf '%s\n' "$l_" | cut -f9)
-    if [ -n "$t_" ] && [ "$t_" != - ]; then case ",$t_," in *",$w0_,"* | *"/$w0_,"*) printf '%s\n' "$l_" ;; esac; continue; fi
+    if [ -n "$t_" ] && [ "$t_" != - ]; then
+      case ",$t_," in *",$w0_,"* | *"/$w0_,"*) ;; *) continue ;; esac
+      intended=$(printf '%s\n' "$l_" | cut -f11 -s)
+      if [[ $intended == "$t_"@* ]]; then
+        [ -n "$recipient_run" ] || recipient_run=$(terminal_created_ms "$wto") || recipient_run=unknown
+        [[ $recipient_run =~ ^[0-9]+$ ]] && [ "$intended" = "$t_@$recipient_run" ] || continue
+      fi
+      printf '%s\n' "$l_"; continue
+    fi
     o_=$(evowner "$l_")
     [ "$o_" != - ] || { printf '%s\n' "$l_"; continue; }
     # 11칸에 지휘 실행(<주소>@<created_ms>)이 실렸으면 그 주소의 지금 터미널이 그 실행일 때만 주인(주소를 새 지휘가 쥐었으면 주인 사라짐).
@@ -48,10 +57,14 @@ wfilter() {
     if [ -n "$om_" ]; then
       case " $orc_ " in *" $o_="*) oc_=${orc_##*" $o_="}; oc_=${oc_%% *} ;;
         *) og_=$(capt 10 hc get "$o_" --json </dev/null 2>&1)
-           if printf '%s\n' "$og_" | grep -q '"state" *: *"live"'; then
-             oc_=$(printf '%s\n' "$og_" | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1); oc_=${oc_:-unk}
-           elif printf '%s\n' "$og_" | grep -Eq '"kind" *: *"not_found"|"address" *:'; then oc_=gone
-           else oc_=unk; fi
+           case $? in
+             0) if jq -e '.state == "live"' <<<"$og_" >/dev/null 2>&1; then
+                  oc_=$(live_created_ms <<<"$og_") || oc_=unk
+                elif jq -e '(.address | type) == "string" and (.state | type) == "string"' <<<"$og_" >/dev/null 2>&1; then oc_=gone
+                else oc_=unk; fi ;;
+             3) if jq -e '.error.kind == "not_found"' <<<"$og_" >/dev/null 2>&1; then oc_=gone; else oc_=unk; fi ;;
+             *) oc_=unk ;;
+           esac
            orc_="$orc_ $o_=$oc_" ;;
       esac
       [ "$oc_" != unk ] || continue
@@ -296,8 +309,8 @@ early_wait_cmd() {
 vmyrun() {  # 이 터미널의 실행 ID를 vme에. 모르면 1
   vme=${HC_LANE_JOB-}; [ -z "$vme" ] || return 0
   [ -n "${HC_TERMINAL_ID-}" ] || return 1
-  vc_=$(capt 10 hc get "$HC_TERMINAL_ID" --json </dev/null 2>/dev/null | sed -n 's/.*"created_ms" *: *\([0-9][0-9]*\).*/\1/p' | tail -n 1)
-  [ -n "$vc_" ] || return 1
+  local info
+  info=$(capt 10 hc get "$HC_TERMINAL_ID" --json </dev/null 2>/dev/null) && vc_=$(live_created_ms <<<"$info") || return 1
   vme=${HC_TERMINAL_ID##*/}@$vc_
 }
 vload() {  # vload <레인> <aid>: 지시를 읽어 vf va vr vs vv vp vb vo, 표시 vx·끝 vdn. 1 없음, 2 꼴 틀림
