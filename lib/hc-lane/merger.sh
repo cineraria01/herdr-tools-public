@@ -255,7 +255,8 @@ mround() {
   # 예: 착지가 한 번에 하나만 접는 문서 조각 폴더)를 앞 구성원과 함께 건드리는 것
   msolo_=(); if mso_=$(git show "$B_:.claude/herdr-merge-solo" 2>/dev/null); then while IFS= read -r l_; do case $l_ in ''|'#'*) ;; *) msolo_+=("$l_") ;; esac; done <<<"$mso_"; fi
   msu_=   # 묶음에 「하나만」 경로를 건드린 구성원이 이미 있음
-  mtouch() { [ ${#msolo_[@]} -gt 0 ] && [ -n "$(git diff --name-only "$(git merge-base "$1" "$B_")" "$1" -- "${msolo_[@]}" 2>/dev/null)" ]; }
+  # 갈래점 뒤 커밋 하나라도 그 경로를 건드렸으면 — 순 차이로 보지 않는다(더했다 지운 앞선 접기 커밋은 착지가 풀어 조각이 돌아온다)
+  mtouch() { [ ${#msolo_[@]} -gt 0 ] && [ -n "$(git rev-list -n 1 "$(git merge-base "$1" "$B_")..$1" -- "${msolo_[@]}" 2>/dev/null)" ]; }
   ! mtouch "${bs_[0]}" || msu_=1
   if [ ${#bq_[@]} -gt 1 ]; then
     k_=(0)

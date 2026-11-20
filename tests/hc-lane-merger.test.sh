@@ -647,6 +647,12 @@ printf 'docs/frag/\n' >"$T/solo.src"
 lane a l-s3 s3.txt s3; land a l-s3
 v0=$(vcount); bmerge
 t "한 묶음에 하나만 경로: 첫 묶음은 l-s1+l-s3, l-s2는 다음에 혼자 — 검증 두 번" '[ $mrc = 0 ] && mainlog | grep -Fxq l-s1 && mainlog | grep -Fxq l-s2 && mainlog | grep -Fxq l-s3 && [ "$(vcount)" = $((v0 + 2)) ] && [ "$(mainlog | head -n 1)" = l-s2 ] || { echo "rc=$mrc v=$(vcount)/$v0"; mainlog | head -5; cat "$T/merr"; false; }'
+# 그 경로를 더했다 지운 제출(앞서 접은 커밋 — 갈래점과의 차이는 비지만 착지가 접기를 풀면 조각이 돌아온다)도 건드린 것으로 본다
+# (2026-11-20 지휘 t1cj: 한 저장소에서 조각을 가진 제출 둘이 함께 묶여 검증 15분 뒤 접기에서 종료 5)
+(cd "$W/a/proj" && git fetch -q origin && git checkout -q -B l-s4 origin/main && mkdir -p docs/frag && printf 's4\n' >docs/frag/s4.md && git add docs/frag/s4.md && git commit -qm l-s4 && git rm -q docs/frag/s4.md && printf 's4\n' >s4.txt && git add s4.txt && git commit -qm l-s4-fold); land a l-s4
+(cd "$W/b/proj" && git fetch -q origin && git checkout -q -B l-s5 origin/main && mkdir -p docs/frag && printf 's5\n' >docs/frag/s5.md && git add docs/frag/s5.md && git commit -qm l-s5); land b l-s5
+v0=$(vcount); bmerge
+t "한 묶음에 하나만 경로: 더했다 지운(접은) 제출도 건드림 — l-s4·l-s5 따로, 검증 두 번" '[ $mrc = 0 ] && mainlog | grep -Fxq l-s4-fold && mainlog | grep -Fxq l-s5 && [ "$(vcount)" = $((v0 + 2)) ] || { echo "rc=$mrc v=$(vcount)/$v0"; mainlog | head -5; cat "$T/merr"; false; }'
 off_
 
 # 2단계(2026-11-20 지휘 t1cj): 전용 착지 스크립트(.claude/herdr-land.sh)가 있는 저장소도 받는다 — 착지는 그 스크립트의 기본 브랜치 판.
