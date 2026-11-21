@@ -2058,9 +2058,12 @@ sleep 2.5
 t "watch: 원격 연결 실패는 「연결 안 됨」 한 번만" '[ "$(grep -c "연결 안 됨 m9" "$HCLOG.send")" = 1 ] || { cat "$HCLOG.send" "$T/we"; false; }'
 t "watch: sh 없는 기계는 「연결 안 됨」·「모름」 없음(lane-nosh)" '! grep -Fq m8 "$HCLOG.send" && ! grep -Fq "모름 m8" "$T/we" || { cat "$HCLOG.send" "$T/we"; false; }'
 mkdir -p "$MH/m9/.local/state/hc-lane"
-ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" h9 t3 lane-r 완료 eeee9999 원격 >"$MH/m9/.local/state/hc-lane/events.tsv"
-upto 'grep -Fq "lane-r 완료 eeee9999" "$HCLOG.send" 2>/dev/null'
+{ ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" h9 t3 lane-r 완료 eeee9999 원격
+  ev "$(date -u +%Y-%m-%dT%H:%M:%SZ)" h9 - hc-disk-low 중간 - 여유적음; } >"$MH/m9/.local/state/hc-lane/events.tsv"
+upto 'grep -Fq "lane-r 완료 eeee9999" "$HCLOG.send" 2>/dev/null && grep -Fq hc-disk-low "$HCLOG.send"'
 t "watch: 다음 바퀴에 다시 붙으면 그 기계 사건을 보냄" 'grep -Fq "lane-r 완료 eeee9999 원격 (m9/t3)" "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
+# 터미널 밖 사건(hc-sweep의 hc-disk-low 등 — 주소 -)은 끝 괄호에 그 기계 hc 이름(disk-low-machine: 「(-)」로 와 기계를 짐작했다)
+t "watch: 터미널 없는 원격 사건은 끝 괄호에 기계 hc 이름" 'grep -Fq "hc-disk-low 중간 여유적음 (m9)" "$HCLOG.send" || { cat "$HCLOG.send" "$T/we"; false; }'
 stopw $w4
 unset HC_FAKE_MACHINES HC_FAKE_MACH_HOME
 # 지휘가 손으로 걸 일 없게: 레인·감사를 띄우면 그 지휘($HC_TERMINAL_ID)의 watch가 없을 때 저절로 하나(사용자 「코드적으로 처리」)

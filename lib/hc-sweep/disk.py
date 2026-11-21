@@ -6,10 +6,11 @@
   go test가 끝나도 남긴 go-build*·t.TempDir(Test*)가 기계마다 GB씩 쌓여 검증이 ENOSPC로 멈췄다(2026-11-21 워커 맥 여유 1GB).
   다른 이름은 건드리지 않는다. 지웠으면 closed.log에 「임시 찌꺼기 지움」 한 줄(개수·크기).
 디스크 부족 알림: 홈이 있는 볼륨 여유가 설정 sweep.disk_free_gb(기본 10, 0이면 끔) 아래면 hc-lane report 중간 --name hc-disk-low
-  사건 하나(주인 없는 사건이라 살아 있는 지휘 watch가 모두 받는다). 한 줄 칸에 여유와 임시 폴더·~/Library/Caches/go-build·
-  ~/.cache/go-build 크기. 알린 표식(…/hc-sweep/disk-low)이 있으면 다시 알리지 않고, 여유가 문턱의 1.5배를 넘으면 표식을 지워
+  사건 하나(주인 없는 사건이라 살아 있는 지휘 watch가 모두 받는다. 터미널 밖이라 watch 줄 끝 괄호에 기계 이름). 한 줄 칸에
+  여유·볼륨 사용률(df처럼 사용/(사용+여유))과 임시 폴더·~/Library/Caches/go-build·~/.cache/go-build 크기. 알린 표식(…/hc-sweep/disk-low)이 있으면 다시 알리지 않고, 여유가 문턱의 1.5배를 넘으면 표식을 지워
   다음 부족 때 또 알린다(문턱 언저리에서 오르내릴 때 되풀이하지 않게). 보내기 실패면 표식 없이 다음 바퀴에 다시.
-  쓰지 않는 옛 캐시(예: GOCACHE를 옮긴 뒤 남은 ~/Library/Caches/go-build)는 지우지 않고 크기만 보인다 — 무엇을 쓰는지는 저장소마다 다르다.
+  Go 캐시는 지우지 않고 크기만 보인다 — ~/Library/Caches/go-build는 macOS 기본 GOCACHE라 GOCACHE를 옮긴 저장소가 있어도 다른
+  go가 다시 채울 수 있다(2026-11-21 지운 뒤 다시 1.5GB). 쓰는 곳이 있는지는 짐작하지 않고 사람이 본다.
 """
 import os
 import shutil
@@ -126,8 +127,9 @@ def du(path, run=subprocess.run):
         return "?" if os.path.exists(path) else "없음"
 
 
-def disk_alert(free, limit_gb, state, base, dry, lane, run=subprocess.run):
-    """부족 알림 한 바퀴. 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 None."""
+def disk_alert(usage, limit_gb, state, base, dry, lane, run=subprocess.run):
+    """부족 알림 한 바퀴(usage = shutil.disk_usage). 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 None."""
+    free = usage.free
     if free >= limit_gb * 1.5 * GB:
         if os.path.exists(state) and not dry:
             os.remove(state)
@@ -138,8 +140,9 @@ def disk_alert(free, limit_gb, state, base, dry, lane, run=subprocess.run):
     short = lambda p: "~" + p[len(home):] if p.startswith(home + "/") else p
     sizes = " · ".join("%s %s" % (short(p.rstrip("/")), du(p, run))
                        for p in [base] + [os.path.expanduser(x) for x in SHOW])
-    msg = "디스크 여유 %.1fGB < 문턱 %sGB — %s (임시 찌꺼기는 hc-sweep이 지움, 안 쓰는 옛 캐시는 손으로)" % (
-        free / GB, limit_gb, sizes)
+    pct = 100 * usage.used / ((usage.used + free) or 1)
+    msg = ("디스크 여유 %.1fGB(사용 %.0f%%) < 문턱 %sGB — %s (임시 찌꺼기는 hc-sweep이 지움, Go 캐시는 쓰는 곳이 없을 때만 손으로"
+           " — ~/Library/Caches/go-build는 macOS 기본 GOCACHE)") % (free / GB, pct, limit_gb, sizes)
     if dry:
         return msg
     # 표식을 먼저 쓴다. 디스크가 차서 못 쓰면 날짜 키로 보내 hc-lane이 그날 두 번 적지 않게 한다(감사 낮음 2)
@@ -182,6 +185,6 @@ def run(dry, conf, record, lane):
     limit = num("sweep.disk_free_gb", "10")
     if limit > 0:
         state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-sweep", "disk-low")
-        msg = disk_alert(shutil.disk_usage(os.path.expanduser("~")).free, limit, state, base, dry, lane)
+        msg = disk_alert(shutil.disk_usage(os.path.expanduser("~")), limit, state, base, dry, lane)
         if msg:
             print("디스크 부족 알림%s:" % (" (보낼 것)" if dry else ""), msg)

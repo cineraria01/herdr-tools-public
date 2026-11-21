@@ -2,11 +2,12 @@
 
 # emit <사건 줄들>: 커서에 적고 찍는다. watch는 먼저 지휘 터미널에 한 줄로 밀어 주고(hc send), 보낸 뒤에만 커서에 적는다
 # (못 보냈으면 1 — 다음 바퀴에 다시. 지휘가 바빠도 hc send는 입력에 쌓인다)
+# 끝 괄호는 터미널 주소, 터미널 밖 사건(hc-sweep·hc-fill — 주소 -)이면 기계 칸(원격은 hc 이름)(disk-low-machine — 「(-)」로 와 어느 기계인지 몰랐다)
 emit() {
   if [ $ec = watch ]; then
     set -- "$(wfilter "$1")"
     [ -n "$1" ] || return 3   # 이 지휘의 사건이 없음(남의 것은 커서에 안 적어 그 지휘·wait 몫으로 남긴다)
-    m_=$(printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '{ s = $4 " " $5 ($6 != "-" ? " " $6 : "") " " $7 " (" $3 ")"; o = o (NR > 1 ? " ‖ " : "") s }
+    m_=$(printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '{ s = $4 " " $5 ($6 != "-" ? " " $6 : "") " " $7 " (" ($3 != "-" ? $3 : $2) ")"; o = o (NR > 1 ? " ‖ " : "") s }
       END { print "hc-lane: " o }' | LC_ALL=C tr -d '\000-\037\177')   # 제어 문자(ESC·Ctrl-C 등)는 지휘 입력에 넣지 않는다
     wsend "$m_" || return 1
   fi

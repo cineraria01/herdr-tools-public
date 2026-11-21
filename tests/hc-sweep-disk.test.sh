@@ -86,8 +86,13 @@ sweep; sweep
 n=$(grep -c 'hc-disk-low' "$EV" 2>/dev/null)
 [ "$n" = 1 ] && ok "같은 상태에서 한 번만 알림" || bad "알림 수 $n: $(cat "$EV" 2>/dev/null)"
 line=$(grep 'hc-disk-low' "$EV" | tail -n 1)
-case $line in *"	중간	"*"디스크 여유"*"문턱 1000000000"*"~/Library/Caches/go-build 없음"*"~/.cache/go-build 없음"*) ok "알림 줄: 중간·여유·세 곳 크기" ;;
+case $line in *"	중간	"*"디스크 여유"*"GB(사용 "*"%) < 문턱 1000000000"*"~/Library/Caches/go-build 없음"*"~/.cache/go-build 없음"*) ok "알림 줄: 중간·여유·사용률·세 곳 크기" ;;
   *) bad "알림 줄 꼴: $line" ;; esac
+# Go 캐시를 「안 쓰는 옛 캐시」로 짐작하지 않는다(disk-low-machine — mini-m4에서 지운 뒤 다시 찼다)
+case $line in *"옛 캐시"*) bad "Go 캐시를 옛 캐시로 부름: $line" ;; *"Go 캐시는 쓰는 곳이 없을 때만 손으로"*) ok "Go 캐시 문구는 사실대로" ;;
+  *) bad "Go 캐시 문구: $line" ;; esac
+# 기계 칸(둘째)은 이 기계 이름(HC_LANE_MACHINE, 없으면 hostname) — watch가 터미널 없는 사건 끝 괄호에 이 칸을 보인다
+[ "$(printf %s "$line" | cut -f2)" = "${HC_LANE_MACHINE:-$(hostname -s)}" ] && ok "알림 사건의 기계 칸 = 이 기계" || bad "기계 칸: $line"
 # 회복(여유 ≥ 문턱의 1.5배) 뒤 다시 부족이면 또 한 번
 cfg "sweep.disk_free_gb 0.000001"
 sweep
