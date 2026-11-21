@@ -33,7 +33,6 @@ type cg struct {
 	kids     []*exec.Cmd
 	RC       int
 	OUT, ERR string
-	calmW    int
 	busy     string
 }
 
@@ -280,15 +279,20 @@ func (c *cg) checkOK(name string, ok bool, want int) {
 	c.check(name, want)
 }
 
-// 시간 시험은 맥 부하에 기대지 않게: calm이 1분 부하가 CPU 수 아래로 내리기를 10초마다 기다린다(이 시나리오 전체에서 합쳐 최대
-// COTENANT_CALM_MAX초, 기본 600 — 단 go test 기한을 넘지 않게 그 앞 90초까지). 그래도 높으면 시간 검사만 건너뛴다.
+// calmWaited: 두 판(go·bash)이 함께 쓰는 calm 기다림 합(초). 판마다 따로 세면 상한의 두 배를 기다린다.
+var calmWaited int
+
+// 시간 시험은 맥 부하에 기대지 않게: calm이 1분 부하가 CPU 수 아래로 내리기를 10초마다 기다린다(두 판 합쳐 최대
+// COTENANT_CALM_MAX초, 기본 600 — 단 go test 기한까지 남은 시간의 절반까지: 기다린 뒤 두 판의 나머지가 부하 속에서도 기한 안에
+// 끝나게. 2026-11-22 verify-go-timeout — 묶음 전체를 한 번에 돌리면 다른 꾸러미가 만든 부하로 기한 앞 90초까지 기다리다 10분을
+// 넘겼다). 그래도 높으면 시간 검사만 건너뛴다.
 func (c *cg) calm() {
 	mx := 600
 	if v, err := strconv.Atoi(os.Getenv("COTENANT_CALM_MAX")); err == nil {
 		mx = v
 	}
 	if dl, ok := c.t.Deadline(); ok {
-		if left := int(time.Until(dl).Seconds()) - 90; left < mx {
+		if left := int(time.Until(dl).Seconds()) / 2; left < mx {
 			mx = left
 		}
 	}
@@ -311,13 +315,13 @@ func (c *cg) calm() {
 			c.busy = ""
 			return
 		}
-		if c.calmW >= mx {
+		if calmWaited >= mx {
 			c.busy = fmt.Sprintf("1분 부하 %d ≥ CPU %d", l, nc)
-			c.t.Logf("calm: %s — 합쳐 %d초 기다려도 안 내려 그대로 잰다", c.busy, c.calmW)
+			c.t.Logf("calm: %s — 합쳐 %d초 기다려도 안 내려 그대로 잰다", c.busy, calmWaited)
 			return
 		}
 		time.Sleep(10 * time.Second)
-		c.calmW += 10
+		calmWaited += 10
 	}
 }
 

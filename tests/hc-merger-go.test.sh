@@ -19,9 +19,24 @@ gofmt=${gob%/go}/gofmt; [ -x "$gofmt" ] || gofmt=gofmt
 f=$("$gofmt" -l cmd internal)
 if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
 if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
-# 시간 한도 600초: tests/hcfill(hc-fill 계약 시험, 바깥 exec 수백 번)이 혼자 2분 남짓 — 바쁜 기계에서도 끊기지 않게
-# tests/hclane(hc-lane 계약 시험, 몇 분)은 빼고 tests/hc-lane-go.test.sh·hc-lane-bash.test.sh가 따로 돈다
-if "$gob" test -race -count=1 -timeout 600s $("$gob" list ./... | grep -v '/tests/hclane$'); then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
+# tests/hclane(hc-lane 계약 시험, 몇 분)은 빼고 tests/hc-lane-go.test.sh·hc-lane-bash.test.sh가 따로 돈다.
+# 느린 꾸러미(SLOW)는 묶음 뒤에 하나씩 따로, 각자 1200초 — 묶음째 돌면 서로의 부하로 늘어져 한 상한을 아무나 넘겼다(2026-11-22
+# verify-go-timeout: claude/hooks/tests의 TestCotenantGuard가 묶음 속에서 10분 초과, 혼자는 1분 안. mini-m6-1 묶음 실측 hooks 820초·
+# tests/hcfill 440초·cmd/herdr-sync 384초, 그다음 hc-merger 46초). 나머지는 묶음으로 600초. 상한을 넘으면 「시간 넘김 — <꾸러미>」로 실패한다.
+SLOW='/claude/hooks/tests$|/tests/hcfill$|/cmd/herdr-sync$'
+gotest() { # 이름 상한 꾸러미…
+  local name=$1 lim=$2 log; shift 2
+  log=$(mktemp "${TMPDIR:-/tmp}/go-test.XXXXXX") || { echo "FAIL - go test -race: 임시 파일"; fail=1; return; }
+  "$gob" test -race -count=1 -timeout "$lim" "$@" 2>&1 | tee "$log"
+  if [ "${PIPESTATUS[0]}" = 0 ]; then echo "ok - go test -race: $name"; return; fi
+  fail=1
+  local tp; tp=$(awk '/^panic: test timed out after/{t=1} t && /^FAIL\t/{print $2; t=0}' "$log" | paste -sd ' ' -)
+  if [ -n "$tp" ]; then echo "FAIL - go test -race: 시간 넘김($lim) — $tp"; else echo "FAIL - go test -race: $name"; fi
+}
+pkgs=$("$gob" list ./...) || { echo "FAIL - go list"; fail=1; }
+# shellcheck disable=SC2046 # 꾸러미 목록은 낱말로 나눈다
+gotest 묶음 600s $(printf '%s\n' "$pkgs" | grep -v '/tests/hclane$' | grep -Ev "$SLOW")
+for p in $(printf '%s\n' "$pkgs" | grep -E "$SLOW"); do gotest "${p#herdr-tools/}" 1200s "$p"; done
 
 # 공통 실행기(lib/go-run.sh — 저장소에서만. 깔린 곳은 ~/.local/lib/go-run.sh가 같은 파일). 가짜 도구 모듈로 본다
 gr=$here/../lib/go-run.sh
