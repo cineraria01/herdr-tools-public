@@ -22,7 +22,7 @@
 # Off switch, people only: "AGENT_LEASE_OFF": "1" in the env block of ~/.claude/settings.json (read from the file,
 # an environment variable alone does nothing). Agents may not write that switch, disableAllHooks or touch
 # .git/agent-leases. Change this file only as: temp copy -> bash -n -> test passes -> mv over it.
-# Test: ~/.claude/hooks/tests/cotenant-guard.test.sh (fake HOME = registry + settings, fake hc on PATH).
+# Test (repo): go test ./claude/hooks/tests/ -run CotenantGuard (fake HOME = registry + settings, fake hc on PATH; go·bash both).
 # Go 판(cmd/herdr-hooks, 같은 판정)으로 — HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 셸 판, 바이너리가 없거나 낡으면 이번은 셸 판·짓기는 뒤에서(lib/go-run.sh GO_RUN_BUILD=bg, 2026-11-21 hooks-go)
 for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
   [ -r "$_hg" ] && { . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks cotenant-guard || exit 1; break; }

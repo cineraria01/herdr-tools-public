@@ -83,7 +83,8 @@ installed_test_paths() {
   mkdir -p "$prefix/bin/tests" "$prefix/lib"
   cp -R "$here/../lib/hc-lane" "$prefix/lib/"
   cp "$lane_bin" "$prefix/bin/hc-lane"
-  for name in hc-lane hc-lane-merger; do
+  # hc-lane 계약 시험은 Go 시험 tests/hclane으로 옮겨(go-tests-lane) 셸 머리가 없다 — 병합기 시험 머리만 본다.
+  for name in hc-lane-merger; do
     # 배포된 시험의 준비 부분만 실행한다. 첫 임시 저장소를 만들기 전에 경로와 격리를 확인한다.
     sed '/^W=/,$d' "$here/$name.test.sh" >"$prefix/bin/tests/$name.test.sh"
     cat >>"$prefix/bin/tests/$name.test.sh" <<'SH'

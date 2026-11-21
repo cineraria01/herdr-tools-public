@@ -21,17 +21,10 @@ Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.sha
 스킬나무     .agents/skills/**                                skills/agents/                                  macos
 제외         .agents/skills/app-managed                       -                                               -
 훅           .claude/hooks/cotenant-guard.sh                  tools:claude/hooks/cotenant-guard.sh            macos
-훅           .claude/hooks/tests/cotenant-guard.test.sh       tools:claude/hooks/tests/cotenant-guard.test.sh macos
 훅           .claude/hooks/loop-no-question.sh                tools:claude/hooks/loop-no-question.sh          macos
 훅           .claude/hooks/hc-lane-wait-guard.sh              tools:claude/hooks/hc-lane-wait-guard.sh        macos
-훅           .claude/hooks/tests/hc-lane-wait-guard.test.sh   tools:claude/hooks/tests/hc-lane-wait-guard.test.sh macos
 훅           .claude/hooks/kill-by-lookup-guard.sh            tools:claude/hooks/kill-by-lookup-guard.sh      macos
-훅           .claude/hooks/tests/kill-by-lookup-guard.test.sh tools:claude/hooks/tests/kill-by-lookup-guard.test.sh macos
 훅           .claude/hooks/lane-no-shell-edit.sh              tools:claude/hooks/lane-no-shell-edit.sh        macos
-훅           .claude/hooks/tests/lane-no-shell-edit.test.sh   tools:claude/hooks/tests/lane-no-shell-edit.test.sh macos
-훅           .claude/hooks/tests/loop-no-question.test.sh     tools:claude/hooks/tests/loop-no-question.test.sh macos
-훅           .claude/hooks/tests/hooks-impl.sh                tools:claude/hooks/tests/hooks-impl.sh          macos
-훅           .claude/hooks/tests/hooks-bash.test.sh           tools:claude/hooks/tests/hooks-bash.test.sh     macos
 도구         .local/bin/hc-lane                               tools:bin/hc-lane                               macos
 도구         .local/lib/hc-lane/**                            tools:lib/hc-lane/                              macos
 Go           .local/lib/herdr-go/go.mod                       tools:go.mod                                    all
@@ -46,7 +39,7 @@ Go           .local/lib/go-run.sh                             tools:lib/go-run.s
 도구         .local/bin/tests/hc-launchd-guard.test.sh        tools:tests/hc-launchd-guard.test.sh            macos
 도구         .local/lib/ovis-split/**                         tools:lib/ovis-split/                           macos
 도구         .local/bin/tests/isolate.sh                      tools:tests/isolate.sh                          macos
-도구         .local/bin/tests/hc-lane.test.sh                 tools:tests/hc-lane.test.sh                     macos
+도구         .local/bin/tests/hc-lane-go.test.sh              tools:tests/hc-lane-go.test.sh                  macos
 도구         .local/bin/tests/hc-lane-bash.test.sh            tools:tests/hc-lane-bash.test.sh                macos
 도구         .local/bin/tests/hc-lane-merger.test.sh          tools:tests/hc-lane-merger.test.sh              macos
 도구         .local/bin/herdr-settings-merge                  tools:bin/herdr-settings-merge                  all

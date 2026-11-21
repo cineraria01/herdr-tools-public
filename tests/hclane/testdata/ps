@@ -1,0 +1,4 @@
+#!/bin/bash
+[ -z "${HC_FAKE_PS_FAIL-}" ] || exit 1
+[ -n "${HC_FAKE_PS-}" ] || exec /bin/ps "$@"
+echo "$*" >>"$HCLOG.ps"; cat "$HC_FAKE_PS"

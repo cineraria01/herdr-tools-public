@@ -33,14 +33,21 @@ var frags = []string{
 
 func corpus(t *testing.T) []string {
 	var out []string
-	// 시험 파일의 따옴표 안 명령들(대략) — 맨 앞(느린 대조는 앞쪽만 본다)
-	for _, f := range []string{"kill-by-lookup-guard", "lane-no-shell-edit", "hc-lane-wait-guard", "cotenant-guard"} {
-		b, err := os.ReadFile(filepath.Join("..", "..", "claude", "hooks", "tests", f+".test.sh"))
+	// 훅 계약 시험(Go — 옛 셸 시험 *.test.sh를 옮긴 것, 2026-11-21 go-tests-hooks)의 문자열 글자들(대략) — 맨 앞(느린 대조는 앞쪽만 본다).
+	// 작은 훅 셋(small_hooks) 먼저, 그다음 cotenant-guard. Go 글자는 풀어서(\" 등), 못 풀면 그대로
+	for _, f := range []string{"small_hooks_test.go", "cotenant_basics_test.go", "cotenant_fix12_test.go", "cotenant_fix34_test.go"} {
+		b, err := os.ReadFile(filepath.Join("..", "..", "claude", "hooks", "tests", f))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range regexp.MustCompile(`'([^'\n]{1,300})'|"([^"\n]{1,300})"`).FindAllStringSubmatch(string(b), -1) {
-			out = append(out, m[1]+m[2])
+		for _, m := range regexp.MustCompile("`([^`\\n]{1,300})`|\"((?:[^\"\\\\\\n]|\\\\.){1,300})\"").FindAllStringSubmatch(string(b), -1) {
+			s := m[1]
+			if m[2] != "" {
+				if s, err = strconv.Unquote(`"` + m[2] + `"`); err != nil {
+					s = m[2]
+				}
+			}
+			out = append(out, s)
 		}
 	}
 	r := rand.New(rand.NewSource(20261121))

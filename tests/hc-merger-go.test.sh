@@ -2,6 +2,7 @@
 # Go 판 단위 시험(go.mod 모듈 전체 — cmd/hc-merger·internal/*): gofmt·go vet·go test -race(프로세스 무리 정리·잠금 안 물림·git 모름 → 쉼·
 # 우선순위·복구 단계별 죽기·사건 줄 꼴·원자 쓰기). 공통 실행기 lib/go-run.sh가 바이너리를 짓고 고르는지도 본다.
 # 운영 도구 계약 시험(cmd/<도구>/contract*_test.go — 옛 tests/<도구>.test.sh)도 여기서 Go 판(기본)으로 돈다. 셸 판은 tests/ops-go-bash.test.sh
+# 훅 계약 시험(claude/hooks/tests/*_test.go — 옛 claude/hooks/tests/*.test.sh)도 여기서 돈다 — 판 스위치가 없으면 go·bash 두 판을 다(2026-11-21 go-tests-hooks)
 # go가 없으면 실패한다 — Go 판을 쓰는 기계에는 go가 있어야 한다(없으면 go_run이 경고하고 셸 판으로 돈다)
 # 실행: bash tests/hc-merger-go.test.sh
 set -u
@@ -19,7 +20,8 @@ f=$("$gofmt" -l cmd internal)
 if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
 if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
 # 시간 한도 600초: tests/hcfill(hc-fill 계약 시험, 바깥 exec 수백 번)이 혼자 2분 남짓 — 바쁜 기계에서도 끊기지 않게
-if "$gob" test -race -count=1 -timeout 600s ./...; then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
+# tests/hclane(hc-lane 계약 시험, 몇 분)은 빼고 tests/hc-lane-go.test.sh·hc-lane-bash.test.sh가 따로 돈다
+if "$gob" test -race -count=1 -timeout 600s $("$gob" list ./... | grep -v '/tests/hclane$'); then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
 
 # 공통 실행기(lib/go-run.sh — 저장소에서만. 깔린 곳은 ~/.local/lib/go-run.sh가 같은 파일). 가짜 도구 모듈로 본다
 gr=$here/../lib/go-run.sh

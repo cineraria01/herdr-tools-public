@@ -2,6 +2,7 @@
 # .claude/herdr-verify.sh 고아 검사: 시험이 배경 프로세스를 남기면 목록을 찍고 끄고 검증 실패.
 # 남기지 않으면 통과. 검증 전부터 돌던 프로세스는 건드리지 않는다. 이 시험도 끝에 고아 0을 확인한다.
 set -u
+unset HERDR_VERIFY_ALL   # 바깥 검증(HERDR_VERIFY_ALL=1)이 주는 값을 안쪽 검증이 물려받으면 8절 「싼 검사에서 멈춤」이 깨진다
 src=$(cd "$(dirname "$0")/.." && pwd)/.claude/herdr-verify.sh
 cfgtool=$(cd "$(dirname "$0")/.." && pwd)/bin/herdr-tools-config   # 검증의 개인 값 검사 단계가 부른다
 T=$(mktemp -d "${TMPDIR:-/tmp}/hv-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1

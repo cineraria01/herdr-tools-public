@@ -1,0 +1,9 @@
+#!/bin/bash
+echo "$*" >>"$HCLOG.app"
+[ -n "${HC_FAKE_APP-}" ] || { echo '{"error":"herdr-app is not running"}' >&2; exit 1; }
+case $1 in
+  ls) if [ -f "$HCLOG.appls" ]; then cat "$HCLOG.appls"
+      elif grep -Fxq herdr.space=lanes "$HCLOG" 2>/dev/null; then echo '{"spaces":[{"id":"box/lanes","name":"lane-a","machine":"box"}]}'
+      else echo '{"spaces":[{"id":"sp1","name":"here","machine":null}]}'; fi ;;
+  do) [ "$2" = space.rename ] && printf '{"spaces":[{"id":"%s","name":"%s","machine":"box"}]}\n' "$4" "$6" >"$HCLOG.appls" ;;
+esac

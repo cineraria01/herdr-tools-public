@@ -1,6 +1,6 @@
 package main
 
-// 단위 시험: worker 고르기·상태 파일·이분 배치 순서·watch 판정. herdr-app을 부르는 길은 tests/herdr-balance.test.sh(가짜 herdr-app)가 본다.
+// 단위 시험: worker 고르기·상태 파일·이분 배치 순서·watch 판정. herdr-app을 부르는 길은 tests/util/herdrbalance_test.go(가짜 herdr-app)가 본다.
 
 import (
 	"fmt"
