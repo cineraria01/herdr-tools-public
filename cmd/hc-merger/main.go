@@ -9,7 +9,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +19,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 )
 
 const (
@@ -41,6 +43,7 @@ func main() {
 		syscall.CloseOnExec(fd)
 	}
 	gSelf, gEvdir = selfPath(), evdir()
+	proc.Who = "hc-lane merger"
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println("hc-merger 1")
 		return
@@ -89,29 +92,18 @@ func onSignals(grace time.Duration) {
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
 		s := <-ch
-		curMu.Lock() // 끌 동안 새 자식을 띄우지 않는다(풀지 않고 끝낸다)
-		if curPG != 0 {
-			stopGroup(curPG, grace)
-		}
+		proc.StopCurrent(grace) // 끌 동안 새 자식을 띄우지 않는다(풀지 않고 끝낸다)
 		os.Exit(128 + int(s.(syscall.Signal)))
 	}()
 }
 
-// flockNB: 파일을 열어 비켜 잠근다. busy = 남이 쥠
+// flockNB: 파일을 열어 비켜 잠근다(lockx). busy = 남이 쥠. 쥔 잠금은 gLocks에 둔다
 func flockNB(path string) (busy bool, err error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
-	if err != nil {
-		return false, fmt.Errorf("열기: %w", err)
+	f, busy, err := lockx.TryLock(path)
+	if f != nil {
+		gLocks = append(gLocks, f)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return true, nil
-		}
-		return false, fmt.Errorf("flock: %w", err)
-	}
-	gLocks = append(gLocks, f)
-	return false, nil
+	return busy, err
 }
 
 var digits = regexp.MustCompile(`^[0-9]+$`)
@@ -302,7 +294,7 @@ func residentMain(args []string) {
 	for {
 		c := exec.Command(exe, "--round", strconv.Itoa(os.Getpid()), top, base, mj, mwr, ml, mme, strconv.Itoa(batch))
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		switch rc := waitGroup(c, ""); rc {
+		switch rc := proc.Wait(c, ""); rc {
 		case 76:
 			continue
 		case 0, 75:
@@ -315,7 +307,7 @@ func residentMain(args []string) {
 		// 빈 바퀴 쉼은 sleep 명령으로(bash 판과 같은 자리 — 시험이 PATH의 sleep으로 쉼 값을 본다). 멈추면 무리째 끈다
 		s := exec.Command("sleep", strconv.Itoa(tick))
 		s.Stdout, s.Stderr = os.Stdout, os.Stderr
-		waitGroup(s, "")
+		proc.Wait(s, "")
 	}
 }
 
@@ -342,7 +334,7 @@ func roundMain(a []string) {
 		die("merger: 후보 잠금을 잡지 못했다: %v", err)
 	}
 	// 둘 다 죽은 앞 실행의 착지가 아직 돌면(자식 기록의 pid + 시작 시각) 그 후보도 쓰는 중이다
-	if busy || childBusy(m.mj+"/child", landGrace) {
+	if busy || proc.ChildBusy(m.mj+"/child", landGrace) {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 앞 실행이 후보 작업 트리를 쓰고 있다")
 		os.Exit(75)
 	}

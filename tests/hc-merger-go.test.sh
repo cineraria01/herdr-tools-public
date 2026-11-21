@@ -1,11 +1,12 @@
 #!/bin/bash
-# 병합기 Go 판(lib/hc-merger) 단위 시험: gofmt·go vet·go test -race(프로세스 무리 정리·잠금 안 물림·git 모름 → 쉼·우선순위·복구 단계별 죽기).
-# go가 없으면 실패한다 — 병합기 Go 판을 쓰는 기계에는 go가 있어야 한다(없으면 hc-lane이 경고하고 bash 판으로 돈다)
+# Go 판 단위 시험(go.mod 모듈 전체 — cmd/hc-merger·internal/*): gofmt·go vet·go test -race(프로세스 무리 정리·잠금 안 물림·git 모름 → 쉼·
+# 우선순위·복구 단계별 죽기·사건 줄 꼴·원자 쓰기). 공통 실행기 lib/go-run.sh가 바이너리를 짓고 고르는지도 본다.
+# go가 없으면 실패한다 — Go 판을 쓰는 기계에는 go가 있어야 한다(없으면 go_run이 경고하고 셸 판으로 돈다)
 # 실행: bash tests/hc-merger-go.test.sh
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-src=$here/../lib/hc-merger
-[ -f "$src/go.mod" ] || src=$here/../../lib/hc-merger   # 깔린 곳(~/.local/bin/tests → ~/.local/lib/hc-merger)
+src=$here/..
+[ -f "$src/go.mod" ] || src=$here/../../lib/herdr-go   # 깔린 곳(~/.local/bin/tests → ~/.local/lib/herdr-go)
 gob=$(command -v go 2>/dev/null) || gob=
 for a in /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do [ -n "$gob" ] || [ ! -x "$a" ] || gob=$a; done
 [ -n "$gob" ] || { echo "FAIL - go가 없다(brew install go)"; exit 1; }
@@ -13,8 +14,35 @@ cd "$src" || { echo "FAIL - 소스 없음: $src"; exit 1; }
 export GOTOOLCHAIN=local GOCACHE=${GOCACHE:-$PWD/.bin/go-build}
 fail=0
 gofmt=${gob%/go}/gofmt; [ -x "$gofmt" ] || gofmt=gofmt
-f=$("$gofmt" -l .)
+f=$("$gofmt" -l cmd internal)
 if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
 if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
-if "$gob" test -race -count=1 ./...; then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
+if "$gob" test -race -count=1 -timeout 300s ./...; then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
+
+# 공통 실행기(lib/go-run.sh — 저장소에서만. 깔린 곳은 ~/.local/lib/go-run.sh가 같은 파일). 가짜 도구 모듈로 본다
+gr=$here/../lib/go-run.sh
+if [ -f "$gr" ]; then
+  T=$(mktemp -d "${TMPDIR:-/tmp}/go-run.XXXXXX") || exit 1
+  mkdir -p "$T/lib" "$T/cmd/hc-fake"
+  cp "$gr" "$T/lib/go-run.sh"
+  printf 'module fake\n\ngo 1.24\n' >"$T/go.mod"
+  printf 'package main\n\nimport (\n\t"fmt"\n\t"os"\n)\n\nfunc main() { fmt.Println("go", len(os.Args)-1, os.Getenv("FAKE_ENV")) }\n' >"$T/cmd/hc-fake/main.go"
+  mkdir -p "$T/home"
+  gr_() { (unset HC_FAKE_IMPL HC_FAKE_BIN HERDR_IMPL GOPATH GOCACHE; export HOME=$T/home; for kv in "$@"; do export "$kv"; done
+    . "$T/lib/go-run.sh"; FAKE_ENV=e go_run hc-fake a b; echo "돌아옴 $?") 2>"$T/err"; }
+  t() { if [ "$2" = "$3" ]; then echo "ok - go-run: $1"; else echo "FAIL - go-run: $1 — 바람 「$3」, 얻음 「$2」"; cat "$T/err"; fail=1; fi; }
+  t "처음엔 빌드해 exec(인자·함수 앞 환경 그대로)" "$(gr_)" "go 2 e"
+  t "빌드가 HOME에 go/(GOPATH 기본값)를 만들지 않음" "$([ -e "$T/home/go" ] && echo 있음 || echo 없음)" 없음
+  t "바이너리는 모듈 곁 .bin" "$([ -x "$T/.bin/hc-fake" ] && echo 있음)" 있음
+  t "스위치 bash면 0으로 돌아옴" "$(gr_ HC_FAKE_IMPL=bash)" "돌아옴 0"
+  t "HERDR_IMPL=bash도" "$(gr_ HERDR_IMPL=bash)" "돌아옴 0"
+  t "틀린 스위치는 2" "$(gr_ HC_FAKE_IMPL=rust)" "돌아옴 2"
+  t "_BIN이 깨졌으면 auto는 경고하고 0" "$(gr_ HC_FAKE_BIN=/없는/바이너리)" "돌아옴 0"
+  t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
+  t "_BIN이 깨졌고 IMPL=go면 1" "$(gr_ HC_FAKE_BIN=/없는/바이너리 HC_FAKE_IMPL=go)" "돌아옴 1"
+  sleep 1; printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("새 판") }\n' >"$T/cmd/hc-fake/main.go"
+  t "소스가 새로우면 다시 빌드" "$(gr_)" "새 판"
+  printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"; touch "$T/cmd/hc-fake/main.go"
+  t "빌드 실패면 옛 바이너리를 그대로(새 판)" "$(gr_)" "새 판"
+fi
 exit $fail

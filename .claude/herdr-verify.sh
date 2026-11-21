@@ -14,7 +14,7 @@ for f in bin/* install.sh .claude/*.sh; do
     *bash*|*/sh*) bash -n "$f" || { echo "문법 실패 $f"; fail=1; } ;;
   esac
 done
-for f in lib/*/*.sh; do   # 도구가 source하는 함수 파일(첫 줄이 #!가 아니다)
+for f in lib/*.sh lib/*/*.sh; do   # 도구가 source하는 함수 파일(첫 줄이 #!가 아니다 — lib/go-run.sh 포함)
   [ -f "$f" ] || continue
   bash -n "$f" || { echo "문법 실패 $f"; fail=1; }
 done

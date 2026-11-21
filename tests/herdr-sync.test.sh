@@ -573,7 +573,13 @@ if [ -f "$LIST" ]; then
   for f in "$here"/../bin/*; do b=${f##*/}; t "config.example/sync.list: bin/$b" 'grep -q " tools:bin/$b " "$LIST"'; done
   # lib/<도구>/(본체가 source하는 함수 파일)는 나무 줄로, 대상은 그 도구 줄과 같게(빠지면 그 기계의 도구가 종료 1)
   # 도구가 함께 쓰는 lib(bin 없음, lib/<이름>/OWNER에 쓰는 도구 이름)는 그 도구 줄과 견준다 — 예: hc-merger(hc-lane이 빌드해 부르는 병합기 Go 판)
-  for f in "$here"/../lib/*/; do [ -d "$f" ] || continue; b=$(basename "$f"); o=$b
+  # Go 판 도구(go.mod·cmd/<이름>)는 소스로 깐다: Go 줄 넷이 한 번에, 대상이 같게(2026-11-21 go-foundation)
+  if [ -f "$here/../go.mod" ]; then
+    golines=$(awk '$3 == "tools:go.mod" || $3 == "tools:cmd/" || $3 == "tools:internal/" || $3 == "tools:lib/go-run.sh" { print $3, $4 }' "$LIST" | sort | paste -sd , -)
+    t "config.example/sync.list: Go 소스 나무 줄 넷, 대상이 같음" '[ "$golines" = "tools:cmd/ macos,tools:go.mod macos,tools:internal/ macos,tools:lib/go-run.sh macos" ]'
+  fi
+  # 점 파일만 남은 폴더(옮긴 도구의 무시된 빌드 산출물 — 예: 옛 lib/hc-merger/.bin)는 lib가 아니다
+  for f in "$here"/../lib/*/; do [ -d "$f" ] && [ -n "$(ls "$f")" ] || continue; b=$(basename "$f"); o=$b
     [ ! -f "$f/OWNER" ] || o=$(head -n 1 "$f/OWNER")
     t "config.example/sync.list: lib/$b/ 나무 줄, 대상은 bin/${o}와 같음" \
       '[ -n "$(awk -v b="$o" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ] && [ "$(awk -v b="$b" "\$3 == \"tools:lib/\" b \"/\" && \$2 ~ /\\/\\*\\*\$/ {print \$4}" "$LIST")" = "$(awk -v b="$o" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ]'

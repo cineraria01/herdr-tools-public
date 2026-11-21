@@ -194,6 +194,20 @@ t "sync-lint: hc-lane에 hc-merger lib 줄이 없으면 더할 줄" '[ $rc = 1 ]
 printf '도구 .local/lib/hc-merger/** tools:lib/hc-merger/ macos\n' >>"$T/sd.list"
 run - sync-lint "$T/sd" "$T/sd.list"
 t "sync-lint: hc-merger lib 줄이 있으면 통과" '[ $rc = 0 ] && [ -z "$out" ]'
+# Go 판 도구(cmd/<이름>, OWNER = 그 bin 도구): 그 bin 줄에 Go 소스 나무 줄 넷을 덮는 대상으로 요구한다(2026-11-21 go-foundation)
+mkdir -p "$T/sg/cmd/hc-merger" "$T/sg/cmd/tool-g"; : >"$T/sg/go.mod"; echo hc-lane >"$T/sg/cmd/hc-merger/OWNER"
+printf '도구 .local/bin/hc-lane tools:bin/hc-lane macos\n도구 .local/bin/tool-g tools:bin/tool-g local\n' >"$T/sg.list"
+run - sync-lint "$T/sg" "$T/sg.list"
+t "sync-lint: Go 줄 없음 — bin 줄마다 넷, 종료 1" '[ $rc = 1 ] && [ "$(printf "%s\n" "$out" | grep -c .)" = 8 ] && printf "%s\n" "$out" | grep -Fxq "도구  .local/lib/herdr-go/cmd/**  tools:cmd/  macos" && printf "%s\n" "$out" | grep -Fxq "도구  .local/lib/go-run.sh  tools:lib/go-run.sh  local" && grep -Fq "Go 소스 나무 줄이 없다" "$T/err"'
+printf 'Go .local/lib/herdr-go/go.mod tools:go.mod macos\nGo .local/lib/herdr-go/cmd/** tools:cmd/ macos\nGo .local/lib/herdr-go/internal/** tools:internal/ macos\nGo .local/lib/go-run.sh tools:lib/go-run.sh macos\n' >>"$T/sg.list"
+run - sync-lint "$T/sg" "$T/sg.list"
+t "sync-lint: macos Go 줄은 macos·local bin을 덮는다" '[ $rc = 0 ] && [ -z "$out" ]'
+printf '도구 .local/bin/tool-g tools:bin/tool-g box-1\n' >>"$T/sg.list"
+run - sync-lint "$T/sg" "$T/sg.list"
+t "sync-lint: 덮지 않는 대상의 bin 줄은 Go 줄이 따로" '[ $rc = 1 ] && [ "$(printf "%s\n" "$out" | grep -c .)" = 4 ] && printf "%s\n" "$out" | grep -Fxq "도구  .local/lib/herdr-go/go.mod  tools:go.mod  box-1"'
+rm "$T/sg/go.mod"
+run - sync-lint "$T/sg" "$T/sg.list"
+t "sync-lint: go.mod 없는 저장소는 Go 줄을 안 봄" '[ $rc = 0 ]'
 EXR=$(cd "$here/.." && pwd)
 run - sync-lint "$EXR" "$EX/sync.list"
 t "sync-lint: config.example/sync.list 통과" '[ $rc = 0 ] && [ -z "$out" ]'

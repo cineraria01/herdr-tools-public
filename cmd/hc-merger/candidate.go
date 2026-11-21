@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 // stack: 묶음 뒤쪽 구성원을 앞 구성원 위에 차례로 얹는다(그 제출이 기준에서 갈라진 뒤의 커밋만). 충돌하는 구성원은 이번 묶음에서
@@ -64,7 +66,7 @@ func (m *M) runCandidate() int {
 		c := exec.Command("bash", ".claude/herdr-setup.sh")
 		c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+m.top, "LANE_BASE="+m.base)
-		if waitGroup(c, m.mj+"/child") != 0 {
+		if proc.Wait(c, m.mj+"/child") != 0 {
 			fmt.Fprintln(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패")
 			return 75
 		}
@@ -73,7 +75,7 @@ func (m *M) runCandidate() int {
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
 		"HERDR_LAND_VERDICT="+m.bv, "HERDR_LAND_PATCHID="+m.bp, "HERDR_LAND_SHA="+m.C0)
-	return waitGroup(c, m.mj+"/child")
+	return proc.Wait(c, m.mj+"/child")
 }
 
 // ponytail: 도구 이름 하나로 거름, 준비 훅이 다른 색인 길을 쓰면 그때 LANE_MERGER 같은 표시로

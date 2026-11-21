@@ -10,24 +10,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"herdr-tools/internal/events"
 )
 
-func utc(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05Z") }
-
-func flat(s string) string { return strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(s) }
-
-// bcut: 바이트로 자르고 끝에 남은 반쪽 UTF-8 글자는 버린다
-func bcut(n int, s string) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
-	}
-	return s
-}
+// 사건 줄과 같은 다듬기(internal/events)
+var (
+	utc  = events.UTC
+	flat = events.Flat
+	bcut = events.Bcut
+)
 
 // awkNum: awk의 「문자열+0」 — 앞의 숫자만, 없으면 0
 func awkNum(s string) float64 {

@@ -3,7 +3,6 @@ package main
 // 보낼 함(out/<큐 이름>)과 사건·레인 알림(bash moutbox·msend·mflush). 원격을 고친 뒤 사건을 쓰기 전에 죽어도 다음 바퀴가 보낸다.
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/events"
+	"herdr-tools/internal/proc"
 )
 
 // outbox: 보낼 사건을 out/<이름>에 — 상태·sha·글·레인·지휘(--to)·기계·터미널·결과 열쇠·판정 열쇠·터미널 실행 시각·지휘 실행
@@ -51,35 +53,28 @@ func (m *M) flush() {
 
 // haveEvent: 이 기계 사건 파일에 같은 레인·상태로 같은 결과 열쇠가 든 사건이 이미 있나(열쇠가 없으면 같은 글)
 func haveEvent(ln, st, key, msg string) bool {
-	f, err := os.Open(gEvdir + "/events.tsv")
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		c := strings.Split(sc.Text(), "\t")
-		for len(c) < 7 {
-			c = append(c, "")
-		}
-		if c[3] != ln || c[4] != st {
-			continue
+	found := false
+	err := events.ScanFile(gEvdir+"/events.tsv", func(e events.Event) bool {
+		if e.Lane != ln || e.State != st {
+			return true
 		}
 		if key == "" {
-			if c[6] == msg {
-				return true
-			}
-			continue
+			found = e.Msg == msg
+			return !found
 		}
 		// 열쇠 뒤 글자가 ID 글자면 다른 열쇠(box-123 대 box-1234)
-		if p := strings.Index(c[6], key); p >= 0 {
-			if rest := c[6][p+len(key):]; rest == "" || !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.~-", rune(rest[0])) {
-				return true
+		if p := strings.Index(e.Msg, key); p >= 0 {
+			if rest := e.Msg[p+len(key):]; rest == "" || !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.~-", rune(rest[0])) {
+				found = true
 			}
 		}
+		return !found
+	})
+	if err != nil {
+		// ponytail: 읽기 실패는 앞 판처럼 「없음」으로 친다 — 사건이 두 번 날 수 있다(report --key가 막는 꼴로 옮기면 고친다)
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 경고 — 사건 파일을 끝까지 읽지 못했다: %v\n", err)
 	}
-	return false
+	return found
 }
 
 // hcRun: hc를 시간 상한 안에서. 표준 출력·종료 코드·표준 오류
@@ -93,7 +88,7 @@ func hcRun(limit time.Duration, args ...string) (string, int, string) {
 	if ctx.Err() != nil {
 		return o.String(), 142, e.String() // bash 판의 perl alarm(SIGALRM)과 같은 종료
 	}
-	return o.String(), code(err), e.String()
+	return o.String(), proc.Code(err), e.String()
 }
 
 // sameRun: hc get 결과가 그 레인의 같은 실행인가 — 최상위 state live·name = 레인·created_ms = 제출 때 적은 값
