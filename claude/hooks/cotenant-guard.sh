@@ -1,9 +1,7 @@
 #!/bin/bash
-# cotenant-guard — Claude Code PreToolUse guard (Edit|Write|MultiEdit|NotebookEdit|Bash) against two agents
-# editing the same files of one git working tree
-# (2026-11-04 1단계; 감사 두 번과 10개 동시 시험 결과 반영).
-# Exit 0 = allow, 2 = block (stderr goes
-# to Claude); any other failure blocks too because the settings entry sets "onFailure": "block". The entry runs
+# cotenant-guard — Claude Code PreToolUse guard (Edit|Write|MultiEdit|NotebookEdit|Bash) against two agents editing
+# the same files of one git working tree (2026-11-04 1단계; 감사 두 번과 10개 동시 시험 결과 반영). Exit 0 = allow,
+# 2 = block (stderr goes to Claude); any other failure blocks too because the settings entry sets "onFailure": "block". The entry runs
 #   /bin/bash -c '[ -r "$HOME/.claude/hooks/cotenant-guard.sh" ] || exit 0; exec /bin/bash "$HOME/.claude/hooks/cotenant-guard.sh"'
 # so a missing file allows while a broken one blocks.
 #
@@ -14,8 +12,7 @@
 # nobody owns an already-dirty file while another agent shares the tree. A dead owner (pid gone or procStart differs
 # = pid reused) hands over. Leases on clean files that anyone could take over (dead owner, live owner idle for 10
 # minutes, ignored file) are deleted when the leases are scanned, by one scanner per tree at a time.
-# Bash: git commands that mix or drop other people's changes (also a commit without paths, --amend) are refused while
-# another agent shares the tree;
+# Bash: git commands that mix or drop other people's changes (also a commit without paths, --amend) are refused while another agent shares the tree;
 # writes (sed -i, >, cp, mv, rm, tee, git rm/mv) to a file or folder holding someone else's uncommitted file are
 # refused, other file targets are leased. bash/sh/zsh -c, eval, timeout, nice and xargs are looked through.
 # Force push (-f, --force, bare --force-with-lease or one without ":<expect>", --mirror, a "+" refspec, --force-if-includes
@@ -26,7 +23,10 @@
 # an environment variable alone does nothing). Agents may not write that switch, disableAllHooks or touch
 # .git/agent-leases. Change this file only as: temp copy -> bash -n -> test passes -> mv over it.
 # Test: ~/.claude/hooks/tests/cotenant-guard.test.sh (fake HOME = registry + settings, fake hc on PATH).
-
+# Go 판(cmd/herdr-hooks, 같은 판정)으로 — HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 셸 판, 바이너리가 없거나 낡으면 이번은 셸 판·짓기는 뒤에서(lib/go-run.sh GO_RUN_BUILD=bg, 2026-11-21 hooks-go)
+for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
+  [ -r "$_hg" ] && { . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks cotenant-guard || exit 1; break; }
+done
 CFG=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 US=$'\037'
 # absolute tools: a GNU stat, a PATH without /sbin or a stray jq must not change the verdict
@@ -434,14 +434,14 @@ bash_git() {   # KIND DIR ARG
   esac
 }
 
-bash_write() {   # DIR ARG
+bash_write() {   # DIR ARG [noglob — 글롭이 펼친 구체 경로: 다시 펼치지 않는다]
   local a=$2 f MSG
   case $a in ''|*'$'*|-) return 0 ;; esac
   case $a in /*) ;; *) a=$1/$a ;; esac
-  case $a in
+  [ "${3-}" = noglob ] || case $a in
     *'*'*|*'?'*|*'['*)
       local -a m; shopt -s nullglob; m=($a); shopt -u nullglob
-      for f in "${m[@]}"; do bash_write / "$f"; done; return 0 ;;
+      for f in "${m[@]}"; do bash_write / "$f" noglob; done; return 0 ;;
   esac
   phys "$a" || return 0
   tree "$PD" || return 0

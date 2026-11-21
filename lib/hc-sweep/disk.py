@@ -9,10 +9,15 @@
   사건 하나(주인 없는 사건이라 살아 있는 지휘 watch가 모두 받는다. 터미널 밖이라 watch 줄 끝 괄호에 기계 이름). 한 줄 칸에
   여유·볼륨 사용률(df처럼 사용/(사용+여유))과 임시 폴더·~/Library/Caches/go-build·~/.cache/go-build 크기. 알린 표식(…/hc-sweep/disk-low)이 있으면 다시 알리지 않고, 여유가 문턱의 1.5배를 넘으면 표식을 지워
   다음 부족 때 또 알린다(문턱 언저리에서 오르내릴 때 되풀이하지 않게). 보내기 실패면 표식 없이 다음 바퀴에 다시.
-  Go 캐시는 지우지 않고 크기만 보인다 — ~/Library/Caches/go-build는 macOS 기본 GOCACHE라 GOCACHE를 옮긴 저장소가 있어도 다른
-  go가 다시 채울 수 있다(2026-11-21 지운 뒤 다시 1.5GB). 쓰는 곳이 있는지는 짐작하지 않고 사람이 본다.
+  알림 자체는 Go 캐시를 지우지 않고 크기만 보인다 — ~/Library/Caches/go-build는 macOS 기본 GOCACHE라 GOCACHE를 옮긴 저장소가
+  있어도 다른 go가 다시 채울 수 있다(2026-11-21 지운 뒤 다시 1.5GB). 줄이는 것은 아래 상한뿐이다(캐시라 지워도 다시 지을 뿐).
+Go 빌드 캐시 상한: 여유가 문턱의 1.5배 아래면(문턱 0이면 끔) GOCACHE(없으면 ~/.cache/go-build — 병합기 기본과 같음)의
+  <두 자리 16진>/ 아래 항목을 mtime 오래된 것부터 지워 설정 sweep.gocache_gb(기본 6, 0이면 끔) 아래로 줄이고, 옛 자리
+  ~/Library/Caches/go-build가 GOCACHE와 다른 곳이면 통째로 비운다. go 명령(ps comm go)이 돌면 건너뛴다. 한 일은 closed.log에
+  「Go 캐시 줄임」 한 줄(2026-11-21 mini-m4 여유 9GB: ~/.cache/go-build가 하루 13.4GB, 옛 자리 1.5GB).
 """
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -168,6 +173,62 @@ def disk_alert(usage, limit_gb, state, base, dry, lane, run=subprocess.run):
     return msg
 
 
+def go_busy(run=subprocess.run):
+    """go 명령(빌드·시험)이 도는가(ps comm 이름이 go — 시험은 HC_SWEEP_GO_COMM으로 바꾼다). 못 보면 True(건드리지 않음)."""
+    name = os.environ.get("HC_SWEEP_GO_COMM") or "go"
+    try:
+        out = run(["ps", "-x", "-o", "comm="], capture_output=True, text=True, timeout=30)
+    except Exception:
+        return True
+    return out.returncode != 0 or any(os.path.basename(x.strip()) == name for x in out.stdout.splitlines())
+
+
+def trim_gocache(cap_gb, dry, record, run=subprocess.run):
+    """Go 빌드 캐시 줄이기 한 바퀴(부르는 쪽이 디스크가 문턱 가까울 때만). 지운(dry면 지울) 바이트."""
+    cache = os.environ.get("GOCACHE") or os.path.expanduser("~/.cache/go-build")
+    old = os.path.expanduser("~/Library/Caches/go-build")
+    if go_busy(run):
+        print("Go 캐시 줄이기: go가 도는 중 — 건너뜀")
+        return 0
+    files = []
+    for root, _, names in os.walk(cache):
+        if not re.fullmatch(r"[0-9a-f]{2}", os.path.basename(root)):  # 항목은 <캐시>/<두 자리 16진>/ 아래(README·trim.txt는 둔다)
+            continue
+        for n in names:
+            try:
+                st = os.lstat(os.path.join(root, n))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                files.append((st.st_mtime, st.st_blocks * 512, os.path.join(root, n)))
+    over, n, freed = sum(f[1] for f in files) - cap_gb * GB, 0, 0
+    for _, size, p in sorted(files):  # go는 쓸 때 mtime을 새로 한다: 오래된 것부터
+        if freed >= over:
+            break
+        if not dry:
+            try:
+                os.remove(p)
+            except OSError:
+                continue
+        n, freed = n + 1, freed + size
+    old_size = 0
+    if os.path.isdir(old) and not os.path.islink(old) and os.path.realpath(old) != os.path.realpath(cache):
+        try:
+            old_size = scan(old, time.time() + 86400)[0]
+            if not dry:
+                remove(old)
+        except OSError as err:
+            print("Go 옛 캐시 못 비움: %s %s" % (old, err))
+            old_size = 0
+    if n or old_size:
+        msg = "캐시 %s 항목 %d개 %.1fGB(상한 %gGB)%s" % (cache, n, freed / GB, cap_gb,
+                                                 " · 옛 캐시 %s %.1fGB" % (old, old_size / GB) if old_size else "")
+        print("Go 캐시 줄이기%s: %s" % (" (할 것)" if dry else "", msg))
+        if not dry:
+            record({"address": "go-cache:" + cache, "name": "-", "cwd": cache, "title": msg}, "Go 캐시 줄임(디스크 문턱 가까움)", "-")
+    return freed + old_size
+
+
 def run(dry, conf, record, lane):
     """bin/hc-sweep main이 부른다(lane = 곁의 hc-lane, 없으면 PATH). 설정을 못 읽으면(None) 그 쓸기는 건너뛴다."""
     def num(key, default):  # 숫자가 아니면 그 키만 끈다(감사 낮음 1)
@@ -184,6 +245,9 @@ def run(dry, conf, record, lane):
         sweep_tmp(base, hours, dry, record)
     limit = num("sweep.disk_free_gb", "10")
     if limit > 0:
+        cap = num("sweep.gocache_gb", "6")
+        if cap > 0 and shutil.disk_usage(os.path.expanduser("~")).free < limit * 1.5 * GB:
+            trim_gocache(cap, dry, record)
         state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-sweep", "disk-low")
         msg = disk_alert(shutil.disk_usage(os.path.expanduser("~")), limit, state, base, dry, lane)
         if msg:

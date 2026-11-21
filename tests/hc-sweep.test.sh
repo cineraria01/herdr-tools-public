@@ -17,7 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-out=$(python3 "$SWEEP" --self-test 2>&1)
+out=$("$SWEEP" --self-test 2>&1)
 t "self-test" '[ "$out" = ok ]'
 
 # 가짜 hc: ls는 $T/ls.json, get <주소>는 $T/get-<주소>.json(없으면 실패)
@@ -32,7 +32,7 @@ EOF
 chmod +x "$T/bin/hc"
 mkdir -p "$T/tmp"   # 디스크 쓸기(lib/hc-sweep/disk.py)가 진짜 임시 폴더를 쓸지 않게
 export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg" XDG_CACHE_HOME="$T/cache" TMPDIR="$T/tmp"
-sweep() { out=$(python3 "$SWEEP" --only-under "$T" "$@" 2>&1); rc=$?; }
+sweep() { out=$("$SWEEP" --only-under "$T" "$@" 2>&1); rc=$?; }
 cfg() { printf '%s\n' "$@" >"$T/cfg/config"; }
 LOG=$T/home/.claude-tasks/closed.log
 
@@ -216,7 +216,7 @@ kill "$(cat "$P/b-kid")" "$(cat "$P/k-kid")" 2>/dev/null
 # 조용히 넘겨 뜻밖의 종료 알림이 사라진다. 레인 아닌 터미널은 그대로 닫는다
 rm -f "$T"/killed-* "$EVT"
 printf x >"$T/notdir"
-out=$(XDG_STATE_HOME=$T/notdir python3 "$SWEEP" --only-under "$T" --min-age 0 2>&1)
+out=$(XDG_STATE_HOME=$T/notdir "$SWEEP" --only-under "$T" --min-age 0 2>&1)
 t "정리됨 못 씀: 레인 터미널은 kill 안 함" '[ ! -e "$T/killed-t61" ] && printf "%s" "$out" | grep -q "실패(정리됨 못 씀): R3 t61"'
 t "정리됨 못 씀: 레인 아닌 터미널은 닫음" '[ -e "$T/killed-t62" ] && printf "%s" "$out" | grep -q "닫힘: R3 t62"'
 t "정리됨 못 씀: closed.log에 남김" 'grep -q "	t61	.*실패(정리됨 못 씀)" "$LOG"'
@@ -253,6 +253,53 @@ EOF
 sweep --min-age 0
 t "제출 뒤 쉰 지 1분 레인: R2로 바로 닫음" '[ -e "$T/killed-t71" ] && printf "%s" "$out" | grep -q "닫힘: R2 t71" || { printf "%s\n" "$out"; false; }'
 t "제출 뒤: 다른 이름·옛 실행의 제출, 제출 뒤 중간 사건이면 안 닫음" '[ ! -e "$T/killed-t72" ] && [ ! -e "$T/killed-t73" ] && [ ! -e "$T/killed-t74" ] || { printf "%s\n" "$out"; false; }'
+
+# 교착 풀기(2026-11-21 mini-m6-1 land-metrics 16시간): hc-sweep은 남은 작업 트리 때문에 터미널을, hc-lane gc는 그 폴더를 쓰는
+# 터미널 때문에 작업 트리를 남겨 서로 기다렸다. 착지했고(cherry + 없음 + 착지 증거) 깨끗한 작업 트리의 done 레인은 한 바퀴에
+# 터미널을 닫고 hc-lane clean으로 작업 트리·가지를 지운다. 더러움·착지 증거 없음·착지 전 커밋은 남기고 --dry-run에 까닭
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
+G=$T/lg R=$T/lg/repo
+mkdir -p "$G"
+git init -q --bare -b main "$G/origin.git" && git clone -q "$G/origin.git" "$R" 2>/dev/null &&
+  git -C "$R" commit -q --allow-empty -m base && git -C "$R" push -q origin HEAD:main || echo "준비 실패: 저장소"
+for b in land-x land-d land-n land-u; do git -C "$R" worktree add -q -b "$b" "$R.wt/$b" origin/main 2>/dev/null || echo "준비 실패: $b"; done
+(cd "$R.wt/land-x" && echo a >a && git add a && git commit -q -m x && git push -q origin HEAD:main) || echo "준비 실패: 착지"
+(cd "$R.wt/land-d" && git merge -q --ff-only origin/main && echo d >dirty) || echo "준비 실패: 더러움"
+(cd "$R.wt/land-u" && echo u >u && git add u && git commit -q -m u) || echo "준비 실패: 착지 전"
+git -C "$R" fetch -q origin
+rm -f "$T"/killed-* "$EVT"
+printf '2026-11-21T10:00:00Z\tm\tt81\tland-x\t제출\tabc1234\tsub → 큐\t3\n2026-11-21T10:00:00Z\tm\tt82\tland-d\t착지\tabc1234\t-\t3\n2026-11-21T10:00:00Z\tm\tt84\tland-u\t완료\tabc1234\t-\t3\n' >"$EVT"
+idle31=$(( ($(date +%s) - 31 * 60) * 1000 ))
+for x in t81:land-x t82:land-d t83:land-n t84:land-u; do
+  a=${x%%:*} b=${x#*:}
+  printf '{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"done"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%s,"turn":5,"cwd":"%s"}\n' \
+    "$a" "$b" "$idle31" "$R.wt/$b" >"$T/get-$a.json"
+done
+cat >"$T/bin/hc" <<EOF
+#!/bin/bash
+case \$1 in
+  ls) printf '{"terminals":['; s=
+      for a in t81 t82 t83 t84; do [ -e "$T/killed-\$a" ] && continue
+        printf '%s{"address":"%s","state":"live","status":"done","cwd":"%s"}' "\$s" "\$a" "\$(sed -n 's/.*"cwd":"\\([^"]*\\)".*/\\1/p' "$T/get-\$a.json")"; s=,; done
+      echo ']}' ;;
+  get) [ -e "$T/killed-\$2" ] && { echo "{\"address\":\"\$2\",\"state\":\"finished\"}"; exit 0; }
+       [ -f "$T/get-\$2.json" ] && exec cat "$T/get-\$2.json"; exit 1 ;;
+  exec) shift; d=
+        while [ "\$1" != -- ]; do case \$1 in --cwd) d=\$2; shift 2 ;; --env) export "\$2"; shift 2 ;; --timeout) shift 2 ;; *) shift ;; esac; done
+        shift; [ -z "\$d" ] || cd "\$d" || exit 1; exec "\$@" ;;
+  read) echo "  ⏵⏵ bypass permissions on (shift+tab to cycle)" ;;
+  kill) touch "$T/killed-\$2" ;;
+  rm) ;;
+  *) exit 1 ;;
+esac
+EOF
+sweep --dry-run --min-age 0
+t "교착 dry-run: 착지·깨끗한 레인은 닫을 것 + clean 예고" 'printf "%s" "$out" | grep -q "닫을 것: R2 t81 land-x .*(닫은 뒤 hc-lane clean land-x)" || { printf "%s\n" "$out"; false; }'
+t "교착 dry-run: 남김 까닭 — 더러움·증거 없음·착지 전" 'printf "%s" "$out" | grep -q "남김: t82 land-d — 작업 트리 남음 — 커밋 안 된 변경" && printf "%s" "$out" | grep -q "남김: t83 land-n — 작업 트리 남음 — 착지 증거 없음" && printf "%s" "$out" | grep -q "남김: t84 land-u — 작업 트리 남음 — 착지 전 커밋" || { printf "%s\n" "$out"; false; }'
+sweep --min-age 0
+t "교착: 착지·깨끗한 레인은 한 바퀴에 터미널 닫고 작업 트리·가지 지움" '[ -e "$T/killed-t81" ] && [ ! -e "$R.wt/land-x" ] && ! git -C "$R" show-ref -q --verify refs/heads/land-x || { printf "%s\n" "$out"; false; }'
+t "교착: closed.log에 정리 한 줄" 'grep -q "	t81	land-x	작업 트리 정리(hc-lane clean land-x)	$R	" "$LOG" || { tail -3 "$LOG"; false; }'
+t "교착: 더러움·증거 없음·착지 전은 터미널·작업 트리 그대로" '[ ! -e "$T/killed-t82" ] && [ ! -e "$T/killed-t83" ] && [ ! -e "$T/killed-t84" ] && [ -d "$R.wt/land-d" ] && [ -d "$R.wt/land-n" ] && [ -d "$R.wt/land-u" ]'
 
 kill "$(pid a)" "$(pid b)" "$(pid k)" "$(pid o)" "$(pid s)" 2>/dev/null
 t "이 시험의 고아 0" allgone

@@ -1675,6 +1675,8 @@ ev8 2026-11-16T03:00:06Z here tf8 lane-f8 착지 abcd1234 끝 2 >>"$EV"
 ev 2026-11-16T03:00:07Z here tf10 lane-f10 판정 - turn 모름 >>"$EV"
 ev 2026-11-16T03:00:08Z here tf11 lane-f11 착지 abcd1234 turn 모름 >>"$EV"
 ev 2026-11-16T03:00:09Z here tf11 lane-f11 정리됨 - "hc-sweep R2" >>"$EV"
+ev8 2026-11-16T03:00:10Z here tf12 lane-f12 제출 abcd1234 "sub → 큐" 2 >>"$EV"
+ev8 2026-11-16T03:00:11Z here tf12 lane-f12 정리됨 - "hc-sweep R2" 6 >>"$EV"
 HC_FAKE_LS='{"terminals":[{"address":"tf1","name":"lane-f1","state":"finished"},{"address":"tf2","name":"lane-f2","state":"finished"},{"address":"tf3","name":"lane-f3","state":"finished"},{"address":"tf4","name":"lane-f4","state":"finished"},{"address":"tf7","name":"lane-f7","state":"finished"},{"address":"tf8","name":"lane-f8","state":"finished","turn":3},{"address":"tf10","name":"lane-f10","state":"finished","turn":3}]}' run wait --timeout 0
 t "끝남·정리됨: report turn을 모르면 착지·판정 뒤라도 알림(감사 3차 [낮음] 3)" 'printf "%s\n" "$out" | grep -Fq "${tab}tf10${tab}lane-f10${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" && printf "%s\n" "$out" | grep -Fq "${tab}tf11${tab}lane-f11${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨)" || { printf "%s\n" "$out"; false; }'
 t "끝남: report 없이 끝나면 「뜻밖의 종료」" '[ $rc = 0 ] && printf "%s\n" "$out" | grep -Fq "${tab}tf2${tab}lane-f2${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)" || { printf "%s\n" "$out"; false; }'
@@ -1682,6 +1684,7 @@ t "끝남: 완료(착지 전) 뒤 끝남은 알림(옛 판 회귀 — 감사 [�
 t "끝남: 막힘 뒤 끝남도 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}tf7${tab}lane-f7${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
 t "끝남: 착지·판정 뒤 끝남은 안 알림" '! printf "%s\n" "$out" | grep -Eq "lane-f[48]${tab}멈춤${tab}-${tab}뜻밖의 종료\(finished"'
 t "정리됨: 중간 뒤 정리됨은 「뜻밖의 종료(정리됨)」, 그 끝남은 두 번 안 알림" 'printf "%s\n" "$out" | grep -Fq "${tab}tf3${tab}lane-f3${tab}멈춤${tab}-${tab}뜻밖의 종료(정리됨) hc-sweep R2" && ! printf "%s\n" "$out" | grep -Fq "lane-f3${tab}멈춤${tab}-${tab}뜻밖의 종료(finished)"'
+t "정리됨: 제출 뒤(그 턴 지나) 정리됨은 「제출 뒤 정리(정리됨)」 — 뜻밖의 종료로 안 읽게(2026-11-21 지휘 후속)" 'printf "%s\n" "$out" | grep -Fq "${tab}tf12${tab}lane-f12${tab}멈춤${tab}-${tab}제출 뒤 정리(정리됨) hc-sweep R2" && ! printf "%s\n" "$out" | grep -Fq "lane-f12${tab}멈춤${tab}-${tab}뜻밖의 종료" || { printf "%s\n" "$out"; false; }'
 t "정리됨: 판정 뒤 정리됨은 안 알림, 정리됨 줄 그대로는 안 찍음" '! printf "%s\n" "$out" | grep -Fq "lane-f4${tab}멈춤" && ! printf "%s\n" "$out" | grep -Fq "${tab}정리됨${tab}"'
 run events
 t "정리됨: hc-lane events에는 보임" 'printf "%s\n" "$out" | grep -Fq "lane-f3${tab}정리됨"'

@@ -122,7 +122,12 @@ func (e *ev) newEvents(cand []string, born string) []string {
 			if seen[nk("멈춤"+tab+f[2]+tab+f[3]+tab+"쉼 turn "+fld(f, 8))] {
 				continue
 			}
-			f[4], f[5], f[6] = "멈춤", "-", "뜻밖의 종료(정리됨) "+f[6]
+			// 바로 앞 report가 제출(병합기에 넣고 끝남)이면 정상 정리 — 셸 판 ev_cmd와 같게
+			pre := "뜻밖의 종료(정리됨) "
+			if ls == "제출" {
+				pre = "제출 뒤 정리(정리됨) "
+			}
+			f[4], f[5], f[6] = "멈춤", "-", pre+f[6]
 		}
 		if f[4] != "멈춤" {
 			lr.rep(f[4], f[5], turnOf(f), t2)

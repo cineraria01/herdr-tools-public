@@ -1,0 +1,18 @@
+#!/bin/bash
+case $1 in
+  ls) [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3
+      case " $* " in *" --label hc-lane=1 "*) e='{"terminals":[]}'; printf '%s\n' "${HC_FAKE_LS_LANE:-$e}"; exit "${HC_FAKE_LABEL_RC:-0}" ;; esac
+      printf '%s\n' "${HC_FAKE_LS:-{\"terminals\":[]\}}" ;;
+  machine) printf '%s\n' "$HC_FAKE_MACHINES" ;;
+  get) case " ${HC_FAKE_GONE-} " in *" $2 "*) echo '{"error":{"kind":"not_found"}}'; exit 3 ;; esac
+       case " ${HC_FAKE_FINISHED-} " in *" $2 "*) echo "{\"address\":\"$2\",\"state\":\"finished\",\"status\":null}"; exit 0 ;; esac
+       # 실행 키: created_ms는 $HC_FAKE_CREATED(「<주소>=<ms>」 공백 목록)에 있으면 그 값, 없으면 1700000000000. name은 주소 끝 낱말
+       c=1700000000000; for x in ${HC_FAKE_CREATED-}; do case $x in "$2="*) c=${x#*=} ;; esac; done
+       case " ${HC_FAKE_NOSTATUS-} " in
+         *" $2 "*) echo "{\"address\":\"$2\",\"created_ms\":$c,\"name\":\"${2##*/}\",\"state\":\"live\",\"status\":null}" ;;
+         *) echo "{\"address\":\"$2\",\"created_ms\":$c,\"name\":\"${HC_FAKE_GET_NAME:-${2##*/}}\",\"state\":\"live\",\"status\":{\"app\":\"claude-code\",\"state\":\"working\"}}" ;;
+       esac ;;
+  exec) echo "$*" >>"$T_LOG/hc.log"; case "$*" in *"${HC_FAKE_EXEC_FAIL:-@@없음@@}"*) exit 255 ;; esac; while [ "$1" != -- ]; do shift; done; shift; exec "$@" ;;
+  send) echo "$*" >>"$T_LOG/send.log"; case " ${HC_FAKE_SEND_FAIL-} " in *" $2 "*) exit 1 ;; esac ;;   # 실패시킬 주소 목록
+  *) echo "$*" >>"$T_LOG/hc.log" ;;
+esac

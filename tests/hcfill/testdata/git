@@ -1,0 +1,24 @@
+#!/bin/bash
+echo "$*" >>"$T_LOG/git.log"
+if [ -n "${HC_REAL_REPO-}" ] && [ "${1-}" = -C ] && [ "${2-}" = "$HC_REAL_REPO" ]; then exec "$HC_REAL_GIT" "$@"; fi
+for a in "$@"; do case $a in
+  fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)
+         [ -z "${HC_FAKE_FETCH_HOOK-}" ] || [ -e "$T_LOG/fetch-hook.done" ] || { : >"$T_LOG/fetch-hook.done"; bash -c "$HC_FAKE_FETCH_HOOK" >/dev/null 2>&1; }
+         exit 0 ;;
+  remote) [ -z "${HC_FAKE_NOORIGIN-}" ] || exit 2; exit 0 ;;   # NOORIGIN: 원격 없는 저장소(get-url 종료 2, ls-remote도 실패)
+  # 착지 표식: ls-remote origin 'refs/hc-landed/<레인>/*'는 $T/landed/<레인>(「sha<TAB>ref」 줄, 없으면 진짜처럼 빈 답·종료 0)에서 ·
+  # HC_FAKE_LSREMOTE_FAIL: 조회 실패(128) · HC_FAKE_MB_RC: merge-base --is-ancestor 종료(기본 0 = 조상)
+  ls-remote) case ${!#} in refs/hc-landed/*)
+      [ -z "${HC_FAKE_LSREMOTE_FAIL-}" ] || exit 128; r_=${!#}; r_=${r_#refs/hc-landed/}; cat "$T_LOG/landed/${r_%/\*}" 2>/dev/null; exit 0 ;; esac
+    [ -z "${HC_FAKE_MQ_FAIL-}${HC_FAKE_NOORIGIN-}" ] || exit 128   # 병합기 큐·켬 표식: 큐에 든 레인 · 켜진 병합기 기계
+    [ -z "${HC_FAKE_MQ-}" ] || printf '0123abcd\trefs/merge-queue/1700000000-%s\n' "$HC_FAKE_MQ"
+    [ -z "${HC_FAKE_MGM-}" ] || printf '0123abcd\trefs/herdr/merger/%s\n' "$HC_FAKE_MGM"; exit 0 ;;
+  symbolic-ref) echo origin/main; exit 0 ;;
+  # 완료 sha를 40자로: <sha>^{commit} → 뒤를 0으로 채운 40자($HC_FAKE_SHA40이면 그 값). $HC_FAKE_REVNONE과 같은 sha는 없음(종료 1, 출력 없음)
+  *'^{commit}') s_=${a%'^{commit}'}; [ "$s_" != "${HC_FAKE_REVNONE-}" ] || exit 1; [ -z "${HC_FAKE_SHA40-}" ] || { echo "$HC_FAKE_SHA40"; exit 0; }
+    printf '%s%0*d\n' "$s_" $((40 - ${#s_})) 0; exit 0 ;;
+  --grep=*) grep -E -- "${a#--grep=}" "$T_LOG/commits" 2>/dev/null | head -n 1; exit 0 ;;
+  push) exit "${HC_FAKE_PUSH_RC:-0}" ;;
+  merge-base) exit "${HC_FAKE_MB_RC:-0}" ;;
+esac; done
+case " $* " in *" log "*) [ -z "${HC_FAKE_LOG_FAIL-}" ] || exit 128; cat "$T_LOG/commits"; [ -z "${HC_FAKE_PARTIAL_LOG-}" ] || exit 128 ;; esac   # LOG_FAIL: origin/<기본> 참조 없음

@@ -21,7 +21,7 @@ printf '#!/bin/sh\nexit 1\n' >"$T/badbin/lsof"
 chmod +x "$T/bin/hc" "$T/badbin/lsof"
 export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg" TMPDIR="$T/tmp"
 cfg() { printf '%s\n' "$@" >"$T/cfg/config"; }
-sweep() { out=$(python3 "$SWEEP" --only-under "$T" "$@" 2>&1); }
+sweep() { out=$("$SWEEP" --only-under "$T" "$@" 2>&1); }
 EV=$T/home/.local/state/hc-lane/events.tsv
 LOG=$T/home/.claude-tasks/closed.log
 old=$(date -v-5H +%Y%m%d%H%M.%S)
@@ -46,7 +46,7 @@ for d in TestOpen444 TestRO333; do age "$X/$d"; done   # 위 chmod·cd가 바꾼
 
 # lsof 실패면 아무것도 안 지움
 cfg "sweep.disk_free_gb 0"
-out=$(PATH="$T/badbin:$PATH" python3 "$SWEEP" --only-under "$T" 2>&1)
+out=$(PATH="$T/badbin:$PATH" "$SWEEP" --only-under "$T" 2>&1)
 [ -d "$X/go-build111" ] && [ -d "$X/TestFoo222" ] && case $out in *"lsof 실패"*) true ;; *) false ;; esac &&
   ok "lsof 실패면 건너뜀" || bad "lsof 실패인데 지움 또는 안내 없음: $out"
 
@@ -104,10 +104,39 @@ n=$(grep -c 'hc-disk-low' "$EV" 2>/dev/null)
 # launchd 작업과 같은 PATH(/usr/sbin 없음)에서도 lsof를 찾는다(감사 중간 1): 오래된 폴더는 지우고 열린 폴더는 남긴다
 cfg "sweep.disk_free_gb 0"
 mkdir -p "$X/go-buildlaunchd/b001"; age "$X/go-buildlaunchd"
-py=$(command -v python3)
-out=$(env PATH="$T/bin:/usr/bin:/bin" "$py" "$SWEEP" --only-under "$T" 2>&1)
+out=$(env PATH="$T/bin:/usr/bin:/bin" "$SWEEP" --only-under "$T" 2>&1)
 [ ! -e "$X/go-buildlaunchd" ] && [ -d "$X/TestOpen444" ] && ok "launchd PATH에서도 lsof로 판정해 지움" ||
   bad "launchd PATH: $out"
 
 kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
+
+# Go 빌드 캐시 상한(2026-11-21 mini-m4 ~/.cache/go-build 하루 13.4GB): 여유가 문턱 1.5배 아래면 GOCACHE를 sweep.gocache_gb 아래로
+# 오래된 항목부터 줄이고, GOCACHE와 다른 옛 자리 ~/Library/Caches/go-build는 비운다. go가 돌면(HC_SWEEP_GO_COMM 이름) 건너뜀
+G=$T/gocache OLD=$T/home/Library/Caches/go-build
+mkdir -p "$G/00" "$G/01" "$G/ab" "$OLD/00"
+for i in 1 2 3 4; do head -c 4096 /dev/zero >"$G/0$((i % 2))/h$i-a"; touch -t "20260101000$i" "$G/0$((i % 2))/h$i-a"; done
+head -c 4096 /dev/zero >"$G/ab/new-d"; head -c 4096 /dev/zero >"$OLD/00/x-a"; printf r >"$G/README"
+export HC_SWEEP_GO_COMM=hcsweep-fakego GOCACHE=$G
+mkdir -p "$T/fg"; ln -s /bin/sleep "$T/fg/hcsweep-fakego"
+cfg "sweep.disk_free_gb 1000000000" "sweep.gocache_gb 0.000009" "sweep.tmp_hours 0"   # 항목 다섯 20KB → 9KB 아래: h1·h2·h3을 지움
+"$T/fg/hcsweep-fakego" 60 & pid=$!
+sleep 0.3
+sweep
+[ -e "$G/00/h2-a" ] && [ -e "$OLD/00/x-a" ] && case $out in *"go가 도는 중"*) true ;; *) false ;; esac &&
+  ok "Go 캐시: go가 돌면 건너뜀" || bad "go가 도는데 줄임: $out"
+kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
+sweep --dry-run
+[ -e "$G/01/h1-a" ] && case $out in *"Go 캐시 줄이기 (할 것)"*) true ;; *) false ;; esac && ok "Go 캐시: dry-run은 찍기만" || bad "Go 캐시 dry-run: $out"
+sweep
+left=$(cd "$G" && find . -type f | LC_ALL=C sort | tr '\n' ' ')
+[ "$left" = "./00/h4-a ./README ./ab/new-d " ] && [ ! -e "$OLD" ] && grep -q "Go 캐시 줄임" "$LOG" &&
+  ok "Go 캐시: 오래된 것부터 상한 아래로, README 남김, 옛 자리 비움, closed.log 한 줄" || bad "Go 캐시: 남은 것 [$left] 옛 자리 $(ls "$OLD" 2>&1) — $out"
+mkdir -p "$OLD/00"; printf x >"$OLD/00/y-a"
+cfg "sweep.disk_free_gb 0.000001" "sweep.gocache_gb 0.000004" "sweep.tmp_hours 0"
+sweep
+[ -e "$G/00/h4-a" ] && [ -e "$OLD/00/y-a" ] && ok "Go 캐시: 디스크 여유가 넉넉하면 안 건드림" || bad "여유 넉넉한데 줄임: $out"
+cfg "sweep.disk_free_gb 1000000000" "sweep.gocache_gb 1" "sweep.tmp_hours 0"
+GOCACHE=$OLD sweep
+[ -e "$OLD/00/y-a" ] && ok "Go 캐시: GOCACHE가 옛 자리면 비우지 않음" || bad "GOCACHE가 옛 자리인데 비움: $out"
+unset GOCACHE HC_SWEEP_GO_COMM
 exit $fail

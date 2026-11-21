@@ -18,7 +18,8 @@ gofmt=${gob%/go}/gofmt; [ -x "$gofmt" ] || gofmt=gofmt
 f=$("$gofmt" -l cmd internal)
 if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
 if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
-if "$gob" test -race -count=1 -timeout 300s ./...; then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
+# 시간 한도 600초: tests/hcfill(hc-fill 계약 시험, 바깥 exec 수백 번)이 혼자 2분 남짓 — 바쁜 기계에서도 끊기지 않게
+if "$gob" test -race -count=1 -timeout 600s ./...; then echo "ok - go test -race"; else echo "FAIL - go test -race"; fail=1; fi
 
 # 공통 실행기(lib/go-run.sh — 저장소에서만. 깔린 곳은 ~/.local/lib/go-run.sh가 같은 파일). 가짜 도구 모듈로 본다
 gr=$here/../lib/go-run.sh
@@ -51,6 +52,7 @@ if [ -f "$gr" ]; then
   src=$(cd "$T" && bash -c '. lib/go-run.sh && go_run_src')
   dl "$src"; sleep 1; touch "$T/cmd/hc-fake/main.go"   # 소스가 받은 바이너리보다 새로워도(시각) 판이 같으면 빌드하지 않는다
   t "받은 바이너리: 판이 같으면 빌드 없이 씀" "$(gr_)" "받은 판"
+  t "받은 바이너리: PATH가 비어도(훅) 판을 대조해 씀" "$(gr_ PATH=/없음)" "받은 판"
   dl "다른판.1"
   t "받은 바이너리: 판이 다르면 기계에서 빌드" "$(gr_)" "기계 빌드"
   t "받은 바이너리: 빌드하면 .src를 지움" "$([ -e "$T/.bin/hc-fake.src" ] && echo 있음 || echo 없음)" 없음
@@ -59,5 +61,19 @@ if [ -f "$gr" ]; then
   t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
   dl "다른판.3"
   t "받은 바이너리: 판이 다르고 빌드가 안 되면 IMPL=go는 1" "$(gr_ HC_FAKE_IMPL=go)" "돌아옴 1"
+  # GO_RUN_BUILD=bg(Claude Code 훅 — 제한 5초 안에 짓지 않는다, 2026-11-21 hooks-go): 낡았으면 짓기는 뒤에서, 이번은 셸 판(경고 없이 0)
+  sleep 1; printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("bg 판") }\n' >"$T/cmd/hc-fake/main.go"
+  t "bg: 소스가 새로우면 옛 바이너리를 부르지 않고 0" "$(gr_ GO_RUN_BUILD=bg)" "돌아옴 0"
+  t "bg: 경고 없음" "$(grep -c '경고' "$T/err")" 0
+  for i in $(seq 1 240); do [ -d "$T/.bin/hc-fake.building" ] || break; sleep 0.5; done
+  t "bg: 뒤에서 지은 새 판을 다음 부름에 씀" "$(gr_ GO_RUN_BUILD=bg)" "bg 판"
+  t "bg: 짓기 잠금을 남기지 않음" "$([ -e "$T/.bin/hc-fake.building" ] && echo 있음 || echo 없음)" 없음
+  t "bg: IMPL=go인데 쓸 수 없으면 1" "$(gr_ GO_RUN_BUILD=bg HC_FAKE_BIN=/없는/바이너리 HC_FAKE_IMPL=go)" "돌아옴 1"
+  t "PATH가 비어도(훅·시험이 비운다) 스위치를 읽는다" "$(gr_ PATH=/없음 HC_FAKE_IMPL=bash)" "돌아옴 0"
+  t "PATH가 비어도 _BIN을 쓴다" "$(gr_ PATH=/없음 HC_FAKE_BIN="$T/.bin/hc-fake")" "bg 판"
+  t "확인한 기본 바이너리는 .ok 표식" "$([ -e "$T/.bin/hc-fake.ok" ] && echo 있음 || echo 없음)" 있음
+  sleep 1; printf '#!/bin/sh\nexit 3\n' >"$T/.bin/hc-fake.new"; chmod +x "$T/.bin/hc-fake.new"; mv -f "$T/.bin/hc-fake.new" "$T/.bin/hc-fake"
+  t ".ok보다 새 바이너리는 다시 확인(깨졌으면 auto는 경고하고 0)" "$(gr_)" "돌아옴 0"
+  t "go_run_up: 대문자·_" "$(. "$T/lib/go-run.sh"; go_run_up herdr-hooks-x9; echo "$go_run_up_r")" HERDR_HOOKS_X9
 fi
 exit $fail

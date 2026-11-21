@@ -7,6 +7,13 @@
 # 문자열 안 설명(echo·grep 패턴·커밋 메시지·heredoc 본문·주석)은 빼고 본다. 단 bash/sh/zsh -c · eval · ssh ·
 # hc exec|run 이 있으면 따옴표 안도 실행될 수 있어 그대로 본다.
 # jq·perl이 없거나 입력을 못 읽으면 막지 않는다(편의 막이라 fail-open, hc-lane-wait-guard와 같다).
+# Go 판(cmd/herdr-hooks — 같은 판정)으로 넘긴다. HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 아래 셸 판 그대로(2026-11-21 hooks-go).
+# 바이너리가 없거나 소스보다 낡았으면 이번은 셸 판, 짓기는 뒤에서(훅 제한 안에 짓지 않는다 — lib/go-run.sh GO_RUN_BUILD=bg)
+for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
+  [ -r "$_hg" ] || continue
+  . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks kill-by-lookup-guard || exit 1
+  break
+done
 JQ=/usr/bin/jq; [ -x "$JQ" ] || JQ=$(command -v jq) || exit 0
 PERL=/usr/bin/perl; [ -x "$PERL" ] || PERL=$(command -v perl) || exit 0
 in=$(cat) || exit 0

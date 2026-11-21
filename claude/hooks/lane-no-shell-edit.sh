@@ -12,6 +12,13 @@
 #     > 대상이 변수($f)·/dev/·&2 면 통과. 읽기(sed -n·cat·heredoc 읽기)·시험 실행은 막지 않는다.
 # jq·perl이 없거나 입력을 못 읽으면 막지 않는다(편의 막이라 fail-open, kill-by-lookup-guard와 같다).
 [ -n "${HC_LANE-}" ] || exit 0
+# Go 판(cmd/herdr-hooks — 같은 판정)으로 넘긴다. HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 아래 셸 판 그대로(2026-11-21 hooks-go).
+# 바이너리가 없거나 소스보다 낡았으면 이번은 셸 판, 짓기는 뒤에서(훅 제한 안에 짓지 않는다 — lib/go-run.sh GO_RUN_BUILD=bg)
+for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
+  [ -r "$_hg" ] || continue
+  . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks lane-no-shell-edit || exit 1
+  break
+done
 JQ=/usr/bin/jq; [ -x "$JQ" ] || JQ=$(command -v jq) || exit 0
 PERL=/usr/bin/perl; [ -x "$PERL" ] || PERL=$(command -v perl) || exit 0
 in=$(cat) || exit 0

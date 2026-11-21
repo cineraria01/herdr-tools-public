@@ -2,6 +2,7 @@
 # Tests for ~/.claude/hooks/hc-lane-wait-guard.sh. Feeds PreToolUse JSON through the same wrapper settings.json uses
 # (a missing hook file = exit 0, so HOOK=/nonexistent shows the state before the hook). Run: bash <this file>  (exit 0 = pass)
 HOOK=${HOOK:-$(cd "$(dirname "$0")/.." && pwd)/hc-lane-wait-guard.sh}   # the hook beside this tests folder (repo or ~/.claude/hooks)
+. "$(dirname "$0")/hooks-impl.sh"   # 판: HERDR_HOOKS_IMPL=go(기본)·bash
 pass=0 fail=0
 # case NAME WANT_RC COMMAND [RUN_IN_BACKGROUND]
 case_() {

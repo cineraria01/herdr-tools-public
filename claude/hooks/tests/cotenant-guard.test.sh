@@ -2,6 +2,7 @@
 # Tests for ~/.claude/hooks/cotenant-guard.sh (PreToolUse lease guard). Temp git repos, a fake session registry (fake HOME), a fake `hc` on PATH, and
 # `sleep` processes standing in for agents. Run: bash ~/.claude/hooks/tests/cotenant-guard.test.sh  (exit 0 = pass)
 HOOK=${HOOK:-$(cd "$(dirname "$0")/.." && pwd)/cotenant-guard.sh}   # the hook beside this tests folder (repo or ~/.claude/hooks)
+. "$(dirname "$0")/hooks-impl.sh"   # 판: HERDR_HOOKS_IMPL=go(기본)·bash — 셸 판을 sed로 고치던 세 곳은 Go 판에서 시험 손잡이(HERDR_HOOKS_TEST_*)
 T=$(mktemp -d "${TMPDIR:-/tmp}/cotenant-test.XXXXXX") && T=$(cd -P "$T" && pwd) || exit 1
 H=$T/home
 mkdir -p "$H/.claude/sessions" "$T/bin"
@@ -481,9 +482,10 @@ OUT=$(jq -cn --arg w "$R5" --arg f "$R5/e.txt" '{session_id:"s5b",cwd:$w,tool_na
   env -u CLAUDE_CONFIG_DIR -u HC_TERMINAL_ID HOME="$H" PATH="$T/bin" /bin/bash "$HOOK" 2>"$T/err"); RC=$? ERR=$(cat "$T/err")
 check "S7 PATH에 git이 없어도 같은 판정(남의 미커밋 파일 차단)" 2 "agent-a5"
 printf '#!/bin/sh\necho broken >&2\nexit 1\n' > "$T/badgit"; chmod +x "$T/badgit"
-sed "s|^GIT=.*|GIT=$T/badgit|" "$HOOK" > "$T/hook-badgit.sh"
+if [ "$HERDR_HOOKS_IMPL" = go ]; then BADGIT_HOOK=$HOOK BADGIT_ENV="HERDR_HOOKS_TEST_GIT=$T/badgit"
+else sed "s|^GIT=.*|GIT=$T/badgit|" "$HOOK" > "$T/hook-badgit.sh"; BADGIT_HOOK=$T/hook-badgit.sh BADGIT_ENV=; fi
 OUT=$(jq -cn --arg w "$R2" --arg f "$R2/a.txt" '{session_id:"sx",cwd:$w,tool_name:"Edit",tool_input:{file_path:$f}}' |
-  env -u CLAUDE_CONFIG_DIR -u HC_TERMINAL_ID HOME="$H" PATH="$T/bin:$PATH" /bin/bash "$T/hook-badgit.sh" 2>"$T/err"); RC=$? ERR=$(cat "$T/err")
+  env -u CLAUDE_CONFIG_DIR -u HC_TERMINAL_ID HOME="$H" PATH="$T/bin:$PATH" $BADGIT_ENV /bin/bash "$BADGIT_HOOK" 2>"$T/err"); RC=$? ERR=$(cat "$T/err")
 check "S7 git을 실행하지 못하면(종료 128 밖) 허용하지 않고 막음" 2 "git을 실행하지 못했다"
 hook s5b Edit "$R5/e.txt" "" "$R5"; check "문구: 기다리라 대신 다른 일을 먼저 하고 나중에 다시 시도하라" 2 "다른 일을 먼저 하고 나중에 다시 시도"
 : > "$L5D/.cleaning"
@@ -545,8 +547,8 @@ cat > "$T/date61" <<'IN'
 exec /bin/date "$@"
 IN
 chmod +x "$T/date61"
-sed "s|DATE=/bin/date|DATE=$T/date61|" "$HOOK" > "$T/hook-61.sh"
-hook61() { local HOOK=$T/hook-61.sh; hook "$@"; }
+if [ "$HERDR_HOOKS_IMPL" = go ]; then hook61() { HOOK_ENV=HERDR_HOOKS_TEST_NOW_OFFSET=61 hook "$@"; }
+else sed "s|DATE=/bin/date|DATE=$T/date61|" "$HOOK" > "$T/hook-61.sh"; hook61() { local HOOK=$T/hook-61.sh; hook "$@"; }; fi
 d=$(rec "$L5D" r1.txt 99996 "$DEADST"); c=$d/claim-99996-20260101000000; : > "$c"; touch -t 202601010000 "$c"
 m=$(stat -f %m "$c"); : > "$c.steal-$m"   # a taker killed right after its marker: the claim and the marker are left
 hook s5b Edit "$R5/r1.txt" "" "$R5"; check "R1 steal 표식만 남은 묵은 claim: 지금은 막고 60초 뒤 풀린다고 알림" 2 "60초가 지나면"
@@ -588,9 +590,10 @@ hook s7b Bash "git add h.txt" "" "$R7"; ms=$(msince "$t0"); timeok "$ms" 3500 ||
 check "R2 상한에 걸린 정리 판정도 못 읽은 임대의 남의 미커밋 파일 git add 차단(${ms}ms)" 2 "agent-a7"
 n2=$(g7); i=1; while [ "$n2" -ge "$n1" ] && [ $i -lt 5 ]; do calm; hook s7b Bash "git add b.txt" "" "$R7"; n2=$(g7); i=$((i + 1)); done
 [ "$n2" -lt "$n1" ]; RC=$?; check "R2 다음 판정이 이어서 정리(남은 $n1 → $n2, 판정 ${i}번)" 0
-sed 's|^SECONDS=0|SECONDS=5|' "$HOOK" > "$T/hook-late.sh"   # a verdict that reaches the scan already past the limit
 rm -f "$L7D/.idle"   # written by a scanner that has read some leases
-HOOK=$T/hook-late.sh hook s7b Bash "git add h.txt" "" "$R7"; check "R2 늦게 시작해 하나도 못 읽은 정리 판정도 남의 미커밋 파일 git add 차단" 2 "agent-a7"
+if [ "$HERDR_HOOKS_IMPL" = go ]; then HOOK_ENV=HERDR_HOOKS_TEST_SECONDS=5 hook s7b Bash "git add h.txt" "" "$R7"   # a verdict that reaches the scan already past the limit
+else sed 's|^SECONDS=0|SECONDS=5|' "$HOOK" > "$T/hook-late.sh"; HOOK=$T/hook-late.sh hook s7b Bash "git add h.txt" "" "$R7"; fi
+check "R2 늦게 시작해 하나도 못 읽은 정리 판정도 남의 미커밋 파일 git add 차단" 2 "agent-a7"
 [ -e "$L7D/.idle" ]; RC=$?; check "R2 시간 상한이 지난 정리 판정은 임대를 읽지 않음" 1
 [ -e "$L7D/.cleaning" ]; RC=$?; check "R2 그때도 정리 잠금을 남기지 않음" 1
 R8=$T/r8; mkrepo "$R8"; L8D=$(git -C "$R8" rev-parse --absolute-git-dir)/agent-leases; mkdir -p "$L8D"
@@ -600,6 +603,16 @@ long=ghost/$(printf 'x%.0s' $(seq 1 120))
 for k in $(seq 1 8000); do printf 'sz\03799998\037%s\037\037gone\0372026-01-01 00:00:00\037%s/g%s.txt\n' "$DEADST" "$long" $k > "$L8D/0g$k/owner"; done
 calm; hook s8a Bash "git add b.txt" "" "$R8"; n=$(ls "$L8D" | grep -c '^0g')
 [ "$RC" = 0 ] && [ "$n" -lt 8000 ]; RC=$?; check "R2 경로가 긴 죽은 임대 8000개(한 status 인자 1.2MB)도 정리가 진행(남은 $n)" 0
+
+# 작업 중 발견(2026-11-21 hooks-go 두 판 대조): 글롭이 펼친 결과를 다시 펼쳐, 닫히지 않은 [ 가 든 대상(펼쳐도 그대로)이나
+# 저를 다시 맞추는 이름(q*·q*b)이면 bash_write가 끝없이 되돌아 셸 판이 죽었다(신호로 끝남 → onFailure로 막힘). 펼친 결과는 구체 경로다
+touch "$R/q*" "$R/q*b"
+for c in "echo x >> build.log[" "rm -f q*" "printf y > 'q*'"; do
+  RC=; hook sb Bash "$c"; check "작업 중 발견: 글롭 결과를 다시 펼치지 않음(끝없이 안 돎): $c" 0
+done
+[ -f "$(leasefile "$R" 'build.log[')" ]; RC=$?; check "작업 중 발견: 닫히지 않은 [ 대상도 보통 파일로 임대" 0
+[ -f "$(leasefile "$R" 'q*b')" ]; RC=$?; check "글롭으로 맞은 파일도 이미 미커밋이면 Bash 쓰기가 임대하지 않음(남의 변경을 떠안지 않게)" 1
+rm -f "$R/q*" "$R/q*b"
 
 echo "pass $pass, fail $fail"
 [ "$fail" = 0 ]

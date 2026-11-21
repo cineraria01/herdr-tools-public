@@ -2,6 +2,13 @@
 # loop-no-question: 무인 루프(이름이나 job 라벨에 loop가 든 hc 터미널)에서 질문 창(AskUserQuestion)을 막는다.
 # 2026-11-07 사용자 결정 "질문 창 막는 훅 (추천)": 151 D1 루프가 질문 창에서 2시간 멈췄다.
 # hc 터미널이 아니거나 hc를 못 읽으면 막지 않는다.
+# Go 판(cmd/herdr-hooks — 같은 판정)으로 넘긴다. HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 아래 셸 판 그대로(2026-11-21 hooks-go).
+# 바이너리가 없거나 소스보다 낡았으면 이번은 셸 판, 짓기는 뒤에서(훅 제한 안에 짓지 않는다 — lib/go-run.sh GO_RUN_BUILD=bg)
+for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
+  [ -r "$_hg" ] || continue
+  . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks loop-no-question || exit 1
+  break
+done
 cat >/dev/null 2>&1
 [ -n "$HC_TERMINAL_ID" ] || exit 0
 HC=$(command -v hc 2>/dev/null || echo "$HOME/.local/bin/hc")

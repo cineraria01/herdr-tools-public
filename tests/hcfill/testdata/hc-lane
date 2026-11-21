@@ -1,0 +1,26 @@
+#!/bin/bash
+if [ "${1-}" = coord ] && [ "${2-}" = --check ]; then   # 지휘가 지금 살아 있나: $HC_FAKE_COORD_GONE(공백 목록)에 든 주소는 사라짐
+  echo "${3-}" >>"$T_LOG/coordcheck.log"; case " ${HC_FAKE_COORD_GONE-} " in *" ${3-} "*) echo "hc-lane coord --check: ${3-} 터미널이 없거나 끝남(가짜)" >&2; exit 1 ;; esac; exit 0; fi
+if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기: $HC_FAKE_COORD_SET_FAIL(공백 목록)에 든 주소는 지휘가 아님
+  echo "${3-}" >>"$T_LOG/coordset.log"; case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
+if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
+if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
+if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi
+if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; sleep "${HC_FAKE_GC_SLEEP:-0}"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
+{ echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)
+[ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_OWNER:-없음}" >>"$T_LOG/owner.log"   # 레인 주인(lanes.tsv 셋째 칸)
+on= name=
+while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
+if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
+echo "$name ${HERDR_LAND_PRIORITY:-없음}" >>"$T_LOG/landprio.log"   # 착지 줄 우선(그 레인을 기다리는 줄 수)
+case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜 실패" >&2; exit 1 ;; esac
+case " ${HC_FAKE_LANE_HELD-} " in *" $name "*) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다" >&2; exit 10 ;; esac   # 임대가 남은 레인: 어느 기계든 10
+[ -z "${HC_FAKE_LANE_HOOK-}" ] || eval "$HC_FAKE_LANE_HOOK" >/dev/null 2>&1   # 띄우는 동안 끼어드는 일(대기열 rm·add 등)
+# $HC_FAKE_LANE_START의 「<기계>/<이름>=<종료>」: 띄우고 터미널은 남긴 채 시작 확인 실패(5·6·7)로 끝난다(진짜 hc-lane처럼 JSON 끝 줄)
+for x in ${HC_FAKE_LANE_START-}; do case $x in "${on:-here}/$name="*)
+  echo "hc-lane: 시작 안 됨 ${on:+$on/}$name: 가짜 로그인 막힘" >&2; echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\",\"start\":\"login\"}"; exit "${x#*=}" ;; esac; done
+echo "레인 $name"
+[ -z "${HC_FAKE_LANE_NOAPP-}" ] || [ -z "$on" ] || echo "hc-lane: Herdr 창이 없어 $on 공간 이름은 못 붙였다(창을 열면 $on/$name 가 보인다)" >&2   # 원격 표시 알림
+echo "{\"lane\":\"${on:+$on/}$name\",\"name\":\"$name\"}"

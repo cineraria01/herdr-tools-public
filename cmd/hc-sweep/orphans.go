@@ -1,0 +1,473 @@
+package main
+
+// 고아 쓸기 — 셸 판 lib/hc-sweep/orphans.py와 같다
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+type procInfo struct {
+	ppid, age int
+	cmd       string
+}
+
+// secs: ps etime([[dd-]hh:]mm:ss) → 초
+func secs(etime string) (int, error) {
+	days, rest := 0, etime
+	if i := strings.LastIndex(etime, "-"); i >= 0 {
+		d, err := strconv.Atoi(etime[:i])
+		if err != nil {
+			return 0, err
+		}
+		days, rest = d, etime[i+1:]
+	}
+	n := 0
+	for _, p := range strings.Split(rest, ":") {
+		v, err := strconv.Atoi(p)
+		if err != nil {
+			return 0, err
+		}
+		n = n*60 + v
+	}
+	return n + days*86400, nil
+}
+
+// processes: 이 사용자의 프로세스 {pid: (ppid, 나이 초, 명령)}
+func processes(r runner) (map[int]procInfo, error) {
+	res := r(60*time.Second, nil, "ps", "-x", "-o", "pid=,ppid=,etime=,command=")
+	if res.err != nil || res.rc != 0 {
+		return nil, fmt.Errorf("ps 실패")
+	}
+	procs := map[int]procInfo{}
+	for _, l := range strings.Split(res.out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 {
+			continue
+		}
+		pid, err := strconv.Atoi(f[0])
+		if err != nil {
+			continue
+		}
+		ppid, err1 := strconv.Atoi(f[1])
+		age, err2 := secs(f[2])
+		if err1 != nil || err2 != nil {
+			return nil, fmt.Errorf("ps 줄을 못 읽음: %s", l)
+		}
+		cmd := ""
+		if len(f) > 3 {
+			// 명령 칸은 셋째 칸 뒤 나머지 그대로
+			rest := strings.TrimLeft(l, " \t")
+			for i := 0; i < 3; i++ {
+				rest = strings.TrimLeft(rest[strings.IndexAny(rest, " \t"):], " \t")
+			}
+			cmd = rest
+		}
+		procs[pid] = procInfo{ppid, age, cmd}
+	}
+	return procs, nil
+}
+
+// exes: {pid: argv[0]}(ps comm — 맥은 공백 든 경로도 그대로, 리눅스는 잘린 이름이라 "/" 든 것만)
+func exes(r runner) (map[int]string, error) {
+	res := r(60*time.Second, nil, "ps", "-x", "-o", "pid=,comm=")
+	if res.err != nil || res.rc != 0 {
+		return nil, fmt.Errorf("ps 실패")
+	}
+	m := map[int]string{}
+	for _, l := range strings.Split(res.out, "\n") {
+		f := strings.SplitN(strings.TrimSpace(l), " ", 2)
+		if len(f) != 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(f[0])
+		if c := strings.TrimSpace(f[1]); err == nil && strings.Contains(c, "/") {
+			m[pid] = c
+		}
+	}
+	return m, nil
+}
+
+// cwds: {pid: cwd}. 못 읽은 pid는 빠진다(명령 줄로만 판정)
+func cwds(pids []int, r runner) map[int]string {
+	m := map[int]string{}
+	if len(pids) == 0 {
+		return m
+	}
+	ps := make([]string, len(pids))
+	for i, p := range pids {
+		ps[i] = strconv.Itoa(p)
+	}
+	res := r(60*time.Second, nil, lsofPath(), "-a", "-d", "cwd", "-p", strings.Join(ps, ","), "-Fpn")
+	if res.err != nil {
+		return m
+	}
+	pid := 0
+	for _, l := range strings.Split(res.out, "\n") {
+		switch {
+		case strings.HasPrefix(l, "p"):
+			pid, _ = strconv.Atoi(l[1:])
+		case strings.HasPrefix(l, "n") && pid != 0:
+			m[pid] = l[1:]
+		}
+	}
+	return m
+}
+
+// laneRoot: 절대 경로가 레인 작업 트리 아래면 그 작업 트리(<…><접미사>/<레인>), 아니면 ""
+func laneRoot(path, suffix string) string {
+	if !strings.HasPrefix(path, "/") {
+		return ""
+	}
+	parts := strings.Split(filepath.Clean(path), "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if strings.HasSuffix(parts[i], suffix) && len(parts[i]) > len(suffix) {
+			return strings.Join(parts[:i+2], "/")
+		}
+	}
+	return ""
+}
+
+// exists: 지워졌으면 false. 그 밖 읽기 오류는 true(있다고 보고 터미널로 판정)
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil || !os.IsNotExist(err)
+}
+
+// realpath: os.path.realpath처럼 — 있는 앞부분의 링크를 풀고 없는 뒤는 그대로
+// (가리키는 곳이 없는 링크도 푼다 — 빠진 디스크 /Volumes로 가는 링크를 알아보게)
+func realpath(p string) string { return realpathN(filepath.Clean(p), 40) }
+
+func realpathN(p string, depth int) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	d := filepath.Dir(p)
+	if d == p || depth == 0 {
+		return p
+	}
+	q := filepath.Join(realpathN(d, depth-1), filepath.Base(p))
+	if st, err := os.Lstat(q); err == nil && st.Mode()&os.ModeSymlink != 0 {
+		if t, err := os.Readlink(q); err == nil {
+			if !filepath.IsAbs(t) {
+				t = filepath.Join(filepath.Dir(q), t)
+			}
+			return realpathN(filepath.Clean(t), depth-1)
+		}
+	}
+	return q
+}
+
+func under(c, root string) bool { return c == root || strings.HasPrefix(c, root+"/") }
+
+type orphan struct {
+	pid, age  int
+	root, cmd string
+	why       string
+	kill      bool
+}
+
+// findOrphans: 고아 후보. 그 작업 트리 아래를 쓰는 live 터미널이 있으면 빼고, 작업 트리가 있는데 본 저장소 아래를 쓰는 터미널이 있거나
+// cwd로만 걸린 것은 보류(kill false). keep은 실행 파일 이름: exeOf(ps comm)에 있으면 그 경로, 없으면 명령 첫 낱말
+func findOrphans(procs map[int]procInfo, cwdOf map[int]string, termCwds []string, suffix string, minAge float64, me int, only string,
+	exists func(string) bool, keep map[string]bool, exeOf map[int]string) []orphan {
+	var terms []string
+	for _, c := range termCwds {
+		terms = append(terms, realpath(c))
+	}
+	pids := make([]int, 0, len(procs))
+	for p := range procs {
+		pids = append(pids, p)
+	}
+	sort.Ints(pids)
+	var found []orphan
+	for _, pid := range pids {
+		pi := procs[pid]
+		exe := exeOf[pid]
+		if exe == "" {
+			if f := strings.Fields(pi.cmd); len(f) > 0 {
+				exe = f[0]
+			}
+		}
+		if pi.ppid != 1 || pid == me || float64(pi.age) < minAge || keep[filepath.Base(exe)] {
+			continue
+		}
+		byCmd, all := map[string]bool{}, map[string]bool{}
+		for _, x := range strings.Fields(pi.cmd) {
+			if i := strings.Index(x, "="); i >= 0 {
+				x = x[i+1:]
+			}
+			if r := laneRoot(x, suffix); r != "" {
+				byCmd[r], all[r] = true, true
+			}
+		}
+		if r := laneRoot(cwdOf[pid], suffix); r != "" {
+			all[r] = true
+		}
+		var roots []string
+		for r := range all {
+			if only == "" || strings.HasPrefix(r, strings.TrimRight(only, "/")+"/") {
+				roots = append(roots, r)
+			} else {
+				delete(byCmd, r)
+			}
+		}
+		sort.Strings(roots)
+		used := len(roots) == 0
+		for _, r := range roots {
+			if exists(r) {
+				for _, c := range terms {
+					if under(c, realpath(r)) {
+						used = true
+					}
+				}
+			}
+		}
+		if used {
+			continue
+		}
+		var there []string
+		for _, r := range roots {
+			if exists(r) {
+				there = append(there, r)
+			}
+		}
+		mainUsed := false
+		for _, r := range there {
+			m := realpath(strings.TrimSuffix(filepath.Dir(r), suffix))
+			for _, c := range terms {
+				if under(c, m) {
+					mainUsed = true
+				}
+			}
+		}
+		o := orphan{pid: pid, age: pi.age, cmd: pi.cmd, kill: true}
+		switch {
+		case mainUsed:
+			o.why, o.kill = "보류: 본 저장소 터미널 있음", false
+		case len(there) > 0 && len(byCmd) == 0:
+			o.why, o.kill = "보류: cwd로만 걸림, 작업 트리 있음", false
+		case len(there) > 0:
+			o.why = "쓰는 터미널 없음"
+		default:
+			o.why = "작업 트리 지워짐"
+		}
+		if len(there) > 0 {
+			o.root = there[0]
+		} else {
+			o.root = roots[0]
+		}
+		found = append(found, o)
+	}
+	return found
+}
+
+// tree: pids와 그 자손
+func tree(pids []int, procs map[int]procInfo) map[int]bool {
+	kids := map[int][]int{}
+	for p, pi := range procs {
+		kids[pi.ppid] = append(kids[pi.ppid], p)
+	}
+	out := map[int]bool{}
+	todo := append([]int(nil), pids...)
+	for len(todo) > 0 {
+		p := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		if !out[p] {
+			out[p] = true
+			todo = append(todo, kids[p]...)
+		}
+	}
+	return out
+}
+
+func alive(p int) bool { return syscall.Kill(p, 0) == nil }
+
+// killTree: pids와 그 자손을 끈다(TERM, wait 뒤 남으면 KILL). 지금 다시 본 ppid·명령이 같은 것만. KILL까지 간 수
+func killTree(pids []int, procs map[int]procInfo, wait time.Duration) (int, error) {
+	now, err := processes(run)
+	if err != nil {
+		return 0, err
+	}
+	var todo []int
+	for p := range tree(pids, procs) {
+		if n, ok := now[p]; ok && n.ppid == procs[p].ppid && n.cmd == procs[p].cmd {
+			todo = append(todo, p)
+		}
+	}
+	for _, p := range todo {
+		syscall.Kill(p, syscall.SIGTERM)
+	}
+	end := time.Now().Add(wait)
+	for time.Now().Before(end) {
+		any := false
+		for _, p := range todo {
+			any = any || alive(p)
+		}
+		if !any {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	left := 0
+	for _, p := range todo {
+		if alive(p) {
+			syscall.Kill(p, syscall.SIGKILL)
+			left++
+		}
+	}
+	return left, nil
+}
+
+// seen: closed.log에 이 pid·명령 앞부분의 관찰 기록이 이미 있나(제목 「나이 N분 <명령>」의 나이는 견주지 않는다)
+func seen(pid int, head, path string) bool {
+	if path == "" {
+		path = filepath.Join(tasksDir, "closed.log")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		x := strings.Split(l, "\t")
+		if len(x) > 6 && x[1] == "pid:"+strconv.Itoa(pid) && strings.Contains(x[3], "관찰") {
+			if p := strings.SplitN(x[6], " ", 3); len(p) == 3 && p[2] == head {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sweepOrphans: 고아 쓸기 한 바퀴. 끌 것 수
+func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
+	suffix, ok1 := conf("sweep.wt_suffix", ".wt")
+	keepS, ok2 := conf("sweep.orphan_keep", "codebase-memory-mcp herdr-core")
+	mode, ok3 := conf("sweep.orphan_kill", "off")
+	if !ok1 || !ok2 || !ok3 || suffix == "" || strings.Contains(suffix, "/") {
+		fmt.Println("고아 쓸기 건너뜀: 설정 sweep.wt_suffix·sweep.orphan_keep·sweep.orphan_kill을 못 읽음")
+		return 0
+	}
+	if mode != "on" && mode != "off" {
+		fmt.Printf("고아 쓸기: sweep.orphan_kill은 on·off다(지금 '%s') — 끄지 않는다\n", mode)
+		mode = "off"
+	}
+	list, isList := termsAny.([]any)
+	var terms []map[string]any
+	for _, x := range list {
+		t, ok := x.(map[string]any)
+		if _, isStr := t["address"].(string); !ok || !isStr {
+			isList = false
+			break
+		}
+		terms = append(terms, t)
+	}
+	if !isList {
+		fmt.Println("고아 쓸기 건너뜀: hc ls에 terminals 목록이 없다")
+		return 0
+	}
+	var local []map[string]any
+	var liveCwds []string
+	for _, t := range terms {
+		if str(t, "state") != "live" {
+			continue
+		}
+		_, hasCwd := t["cwd"].(string)
+		if hasCwd {
+			liveCwds = append(liveCwds, str(t, "cwd"))
+		}
+		if !strings.Contains(str(t, "address"), "/") {
+			if !hasCwd {
+				fmt.Println("고아 쓸기 건너뜀: cwd를 모르는 이 기계 터미널이 있다")
+				return 0
+			}
+			local = append(local, t)
+		}
+	}
+	procs, err := processes(run)
+	if err != nil {
+		fmt.Println("고아 쓸기 실패:", err)
+		return 0
+	}
+	var ones []int
+	for p, pi := range procs {
+		if pi.ppid == 1 {
+			ones = append(ones, p)
+		}
+	}
+	exeOf, err := exes(run)
+	if err != nil {
+		fmt.Println("고아 쓸기 실패:", err)
+		return 0
+	}
+	keep := map[string]bool{}
+	for _, k := range strings.Fields(keepS) {
+		keep[k] = true
+	}
+	found := findOrphans(procs, cwds(ones, run), liveCwds, suffix, minAge, os.Getpid(), only, exists, keep, exeOf)
+	termPids, pidsOK := map[int]bool{}, true
+	for _, o := range found {
+		if !o.kill {
+			continue
+		}
+		// 자손에 live 터미널 프로세스(코어·에이전트)가 있으면 끄지 않는다
+		for _, t := range local {
+			g, err := hc("get", str(t, "address"))
+			p, isNum := g["pid"].(float64)
+			if err != nil || !isNum {
+				pidsOK = false
+				break
+			}
+			termPids[int(p)] = true
+		}
+		break
+	}
+	targets := 0
+	for _, o := range found {
+		if o.kill && !pidsOK {
+			o.why, o.kill = "보류: 터미널 pid를 못 읽음", false
+		} else if o.kill {
+			for p := range tree([]int{o.pid}, procs) {
+				if termPids[p] {
+					o.why, o.kill = "보류: 자손에 터미널 프로세스 있음", false
+				}
+			}
+		}
+		line := fmt.Sprintf("pid %d 나이 %d분 %s (%s) %s", o.pid, o.age/60, o.root, o.why, cutRunes(o.cmd, 80))
+		head := flat(cutRunes(o.cmd, 80))
+		title := fmt.Sprintf("나이 %d분 %s", o.age/60, head)
+		addr := "pid:" + strconv.Itoa(o.pid)
+		switch {
+		case !o.kill:
+			fmt.Println("보류 고아:", line)
+			continue
+		case dry:
+			fmt.Println("끌 고아:", line)
+		case mode == "off":
+			fmt.Println("고아(끄기 꺼짐, 기록만):", line)
+			if !seen(o.pid, head, "") {
+				record(addr, "-", "고아 관찰("+o.why+")", o.root, "-", title)
+			}
+		default:
+			hard, err := killTree([]int{o.pid}, procs, 5*time.Second)
+			if err != nil {
+				fmt.Println("고아 못 끔:", line, err)
+				continue
+			}
+			k, mark := "", ""
+			if hard > 0 {
+				k, mark = " KILL", "(KILL)"
+			}
+			record(addr, "-", "고아("+o.why+")"+k, o.root, "-", title)
+			fmt.Println("끈 고아:", line, mark)
+		}
+		targets++
+	}
+	return targets
+}
