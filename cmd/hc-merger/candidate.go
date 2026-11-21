@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"herdr-tools/internal/proc"
 )
@@ -29,7 +30,7 @@ func (m *M) stack() bool {
 	for i := 1; i < len(m.b); i++ {
 		mf, rc := out("merge-base", m.b[i].s, m.B)
 		if rc != 0 {
-			die("merger: git merge-base 실패(%s)", m.b[i].l)
+			dieGit(rc, "merger: git merge-base 실패(%s)", m.b[i].l)
 		}
 		if inLog(m.mwt, m.lgf, "rebase", "-q", "--onto", m.br, mf, m.b[i].s) == 0 {
 			if inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br) != 0 {
@@ -66,8 +67,9 @@ func (m *M) runCandidate() int {
 		c := exec.Command("bash", ".claude/herdr-setup.sh")
 		c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+m.top, "LANE_BASE="+m.base)
-		if proc.Wait(c, m.mj+"/child") != 0 {
-			fmt.Fprintln(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패")
+		// 준비 훅에도 상한(E11·G1 — 의존성 설치가 망에서 멈추면 main에 쓰는 유일한 프로세스가 선다). 넘으면 무리째 거두고 큐를 둔 채 쉰다
+		if rc := proc.WaitMax(c, m.mj+"/child", setupMax()); rc != 0 {
+			fmt.Fprintf(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패(종료 %d)\n", rc)
 			return 75
 		}
 	}
@@ -76,6 +78,11 @@ func (m *M) runCandidate() int {
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
 		"HERDR_LAND_VERDICT="+m.bv, "HERDR_LAND_PATCHID="+m.bp, "HERDR_LAND_SHA="+m.C0)
 	return proc.Wait(c, m.mj+"/child")
+}
+
+// setupMax: 준비 훅 상한 HERDR_TIMEOUT_SETUP(초, 기본 1800 — 큰 저장소의 의존성 설치·빌드). 0이면 상한 없음
+func setupMax() time.Duration {
+	return time.Duration(intSetting("HERDR_TIMEOUT_SETUP", os.Getenv("HERDR_TIMEOUT_SETUP"), 1800, 0)) * time.Second
 }
 
 // ponytail: 도구 이름 하나로 거름, 준비 훅이 다른 색인 길을 쓰면 그때 LANE_MERGER 같은 표시로

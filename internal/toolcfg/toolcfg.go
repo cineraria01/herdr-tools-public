@@ -108,7 +108,7 @@ type pattern struct {
 }
 
 // Lint: 셸 판 `lint [--strict] [<파일>…]`. 걸린 줄은 stdout에 「파일:줄: 패턴」. 종료 코드 0 깨끗 · 1 걸림 · 2 검사 못 함 · 3 strict인데 패턴 없음.
-// 패턴은 ERE를 Go 정규식으로(대소문자 무시) 읽는다 — Go가 못 읽는 패턴은 틀린 패턴(종료 2, 검사 없이 통과하지 않게)
+// 패턴은 셸 판(LC_ALL=C grep -E -i)처럼 바이트 단위로 읽는다(ereToGo) — Go가 못 읽는 패턴은 틀린 패턴(종료 2, 검사 없이 통과하지 않게)
 func Lint(dir string, strict bool, files []string, stdout, stderr io.Writer) int {
 	return LintAt("", dir, strict, files, stdout, stderr)
 }
@@ -148,7 +148,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		if t == "" || t[0] == '#' {
 			continue
 		}
-		re, err := regexp.Compile("(?i)" + s)
+		re, err := regexp.Compile(ereToGo(s))
 		if err != nil {
 			return die2("틀린 패턴 %s (%s)", s, pf)
 		}
@@ -199,6 +199,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		if fi, err := os.Lstat(at(f)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 			// 심볼릭 링크는 git에 대상 경로 글자로 들어간다: 그 글자를 견주고 대상 내용은 읽지 않는다
 			if t, err := os.Readlink(at(f)); err == nil {
+				t = byteRunes([]byte(t))
 				for _, p := range pats {
 					if p.re.MatchString(t) {
 						add(f, 1, p.text)
@@ -210,16 +211,18 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		} else {
 			// 이진·UTF-8 아닌 파일도 바이트로 본다
 			for i, l := range splitLines(data) {
+				m := byteRunes(l)
 				for _, p := range pats {
-					if p.re.Match(l) {
+					if p.re.MatchString(m) {
 						add(f, i+1, p.text)
 					}
 				}
 			}
 		}
 		if !strings.HasPrefix(f, "/") { // 경로 글자: 상대 경로로 준 것만(절대 경로는 임시 파일 같은 남의 자리)
+			m := byteRunes([]byte(f))
 			for _, p := range pats {
-				if p.re.MatchString(f) {
+				if p.re.MatchString(m) {
 					add(f, 0, "경로 "+p.text)
 				}
 			}
@@ -247,6 +250,104 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 	}
 	w.Flush()
 	return 1
+}
+
+// byteRunes: 바이트 하나를 글자 하나로 — 0x00~0x7F는 그대로, 0x80~0xFF는 대소문자 접기가 없는 사용자 영역 글자 U+E080~U+E0FF.
+// 셸 판 LC_ALL=C처럼 「.」 하나가 바이트 하나, 대소문자 무시는 ASCII만, 0x80 이상은 낱말 글자가 아니다(패턴도 같게 옮긴다)
+func byteRunes(b []byte) string {
+	ascii := true
+	for _, c := range b {
+		if c >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return string(b)
+	}
+	var s strings.Builder
+	for _, c := range b {
+		writeByte(&s, c)
+	}
+	return s.String()
+}
+
+func writeByte(s *strings.Builder, c byte) {
+	if c < 0x80 {
+		s.WriteByte(c)
+	} else {
+		s.WriteRune(0xE000 + rune(c))
+	}
+}
+
+// ereToGo: ERE 패턴 한 줄을 셸 판(LC_ALL=C grep -E -i)과 같게 거는 Go 정규식으로 — 바이트는 byteRunes처럼 옮기고,
+// 괄호 식 안의 역슬래시는 ERE처럼 글자 그대로, \< \> [[:<:]] [[:>:]]는 \b.
+// ponytail: \b는 낱말 시작·끝을 가리지 않아 셸보다 느슨하다(「tok\<x」 같은 꼴을 더 건다 — 개인 값 검사라 더 거는 쪽).
+// 역참조 등 Go가 못 읽는 꼴은 컴파일 오류 → 종료 2(조용히 통과하지 않게)
+func ereToGo(p string) string {
+	var b strings.Builder
+	b.WriteString("(?i)")
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch {
+		case strings.HasPrefix(p[i:], "[[:<:]]"), strings.HasPrefix(p[i:], "[[:>:]]"):
+			b.WriteString(`\b`)
+			i += 6
+		case c == '\\' && i+1 < len(p):
+			i++
+			switch n := p[i]; {
+			case n == '<' || n == '>':
+				b.WriteString(`\b`)
+			case n >= 0x80: // Go는 ASCII 아닌 글자의 역슬래시를 못 읽는다 — 글자 그대로
+				writeByte(&b, n)
+			default:
+				b.WriteByte('\\')
+				b.WriteByte(n)
+			}
+		case c == '[':
+			j := bracketEnd(p, i)
+			if j < 0 {
+				b.WriteByte(c) // 닫히지 않은 괄호 — Go도 틀린 패턴으로 본다
+				continue
+			}
+			for ; i <= j; i++ {
+				if p[i] == '\\' {
+					b.WriteString(`\\`)
+				} else {
+					writeByte(&b, p[i])
+				}
+			}
+			i = j
+		default:
+			writeByte(&b, c)
+		}
+	}
+	return b.String()
+}
+
+// bracketEnd: p[i]의 [로 여는 괄호 식을 닫는 ]의 자리(없으면 -1). 맨 앞 ^ 다음의 ]는 글자, [:…:] [.….] [=…=]는 통째로 건너뛴다
+func bracketEnd(p string, i int) int {
+	k := i + 1
+	if k < len(p) && p[k] == '^' {
+		k++
+	}
+	if k < len(p) && p[k] == ']' {
+		k++
+	}
+	for ; k < len(p); k++ {
+		if p[k] == '[' && k+1 < len(p) && strings.IndexByte(":.=", p[k+1]) >= 0 {
+			e := strings.Index(p[k+2:], string(p[k+1])+"]")
+			if e < 0 {
+				return -1
+			}
+			k += 2 + e + 1
+			continue
+		}
+		if p[k] == ']' {
+			return k
+		}
+	}
+	return -1
 }
 
 // splitLines: grep처럼 줄로 나눈다(끝 줄바꿈 뒤의 빈 조각은 줄이 아니다)

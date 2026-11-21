@@ -10,12 +10,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/proc"
 )
 
 // run: 출력은 화면 그대로 · runQ: 출력 모두 버림(>/dev/null 2>&1) · runO: 표준 출력만 버림
@@ -49,7 +51,7 @@ func fetchr(quiet bool, args ...string) int {
 		errw = io.Discard
 	}
 	waits := strings.Fields(os.Getenv("HC_LANE_FETCH_WAITS"))
-	if _, set := os.LookupEnv("HC_LANE_FETCH_WAITS"); !set {
+	if os.Getenv("HC_LANE_FETCH_WAITS") == "" { // bash ${HC_LANE_FETCH_WAITS:-1 2 4} — 빈 값도 기본(F11)
 		waits = []string{"1", "2", "4"}
 	}
 	waits = append(waits, "-")
@@ -80,12 +82,45 @@ func place(tmp, dst string) error {
 	return nil
 }
 
-// writeVia: dst.tmp에 다 쓴 뒤 바꿔 넣는다(덮어쓰다 끊겨 반쪽 파일이 남지 않게)
+// writeVia: dst.tmp에 다 쓰고 fsync한 뒤 바꿔 넣고 폴더도 fsync한다(덮어쓰다 끊겨 반쪽 파일이 남지 않게, 원격을 고치기 전에
+// 일지가 디스크에 닿게 — E08·G3: 전원이 끊겨도 빈 일지가 남지 않게)
 func writeVia(dst, content string) error {
-	if err := os.WriteFile(dst+".tmp", []byte(content), 0o666); err != nil {
+	f, err := os.OpenFile(dst+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666)
+	if err != nil {
 		return fmt.Errorf("쓰기 %s.tmp: %w", dst, err)
 	}
-	return place(dst+".tmp", dst)
+	_, err = f.WriteString(content)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("쓰기 %s.tmp: %w", dst, err)
+	}
+	if err := place(dst+".tmp", dst); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(dst))
+	if err != nil {
+		return fmt.Errorf("폴더 열기 %s: %w", filepath.Dir(dst), err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("폴더 fsync %s: %w", filepath.Dir(dst), err)
+	}
+	return nil
+}
+
+// dieGit: 로컬 git이 실패해 멈출 자리 — 시간 넘김(proc.TimeoutCode, 모름)이면 멈추지 않고 이 바퀴만 쉰다(75 — 다음 바퀴가 일지로 다시 본다,
+// F6). 그 밖의 실패는 die
+func dieGit(rc int, format string, a ...any) {
+	if rc == proc.TimeoutCode {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: %s — git 시간 넘김(모름), 바꾼 것 없이 다음 바퀴에\n", fmt.Sprintf(format, a...))
+		os.Exit(75)
+	}
+	die(format, a...)
 }
 
 // 자식 프로세스 무리(요구 1: 자기가 띄운 프로세스만 소유)는 internal/proc: 착지·준비 훅·바퀴 일꾼·빈 바퀴 sleep은 새 무리로 띄우고

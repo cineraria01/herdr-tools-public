@@ -59,8 +59,31 @@ func TestSrcDigestMatchesGoRun(t *testing.T) {
 		t.Errorf("srcDigest %s, go_run_src %s", got, want)
 	}
 	os.WriteFile(filepath.Join(d, "cmd/a/main.go"), []byte("package main // 바뀜\n"), 0o644)
-	if g2, _ := srcDigest(d); g2 == got {
+	g2, _ := srcDigest(d)
+	if g2 == got {
 		t.Errorf("소스가 바뀌어도 판이 같다")
+	}
+	// go:embed 글(.go가 아닌 파일)만 바뀌어도 판이 바뀐다(gofix-core B10·M4). 숨김 파일은 herdr-sync 나무 줄이 걷지 않으니 두 판 모두 뺀다
+	os.WriteFile(filepath.Join(d, "cmd/a/OWNER"), []byte("c\n"), 0o644)
+	g3, err := srcDigest(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g3 == g2 {
+		t.Errorf("임베드 파일만 바뀌었는데 판이 같다")
+	}
+	os.MkdirAll(filepath.Join(d, "cmd/a/.hid"), 0o755)
+	os.WriteFile(filepath.Join(d, "cmd/a/.DS_Store"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(d, "cmd/a/.hid/x.go"), []byte("x"), 0o644)
+	if g, _ := srcDigest(d); g != g3 {
+		t.Errorf("숨김 파일·숨김 폴더가 판에 들었다")
+	}
+	out, err = exec.Command("bash", "-c", `. "$1/lib/go-run.sh" && go_run_src`, "_", d).Output()
+	if err != nil {
+		t.Fatalf("go_run_src: %v", err)
+	}
+	if want := strings.TrimSpace(string(out)); g3 != want {
+		t.Errorf("임베드·숨김: srcDigest %s, go_run_src %s", g3, want)
 	}
 }
 

@@ -37,7 +37,7 @@ func newFx(t *testing.T) *fx {
 	f := &fx{t: t, dir: d, origin: d + "/o.git", seed: d + "/seed", clone: d + "/m", events: d + "/events"}
 	for k, v := range map[string]string{"HOME": d, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
 		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-		"HC_LANE_FETCH_WAITS": "", "XDG_STATE_HOME": d + "/state"} {
+		"HC_LANE_FETCH_WAITS": "0", "XDG_STATE_HOME": d + "/state"} {
 		t.Setenv(k, v)
 	}
 	f.git(d, "init", "-q", "--bare", "-b", "main", f.origin)

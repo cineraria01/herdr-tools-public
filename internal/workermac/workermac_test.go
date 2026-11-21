@@ -1,3 +1,5 @@
+//go:build !windows
+
 package workermac
 
 import (
@@ -59,18 +61,24 @@ func TestOutputCodes(t *testing.T) {
 	}
 }
 
-// 자식이 끝났는데 배경 손자가 출력 관을 쥐어도 오래 기다리지 않는다
+// 자식이 끝났는데 배경 손자가 출력 관을 쥐면 오래 기다리지 않고, 결과는 모름(받은 출력이 다인지 모른다)이며 손자는 돌아올 때 이미 거뒀다(B20)
 func TestOutputHeldPipe(t *testing.T) {
 	pidf := filepath.Join(t.TempDir(), "pid")
 	start := time.Now()
-	out, rc := Output(context.Background(), 0, nil, "/bin/sh", "-c", "echo 끝; sleep 30 & echo $! >"+pidf+"; exit 0")
-	if b, err := os.ReadFile(pidf); err == nil { // 시험이 배경 프로세스를 남기지 않게
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
-			syscall.Kill(pid, syscall.SIGKILL)
-		}
+	_, rc := Output(context.Background(), 0, nil, "/bin/sh", "-c", "echo 끝; sleep 30 & echo $! >"+pidf+"; exit 0")
+	pid := 0
+	if b, err := os.ReadFile(pidf); err == nil {
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 	}
-	if rc != 0 || out != "끝\n" {
-		t.Fatalf("rc %d out %q", rc, out)
+	if pid <= 1 {
+		t.Fatal("손자 pid를 읽지 못했다")
+	}
+	alive := syscall.Kill(pid, 0) == nil
+	if alive {
+		syscall.Kill(pid, syscall.SIGKILL) // 시험이 배경 프로세스를 남기지 않게(이 시험이 띄운 것)
+	}
+	if rc != TimeoutCode || alive {
+		t.Fatalf("관을 쥔 손자: rc %d(기대 %d) 손자 살아 있음 %v", rc, TimeoutCode, alive)
 	}
 	if d := time.Since(start); d > 15*time.Second {
 		t.Fatalf("너무 오래 걸림 %v", d)

@@ -55,8 +55,9 @@ func githubSlug(url string) string {
 	return ""
 }
 
-// srcDigest: 모듈 소스 판 — go.mod·cmd/**·internal/** 의 *.go·go.mod(일반 파일)를 상대 경로 바이트 순으로 「crc 크기 경로」 줄로 적은 목록의 cksum(crc.크기).
-// lib/go-run.sh go_run_src(`find … | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
+// srcDigest: 모듈 소스 판 — go.mod·cmd/**·internal/** 의 일반 파일 전부(go:embed 글 포함 — 임베드만 바뀐 판도 알아보게, gofix-core B10·M4)를
+// 상대 경로 바이트 순으로 「crc 크기 경로」 줄로 적은 목록의 cksum(crc.크기). 숨김 파일·숨김 폴더 아래는 뺀다(herdr-sync 나무 줄이 걷지 않아 기계에 없다).
+// lib/go-run.sh go_run_src(`find … ! -path '*/.*' | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
 func srcDigest(dir string) (string, error) {
 	var files []string
 	for _, top := range []string{"go.mod", "cmd", "internal"} {
@@ -67,7 +68,13 @@ func srcDigest(dir string) (string, error) {
 				}
 				return err
 			}
-			if d.Type().IsRegular() && (strings.HasSuffix(d.Name(), ".go") || d.Name() == "go.mod") {
+			if strings.HasPrefix(d.Name(), ".") {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if d.Type().IsRegular() {
 				rel, _ := filepath.Rel(dir, p)
 				files = append(files, rel)
 			}

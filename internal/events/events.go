@@ -25,14 +25,23 @@ type Event struct {
 // Flat: 탭·CR·줄바꿈을 빈칸으로(칸이 늘지 않게)
 func Flat(s string) string { return strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(s) }
 
-// Bcut: 바이트로 자르고 끝에 남은 반쪽 UTF-8 글자는 버린다
+// Bcut: 바이트로 자르고 끝에 남은 반쪽 UTF-8 글자(최대 3바이트)만 버린다. n이 0 이하면 빈 글.
+// 셸 판 bcut(iconv -c)과의 의도된 차이: 셸은 가운데 깨진 바이트도 빼고, 다 빠져 비면 자른 바이트를 그대로 둔다 — 여기는 받은 바이트를 그대로 둔다
 func Bcut(n int, s string) string {
 	if len(s) <= n {
 		return s
 	}
+	if n <= 0 {
+		return ""
+	}
 	s = s[:n]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
+	for i := len(s) - 1; i >= 0 && i >= len(s)-3; i-- {
+		if utf8.RuneStart(s[i]) {
+			if !utf8.FullRuneInString(s[i:]) {
+				s = s[:i]
+			}
+			break
+		}
 	}
 	return s
 }
@@ -47,16 +56,39 @@ func dash(s string) string {
 	return s
 }
 
-// Line: report와 같은 꼴의 한 줄(줄바꿈 없음). 앞 칸은 64바이트씩, 남는 자리를 한 줄 칸이 쓴다. 시각이 비면 지금
-func (e Event) Line() string {
+// cols: 한 줄 칸(7칸)의 앞(탭으로 끝남)과 뒤(탭으로 시작). 기계·터미널·레인·지휘는 64바이트, 모든 칸은 탭·줄바꿈을 빈칸으로
+func (e Event) cols() (head, tail string) {
 	t := e.Time
 	if t == "" {
 		t = UTC(time.Now())
 	}
-	tail := "\t" + dash(e.Turn) + "\t" + dash(e.To) + "\t" + dash(e.Run) + "\t" + Bcut(64, dash(e.Owner)) + "\t" + dash(e.Key)
-	head := t + "\t" + Bcut(64, Flat(dash(e.Machine))) + "\t" + Bcut(64, Flat(dash(e.Term))) + "\t" + Bcut(64, Flat(dash(e.Lane))) +
-		"\t" + e.State + "\t" + Flat(dash(e.SHA)) + "\t"
-	return Bcut(MaxLine-len(tail), head+Flat(dash(e.Msg))) + tail
+	tail = "\t" + Flat(dash(e.Turn)) + "\t" + Flat(dash(e.To)) + "\t" + Flat(dash(e.Run)) + "\t" + Bcut(64, Flat(dash(e.Owner))) + "\t" + Flat(dash(e.Key))
+	head = Flat(t) + "\t" + Bcut(64, Flat(dash(e.Machine))) + "\t" + Bcut(64, Flat(dash(e.Term))) + "\t" + Bcut(64, Flat(dash(e.Lane))) +
+		"\t" + Flat(e.State) + "\t" + Flat(dash(e.SHA)) + "\t"
+	return head, tail
+}
+
+// Line: report와 같은 꼴의 한 줄(줄바꿈 없음). 늘 12칸이고 패닉하지 않는다 — 1000바이트에 맞춰 줄이는 것은 한 줄 칸(7칸)뿐.
+// 다른 칸만으로 넘치면 한 줄 칸이 비고 줄이 1000바이트를 넘는다(쓰기 전에 Check가 막는다). 시각이 비면 지금
+func (e Event) Line() string {
+	head, tail := e.cols()
+	return head + Bcut(MaxLine-len(head)-len(tail), Flat(dash(e.Msg))) + tail
+}
+
+// Check: 쓰기 전 입력 검사 — 줄이 그대로 지켜야 할 칸(시각·상태·sha·turn·--to·실행·지휘·키)에 탭·줄바꿈이 있거나,
+// 한 줄 칸 1바이트도 남지 않게 길면(1000바이트) 오류. 이때 한 줄 칸을 줄여 맞추지 않는다(받는 쪽·키가 깨진 사건을 쓰지 않게)
+func (e Event) Check() error {
+	for _, c := range [][2]string{{"시각", e.Time}, {"상태", e.State}, {"sha", e.SHA}, {"turn", e.Turn}, {"--to", e.To},
+		{"실행", e.Run}, {"지휘", e.Owner}, {"키", e.Key}} {
+		if strings.ContainsAny(c[1], "\t\r\n") {
+			return fmt.Errorf("사건 %s 칸에 탭·줄바꿈이 있다: %q", c[0], c[1])
+		}
+	}
+	head, tail := e.cols()
+	if n := len(head) + len(tail); n >= MaxLine {
+		return fmt.Errorf("사건 줄이 한 줄 칸 없이 %d바이트(상한 %d) — --to·키·실행 칸이 너무 길다", n, MaxLine)
+	}
+	return nil
 }
 
 // Parse: 한 줄을 읽는다. 7칸이 안 되면 false(옛 줄·깨진 줄)
@@ -99,8 +131,11 @@ func ScanFile(path string, fn func(Event) bool) error {
 	return Scan(f, fn)
 }
 
-// Append: path 뒤에 한 줄을 한 번의 쓰기로 더한다(O_APPEND)
+// Append: path 뒤에 한 줄을 한 번의 쓰기로 더한다(O_APPEND). Check가 실패하면 파일을 건드리지 않고 그 오류
 func Append(path string, e Event) error {
+	if err := e.Check(); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err != nil {
 		return fmt.Errorf("사건 파일 열기: %w", err)

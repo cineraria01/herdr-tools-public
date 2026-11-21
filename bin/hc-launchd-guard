@@ -4,15 +4,20 @@
 # hc-launchd-guard [--log <파일>] <이름> -- <도구> [인자…]
 #   이 기계에 <이름> 터미널이 살아 있으면 아무것도 안 하고 0.
 #   없으면 hc run --bg --no-parent --outlive-parent --rm --name <이름> --cwd $HOME -- env -u HC_TERMINAL_ID -u HC_SCOPE -u HC_TERMINAL_SOCKET <도구 절대 경로> [인자…]
-#   hc가 안 되면(hc ls 실패·목록 아님, hc run 실패) 그 자리에서 HERDR_IMPL=bash로 도구를 exec(셸 판 — 종료 코드 그대로).
+#   hc run이 안 되고 터미널도 없으면 그 자리에서 HERDR_IMPL=bash·<도구>_IMPL=bash로 도구를 exec(셸 판 — 종료 코드 그대로).
+#   살아 있는지 모르면(hc ls 실패·멈춤·목록 아님·같은 이름 항목의 state가 문자열이 아님) 띄우지 않고 75 — launchd가 다시 부른다.
+#   모름이 3번 이어질 때만 셸 판(셈은 ${XDG_STATE_HOME:-~/.local/state}/herdr-go/guard-unknown-<이름>, 살아 있음·띄움 성공이면 지움 — 2026-11-21 gofix-core B07·M2).
+#   hc ls 20초·hc run 60초 상한(HC_LAUNCHD_GUARD_LS_SECS·_RUN_SECS) — 넘으면 그 무리째 끊는다(B06·M3: 멈춘 hc에 지킴이가 안 끝나면 launchd가 다시 안 부른다).
 #   --log: 도구 출력(두 길 모두)과 이 지킴이의 줄을 그 파일 끝에 잇는다.
+#   <도구>가 python3·python이고 다음 인자 파일이 파이썬이 아니면(첫 줄 #!…python 아님) 해석기를 빼고 그 파일을 직접 돌린다 — bash 포장으로 바뀐
+#   도구를 이미 깔린 옛 plist가 python3로 넘겨도 살게(B01·M1: herdr-balance).
 #
 # 왜: launchd가 띄운 새 Go 바이너리는 ~/Documents 첫 접근에서 macOS 개인 정보 보호 창에 사람 응답까지 잠든다(빌드마다 서명이 바뀌어
 # 판마다 다시 묻는다 — 2026-11-21 맥 hc-fill 37분). Herdr 터미널(herdr-core가 띄움)에서는 창이 안 뜬다. 터미널 표식을 지우는 것은
 # 도구가 launchd에서처럼 「터미널 밖」으로 돌게 하려는 것이다 — 도구가 띄우는 hc run이 이 터미널의 자식이 되지 않게(자식은 부모와 같이 끝난다).
 # 상주 작업(KeepAlive)이면 launchd가 이 지킴이를 ThrottleInterval마다 다시 불러 터미널이 죽었으면 다시 띄운다. 주기 작업(StartInterval)은
-# 앞 판이 아직 돌면 건너뛴다. hc ls가 잠깐 실패해도 셸 판이 같이 돌 수 있다 — 도구의 잠금(hc-fill watch.lock 등)이 겹침을 막는다.
-# 의존: hc·jq(macOS /usr/bin/jq). 이 기계 터미널만 본다(주소에 / 없음). 예시 plist는 launchd/, 켜는 법은 README 「launchd 작업」.
+# 앞 판이 아직 돌면 건너뛴다. 모름에 바로 셸 판을 띄우면 살아 있는 Go 판 곁에 둘째가 돈다(잠금 없는 herdr-balance --watch는 계속 같이) — 그래서 기다린다.
+# 의존: hc·jq(macOS /usr/bin/jq)·perl(상한, 없으면 상한 없이). 이 기계 터미널만 본다(주소에 / 없음). 예시 plist는 launchd/, 켜는 법은 README 「launchd 작업」.
 set -u
 log=
 [ "${1-}" = --log ] && { log=${2-}; shift 2 || exit 2; }
@@ -22,31 +27,70 @@ case $name in '' | *[!a-z0-9_-]*) echo "hc-launchd-guard: 이름은 a-z 0-9 - _ 
 shift 2
 tool=$(command -v "$1") || { echo "hc-launchd-guard: 도구를 못 찾았다: $1" >&2; exit 127; }
 shift
+sw=${tool##*/}   # 셸 판 스위치 <도구>_IMPL의 도구 이름
+case $sw in
+  python | python3 | python3.*)
+    if [ -f "${1-}" ]; then
+      sw=${1##*/} first=
+      IFS= read -r first <"$1"
+      case $first in '#!'*python*) ;; *) tool=$1; shift ;; esac
+    fi ;;
+esac
 [ -z "$log" ] || exec >>"$log" 2>&1
+unk=${XDG_STATE_HOME:-$HOME/.local/state}/herdr-go/guard-unknown-$name
 
-# alive: 0 살아 있음 · 1 없음 · 2 모름(hc·jq 실패, 목록 아님)
+# lim <초> <명령…>: 그 초 안에 안 끝나면 무리(따로 둔 프로세스 그룹)째 TERM → 1초 뒤 KILL, 124. lib/go-run.sh go_run_lim과 같은 것 —
+# 지킴이는 Go 쪽이 깨졌을 때의 길이라 그 파일에 기대지 않는다
+lim() {
+  [ -x /usr/bin/perl ] || { shift; "$@"; return; }
+  /usr/bin/perl -e 'my $t = shift; my $p = fork; defined $p or exit 126; if (!$p) { setpgrp; exec @ARGV or exit 127 } setpgrp $p, $p;
+    my $k = sub { kill "TERM", -$p; sleep 1; kill "KILL", -$p; exit $_[0] }; $SIG{ALRM} = sub { $k->(124) }; $SIG{$_} = sub { $k->(130) } for qw(INT TERM HUP);
+    alarm $t; waitpid $p, 0; exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$@"
+}
+
+# alive: 0 살아 있음 · 1 없음 · 2 모름(hc·jq 실패·시간 넘김, 목록 아님, 같은 이름 이 기계 항목의 state가 문자열이 아님)
 alive() {
   local out
-  out=$(hc ls --json 2>/dev/null </dev/null) || return 2
-  printf '%s' "$out" | jq -e --arg n "$name" 'if (.terminals | type) != "array" then error("목록 아님")
-    else any(.terminals[]; .state == "live" and .name == $n and ((.address // "/") | contains("/") | not)) end' >/dev/null 2>&1
+  out=$(lim "${HC_LAUNCHD_GUARD_LS_SECS:-20}" hc ls --json 2>/dev/null </dev/null) || return 2
+  printf '%s' "$out" | jq -e --arg n "$name" 'if (.terminals | type) != "array" then error("목록 아님") else
+    [.terminals[] | select(.name == $n and ((.address // "/") | contains("/") | not))] as $m
+    | if any($m[]; .state == "live") then true elif any($m[]; (.state | type) != "string") then error("state 모름") else false end end' >/dev/null 2>&1
   case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
 }
 
 shell() {
   echo "$(date '+%F %T') hc-launchd-guard $name: $1 — 셸 판으로 그 자리에서 돈다" >&2
   shift
+  # 도구별 스위치가 HERDR_IMPL보다 앞선다 — 그것도 bash로(B08). 이름은 go-run.sh go_run_up과 같게(대문자, -는 _)
+  local up
+  up=$(printf '%s' "$sw" | LC_ALL=C tr 'a-z-' 'A-Z_')
+  case $up in '' | [0-9]* | *[!A-Z0-9_]*) ;; *) export "${up}_IMPL=bash" ;; esac
   HERDR_IMPL=bash exec "$tool" "$@"
 }
 
+# unknown <무엇>: 모름 — 3번째로 이어졌으면 셸 판, 아니면 75로 끝내 launchd가 다시 부르게
+unknown() {
+  local n=0
+  n=$(cat "$unk" 2>/dev/null) || n=0
+  case $n in '' | *[!0-9]*) n=0 ;; esac
+  n=$((n + 1))
+  mkdir -p "${unk%/*}" 2>/dev/null && echo "$n" >"$unk" 2>/dev/null
+  [ "$n" -ge 3 ] && shell "$1 — 살아 있는지 모름이 ${n}번째" "${@:2}"
+  echo "$(date '+%F %T') hc-launchd-guard $name: $1 — 살아 있는지 몰라 띄우지 않음(${n}번째, 3번째면 셸 판)" >&2
+  exit 75
+}
+
 alive; r=$?
-[ $r = 0 ] && exit 0
-[ $r = 1 ] || shell "hc ls를 못 읽음" "$@"
+[ $r = 0 ] && { rm -f "$unk"; exit 0; }
+[ $r = 1 ] || unknown "hc ls를 못 읽음" "$@"
 cmd=(/usr/bin/env -u HC_TERMINAL_ID -u HC_SCOPE -u HC_TERMINAL_SOCKET "$tool" "$@")
 [ -z "$log" ] || cmd=(/bin/sh -c 'exec "$@" >>"$0" 2>&1' "$log" "${cmd[@]}")
-if hc run --bg --no-parent --outlive-parent --rm --name "$name" --cwd "$HOME" -- "${cmd[@]}" >/dev/null 2>&1 </dev/null; then
+if lim "${HC_LAUNCHD_GUARD_RUN_SECS:-60}" hc run --bg --no-parent --outlive-parent --rm --name "$name" --cwd "$HOME" -- "${cmd[@]}" >/dev/null 2>&1 </dev/null; then
+  rm -f "$unk"
   echo "$(date '+%F %T') hc-launchd-guard $name: Herdr 터미널로 띄움" >&2
   exit 0
 fi
-alive && exit 0   # 이름 겹침: 그사이 다른 지킴이가 띄웠다
+alive; r=$?
+[ $r = 0 ] && { rm -f "$unk"; exit 0; }   # 이름 겹침: 그사이 다른 지킴이가 띄웠다(또는 상한 넘긴 hc run이 띄웠다)
+[ $r = 1 ] || unknown "hc run 실패 뒤 hc ls를 못 읽음" "$@"
 shell "hc run 실패" "$@"

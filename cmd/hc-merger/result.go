@@ -258,7 +258,13 @@ func (m *M) fretry() {
 			continue
 		}
 		f := m.mj + "/fail/" + name
-		v := readLines(f, 6)
+		v, err := readLinesE(f, 6)
+		if err != nil {
+			// 읽기 실패는 깨진 기록이 아니다 — 원격 반송이 끝났어도 막힘 사건이 아직일 수 있으니 지우지 않고 다음 바퀴에(E07)
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 돌려보낼 기록 %s 를 읽지 못했다 — 두고 다음 바퀴에: %v\n", name, err)
+			m.mer = true
+			continue
+		}
 		q, s, ln, rec, lg, why := v[0], v[1], v[2], v[3], v[4], v[5]
 		if !strings.HasPrefix(q, "refs/merge-queue/") || len(q) == len("refs/merge-queue/") ||
 			strings.TrimPrefix(q, "refs/merge-queue/") != name || !sha40.MatchString(s) || ln == "" || why == "" {
@@ -272,12 +278,18 @@ func (m *M) fretry() {
 	}
 }
 
-// readLines: 파일 앞 n줄(read -r처럼 앞뒤 빈칸·탭을 뺌). 모자라면 빈 값
+// readLines: 파일 앞 n줄(read -r처럼 앞뒤 빈칸·탭을 뺌). 모자라거나 못 읽으면 빈 값
 func readLines(path string, n int) []string {
+	v, _ := readLinesE(path, n)
+	return v
+}
+
+// readLinesE: readLines에 읽기 오류(파일이 없음·권한 등 — 「깨진 기록」과 가른다)
+func readLinesE(path string, n int) ([]string, error) {
 	v := make([]string, n)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return v
+		return v, err
 	}
 	lines := strings.Split(string(b), "\n")
 	for i := 0; i < n && i < len(lines); i++ {
@@ -286,5 +298,5 @@ func readLines(path string, n int) []string {
 		}
 		v[i] = strings.Trim(lines[i], " \t")
 	}
-	return v
+	return v, nil
 }

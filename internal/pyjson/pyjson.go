@@ -21,15 +21,15 @@ type KV struct {
 // Obj: 순서가 있는 객체
 type Obj []KV
 
-// Decode: JSON 하나를 any로(숫자는 json.Number). 뒤에 다른 값이 붙어 있으면 오류
+// Decode: JSON 하나를 any로(숫자는 json.Number). 뒤에 JSON 공백(빈칸·탭·줄바꿈·CR) 말고 무엇이든 남으면 오류(파이썬 json.loads 「Extra data」)
 func Decode(b []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
 	if err := d.Decode(v); err != nil {
 		return err
 	}
-	if d.More() {
-		return fmt.Errorf("JSON 뒤에 다른 값이 있다")
+	if rest := bytes.TrimLeft(b[d.InputOffset():], " \t\n\r"); len(rest) > 0 {
+		return fmt.Errorf("JSON 뒤에 다른 값이 있다(%d바이트째)", len(b)-len(rest))
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func Quote(b *strings.Builder, s string, ascii bool) {
 		case ascii && r > 0xffff:
 			a, c := utf16.EncodeRune(r)
 			fmt.Fprintf(b, `\u%04x\u%04x`, a, c)
-		case ascii && r > 0x7f:
+		case ascii && r >= 0x7f: // 파이썬 ensure_ascii는 0x7f(DEL)도 \u007f
 			fmt.Fprintf(b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)

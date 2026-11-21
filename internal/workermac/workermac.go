@@ -38,7 +38,7 @@ var inflight sync.WaitGroup // 기다리는 자식(신호를 받으면 거둘 �
 // 표준 입력은 c.Stdin(nil이면 /dev/null). 자식이 끝났는데 손자가 출력 관을 쥐고 있으면 몇 초 뒤 그만 기다린다
 func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, name, args...)
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	proc.Group(c)
 	c.Cancel = func() error { proc.StopGroup(c.Process.Pid, Grace); return nil }
 	c.WaitDelay = Grace + 3*time.Second
 	return c
@@ -55,8 +55,14 @@ func Run(ctx context.Context, c *exec.Cmd) int {
 		}
 		return 127
 	}
-	err := c.Wait() // 종료 코드는 ProcessState로 본다(ErrWaitDelay — 출력 관만 늦게 닫힘 — 여도 자식의 결과)
+	err := c.Wait()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return TimeoutCode
+	}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// 자식은 끝났는데 손자가 출력 관을 쥐고 있었다 — 받은 출력이 다인지 모른다(Go 전환 감사 B20). 그 무리를 거두고 모름으로
+		proc.StopGroup(c.Process.Pid, Grace)
+		fmt.Fprintf(os.Stderr, "%s: %s 는 끝났는데 출력 관이 닫히지 않았다 — 결과를 모른다\n", Who, c.Path)
 		return TimeoutCode
 	}
 	ps := c.ProcessState

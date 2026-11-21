@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 // judge: 착지(종료 m.lr) 뒤. 종료 코드와 상관없이 먼저 원격이 후보를 담았는지 본다(응답 유실로 1이어도 들어갔을 수 있다).
@@ -32,7 +34,7 @@ func (m *M) judge() {
 		C, r2 = out("rev-parse", "-q", "--verify", "refs/heads/"+m.br)
 	}
 	if r1 != 0 || r2 != 0 {
-		die("merger: 착지 뒤 후보·origin/%s 를 읽지 못했다 — 다음 실행이 일지로 판정한다", m.base)
+		dieGit(max(r1, r2), "merger: 착지 뒤 후보·origin/%s 를 읽지 못했다 — 다음 실행이 일지로 판정한다", m.base)
 	}
 	proven, firstProof := 0, ""
 	if m.b[0].d != "" {
@@ -214,7 +216,7 @@ func (m *M) recover() bool {
 	}
 	var rc int
 	if m.O, rc = out("rev-parse", "-q", "--verify", "refs/remotes/origin/"+m.base+"^{commit}"); rc != 0 {
-		die("merger: origin/%s 가 없다", m.base)
+		dieGit(rc, "merger: origin/%s 가 없다", m.base)
 	}
 	for _, e := range m.b {
 		if e.d != "" {
@@ -304,15 +306,29 @@ func (m *M) wtclean() bool {
 			continue
 		}
 		if strings.HasPrefix(wt, m.mwr+"/") || strings.HasPrefix(wt, m.mj+"/wt/") {
-			if run("worktree", "remove", "-f", "-f", wt) != 0 {
-				return false
+			if rc := run("worktree", "remove", "-f", "-f", wt); rc != 0 {
+				// 지우기가 도중에 끊겨 .git 파일이 먼저 지워진 꼴이면 git은 영원히 못 지운다(F1 — 「validation failed」) — 병합기 자기 폴더
+				// 아래일 때만 직접 지우고 아래 prune이 등록을 거둔다. 후보 잠금·자식 기록이 다른 실행이 쓰지 않음을 이미 보장한다.
+				// 그 밖의 실패(시간 넘김·일시 실패)는 계약대로 쉰다(bash 판과 같음 — 다음 바퀴에 다시)
+				if _, err := os.Lstat(wt + "/.git"); rc == proc.TimeoutCode || !errors.Is(err, os.ErrNotExist) {
+					return false
+				}
+				fmt.Fprintf(os.Stderr, "hc-lane merger: git이 후보 작업 트리를 지우지 못해 직접 지운다: %s\n", wt)
+				if err := os.RemoveAll(wt); err != nil {
+					fmt.Fprintf(os.Stderr, "hc-lane merger: 후보 작업 트리를 지우지 못했다: %v\n", err)
+					return false
+				}
 			}
 		}
 	}
 	if run("worktree", "prune") != 0 {
 		return false
 	}
-	// mktemp 뒤 등록 전에 중단된 후보의 빈 폴더도 회수한다
+	// mktemp 뒤 등록 전에 중단된 후보의 폴더(비었든 반쯤 찼든)도 회수한다 — 등록이 남은 것은 위에서 지웠고 prune 뒤 목록에 없어야 한다
+	list, rc = out("worktree", "list", "--porcelain")
+	if rc != 0 {
+		return false
+	}
 	des, err := os.ReadDir(m.mwr)
 	if err != nil {
 		return false
@@ -323,10 +339,13 @@ func (m *M) wtclean() bool {
 			continue
 		}
 		p := m.mwr + "/" + d.Name()
-		if sub, err := os.ReadDir(p); err == nil && len(sub) == 0 {
-			if err := os.Remove(p); err != nil {
-				ok = false
-			}
+		if strings.Contains(list+"\n", "worktree "+p+"\n") {
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 지운 후보 작업 트리가 아직 등록돼 있다: %s\n", p)
+			ok = false
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
+			ok = false
 		}
 	}
 	return ok
@@ -347,11 +366,11 @@ func (m *M) existing(C, why string) {
 
 var transLog = regexp.MustCompile(`git fetch( origin)? 실패|push 결과 모름|push 실패\(다른 쪽`)
 
-// trans: 다시 하면 될 착지 실패인가 — 종료 75(기다림 상한)·4(push 거절 횟수)·7(rebase로 기본 브랜치에 막 생긴 착지 스크립트를 만남),
-// 원격 받기 실패·push 전송만 끊김(로그). 충돌·검증 실패는 아니다
+// trans: 다시 하면 될 착지 실패인가 — 종료 75(기다림 상한)·4(push 거절 횟수)·7(rebase로 기본 브랜치에 막 생긴 착지 스크립트를 만남)·
+// 124(착지 안 명령의 시간 넘김 — 모름, M01), 원격 받기 실패·push 전송만 끊김(로그). 충돌·검증 실패는 아니다
 func (m *M) trans() bool {
 	switch m.lr {
-	case "75", "4", "7":
+	case "75", "4", "7", "124":
 		return true
 	}
 	b, err := os.ReadFile(m.lgf)

@@ -22,6 +22,7 @@ import (
 
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/version"
 )
 
 const (
@@ -38,14 +39,11 @@ var (
 )
 
 func main() {
-	// 물려받은 fd(바깥 병합기의 잠금 fd 19 등)를 자식에게 넘기지 않는다(요구 2). Go가 여는 fd는 기본 O_CLOEXEC
-	for fd := 3; fd < 1024; fd++ {
-		syscall.CloseOnExec(fd)
-	}
+	closeInherited()
 	gSelf, gEvdir = selfPath(), evdir()
 	proc.Who = "hc-lane merger"
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("hc-merger 1")
+		fmt.Println(version.String("hc-merger")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--round" {
@@ -78,12 +76,16 @@ func die(format string, a ...any) {
 			top = "?"
 		}
 		// 병합기가 멈추면 막힘 사건(main에 쓰는 곳이 하나라 조용히 서면 전체 착지가 선다)
-		c := exec.Command(gSelf, "report", "막힘", "-", fmt.Sprintf("병합기 멈춤: %s (클론 %s)", msg, top), "--name", "merger")
-		if err := c.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "hc-lane merger: 멈춤 사건을 적지 못했다: %v\n", err)
-		}
+		reportBlocked(fmt.Sprintf("병합기 멈춤: %s (클론 %s)", msg, top))
 	}
 	os.Exit(1)
+}
+
+// reportBlocked: 막힘 사건(--name merger)을 상한 안에서 적는다(E05 — 사건 쓰기가 멈춰도 병합기가 서지 않게)
+func reportBlocked(msg string) {
+	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "막힘", "-", msg, "--name", "merger"); rc != 0 {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 막힘 사건을 적지 못했다(종료 %d): %s\n", rc, strings.TrimSpace(e))
+	}
 }
 
 // onSignals: TERM·INT·HUP이면 지금 기다리는 자식 무리를 끄고(유예 뒤 KILL) 128+신호로 끝낸다
@@ -128,6 +130,17 @@ func ckey(s string) string {
 		}
 		return '_'
 	}, s)
+}
+
+// ckeyBytes: bash 판을 C 로캘(launchd 등)에서 돌린 꼴 — 바이트마다 _ 하나
+func ckeyBytes(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if !(c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') {
+			b[i] = '_'
+		}
+	}
+	return string(b)
 }
 
 // plain: 출력하는 명령에 따옴표 없이 넣는 가지 이름 글자
@@ -182,7 +195,7 @@ func physical(p string) (string, error) {
 
 // residentMain: merger --repo <전용 클론> [--once] [--tick <초>] [<기본 브랜치>] — 한 클론에 하나(잠금)
 func residentMain(args []string) {
-	once, repo, base, tickArg := false, "", "", ""
+	once, repo, base, tickArg, tickSet := false, "", "", "", false
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "--repo" || a == "--tick":
@@ -193,7 +206,7 @@ func residentMain(args []string) {
 			if a == "--repo" {
 				repo = args[i]
 			} else {
-				tickArg = args[i]
+				tickArg, tickSet = args[i], true
 			}
 		case a == "--once":
 			once = true
@@ -206,7 +219,10 @@ func residentMain(args []string) {
 			base = a
 		}
 	}
-	// 「쉬지 않고 ls-remote」를 막는 값 — 정수가 아니면 기본 30초(요구 5)
+	// 「쉬지 않고 ls-remote」를 막는 값 — 명시한 값이 정수가 아니면 bash 판처럼 멈춘다(E10), 없으면 30초
+	if tickSet && !digits.MatchString(tickArg) {
+		die("merger: --tick은 초(정수): %s", tickArg)
+	}
 	tick := intSetting("--tick", tickArg, 30, 0)
 	batch := intSetting("HC_LANE_MERGER_BATCH", os.Getenv("HC_LANE_MERGER_BATCH"), 3, 1)
 	if repo == "" {
@@ -239,17 +255,25 @@ func residentMain(args []string) {
 	}
 	// 잠금 = 이 프로세스가 연 파일의 flock(bash 판과 같은 파일·같은 뜻 — 두 판이 함께 돌지 못한다). 자식에 물리지 않으니 병합기가 죽으면
 	// 바로 놓인다(착지 자식·검증이 남긴 고아가 살아 있어도)
-	lk := gEvdir + "/merger." + ckey(top) + ".lock"
-	busy, err := flockNB(lk)
-	if busy {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: 이 클론의 병합기가 아직 돈다 — 잠금 %s\n", lk)
-		os.Exit(75)
-	}
-	if err != nil {
-		die("merger: 잠금을 걸지 못했다(%v): %s", err, lk)
+	// 잠금 파일 이름은 bash 판 tr이 로캘에 따라 글자(UTF-8)마다 또는 바이트(C)마다 _ 하나라 두 꼴을 다 쥔다(E04·F5 — 클론 경로에 한글이 있어도
+	// 어느 로캘의 bash 판과도 함께 돌지 못하게). ASCII 경로면 한 파일
+	for _, k := range []string{ckey(top), ckeyBytes(top)} {
+		lk := gEvdir + "/merger." + k + ".lock"
+		busy, err := flockNB(lk)
+		if busy {
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 이 클론의 병합기가 아직 돈다 — 잠금 %s\n", lk)
+			os.Exit(75)
+		}
+		if err != nil {
+			die("merger: 잠금을 걸지 못했다(%v): %s", err, lk)
+		}
+		if ckey(top) == ckeyBytes(top) {
+			break
+		}
 	}
 	gRun, gTop = true, top
 	onSignals(roundGrace)
+	var err error
 	mj, rc := out("rev-parse", "--git-path", "hc-merger")
 	if rc != 0 || mj == "" || os.MkdirAll(mj+"/out", 0o777) != nil || os.MkdirAll(mj+"/fail", 0o777) != nil {
 		die("merger: 일지 폴더를 만들지 못했다")
@@ -301,8 +325,10 @@ func residentMain(args []string) {
 			if once {
 				os.Exit(rc)
 			}
-		default:
+		case 1: // 일꾼이 멈추며 막힘 사건을 이미 냈다
 			os.Exit(rc)
+		default: // 신호·패닉 등으로 일꾼이 사건 없이 끝났다(G2) — 상주가 막힘 사건을 내고 멈춘다
+			die("merger: 바퀴 일꾼이 뜻밖에 끝났다(종료 %d)", rc)
 		}
 		// 빈 바퀴 쉼은 sleep 명령으로(bash 판과 같은 자리 — 시험이 PATH의 sleep으로 쉼 값을 본다). 멈추면 무리째 끈다
 		s := exec.Command("sleep", strconv.Itoa(tick))
@@ -314,6 +340,7 @@ func residentMain(args []string) {
 // roundMain: --round <부모 pid> <클론> <기본> <일지 폴더> <후보 폴더> <로그 폴더> <기계> <묶음> — 한 바퀴. 종료 76 일을 함(바로 다음 바퀴),
 // 75 원격 오류·남은 일로 쉼, 0 할 일 없음, 1 멈춤
 func roundMain(a []string) {
+	gRun = true // 인자부터 틀려도(상주와 일꾼의 판이 갈림 — F14) 막힘 사건을 남긴다
 	if len(a) != 8 {
 		die("merger: --round 인자 수가 틀렸다")
 	}
@@ -339,6 +366,7 @@ func roundMain(a []string) {
 		os.Exit(75)
 	}
 	m.round()
+	m.deferNote()
 	switch {
 	case m.mq != "":
 		os.Exit(76)

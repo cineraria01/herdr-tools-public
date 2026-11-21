@@ -44,4 +44,21 @@ func TestDecodeKeepsNumber(t *testing.T) {
 	if err := Decode([]byte(`{} {}`), &v); err == nil || !strings.Contains(err.Error(), "다른 값") {
 		t.Fatal("뒤에 붙은 값은 오류여야", err)
 	}
+	// 파이썬 json.loads 실제 결과: '{}]'·'{}\x0c'·'{} x'는 Extra data, '{} \n\t\r'는 됨
+	for s, ok := range map[string]bool{"{}]": false, "[1]]": false, "{}\x0c": false, "{} x": false, "{} \n\t\r": true} {
+		if err := Decode([]byte(s), &v); (err == nil) != ok {
+			t.Errorf("%q: 됨 %v 이어야, 오류 %v", s, ok, err)
+		}
+	}
+}
+
+// O01: ensure_ascii는 0x7f도 \u007f(파이썬 json.dumps(["a\x7fb"]) 실제 결과 ["a\u007fb"]), 아니면 그대로
+func TestDumpsDel(t *testing.T) {
+	u := `\` + "u"
+	if g := Dumps([]string{"a\x7fb"}, true); g != `["a`+u+`007fb"]` {
+		t.Fatalf("ascii: %q", g)
+	}
+	if g := Dumps([]string{"a\x7fb"}, false); g != "[\"a\x7fb\"]" {
+		t.Fatalf("raw: %q", g)
+	}
 }

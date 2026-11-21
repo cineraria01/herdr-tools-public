@@ -8,6 +8,7 @@ package clitest
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -19,8 +20,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"herdr-tools/internal/cksum"
+	"herdr-tools/internal/proc"
 )
 
 // C: 셸 시험의 t() — 단언마다 번호를 매기고 실패면 Detail을 함께 찍는다
@@ -140,24 +143,39 @@ func TempDir(t *testing.T) string {
 	return d
 }
 
+// DefaultMax: Cmd.Max가 0일 때 명령 하나의 상한 — go test 기본 마감(10분)보다 짧게
+var DefaultMax = 60 * time.Second
+
 // Cmd: 한 번 부르기. Env는 os.Environ() 위에 덧씌운다("K=" 빈 값, "K" 혼자는 지움)
 type Cmd struct {
 	Dir      string
 	Env      []string
 	Stdin    string
-	Combined bool // 2>&1
+	Combined bool          // 2>&1
+	Max      time.Duration // 명령 하나의 상한(0이면 DefaultMax)
 }
 
 // Res: 셸 $(…)처럼 Out은 끝 줄바꿈을 뺀 표준 출력(Combined면 둘 다), Err는 표준 오류 그대로
 type Res struct {
-	Out string
-	Err string
-	RC  int
+	Out     string
+	Err     string
+	RC      int
+	Timeout bool // 상한을 넘겨(또는 끝난 뒤 출력 관이 상한만큼 안 닫혀) 무리째 껐다 — RC 124
 }
 
-// Run: 부르고 결과. 못 띄우면 RC 127
+// Run: 부르고 결과. 못 띄우면 RC 127. 명령은 새 프로세스 무리로 띄우고, 상한을 넘기면 그 무리만 TERM → 2초 → KILL하고
+// 기다린 뒤 RC 124·Timeout(시험 마감에 걸려 자식이 남지 않게)
 func (c Cmd) Run(name string, args ...string) Res {
-	cmd := exec.Command(name, args...)
+	max := c.Max
+	if max <= 0 {
+		max = DefaultMax
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), max)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	proc.Group(cmd)
+	cmd.Cancel = func() error { proc.StopGroup(cmd.Process.Pid, 2*time.Second); return nil }
+	cmd.WaitDelay = max // 끝난 뒤 출력 관을 쥔 손자는 상한만큼 기다리고 아래에서 무리째 끈다
 	cmd.Dir = c.Dir
 	cmd.Env = MergeEnv(os.Environ(), c.Env)
 	if c.Stdin != "" {
@@ -171,6 +189,11 @@ func (c Cmd) Run(name string, args ...string) Res {
 		cmd.Stderr = &e
 	}
 	err := cmd.Run()
+	if cmd.Process != nil && (ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay)) {
+		proc.StopGroup(cmd.Process.Pid, 2*time.Second) // 무리 번호는 무리가 남아 있는 동안 다른 프로세스에 다시 쓰이지 않는다
+		e.WriteString(fmt.Sprintf("clitest: 시간 넘김(%s) — 무리를 껐다: %s\n", max, name))
+		return Res{Out: strings.TrimRight(o.String(), "\n"), Err: e.String(), RC: 124, Timeout: true}
+	}
 	rc := 0
 	var ee *exec.ExitError
 	switch {

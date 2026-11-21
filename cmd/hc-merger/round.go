@@ -35,6 +35,7 @@ type M struct {
 	mjx, ex, br, lgf, C0, mwt, mlab string
 	lr                              string // 착지 종료(뒤에 설명이 붙을 수 있음)
 	O, lk2, hs                      string
+	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -43,6 +44,32 @@ const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/her
 func (m *M) defer_(why string) {
 	fmt.Fprintf(os.Stderr, "hc-lane merger: %s — 큐를 두고 다음 바퀴에\n", why)
 	m.mer, m.mq = true, ""
+	m.deferred = why
+}
+
+// deferNote: 같은 까닭의 「다음 바퀴에」가 deferAlarm 바퀴 이어지면 막힘 사건을 한 번 낸다(G4 — 영구 실패가 사건 없이 75만 되풀이하지 않게).
+// 바퀴가 쉬지 않고 끝나면(다른 까닭 포함) 센 것을 지운다
+const deferAlarm = 10
+
+func (m *M) deferNote() {
+	f := m.mj + "/defer"
+	if m.deferred == "" {
+		removeQuiet(f)
+		return
+	}
+	n := 0
+	if b, err := os.ReadFile(f); err == nil {
+		if c, why, ok := strings.Cut(strings.TrimRight(string(b), "\n"), "\t"); ok && why == m.deferred {
+			n, _ = strconv.Atoi(c)
+		}
+	}
+	n++
+	if err := os.WriteFile(f, []byte(fmt.Sprintf("%d\t%s\n", n, m.deferred)), 0o666); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 쉰 횟수를 쓰지 못했다: %v\n", err)
+	}
+	if n == deferAlarm {
+		reportBlocked(fmt.Sprintf("병합기가 같은 까닭으로 %d바퀴째 쉼: %s (클론 %s)", n, m.deferred, m.top))
+	}
 }
 
 func (m *M) reserved(l string) bool {
@@ -76,7 +103,7 @@ func ianc(a, b string) bool {
 	case 1:
 		return false
 	default:
-		die("merger: git merge-base --is-ancestor 실패(종료 %d)", rc)
+		dieGit(rc, "merger: git merge-base --is-ancestor 실패(종료 %d)", rc)
 	}
 	return false
 }
@@ -306,7 +333,7 @@ func (m *M) round() {
 	}
 	st, rc := out("status", "--porcelain", "--untracked-files=all")
 	if rc != 0 {
-		die("merger: git status 실패 — 클론 상태를 모른다")
+		dieGit(rc, "merger: git status 실패 — 클론 상태를 모른다")
 	}
 	if st != "" {
 		die("merger: 병합기 클론에 커밋 안 된 변경·새 파일이 있다 — 살펴 치운 뒤 다시 띄운다: %s", m.top)
@@ -354,7 +381,7 @@ func (m *M) round() {
 		return
 	}
 	if m.B, rc = out("rev-parse", "-q", "--verify", "refs/remotes/origin/"+m.base+"^{commit}"); rc != 0 {
-		die("merger: origin/%s 가 없다", m.base)
+		dieGit(rc, "merger: origin/%s 가 없다", m.base)
 	}
 	// 이미 기본 브랜치에 든 제출은 착지 없이 정리만
 	if ianc(m.b[0].s, m.B) {
@@ -377,7 +404,7 @@ func (m *M) round() {
 	hl, rc1 := out("ls-tree", "--name-only", m.b[0].s, "--", ".claude/herdr-land.sh")
 	hb, rc2 := out("ls-tree", "--name-only", m.B, "--", ".claude/herdr-land.sh")
 	if rc1 != 0 || rc2 != 0 {
-		die("merger: git ls-tree 실패(%s · %s)", m.b[0].s, m.B)
+		dieGit(max(rc1, rc2), "merger: git ls-tree 실패(%s · %s)", m.b[0].s, m.B)
 	}
 	m.hb = hb
 	if hl != "" && hb == "" {
@@ -408,8 +435,11 @@ func (m *M) round() {
 	m.jwrite() // 행동 전에(작업 트리를 만들기 전에)
 	// 후보는 매번 새 임시 작업 트리에서 레인 이름 가지로 — 클론의 작업 트리는 건드리지 않는다
 	var err error
-	if m.mwt, err = mktempDir(m.mwr); err != nil || run("worktree", "add", "-q", "-f", "-B", m.br, m.mwt, m.C0) != 0 {
+	if m.mwt, err = mktempDir(m.mwr); err != nil {
 		die("merger: 후보 작업 트리를 만들지 못했다(%s)", m.br)
+	}
+	if rc := run("worktree", "add", "-q", "-f", "-B", m.br, m.mwt, m.C0); rc != 0 {
+		dieGit(rc, "merger: 후보 작업 트리를 만들지 못했다(%s)", m.br)
 	}
 	if len(m.b) > 1 && !m.stack() {
 		return

@@ -51,38 +51,80 @@ if [ -f "$gr" ]; then
   t "리눅스·go 없음: 두 번째부터 조용히" "$(gr_ "${nogo[@]}") $(wc -l <"$T/err" | tr -d ' ')" "돌아옴 0 0"
   gr_ HC_FAKE_BIN=/없는/바이너리 PATH=/없음 GO_RUN_GOS= GO_RUN_OS=darwin27 >/dev/null
   t "macOS·go 없음은 그대로 크게" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
-  sleep 1; printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("새 판") }\n' >"$T/cmd/hc-fake/main.go"
-  t "소스가 새로우면 다시 빌드" "$(gr_)" "새 판"
-  printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"; touch "$T/cmd/hc-fake/main.go"
-  t "빌드 실패면 옛 바이너리를 그대로(새 판)" "$(gr_)" "새 판"
+  # 판 대조(2026-11-21 gofix-core B17·L1·B18): 기계 빌드도 빌드 시작 때 계산한 판을 .src에 적고, 시각 말고 늘 판으로 본다.
+  # 판이 다르거나 모르면(.src 없음) 새 빌드가 된 뒤에만 Go 판 — 빌드가 안 되면 옛 바이너리를 쓰지 않는다
+  M=$T/cmd/hc-fake
+  src_() { (cd "$T" && bash -c '. lib/go-run.sh && go_run_src'); }
+  t "기계 빌드도 지은 판을 .src에" "$(cat "$T/.bin/hc-fake.src" 2>/dev/null)" "$(src_)"
+  printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("새 판") }\n' >"$M/main.go"
+  t "소스가 바뀌면 다시 빌드" "$(gr_)" "새 판"
+  printf 'package main\n\nfunc main() { 깨짐 }\n' >"$M/main.go"; touch "$M/main.go"
+  t "빌드 실패면 판이 다른 옛 바이너리를 쓰지 않고 셸 판" "$(gr_)" "돌아옴 0"
+  t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
+  t "그때 IMPL=go는 1" "$(gr_ HC_FAKE_IMPL=go)" "돌아옴 1"
+  printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("옛 시각 판") }\n' >"$M/main.go"; touch -t 202601010000 "$M/main.go"
+  t "옛 시각으로 깔린 새 소스(herdr-sync는 맥의 시각 그대로 깐다)도 판이 달라 다시 빌드" "$(gr_)" "옛 시각 판"
+  # go:embed 글도 판에 든다(B10·M4)
+  printf 'package main\n\nimport (\n\t_ "embed"\n\t"fmt"\n)\n\n//go:embed msg.txt\nvar msg string\n\nfunc main() { fmt.Print(msg) }\n' >"$M/main.go"
+  printf 'v1\n' >"$M/msg.txt"
+  t "임베드: 빌드" "$(gr_)" v1
+  printf 'v2\n' >"$M/msg.txt"; touch -t 202601010000 "$M/msg.txt"
+  t "임베드 파일만 바뀌어도(옛 시각이라도) 다시 빌드" "$(gr_)" v2
+  rm -f "$T/.bin/hc-fake.src"; mv "$M/msg.txt" "$M/msg.bak"
+  t ".src가 없는 바이너리(판 모름)는 빌드가 안 되면 쓰지 않음" "$(gr_)" "돌아옴 0"
+  mv "$M/msg.bak" "$M/msg.txt"
   # 받은 바이너리(herdr-sync가 릴리스에서 받아 .bin/<도구>와 <도구>.src를 둠, 2026-11-21 ops-go): 소스 판이 같으면 빌드 없이 그것을
-  printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("기계 빌드") }\n' >"$T/cmd/hc-fake/main.go"
   dl() { printf '#!/bin/sh\necho 받은 판\n' >"$T/.bin/hc-fake"; chmod +x "$T/.bin/hc-fake"; printf '%s\n' "$1" >"$T/.bin/hc-fake.src"; }
-  src=$(cd "$T" && bash -c '. lib/go-run.sh && go_run_src')
-  dl "$src"; sleep 1; touch "$T/cmd/hc-fake/main.go"   # 소스가 받은 바이너리보다 새로워도(시각) 판이 같으면 빌드하지 않는다
+  printf 'v4\n' >"$M/msg.txt"
+  dl "$(src_)"; sleep 1; touch "$M/main.go" "$M/msg.txt"   # 소스가 받은 바이너리보다 새로워도(시각) 판이 같으면 빌드하지 않는다
   t "받은 바이너리: 판이 같으면 빌드 없이 씀" "$(gr_)" "받은 판"
   t "받은 바이너리: PATH가 비어도(훅) 판을 대조해 씀" "$(gr_ PATH=/없음)" "받은 판"
-  dl "다른판.1"
-  t "받은 바이너리: 판이 다르면 기계에서 빌드" "$(gr_)" "기계 빌드"
-  t "받은 바이너리: 빌드하면 .src를 지움" "$([ -e "$T/.bin/hc-fake.src" ] && echo 있음 || echo 없음)" 없음
-  dl "다른판.2"; printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"
+  printf 'v5\n' >"$M/msg.txt"
+  t "받은 바이너리: 임베드 파일만 바뀌어도 판이 달라 기계에서 빌드" "$(gr_)" v5
+  t "받은 바이너리: 기계에서 빌드하면 .src는 지은 판" "$(cat "$T/.bin/hc-fake.src" 2>/dev/null)" "$(src_)"
+  dl "다른판.2"; mv "$M/msg.txt" "$M/msg.bak"
   t "받은 바이너리: 판이 다르고 빌드도 안 되면 셸 판(받은 옛 판을 안 씀)" "$(gr_)" "돌아옴 0"
   t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
   dl "다른판.3"
   t "받은 바이너리: 판이 다르고 빌드가 안 되면 IMPL=go는 1" "$(gr_ HC_FAKE_IMPL=go)" "돌아옴 1"
+  mv "$M/msg.bak" "$M/msg.txt"
+  # 빌드는 이 기계 것으로(L2): GOOS·GOARCH·GOFLAGS가 든 환경에서 불려도 남의 OS 바이너리를 남기지 않는다
+  printf 'v6\n' >"$M/msg.txt"
+  t "GOOS·GOARCH·GOFLAGS가 든 환경에서도 이 기계 바이너리를 지음" "$(gr_ GOOS=linux GOARCH=amd64 GOFLAGS=-tags=x)" v6
+  t "그 뒤 깨끗한 환경에서도 그대로" "$(gr_)" v6
+  # 상한(B09): 멈춘 go build·--version은 상한에서 무리째 끊고, auto는 셸 판·go는 1
+  mkdir -p "$T/slowgo"; printf '#!/bin/sh\necho $$ >>"%s/slowgo.calls"\nexec sleep 15\n' "$T" >"$T/slowgo/go"; chmod +x "$T/slowgo/go"
+  printf '#!/bin/sh\n[ "$1" = --version ] && { echo $$ >"%s/slowbin.pid"; exec sleep 15; }\necho 느린 판\n' "$T" >"$T/slowbin"; chmod +x "$T/slowbin"
+  alive() { p=$(tail -1 "$1" 2>/dev/null); [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null && echo 거둠 || echo "남음($p)"; }
+  printf 'v7\n' >"$M/msg.txt"; s=$SECONDS
+  t "빌드가 멈추면 상한에서 끊고 auto는 셸 판" "$(gr_ PATH="$T/slowgo:$PATH" GO_RUN_BUILD_SECS=1)" "돌아옴 0"
+  t "그 빌드 무리를 거둠" "$(alive "$T/slowgo.calls")" 거둠
+  t "빌드가 멈추면 IMPL=go는 1" "$(gr_ PATH="$T/slowgo:$PATH" GO_RUN_BUILD_SECS=1 HC_FAKE_IMPL=go)" "돌아옴 1"
+  t "--version이 멈추면 상한에서 끊고 auto는 셸 판" "$(gr_ HC_FAKE_BIN="$T/slowbin" GO_RUN_VERSION_SECS=1)" "돌아옴 0"
+  t "그 --version 무리를 거둠" "$(alive "$T/slowbin.pid")" 거둠
+  t "멈춤 셋이 모두 상한 안에 끝남" "$([ $((SECONDS - s)) -lt 12 ] && echo 예 || echo "아니오 $((SECONDS - s))초")" 예
   # GO_RUN_BUILD=bg(Claude Code 훅 — 제한 5초 안에 짓지 않는다, 2026-11-21 hooks-go): 낡았으면 짓기는 뒤에서, 이번은 셸 판(경고 없이 0)
-  sleep 1; printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("bg 판") }\n' >"$T/cmd/hc-fake/main.go"
-  t "bg: 소스가 새로우면 옛 바이너리를 부르지 않고 0" "$(gr_ GO_RUN_BUILD=bg)" "돌아옴 0"
+  # 짓기 잠금(B30)은 짓는 무리가 쥔 flock — 짓는 쪽이 살아 있으면 오래돼도 뺏지 않고, 끝나거나 죽으면 저절로 풀린다
+  held() { perl -MFcntl=:flock -e 'open(my $f, ">>", shift) or exit 1; exit(flock($f, LOCK_EX | LOCK_NB) ? 1 : 0)' "$T/.bin/hc-fake.build.lock"; }
+  bgwait() { for i in $(seq 1 240); do held || return 0; sleep 0.5; done; }
+  printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("bg 판") }\n' >"$M/main.go"; : >"$T/slowgo.calls"
+  t "bg: 소스가 바뀌면 옛 바이너리를 부르지 않고 0" "$(gr_ GO_RUN_BUILD=bg PATH="$T/slowgo:$PATH" GO_RUN_BUILD_SECS=4)" "돌아옴 0"
   t "bg: 경고 없음" "$(grep -c '경고' "$T/err")" 0
-  for i in $(seq 1 240); do [ -d "$T/.bin/hc-fake.building" ] || break; sleep 0.5; done
+  [ ! -d "$T/.bin/hc-fake.building" ] || touch -t 202601010000 "$T/.bin/hc-fake.building"   # 옛 판의 나이 잠금이면 묵혀 둔다(B30 재현)
+  gr_ GO_RUN_BUILD=bg PATH="$T/slowgo:$PATH" GO_RUN_BUILD_SECS=4 >/dev/null; sleep 1
+  t "bg: 짓는 쪽이 살아 있으면 다시 짓지 않음" "$(wc -l <"$T/slowgo.calls" | tr -d ' ')" 1
+  bgwait
+  t "bg: 멈춘 짓기도 상한에서 끝나 잠금이 풀림" "$(held && echo 쥠 || echo 풀림) $(alive "$T/slowgo.calls")" "풀림 거둠"
+  t "bg: 실제 go로 다시 — 이번은 0" "$(gr_ GO_RUN_BUILD=bg)" "돌아옴 0"
+  bgwait
   t "bg: 뒤에서 지은 새 판을 다음 부름에 씀" "$(gr_ GO_RUN_BUILD=bg)" "bg 판"
-  t "bg: 짓기 잠금을 남기지 않음" "$([ -e "$T/.bin/hc-fake.building" ] && echo 있음 || echo 없음)" 없음
+  t "bg: 짓기가 끝나면 잠금이 풀림" "$(held && echo 쥠 || echo 풀림)" 풀림
   t "bg: IMPL=go인데 쓸 수 없으면 1" "$(gr_ GO_RUN_BUILD=bg HC_FAKE_BIN=/없는/바이너리 HC_FAKE_IMPL=go)" "돌아옴 1"
   t "PATH가 비어도(훅·시험이 비운다) 스위치를 읽는다" "$(gr_ PATH=/없음 HC_FAKE_IMPL=bash)" "돌아옴 0"
   t "PATH가 비어도 _BIN을 쓴다" "$(gr_ PATH=/없음 HC_FAKE_BIN="$T/.bin/hc-fake")" "bg 판"
   t "확인한 기본 바이너리는 .ok 표식" "$([ -e "$T/.bin/hc-fake.ok" ] && echo 있음 || echo 없음)" 있음
   sleep 1; printf '#!/bin/sh\nexit 3\n' >"$T/.bin/hc-fake.new"; chmod +x "$T/.bin/hc-fake.new"; mv -f "$T/.bin/hc-fake.new" "$T/.bin/hc-fake"
-  t ".ok보다 새 바이너리는 다시 확인(깨졌으면 auto는 경고하고 0)" "$(gr_)" "돌아옴 0"
+  t ".ok보다 새 바이너리는 다시 확인 — --version이 안 되면 판이 같아도 다시 지어 씀(L2)" "$(gr_)" "bg 판"
   t "go_run_up: 대문자·_" "$(. "$T/lib/go-run.sh"; go_run_up herdr-hooks-x9; echo "$go_run_up_r")" HERDR_HOOKS_X9
 fi
 exit $fail

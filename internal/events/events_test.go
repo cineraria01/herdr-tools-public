@@ -17,6 +17,58 @@ func TestBcutKeepsWholeRunes(t *testing.T) {
 	}
 }
 
+// F10: 가운데 깨진 바이트 뒤를 다 버리지 않는다 — 끝의 반쪽 글자만. 셸 bcut 300의 실제 결과는 297바이트(iconv -c가 가운데 \xff도 뺌),
+// 여기는 \xff를 그대로 두어 298바이트(의도된 차이)
+func TestBcutOnlyTrimsTail(t *testing.T) {
+	s := "앞글자\xff" + strings.Repeat("뒤", 200)
+	if got := Bcut(300, s); got != s[:298] {
+		t.Fatalf("끝의 반쪽 글자만 깎아야: %d바이트", len(got))
+	}
+	if got := Bcut(2, "가나"); got != "" {
+		t.Fatalf("반쪽뿐이면 빈 글: %q", got)
+	}
+	if got := Bcut(3, "ab\xff\xfe"); got != "ab\xff" {
+		t.Fatalf("끝이 완결된 깨진 바이트면 그대로: %q", got)
+	}
+	if Bcut(-5, "abc") != "" || Bcut(0, "abc") != "" {
+		t.Fatal("0 이하는 빈 글(패닉 없이)")
+	}
+}
+
+// M09: 꼬리 칸이 길어도 패닉하지 않고 늘 12칸, 줄이는 것은 한 줄 칸뿐. 지킬 수 없으면 Append가 쓰기 전에 오류
+func TestLineLongTailNeverPanics(t *testing.T) {
+	base := Event{Time: "2026-11-21T00:00:00Z", Machine: "box", Lane: "l-a", State: "완료", SHA: "abcdef12", Msg: strings.Repeat("가", 400)}
+	mid := base
+	mid.To = strings.Repeat("t", 800)
+	l := mid.Line()
+	p, ok := Parse(l)
+	if strings.Count(l, "\t") != 11 || !ok || p.Lane != "l-a" || p.To != mid.To || p.State != "완료" || len(l) > MaxLine {
+		t.Fatalf("12칸·앞 칸 그대로·1000바이트 안: %d칸 %d바이트 %+v", strings.Count(l, "\t")+1, len(l), p.Lane)
+	}
+	if err := mid.Check(); err != nil {
+		t.Fatalf("들어가면 오류 아님: %v", err)
+	}
+	for _, f := range []func(*Event){func(e *Event) { e.To = strings.Repeat("t", 1200) }, func(e *Event) { e.Key = strings.Repeat("k", 990) },
+		func(e *Event) { e.Run = strings.Repeat("r", 5000) }, func(e *Event) { e.To = "a\tb" }} {
+		e := base
+		f(&e)
+		l := e.Line() // 패닉하면 시험 실패
+		if strings.Count(l, "\t") != 11 {
+			t.Fatalf("늘 12칸: %d", strings.Count(l, "\t")+1)
+		}
+		if e.Check() == nil {
+			t.Fatalf("지킬 수 없는 칸은 Check 오류: To %d Key %d Run %d", len(e.To), len(e.Key), len(e.Run))
+		}
+		p := filepath.Join(t.TempDir(), "events.tsv")
+		if err := Append(p, e); err == nil {
+			t.Fatal("Append가 쓰기 전에 오류여야")
+		}
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatal("오류면 파일을 건드리지 않는다")
+		}
+	}
+}
+
 // report.sh와 같은 꼴: 빈 칸은 -, 탭·줄바꿈은 빈칸, 앞 칸 64바이트, 줄 1000바이트 안
 func TestLineMatchesReportFormat(t *testing.T) {
 	e := Event{Time: "2026-11-21T00:00:00Z", Machine: "box", Lane: "l-a", State: "완료", SHA: "abcdef12", Msg: "한\t줄\n끝"}
