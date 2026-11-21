@@ -15,16 +15,21 @@
 set -u
 # Go 판(cmd/herdr-settings-merge)으로 — 되돌리기 HERDR_SETTINGS_MERGE_IMPL=bash(또는 HERDR_IMPL=bash). 아래는 셸 판(POSIX sh + jq)
 # 공통 실행기(lib/go-run.sh, bash)가 곁에 없거나 bash가 없으면(Go 소스를 안 깐 기계) 조용히 셸 판, IMPL=go로 못박았으면 종료 1.
-# go_run이 돌아오면(셸 판을 고름) bash가 100+그 값으로 끝난다 — Go 판의 종료 코드(0·1·2)와 겹치지 않는다
+# 판 고르기는 자식이 아니라 exec로 — 이 PID가 그대로 최종 병합기가 된다(Go 판 exec, 또는 셸 판을 고르면 IMPL=bash로 이 파일을 /bin/sh로
+# 다시 exec). 포장 PID를 끄면 병합기도 끝난다(예전: bash -c 자식이 Go 판을 띄워 포장만 죽고 자식이 나중에 입력을 받아 썼다, 2026-11-22 A10).
+# 종료 코드: go_run 1(IMPL=go인데 못 씀)·2(스위치 값이 틀림)은 그대로, 공통 실행기를 못 읽으면 1 — 예전 100+ 매핑과 밖에서 보는 값이 같다
 gr=$(dirname "$0")/../lib/go-run.sh
-if [ -f "$gr" ] && command -v bash >/dev/null 2>&1; then
-  [ -n "${HERDR_KEYS-}" ] || [ ! -f "$(dirname "$0")/../settings/keys.json" ] || { HERDR_KEYS=$(dirname "$0")/../settings/keys.json; export HERDR_KEYS; }
-  bash -c '. "$1" || exit 101; shift; go_run herdr-settings-merge "$@"; exit $((100 + $?))' _ "$gr" "$@"
-  rc=$?
-  case $rc in 100) ;; 101 | 102) exit $((rc - 100)) ;; *) exit $rc ;; esac
-elif [ "${HERDR_SETTINGS_MERGE_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then
-  echo "herdr-settings-merge: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1
-fi
+case ${HERDR_SETTINGS_MERGE_IMPL:-${HERDR_IMPL:-auto}} in
+  bash | sh) ;;   # 셸 판 — 이 셸에서 그대로(go_run도 바로 돌아온다)
+  *)
+    if [ -f "$gr" ] && command -v bash >/dev/null 2>&1; then
+      [ -n "${HERDR_KEYS-}" ] || [ ! -f "$(dirname "$0")/../settings/keys.json" ] || { HERDR_KEYS=$(dirname "$0")/../settings/keys.json; export HERDR_KEYS; }
+      exec bash -c '. "$1" || exit 1; shift; go_run herdr-settings-merge "$@"; rc=$?; [ "$rc" = 0 ] || exit "$rc"
+        export HERDR_SETTINGS_MERGE_IMPL=bash; exec /bin/sh "$0" "$@"' "$0" "$gr" "$@"
+    elif [ "${HERDR_SETTINGS_MERGE_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then
+      echo "herdr-settings-merge: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1
+    fi ;;
+esac
 die2() { echo "herdr-settings-merge: $*" >&2; exit 2; }
 check=0 takes=" "
 while [ $# -gt 0 ]; do

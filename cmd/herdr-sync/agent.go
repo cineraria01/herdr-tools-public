@@ -4,12 +4,15 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/proc"
@@ -53,20 +56,62 @@ func output(c *exec.Cmd) (string, int) {
 	return string(out), proc.Code(err)
 }
 
-// pipeline: prefix + producer의 표준 출력을 consumer의 표준 입력으로(셸 판 `{ cat …; echo .; prod; } | cons`). 두 종료 코드
+// pipeDrain: 소비자가 0으로 끝난 뒤 생산자가 끝나기를 기다리는 상한 — 넘으면 생산자를 끄고 124(모름)
+var pipeDrain = 60 * time.Second
+
+// pipeline: prefix + producer의 표준 출력을 consumer의 표준 입력으로(셸 판 `{ cat …; echo .; prod; } | cons`). 두 종료 코드.
+// 둘 사이는 OS 파이프 하나(Go가 가운데서 복사하지 않는다): 소비자가 끝나면 이쪽 읽기 끝을 닫아 생산자의 쓰기가 EPIPE로 끝나게 하고,
+// 소비자가 실패했으면 생산자를 바로 끈다 — 실패한 소비자 뒤에서 생산자를 끝까지 기다리며 잠금을 쥐지 않는다(gofix-ops A08)
 func pipeline(prefix []byte, producer, consumer *exec.Cmd, out io.Writer) (int, int) {
-	pr, err := producer.StdoutPipe()
+	r, w, err := os.Pipe()
 	if err != nil {
 		return 1, 1
 	}
-	if err := producer.Start(); err != nil {
-		return proc.Code(err), 1
+	consumer.Stdin, consumer.Stdout = r, out
+	producer.Stdout = w
+	type started struct {
+		ok  bool
+		err error
 	}
-	consumer.Stdin = io.MultiReader(bytes.NewReader(prefix), pr)
-	consumer.Stdout = out
+	st := make(chan started, 1)
+	go func() { // 앞부분을 다 쓴 뒤에 생산자를 띄운다(순서). 소비자가 먼저 죽으면 쓰기가 EPIPE로 돌아온다
+		if _, err := w.Write(prefix); err != nil {
+			w.Close()
+			st <- started{false, nil}
+			return
+		}
+		err := producer.Start()
+		w.Close() // 생산자가 제 사본을 쥔다 — 생산자가 끝나면 소비자가 EOF
+		st <- started{err == nil, err}
+	}()
 	crc := run(consumer)
-	io.Copy(io.Discard, pr) // 소비자가 다 안 읽었어도 생산자가 막히지 않게
-	return proc.Code(producer.Wait()), crc
+	r.Close()
+	s := <-st
+	if !s.ok {
+		if s.err != nil {
+			return proc.Code(s.err), crc
+		}
+		return 1, crc // 앞부분을 다 넘기지 못했다(소비자가 먼저 끝남)
+	}
+	done := make(chan error, 1)
+	go func() { done <- producer.Wait() }()
+	if crc != 0 {
+		select {
+		case err := <-done:
+			return proc.Code(err), crc
+		default:
+		}
+		producer.Process.Kill()
+		return proc.Code(<-done), crc
+	}
+	select {
+	case err := <-done:
+		return proc.Code(err), crc
+	case <-time.After(pipeDrain):
+	}
+	producer.Process.Kill()
+	<-done
+	return proc.TimeoutCode, crc
 }
 
 // tarCreate: 맥 tar(bsdtar) — 확장 속성·ACL·맥 메타데이터를 빼고, 이름을 바이트 그대로(hdrcharset=BINARY). list 파일의 경로를 dir 아래에서
@@ -205,26 +250,35 @@ func query(where string) (*qres, bool) {
 		}
 		q.C, q.B, q.L = append(q.C, s), append(q.B, b), append(q.L, w)
 	}
-	return q, iu == len(us) && q.H != ""
+	// 끝 줄(H·O)까지 와야 온전한 조회다 — 잘린 조회를 「OS 알 수 없음」 건너뜀(종료 0)으로 읽지 않는다(gofix-ops B10)
+	return q, iu == len(us) && q.H != "" && q.O != ""
 }
 
-// rsig: 저장소 파일 서명(맥 서명과 같은 꼴 crc.크기.x|-), 없으면 -
+// rsig: 저장소 파일 서명(맥 서명과 같은 꼴 crc.크기.x|-), 없으면(일반 파일이 아니면) -.
+// 있는지 모르거나 못 읽으면 멈춘다 — 「없음」으로 읽으면 깖이 「저장소에서 지워짐」으로 맥 파일을 치운다(gofix-ops A01·O-08)
 func rsig(f, k string) string {
-	if !isFile(f) {
+	st, err := os.Stat(f)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			return "-"
+		}
+		die("저장소 파일을 읽지 못했다: %s (%v)", f, err)
+	}
+	if !st.Mode().IsRegular() {
 		return "-"
 	}
 	x := "-"
-	if !strings.Contains(k, "#") && syscall.Access(f, 1) == nil {
+	if !strings.Contains(k, "#") && canExec(f) {
 		x = "x"
 	}
 	fh, err := os.Open(f)
 	if err != nil {
-		return "-"
+		die("저장소 파일을 읽지 못했다: %s (%v)", f, err)
 	}
 	defer fh.Close()
 	c, n, err := cksum.Reader(fh)
 	if err != nil {
-		return "-"
+		die("저장소 파일을 읽지 못했다: %s (%v)", f, err)
 	}
 	return fmt.Sprintf("%d.%d.%s", c, n, x)
 }

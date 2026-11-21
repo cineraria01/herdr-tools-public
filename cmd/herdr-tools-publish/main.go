@@ -27,6 +27,7 @@ const (
 	usage = `herdr-tools-publish: 범용 저장소(비공개)의 origin/main 트리를 공개 저장소에 기록 없이 내보낸다.
   herdr-tools-publish            검사 → 공개 main 위에 커밋 하나(「herdr-tools <sha> 내보냄」) → push
   herdr-tools-publish --dry-run  바뀔 파일 목록과 검사 결과만 (push 없음, publish.dir을 만들지 않음)
+HERDR_TOOLS_PUBLISH_RESULT=<파일>: 게시가 성공(내보냄·같음, --dry-run 아님)했을 때만 검사한 비공개 커밋 sha 한 줄(그 밖은 파일 없음)
 비공개 커밋 메시지·작성자는 싣지 않는다. 공개 트리는 비공개 트리와 같은 객체다(attributes를 거치지 않음). 같으면 「같음」.
 막기(fail-closed): 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나, 블롭 내용·경로·링크 대상·공개 커밋 작성자에 개인 값(herdr-tools-config lint)이나 비밀 꼴이 있거나,
 검사를 못 하면 아무것도 push하지 않고 종료 1. 설정 키: publish.repo(없으면 종료 2)·publish.dir·publish.author·publish.secrets.
@@ -67,6 +68,13 @@ func main() {
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	// 결과 파일(A02): 낡은 값을 남기지 않게 먼저 지운다 — 게시가 성공했을 때만 다시 쓴다(done)
+	res := os.Getenv("HERDR_TOOLS_PUBLISH_RESULT")
+	if res != "" {
+		if err := os.Remove(res); err != nil && !os.IsNotExist(err) {
+			die("결과 파일을 지우지 못했다: %v", err)
+		}
 	}
 	home := os.Getenv("HOME")
 	repo := os.Getenv("HERDR_TOOLS_REPO")
@@ -306,11 +314,10 @@ print("\n".join(out))`)
 		show(hits, true)
 		bad = true
 	}
+	// 막히면 --dry-run도 여기서 끝낸다(B13): 뒤의 변경 목록(diff-tree)이 가린 이름을 원래 경로로 찍지 않게
 	blocked := func() {
 		fmt.Fprintf(os.Stderr, "%s: 막음 — 위 줄을 고치기 전에는 내보내지 않는다 (비공개 %s)\n", me, short)
-		if !dry {
-			exit(1)
-		}
+		exit(1)
 	}
 	if bad {
 		blocked()
@@ -373,17 +380,22 @@ print("\n".join(out))`)
 	case 0:
 	case 1:
 		fmt.Println("공개 커밋 작성자·커미터가 개인 값에 걸린다 — 설정 publish.author(이름 <noreply 메일>)를 둔다")
-		bad = true
 		blocked()
 	default:
 		die("개인 값 검사 못 함 (작성자)")
 	}
-	if !bad {
-		fmt.Printf("검사 통과 (비공개 %s, 파일 %d개)\n", short, len(paths))
+	// 작성자·커미터에도 비밀 꼴(B12) — 값은 찍지 않는다
+	if hits, ok := scan([]string{identFile}, extra); !ok {
+		die("비밀 꼴 검사 못 함 (작성자)")
+	} else if len(hits) > 0 {
+		fmt.Println("공개 커밋 작성자·커미터가 비밀 꼴에 걸린다 — 설정 publish.author(이름 <noreply 메일>)를 고친다")
+		blocked()
 	}
-	parent, ok := g("ls-remote", url, "refs/heads/main")
+	fmt.Printf("검사 통과 (비공개 %s, 파일 %d개)\n", short, len(paths))
+	// 공개 저장소에 닿는 git은 remote로: 출력·오류 글에 publish.repo 주소 원문을 싣지 않는다(A12 — 인증값이 든 주소일 수 있다)
+	parent, ok := remote(dir, url, "ls-remote", url, "refs/heads/main")
 	if !ok {
-		die("공개 저장소를 읽지 못했다: %s", url)
+		die("공개 저장소를 읽지 못했다 (publish.repo)")
 	}
 	if f := strings.Fields(parent); len(f) > 0 {
 		parent = f[0]
@@ -392,22 +404,29 @@ print("\n".join(out))`)
 	}
 	var ptree string
 	if parent != "" {
-		if _, ok := g("fetch", "-q", url, "refs/heads/main"); !ok {
-			die("공개 저장소 fetch 실패: %s", url)
+		if _, ok := remote(dir, url, "fetch", "-q", url, "refs/heads/main"); !ok {
+			die("공개 저장소 fetch 실패 (publish.repo)")
 		}
 		if ptree, ok = g("rev-parse", parent+"^{tree}"); !ok {
 			die("공개 main을 읽지 못했다")
 		}
+		// 앞 실행이 push 뒤 로컬 ref를 못 바꿨으면(B16) 확인한 원격 값으로 맞춘다
+		if !dry {
+			if l, _ := gitx.Out("", nil, "--git-dir="+dir, "rev-parse", "-q", "--verify", "refs/heads/main"); l != parent {
+				if _, ok := g("update-ref", "refs/heads/main", parent); !ok {
+					fmt.Fprintf(os.Stderr, "%s: 경고 — 로컬 refs/heads/main을 원격 값으로 맞추지 못했다 (%s)\n", me, dir)
+				}
+			}
+		}
 	} else {
 		ptree, _ = g("hash-object", "-t", "tree", "/dev/null")
 	}
-	code := 0
-	if bad {
-		code = 1
-	}
 	if tree == ptree {
 		fmt.Printf("같음 (비공개 %s)\n", short)
-		exit(code)
+		if !dry {
+			done(res, src)
+		}
+		exit(0)
 	}
 	// 트리·블롭 객체만 옮긴다(비공개 커밋 객체는 옮기지 않는다). 공개 트리 = 비공개 트리 sha. 검사한 목록 그대로, 블롭까지 있는지 확인
 	if !transfer(repo, dir, tree, shas) {
@@ -415,12 +434,11 @@ print("\n".join(out))`)
 	}
 	if c := exec.Command("git", "-c", "user.useConfigOnly=true", "--git-dir="+dir, "diff-tree", "-r", "--name-status", ptree, tree); true {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		proc.Run(c) // 보여 주기만 — 결과는 보지 않는다
+		if err := proc.Run(c); err != nil { // B14: 못 읽었으면(시간 넘김 포함) 미리보기·내보내기를 끝내지 않는다
+			die("변경 목록을 읽지 못했다 (git diff-tree)")
+		}
 	}
 	if dry {
-		if bad {
-			exit(1)
-		}
 		fmt.Println("(--dry-run: push 안 함)")
 		exit(0)
 	}
@@ -432,12 +450,16 @@ print("\n".join(out))`)
 	if !ok {
 		die("커밋을 만들지 못했다")
 	}
-	if _, ok := g("push", "-q", url, commit+":refs/heads/main"); !ok {
-		die("push 실패: %s (fast-forward만 한다)", url)
+	if _, ok := remote(dir, url, "push", "-q", url, commit+":refs/heads/main"); !ok {
+		die("push 실패 (publish.repo, fast-forward만 한다)")
 	}
-	g("update-ref", "refs/heads/main", commit)
+	// 원격은 이미 바뀌었다 — 로컬 ref 실패는 따로 알리고 종료 코드는 원격 결과(다음 실행이 원격 값으로 맞춘다)
+	if _, ok := g("update-ref", "refs/heads/main", commit); !ok {
+		fmt.Fprintf(os.Stderr, "%s: 경고 — 공개 push는 됐지만 로컬 refs/heads/main을 바꾸지 못했다 (%s, 다음 실행에서 원격 값으로 맞춘다)\n", me, dir)
+	}
 	cs, _ := g("rev-parse", "--short", commit)
-	fmt.Printf("내보냄 %s (비공개 %s → %s)\n", cs, short, url)
+	fmt.Printf("내보냄 %s (비공개 %s → publish.repo)\n", cs, short)
+	done(res, src)
 	exit(0)
 }
 
@@ -447,32 +469,6 @@ func lines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
-}
-
-// transfer: 비공개 저장소의 tree와 목록 객체를 pack-objects | unpack-objects로 공개 쪽에 옮기고 rev-list --objects로 확인
-func transfer(repo, dir, tree string, shas []string) bool {
-	pack := exec.Command("git", "-C", repo, "pack-objects", "-q", "--stdout")
-	pack.Stdin = strings.NewReader(tree + "\n" + strings.Join(shas, "\n") + "\n")
-	pack.Stderr = os.Stderr
-	unpack := exec.Command("git", "-c", "user.useConfigOnly=true", "--git-dir="+dir, "unpack-objects", "-q")
-	unpack.Stderr = os.Stderr
-	pipe, err := pack.StdoutPipe()
-	if err != nil {
-		return false
-	}
-	unpack.Stdin = pipe
-	if pack.Start() != nil {
-		return false
-	}
-	uerr := unpack.Run()
-	pipe.Close() // unpack이 먼저 죽었으면 pack의 쓰기가 막히지 않고 실패하게
-	perr := pack.Wait()
-	if uerr != nil || perr != nil {
-		return false
-	}
-	c := exec.Command("git", "-c", "user.useConfigOnly=true", "--git-dir="+dir, "rev-list", "--objects", tree)
-	c.Stderr = os.Stderr
-	return proc.Run(c) == nil
 }
 
 var secretPats = []string{`-----BEGIN[A-Z0-9 ]*PRIVATE KEY`, `gh[pousr]_[A-Za-z0-9]{30,}`, `github_pat_[A-Za-z0-9_]{30,}`,

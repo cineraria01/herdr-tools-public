@@ -118,6 +118,12 @@ cmd_sync_lint() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die2 "sync-lint <범용 저장소> [<sync.list>]"
   local repo=$1 list=${2:-$dir/sync.list} b d tool t missing bad=0 deps= o
   [ -f "$list" ] || die2 "sync.list 없음: $list"
+  # 줄 끝 CR·끝 줄바꿈 없음은 오류(herdr-sync 셸 판은 CR 줄을 못 맞추고 줄바꿈 없는 마지막 줄을 버린다 — Go 판과 갈리지 않게)
+  local form=0 n
+  for n in $(LC_ALL=C grep -n $'\r$' -- "$list" | cut -d: -f1); do echo "$me: $list:$n: 줄 끝 CR — 줄바꿈은 LF만" >&2; form=1; done
+  if [ -s "$list" ] && [ -n "$(tail -c 1 -- "$list")" ]; then
+    echo "$me: $list:$(($(wc -l < "$list") + 1)): 끝 줄바꿈 없음 — 마지막 줄 뒤에 줄바꿈을 붙인다" >&2; form=1
+  fi
   # 고칠 줄의 맥 경로는 도구가 함수 파일을 찾는 자리(bin 옆 ../lib/<도구>)
   # 도구가 함께 쓰는 다른 lib: lib/<이름>/OWNER에 그 lib를 쓰는 도구 이름(bin 없는 lib, 2026-11-21 merger-go — Go 소스는 이제
   # sync_lint_go가 본다). 그 도구 bin 줄에 같은 대상의 그 lib 나무 줄도 요구한다
@@ -140,6 +146,7 @@ cmd_sync_lint() {
     bad=1
   done <<<"$missing"
   sync_lint_go "$repo" "$list" || bad=1
+  [ $form = 0 ] || bad=1
   return $bad
 }
 

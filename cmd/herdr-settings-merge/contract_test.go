@@ -54,6 +54,19 @@ func at(v any, path ...any) any {
 	return v
 }
 
+// dirNames: 폴더 항목 이름 전부(점 파일 포함, 정렬, 빈칸으로 이음)
+func dirNames(d string) string {
+	es, err := os.ReadDir(d)
+	if err != nil {
+		return "!" + err.Error()
+	}
+	n := make([]string, 0, len(es))
+	for _, e := range es {
+		n = append(n, e.Name())
+	}
+	return strings.Join(n, " ") // ReadDir는 이름순
+}
+
 // load: JSON 파일(못 읽으면 nil과 false)
 func load(p string) (any, bool) {
 	b, err := os.ReadFile(p)
@@ -134,7 +147,9 @@ func TestContract(t *testing.T) {
 		// 씀: 현재 = base → 맥 값으로, 백업·권한·base
 		fresh(`{"model":"old","theme":"dark"}`, `{".model":"`+ckj(`"old"`)+`"}`)
 		ct.Chmod(t, H+"/.claude/settings.json", 0o640)
+		ct.Put(t, H+"/.claude/.keep", "x\n") // 원래 있던 점 파일은 그대로 남아야 한다
 		before := strings.TrimRight(ct.Read(H+"/.claude/settings.json"), "\n")
+		entries0 := dirNames(H + "/.claude")
 		run(`{"values":{".model":"new"}}`)
 		c.Ok("씀: 종료 0·씀 줄", r.RC == 0 && r.Out == "씀 .model")
 		c.Ok("씀: 값이 바뀌고 다른 키는 그대로", S("model") == `"new"` && S("theme") == `"dark"`)
@@ -142,12 +157,8 @@ func TestContract(t *testing.T) {
 		c.Ok("씀: 권한 그대로(640)", err == nil && st.Mode().IsRegular() && st.Mode().Perm() == 0o640)
 		c.Ok("씀: bak/<시각>/settings.json에 원본", bakAll() == before)
 		c.Ok("씀: base가 새 값으로", baseRaw(".model") == ckj(`"new"`))
-		es, _ := os.ReadDir(H + "/.claude")
-		left := false
-		for _, e := range es { // ls(점 파일 빼고)
-			left = left || (e.Name() != "settings.json" && !strings.HasPrefix(e.Name(), "."))
-		}
-		c.Ok("씀: 임시 파일을 남기지 않음", !left)
+		// 쓰기 전후 폴더 항목 전체(점 파일 포함)가 같아야 한다 — 숨긴 임시 이름도 남으면 실패
+		c.Ok("씀: 임시 파일을 남기지 않음", dirNames(H+"/.claude") == entries0 && entries0 == ".keep settings.json")
 		run(`{"values":{".model":"new"}}`)
 		c.Ok("씀 뒤 다시: 같음", r.RC == 0 && r.Out == "같음 .model")
 

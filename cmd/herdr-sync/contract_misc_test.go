@@ -159,7 +159,8 @@ echo "$*" >> "$HCT/gh.calls"
 op=$2 tag=$3; shift 3
 d=$HCT/rel/$tag
 case $op in
-  view) [ -d "$d" ] ;;
+  view) [ -d "$d" ] || { echo "release not found" >&2; exit 1; }
+    ls "$d" ;;
   download) while [ $# -gt 0 ]; do case $1 in --pattern) p=$2; shift ;; --dir) o=$2; shift ;; esac; shift; done
     [ -f "$d/$p" ] && cp "$d/$p" "$o/" ;;
   create | upload) [ -z "${GH_FAKE_FAIL-}" ] || exit 1
@@ -177,9 +178,14 @@ func (s *sx) release() {
 	if os.Getenv("GOCACHE") == "" {
 		s.t.Setenv("GOCACHE", s.here+"/.bin/go-build")
 	}
-	s.put(T+"/repo/go.mod", "module herdr-tools\n\ngo 1.24\n")
-	s.put(T+"/repo/cmd/hello/main.go", "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hello\") }\n")
-	s.git(T+"/repo", "add", "go.mod", "cmd")
+	// hello는 새긴 커밋을 찍는다(시험 바이너리가 -X …version.Commit을 실제로 받았는지 — 감사 T01·O-14)
+	gomod := "module herdr-tools\n\ngo 1.24\n"
+	hello := "package main\n\nimport (\n\t\"fmt\"\n\n\t\"herdr-tools/internal/version\"\n)\n\nfunc main() { fmt.Println(\"hello\", version.Commit) }\n"
+	ver := "package version\n\nvar Commit = \"dev\"\n"
+	s.put(T+"/repo/go.mod", gomod)
+	s.put(T+"/repo/cmd/hello/main.go", hello)
+	s.put(T+"/repo/internal/version/version.go", ver)
+	s.git(T+"/repo", "add", "go.mod", "cmd", "internal")
 	s.git(T+"/repo", "commit", "-qm", "go")
 	s.gitLand(T+"/repo", "push", "-q", "origin", "main")
 	s.editLines(T+"/conf/config", func(l string) (string, bool) {
@@ -190,8 +196,10 @@ func (s *sx) release() {
 	})
 	s.git(T+"/conf", "commit", "-qam", "rel")
 	s.gitLand(T+"/conf", "push", "-q", "origin", "main")
-	for _, h := range []string{M, W1, LX} { // Go 소스를 깐 기계(받는 자리)
-		s.put(h+"/.local/lib/herdr-go/go.mod", "module herdr-tools\n")
+	for _, h := range []string{M, W1, LX} { // Go 소스를 깐 기계(받는 자리 — 소스 판이 범용 저장소와 같아야 받는다)
+		s.put(h+"/.local/lib/herdr-go/go.mod", gomod)
+		s.put(h+"/.local/lib/herdr-go/cmd/hello/main.go", hello)
+		s.put(h+"/.local/lib/herdr-go/internal/version/version.go", ver)
 	}
 	s.run()
 	tag := "bin-" + ct.Git(T+"/repo", "rev-parse", "HEAD")[:12]
@@ -204,9 +212,10 @@ func (s *sx) release() {
 	for _, l := range ct.Lines(ct.Read(rel + "/SHA256SUMS")) {
 		first = append(first, strings.SplitN(l, " ", 2)[0])
 	}
-	s.ok("릴리스: 커밋을 바이너리에 새김(빌드 입력은 범용 저장소)", ct.Cmd{}.Run(rel+"/hello").RC == 0 && hex.EncodeToString(sum[:]) == strings.Join(first, "\n"))
+	s.ok("릴리스: 커밋을 바이너리에 새김(빌드 입력은 범용 저장소)", ct.Cmd{}.Run(rel+"/hello").Out == "hello "+tag[4:] && hex.EncodeToString(sum[:]) == strings.Join(first, "\n"))
 	wb := W1 + "/.local/lib/herdr-go/.bin"
-	s.ok("받기: macOS 기계·맥은 해시가 맞으면 받고 소스 판을 곁에", s.has("w1 받음 hello ("+tag+")") && ct.Cmd{}.Run(wb+"/hello").Out == "hello" && strings.TrimRight(ct.Read(wb+"/hello.src"), "\n") == src && ct.IsExec(M+"/.local/lib/herdr-go/.bin/hello"))
+	s.ok("받기: macOS 기계·맥은 해시가 맞으면 받고 소스 판을 곁에", s.has("w1 받음 hello ("+tag+")") && ct.Cmd{}.Run(wb+"/hello").Out == "hello "+tag[4:] && strings.TrimRight(ct.Read(wb+"/hello.src"), "\n") == src && ct.IsExec(M+"/.local/lib/herdr-go/.bin/hello"))
+	s.ok("릴리스: 로그에 publish.repo 주소 원문이 없다", !s.contains("github.com/test/pub"))
 	s.ok("받기: 리눅스는 받지 않는다(darwin/arm64만)", !ct.Exists(LX+"/.local/lib/herdr-go/.bin/hello"))
 	s.put(T+"/gh.calls", "")
 	s.run()
@@ -221,5 +230,11 @@ func (s *sx) release() {
 	os.RemoveAll(rel)
 	s.runEnv([]string{"GH_FAKE_FAIL=1"})
 	s.ok("릴리스: 올리기 실패는 크게 경고, 받지 않음, 종료 코드 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 릴리스 만들기 실패 "+tag+" (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 빌드한다 !!!") && !ct.Exists(wb+"/hello"))
+	// 게시기가 검사한 커밋이 HEAD와 트리가 다르면(그사이 origin/main이 앞섬) 짓지도 올리지도 않는다(감사 A02·O-02)
+	s.put(T+"/gh.calls", "")
+	s.runEnv([]string{"PUB_FAKE_CHECKED=" + ct.Git(T+"/repo", "rev-parse", "HEAD~1")})
+	s.ok("릴리스: 검사한 커밋이 HEAD와 다르면 건너뜀(크게 경고), gh를 부르지 않음", s.r.RC == 0 && s.contains("릴리스 건너뜀 — 공개 검사한 커밋이 범용 저장소 HEAD") && ct.Read(T+"/gh.calls") == "")
+	s.runEnv([]string{"PUB_FAKE_CHECKED=-"})
+	s.ok("릴리스: 게시기가 검사한 커밋을 안 알리면 건너뜀", s.r.RC == 0 && s.contains("검사한 커밋을 알려 주지 않았다") && ct.Read(T+"/gh.calls") == "")
 	ct.Unsetenv(s.t, "HERDR_SYNC_RELEASE_URL")
 }

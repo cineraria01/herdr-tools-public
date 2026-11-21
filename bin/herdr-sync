@@ -19,18 +19,18 @@ STATE=$HOME/.local/state/herdr-sync
 die() { echo "herdr-sync: $*" >&2; exit 1; }
 usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-# 맥 확인: Herdr 앱이 있고 hc가 다른 기계를 아는 곳. 워커 맥의 hc는 다른 기계를 모른다.
-# (HERDR_SYNC_SYSAPPS는 시험용: /Applications 대신 볼 폴더)
+if [ -z "${HERDR_SYNC_LOCKED-}" ]; then   # Go 판(cmd/herdr-sync, 릴리스 바이너리까지)으로 exec. HERDR_SYNC_IMPL=bash면 이 셸 판(릴리스 없음)
+  gr=$(dirname "$0")/../lib/go-run.sh   # 공통 실행기가 곁에 없으면 조용히 셸 판, IMPL=go로 못박았으면 종료 1. 잠금 뒤 다시 부른 것은 셸 판
+  if [ -f "$gr" ]; then . "$gr" || exit 1; go_run herdr-sync "$@" || exit; elif [ "${HERDR_SYNC_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then echo "herdr-sync: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1; fi
+fi   # 맥 확인(Herdr 앱 + 기계를 아는 hc)은 셸 판만 여기서 — Go 판은 상한 안에서 스스로 본다(B03). HERDR_SYNC_SYSAPPS는 시험용 /Applications
 all=$(hc machine ls 2> /dev/null | jq -r '.machines[].name' 2> /dev/null)
 if { [ ! -d "$HOME/Applications/Herdr.app" ] && [ ! -d "${HERDR_SYNC_SYSAPPS:-/Applications}/Herdr.app" ]; } || [ -z "$all" ]; then
   echo "herdr-sync: 맥에서만 돈다 (~/Applications/Herdr.app 또는 /Applications/Herdr.app이 있고 hc machine ls에 기계가 있는 곳)" >&2
   exit 2
 fi
 mkdir -p "$STATE" || exit 1
-if [ -z "${HERDR_SYNC_LOCKED-}" ]; then   # Go 판(cmd/herdr-sync, 릴리스 바이너리까지)으로 exec. HERDR_SYNC_IMPL=bash면 이 셸 판(릴리스 없음)
-  gr=$(dirname "$0")/../lib/go-run.sh   # 공통 실행기가 곁에 없으면 조용히 셸 판, IMPL=go로 못박았으면 종료 1. 잠금 뒤 다시 부른 것은 셸 판
-  if [ -f "$gr" ]; then . "$gr" || exit 1; go_run herdr-sync "$@" || exit; elif [ "${HERDR_SYNC_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then echo "herdr-sync: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1; fi
-  HERDR_SYNC_LOCKED=1 lockf -s -t 0 "$STATE/lock" "$0" "$@"; rc=$?
+if [ -z "${HERDR_SYNC_LOCKED-}" ]; then   # -k: 잠금 파일을 지우지 않는다 — 지우면 먼저 연 fd(Go 판 flock)와 새 파일이 따로 잠긴다(A07)
+  HERDR_SYNC_LOCKED=1 lockf -k -s -t 0 "$STATE/lock" "$0" "$@"; rc=$?
   [ $rc = 75 ] && echo "herdr-sync: 다른 herdr-sync가 돌고 있다 ($STATE/lock)" >&2; exit $rc
 fi
 
@@ -80,17 +80,17 @@ mark() { n=$(grep -n -x -F -- "$MARK" "$f" | head -n 1 | cut -d: -f1); [ -n "$n"
 val() {
   at "$1"
   case $1 in
-    *'#body') [ -f "$f" ] || return 1; mark || return 3; tail -n +"$((n + 1))" "$f" ;;
-    *'#codex-shared') [ -f "$f" ] || return 4; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
-      awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" ;;
-    *) [ -f "$f" ] || return 1; cat "$f" ;;
+    *'#body') [ -f "$f" ] || return 1; [ -r "$f" ] || return 6; mark || return 3; tail -n +"$((n + 1))" "$f" || return 6 ;;
+    *'#codex-shared') [ -f "$f" ] || return 4; [ -r "$f" ] || return 6; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
+      awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" || return 6 ;;
+    *) [ -f "$f" ] || return 1; cat "$f" || return 6 ;;
   esac
 }
 sum() { cksum < "$1" | awk '{print $1"."$2}'; }
 sig() {
   case $1 in *@) at "$1"; if [ -L "$f" ]; then readlink "$f"; elif [ -e "$f" ]; then echo '!'; else echo -; fi; return ;; esac
   val "$1" > "$T/v"
-  case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; *) echo -; return ;; esac
+  case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; 6) echo "읽지 못했다: $f" >&2; return 1 ;; *) echo -; return ;; esac
   x=-; case $1 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
   echo "$(sum "$T/v").$x"
 }
@@ -104,7 +104,7 @@ setbf() {   # setbf <파일>: 그 파일의 「키 서명」 줄들로 base를 �
 }
 bak() { at "$1"; [ -f "$f" ] || return 0; o=$S/bak/$2/$p; mkdir -p "$(dirname "$o")" && cp -p "$f" "$o"; }
 # 나무 걷기. 링크는 따라가지 않고(L로 알린다), 이름이 .으로 시작하는 것·__pycache__·node_modules와 제외 파일의 상대 경로는 들어가지 않는다.
-# 7MB(512바이트 블록 14336개, hc exec 입출력 한도 8MB 아래 묶음 상한) 넘는 파일은 cksum하지 않고 G로 알린다. cksum·find는 폴더마다 몇 번만 돈다.
+# 7MB(512바이트 블록 14336개, hc exec 입출력 한도 8MB 아래 묶음 상한) 넘는 파일은 cksum하지 않고 G로 알린다. cksum·find는 폴더마다 몇 번만 돈다. 걷기·cksum이 하나라도 실패하면 종료 1(B08)
 # ponytail: 이름에 탭·줄바꿈이 든 파일, 제외 경로의 glob 글자([*?)는 다루지 않는다
 lt() {
   ld=$1 lp=$2 lx=$3
@@ -115,13 +115,13 @@ lt() {
   set -- "$@" \)
   ( cd "$ld" || exit 1
     find . ! -name . "$@" -prune -o -type l -exec printf 'L\t%s\n' {} + -o -type f -size +14336 -exec printf 'G\t%s\n' {} + \
-      -o -type f -perm -100 -exec printf 'X\t%s\n' {} +
-    find . ! -name . "$@" -prune -o -type f ! -size +14336 -exec cksum {} + ) |
-    awk -v p="$lp" '
+      -o -type f -perm -100 -exec printf 'X\t%s\n' {} + &&
+    find . ! -name . "$@" -prune -o -type f ! -size +14336 -exec cksum {} + ) > "$T/lw" || { echo "나무를 읽지 못했다: $lp" >&2; return 1; }
+  awk -v p="$lp" '
       /^[LGX]\t/ { t = substr($0, 1, 1); f = substr($0, 3) }
       !/^[LGX]\t/ { t = "F"; c = $1 "." $2; f = $0; sub(/^[^ ]+ [^ ]+ /, "", f) }
       { sub(/^\.\//, "", f); f = p "/" f
-        if (t == "X") x[f] = 1; else if (t == "F") printf "F\t%s\t%s.%s\n", f, c, ((f in x) ? "x" : "-"); else printf "%s\t%s\n", t, f }'
+        if (t == "X") x[f] = 1; else if (t == "F") printf "F\t%s\t%s.%s\n", f, c, ((f in x) ? "x" : "-"); else printf "%s\t%s\n", t, f }' "$T/lw"
 }
 q() {
   for s in k r t x y; do : > "$T/$s"; done
@@ -130,12 +130,12 @@ q() {
     if [ "$a" = -- ]; then case $s in k) s=r ;; r) s=t ;; t) s=x ;; x) s=y ;; esac; continue; fi
     printf '%s\n' "$a" >> "$T/$s"
   done
-  while IFS= read -r a; do printf 'U\t%s\t%s\n' "$(sig "$a")" "$(bsig "$a")"; done < "$T/k"
+  while IFS= read -r a; do s=$(sig "$a") || exit 1; printf 'U\t%s\t%s\n' "$s" "$(bsig "$a")"; done < "$T/k"
   while IFS= read -r a; do if [ -e "$HOME/$a" ] || [ -L "$HOME/$a" ]; then printf 'R\t%s\n' "$a"; fi; done < "$T/r"
   while IFS= read -r a; do if [ -e "$HOME/$a" ]; then printf 'Y\t%s\n' "$a"; fi; done < "$T/y"
   while IFS= read -r a; do
     awk -v r="$a/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' "$T/x" > "$T/ex"
-    lt "$HOME/$a" "$a" "$T/ex"
+    lt "$HOME/$a" "$a" "$T/ex" || exit 1
   done < "$T/t"
   if [ -s "$T/t" ] && [ -f "$B" ]; then
     awk -F'\t' -v t="$T/t" 'BEGIN { while ((getline l < t) > 0) r[l "/"] = 1 } { for (p in r) if (index($1, p) == 1) { print "B\t" $0; next } }' "$B"
@@ -641,7 +641,7 @@ build() {
   [ $check = 0 ] || return 0
   pre=$(HERDR_TOOLS_CONFIG=$CONF bash "$REPO/bin/herdr-tools-config" get sync.prebuild "") || die "개인 설정을 읽지 못했다: $CONF/config"
   [ -n "$pre" ] || return 0
-  sh -c "$pre" > /dev/null || die "sync.prebuild 실패: $pre"
+  sh -c "$pre" > /dev/null || die "sync.prebuild 실패 (개인 설정 키 sync.prebuild, 종료 $?)"   # 명령 원문은 찍지 않는다(개인 경로·인증 인자)
 }
 body=0
 build

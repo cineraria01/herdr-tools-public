@@ -242,8 +242,17 @@ func repoSync() {
 		if uconf {
 			undo(CONF, st["conf"], "st.conf")
 		}
+		dropJournal()
 		die(f, a...)
 	}
+	// 쓰기 전에 일지(journal.go) — 스테이징과 커밋 사이에 죽어도 다음 실행이 자기 것만 되돌린다
+	var jes []jentry
+	for _, i := range idx {
+		if acts[i] == "모음" {
+			jes = append(jes, jentry{U[i].d, "", U[i].r, U[i].k, q.C[i]})
+		}
+	}
+	writeJournal(jes)
 	mc := make([][]string, len(TR))
 	mr := make([][]string, len(TR))
 	for _, i := range idx {
@@ -376,8 +385,15 @@ func repoSync() {
 			fmt.Println(l)
 		}
 	}
+	if len(jes) > 0 {
+		dropJournal()
+	}
 	for _, d := range []string{CONF, REPO} {
-		if s, _ := gitq("-C", d, "rev-list", "-1", "origin/main..HEAD"); s == "" {
+		s, rc := git("-C", d, "rev-list", "-1", "origin/main..HEAD")
+		if rc != 0 { // 실패·시간 넘김을 「보낼 것 없음」으로 읽고 base를 적지 않는다(gofix-ops B02·K-01)
+			die("보낼 커밋을 알지 못했다 (git rev-list 종료 %d — 모름): %s. 다시 돌리면 남은 커밋을 보낸다", rc, d)
+		}
+		if s == "" {
 			continue
 		}
 		c := exec.Command("git", "-C", d, "push", "-q", "origin", "HEAD:main")
@@ -438,7 +454,10 @@ func repoSync() {
 		}
 		var wo bytes.Buffer
 		pre, tar := wpack(d, kc[g], "kc.src")
-		pipeline(pre, tar, mac("W", STAMP), &wo)
+		if p, c := pipeline(pre, tar, mac("W", STAMP), &wo); p != 0 || c != 0 {
+			warn("맥 나무 깔기 묶음이 실패로 끝났다 (보냄 %d · 받음 %d)", p, c)
+			bad = true
+		}
 		okk := map[string]bool{}
 		for _, r := range wres(kc[g], wo.String()) {
 			if r[0] == "ok" {
@@ -478,8 +497,8 @@ func build() {
 	}
 	c := exec.Command("sh", "-c", pre)
 	c.Stderr = os.Stderr
-	if run(c) != 0 {
-		die("sync.prebuild 실패: %s", pre)
+	if rc := run(c); rc != 0 { // 명령 원문은 찍지 않는다 — 개인 경로·인증 인자가 들 수 있다(gofix-ops B17)
+		die("sync.prebuild 실패 (개인 설정 키 sync.prebuild, 종료 %d)", rc)
 	}
 }
 

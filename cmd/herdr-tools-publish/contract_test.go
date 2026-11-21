@@ -189,6 +189,7 @@ func TestContract(t *testing.T) {
 	secretsContract(f, h)
 	overlapContract(f)
 	blobContract(f)
+	fixContract(f)
 
 	// 8. publish.dir에 다른 저장소가 있으면 건드리지 않는다
 	ct.MustGit(t, T, "init", "-q", "--bare", T+"/other.git")

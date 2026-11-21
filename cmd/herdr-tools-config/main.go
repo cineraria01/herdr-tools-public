@@ -59,14 +59,40 @@ func main() {
 			die2("sync-lint <범용 저장소> [<sync.list>]")
 		}
 		list := dir + "/sync.list"
-		if len(a) == 3 {
+		if len(a) == 3 && a[2] != "" { // 빈 인자도 기본 경로(셸 판 ${2:-…})
 			list = a[2]
 		}
-		os.Exit(toolcfg.SyncLint(a[1], list, os.Stdout, os.Stderr))
+		bad := listForm(list)
+		if rc := toolcfg.SyncLint(a[1], list, os.Stdout, os.Stderr); rc != 0 || !bad {
+			os.Exit(rc)
+		}
+		os.Exit(1)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+}
+
+// listForm: sync.list의 줄 끝 CR·끝 줄바꿈 없음을 줄 번호로 알린다(있으면 참). herdr-sync 셸 판은 CR 줄을 어느 기계에도 못 맞추고
+// 줄바꿈 없는 마지막 줄을 버린다(Go 판은 읽는다) — 두 판이 갈리지 않게 막는다. 못 읽으면 거짓(SyncLint가 종료 2)
+func listForm(list string) bool {
+	data, err := os.ReadFile(list)
+	if err != nil || len(data) == 0 {
+		return false
+	}
+	bad := false
+	ls := strings.Split(string(data), "\n")
+	for i, l := range ls {
+		if strings.HasSuffix(l, "\r") {
+			fmt.Fprintf(os.Stderr, "%s: %s:%d: 줄 끝 CR — 줄바꿈은 LF만\n", me, list, i+1)
+			bad = true
+		}
+	}
+	if data[len(data)-1] != '\n' {
+		fmt.Fprintf(os.Stderr, "%s: %s:%d: 끝 줄바꿈 없음 — 마지막 줄 뒤에 줄바꿈을 붙인다\n", me, list, len(ls))
+		bad = true
+	}
+	return bad
 }
 
 func get(dir string, a []string) {

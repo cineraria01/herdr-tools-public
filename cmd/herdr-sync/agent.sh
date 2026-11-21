@@ -13,17 +13,17 @@ mark() { n=$(grep -n -x -F -- "$MARK" "$f" | head -n 1 | cut -d: -f1); [ -n "$n"
 val() {
   at "$1"
   case $1 in
-    *'#body') [ -f "$f" ] || return 1; mark || return 3; tail -n +"$((n + 1))" "$f" ;;
-    *'#codex-shared') [ -f "$f" ] || return 4; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
-      awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" ;;
-    *) [ -f "$f" ] || return 1; cat "$f" ;;
+    *'#body') [ -f "$f" ] || return 1; [ -r "$f" ] || return 6; mark || return 3; tail -n +"$((n + 1))" "$f" || return 6 ;;
+    *'#codex-shared') [ -f "$f" ] || return 4; [ -r "$f" ] || return 6; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
+      awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" || return 6 ;;
+    *) [ -f "$f" ] || return 1; cat "$f" || return 6 ;;
   esac
 }
 sum() { cksum < "$1" | awk '{print $1"."$2}'; }
 sig() {
   case $1 in *@) at "$1"; if [ -L "$f" ]; then readlink "$f"; elif [ -e "$f" ]; then echo '!'; else echo -; fi; return ;; esac
   val "$1" > "$T/v"
-  case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; *) echo -; return ;; esac
+  case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; 6) echo "읽지 못했다: $f" >&2; return 1 ;; *) echo -; return ;; esac
   x=-; case $1 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
   echo "$(sum "$T/v").$x"
 }
@@ -37,7 +37,7 @@ setbf() {   # setbf <파일>: 그 파일의 「키 서명」 줄들로 base를 �
 }
 bak() { at "$1"; [ -f "$f" ] || return 0; o=$S/bak/$2/$p; mkdir -p "$(dirname "$o")" && cp -p "$f" "$o"; }
 # 나무 걷기. 링크는 따라가지 않고(L로 알린다), 이름이 .으로 시작하는 것·__pycache__·node_modules와 제외 파일의 상대 경로는 들어가지 않는다.
-# 7MB(512바이트 블록 14336개, hc exec 입출력 한도 8MB 아래 묶음 상한) 넘는 파일은 cksum하지 않고 G로 알린다. cksum·find는 폴더마다 몇 번만 돈다.
+# 7MB(512바이트 블록 14336개, hc exec 입출력 한도 8MB 아래 묶음 상한) 넘는 파일은 cksum하지 않고 G로 알린다. cksum·find는 폴더마다 몇 번만 돈다. 걷기·cksum이 하나라도 실패하면 종료 1(B08)
 # ponytail: 이름에 탭·줄바꿈이 든 파일, 제외 경로의 glob 글자([*?)는 다루지 않는다
 lt() {
   ld=$1 lp=$2 lx=$3
@@ -48,13 +48,13 @@ lt() {
   set -- "$@" \)
   ( cd "$ld" || exit 1
     find . ! -name . "$@" -prune -o -type l -exec printf 'L\t%s\n' {} + -o -type f -size +14336 -exec printf 'G\t%s\n' {} + \
-      -o -type f -perm -100 -exec printf 'X\t%s\n' {} +
-    find . ! -name . "$@" -prune -o -type f ! -size +14336 -exec cksum {} + ) |
-    awk -v p="$lp" '
+      -o -type f -perm -100 -exec printf 'X\t%s\n' {} + &&
+    find . ! -name . "$@" -prune -o -type f ! -size +14336 -exec cksum {} + ) > "$T/lw" || { echo "나무를 읽지 못했다: $lp" >&2; return 1; }
+  awk -v p="$lp" '
       /^[LGX]\t/ { t = substr($0, 1, 1); f = substr($0, 3) }
       !/^[LGX]\t/ { t = "F"; c = $1 "." $2; f = $0; sub(/^[^ ]+ [^ ]+ /, "", f) }
       { sub(/^\.\//, "", f); f = p "/" f
-        if (t == "X") x[f] = 1; else if (t == "F") printf "F\t%s\t%s.%s\n", f, c, ((f in x) ? "x" : "-"); else printf "%s\t%s\n", t, f }'
+        if (t == "X") x[f] = 1; else if (t == "F") printf "F\t%s\t%s.%s\n", f, c, ((f in x) ? "x" : "-"); else printf "%s\t%s\n", t, f }' "$T/lw"
 }
 q() {
   for s in k r t x y; do : > "$T/$s"; done
@@ -63,12 +63,12 @@ q() {
     if [ "$a" = -- ]; then case $s in k) s=r ;; r) s=t ;; t) s=x ;; x) s=y ;; esac; continue; fi
     printf '%s\n' "$a" >> "$T/$s"
   done
-  while IFS= read -r a; do printf 'U\t%s\t%s\n' "$(sig "$a")" "$(bsig "$a")"; done < "$T/k"
+  while IFS= read -r a; do s=$(sig "$a") || exit 1; printf 'U\t%s\t%s\n' "$s" "$(bsig "$a")"; done < "$T/k"
   while IFS= read -r a; do if [ -e "$HOME/$a" ] || [ -L "$HOME/$a" ]; then printf 'R\t%s\n' "$a"; fi; done < "$T/r"
   while IFS= read -r a; do if [ -e "$HOME/$a" ]; then printf 'Y\t%s\n' "$a"; fi; done < "$T/y"
   while IFS= read -r a; do
     awk -v r="$a/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' "$T/x" > "$T/ex"
-    lt "$HOME/$a" "$a" "$T/ex"
+    lt "$HOME/$a" "$a" "$T/ex" || exit 1
   done < "$T/t"
   if [ -s "$T/t" ] && [ -f "$B" ]; then
     awk -F'\t' -v t="$T/t" 'BEGIN { while ((getline l < t) > 0) r[l "/"] = 1 } { for (p in r) if (index($1, p) == 1) { print "B\t" $0; next } }' "$B"

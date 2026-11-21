@@ -27,6 +27,7 @@ type sx struct {
 	here, sync, impl string
 	T, MAC, W1, LX   string
 	A, C, W1A        string // 나무 단계(15)의 맥 .agents/skills·.claude/skills, w1 .agents/skills
+	sigRC            int    // signalMid로 끈 실행의 종료 코드
 }
 
 // fakeHC: 가짜 hc — machine ls와 exec [-i] --on만. 입력·출력은 진짜 hc처럼 8MB까지
@@ -47,6 +48,8 @@ case $1 in
       exec < "$HCT/in.$$" && rm -f "$HCT/in.$$"
     fi
     if [ $in = 1 ] && [ "${HC_FAKE_CORRUPT-}" = "$m" ]; then head -c 3 | PATH="$h/.fakebin:$PATH" HOME=$h "$@"; exit; fi
+    # HC_FAKE_NOO: 그 기계 조회 출력에서 OS 줄(O)이 잘린 꼴 — 종료 0
+    if [ "${HC_FAKE_NOO-}" = "$m" ]; then PATH="$h/.fakebin:$PATH" HOME=$h "$@" | grep -v '^O'; exit 0; fi
     # 출력도 8MB에서 자른다
     PATH="$h/.fakebin:$PATH" HOME=$h "$@" | head -c 8388608; exit "${PIPESTATUS[0]}" ;;
   *) echo "fake hc: $*" >&2; exit 2 ;;
@@ -260,8 +263,10 @@ Codex공통 .codex/AGENTS.md#codex-shared  codex/AGENTS.shared.md     all
 	s.putx(T+"/repo/bin/hc-lane", "#!/bin/sh\necho lane\n")
 	copyExec(t, merge, T+"/repo/bin/herdr-settings-merge")
 	copyExec(t, cfgtool, T+"/repo/bin/herdr-tools-config")
-	// 가짜 공개 내보내기: 부른 것을 적는다(PUB_FAKE_RC로 실패시킴)
-	s.put(T+"/repo/bin/herdr-tools-publish", "#!/bin/sh\necho \"$HERDR_TOOLS_REPO $HERDR_TOOLS_CONFIG $*\" >> \"$HCT/published\"\nexit ${PUB_FAKE_RC:-0}\n")
+	// 가짜 공개 내보내기: 부른 것을 적는다(PUB_FAKE_RC로 실패시킴). 성공이면 「검사한」 커밋(origin/main, PUB_FAKE_CHECKED로 바꿈)을 결과 파일에
+	s.put(T+"/repo/bin/herdr-tools-publish", "#!/bin/sh\necho \"$HERDR_TOOLS_REPO $HERDR_TOOLS_CONFIG $*\" >> \"$HCT/published\"\n"+
+		"[ \"${PUB_FAKE_RC:-0}\" = 0 ] || exit $PUB_FAKE_RC\n"+
+		"[ -z \"${HERDR_TOOLS_PUBLISH_RESULT-}\" ] || echo \"${PUB_FAKE_CHECKED:-$(git -C \"$HERDR_TOOLS_REPO\" rev-parse origin/main)}\" > \"$HERDR_TOOLS_PUBLISH_RESULT\"\n")
 	s.put(T+"/conf/settings/keys.json", `{"values":[".language",".model",".effortLevel",".nope"],"hooks":{"PreToolUse":["cotenant-guard.sh"]},"refs":[".permissions"],"exceptions":{"lx":[".effortLevel"]}}`+"\n")
 	s.put(T+"/conf/config", "sync.prebuild  python3 ~/.local/share/claude-md/build_codex.py\n")
 	s.put(T+"/conf/private-patterns.txt", "secret-word\n")
@@ -307,5 +312,8 @@ open(p, "w").write(a + "<!-- codex-shared:start -->\ncodex built\n<!-- codex-sha
 	s.trees()       // 15(나무)
 	s.lockAndRest() // 13·14·15(공개)·16
 	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(T+"/tmp"))
+	if s.impl == "go" {
+		s.failures() // 17(실패 주입 — SIGKILL한 실행은 임시 폴더를 남기니 위 확인 뒤에)
+	}
 	s.c.Done()
 }

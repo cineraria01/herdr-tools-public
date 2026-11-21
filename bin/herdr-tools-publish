@@ -2,6 +2,7 @@
 # herdr-tools-publish: 범용 저장소(비공개)의 origin/main 트리를 공개 저장소에 기록 없이 내보낸다.
 #   herdr-tools-publish            검사 → 공개 main 위에 커밋 하나(「herdr-tools <sha> 내보냄」) → push
 #   herdr-tools-publish --dry-run  바뀔 파일 목록과 검사 결과만 (push 없음, publish.dir을 만들지 않음)
+# HERDR_TOOLS_PUBLISH_RESULT=<파일>: 게시가 성공(내보냄·같음, --dry-run 아님)했을 때만 검사한 비공개 커밋 sha 한 줄(그 밖은 파일 없음)
 # 비공개 커밋 메시지·작성자는 싣지 않는다. 공개 트리는 비공개 트리와 같은 객체다(attributes를 거치지 않음). 같으면 「같음」.
 # 막기(fail-closed): 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나, 블롭 내용·경로·링크 대상·공개 커밋 작성자에 개인 값(herdr-tools-config lint)이나 비밀 꼴이 있거나,
 # 검사를 못 하면 아무것도 push하지 않고 종료 1. 설정 키: publish.repo(없으면 종료 2)·publish.dir·publish.author·publish.secrets.
@@ -20,11 +21,14 @@ die() { echo "$me: $*" >&2; exit 1; }
 REPO=${HERDR_TOOLS_REPO:-$HOME/Documents/app/herdr-tools}
 CONF=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
 dry=0
-case ${1-} in
-  '') ;;
-  --dry-run) dry=1 ;;
-  *) sed -n '2,7s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+case $#:${1-} in   # 남는 인자는 Go 판처럼 사용법·종료 2(--dry-run extra를 받아들이지 않는다)
+  0:) ;;
+  1:--dry-run) dry=1 ;;
+  *) sed -n '2,8s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac
+# 결과 파일(HERDR_TOOLS_PUBLISH_RESULT): 낡은 값을 남기지 않게 먼저 지운다 — 게시가 성공했을 때만 다시 쓴다(done_ok)
+res=${HERDR_TOOLS_PUBLISH_RESULT-}
+[ -z "$res" ] || rm -f -- "$res" || die "결과 파일을 지우지 못했다: $res"
 # 공개 커밋 작성자는 명시값만: 부른 쪽 환경의 작성자 변수는 지우고, git이 호스트 이름으로 지어내지 못하게 한다(useConfigOnly).
 # push·fetch가 인증 질문에서 멈추지 않게 한다(herdr-sync 끝에서 사람 없이 부른다)
 unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE EMAIL
@@ -191,15 +195,30 @@ case $? in
   *) die "개인 값 검사 못 함 (작성자)" ;;
 esac
 [ $bad = 0 ] && echo "검사 통과 (비공개 $short, 파일 ${#paths[@]}개)"
-parent=$(g ls-remote "$url" refs/heads/main) || die "공개 저장소를 읽지 못했다: $url"
+# rgit: 공개 저장소에 닿는 git — 오류 글의 publish.repo 주소 원문을 키 이름으로 바꿔 찍는다(인증값이 든 주소일 수 있다)
+rgit() {
+  local rc
+  g "$@" 2> "$T/rerr"; rc=$?
+  U=$url awk 'BEGIN { u = ENVIRON["U"] } { s = $0; o = ""
+    while ((i = index(s, u)) > 0) { o = o substr(s, 1, i - 1) "publish.repo"; s = substr(s, i + length(u)) } print o s }' "$T/rerr" >&2
+  return $rc
+}
+# done_ok: 게시 성공(내보냄·같음) — 결과 파일이 있으면 검사한 비공개 커밋 sha 한 줄을 같은 폴더 임시 파일 → mv로
+done_ok() {
+  [ -n "$res" ] || return 0
+  local tf
+  tf=$(mktemp "$(dirname -- "$res")/.$(basename -- "$res").XXXXXX") && printf '%s\n' "$src" > "$tf" && mv -f -- "$tf" "$res" ||
+    { [ -z "${tf:-}" ] || rm -f -- "$tf"; die "결과 파일을 쓰지 못했다: $res"; }
+}
+parent=$(rgit ls-remote "$url" refs/heads/main) || die "공개 저장소를 읽지 못했다 (publish.repo)"
 parent=${parent%%[[:space:]]*}
 if [ -n "$parent" ]; then
-  g fetch -q "$url" refs/heads/main || die "공개 저장소 fetch 실패: $url"
+  rgit fetch -q "$url" refs/heads/main || die "공개 저장소 fetch 실패 (publish.repo)"
   ptree=$(g rev-parse "$parent^{tree}") || die "공개 main을 읽지 못했다"
 else
   ptree=$(g hash-object -t tree /dev/null)
 fi
-if [ "$tree" = "$ptree" ]; then echo "같음 (비공개 $short)"; [ $bad = 1 ] && exit 1; exit 0; fi
+if [ "$tree" = "$ptree" ]; then echo "같음 (비공개 $short)"; [ $bad = 1 ] && exit 1; [ $dry = 1 ] || done_ok; exit 0; fi
 # 트리·블롭 객체만 옮긴다(비공개 커밋 객체는 옮기지 않는다). 공개 트리 = 비공개 트리 sha
 (set -o pipefail
   { echo "$tree"; tr '\0' '\n' < "$T/ls" | awk '{print $3}'; } | git -C "$REPO" pack-objects -q --stdout | g unpack-objects -q) \
@@ -208,6 +227,7 @@ g diff-tree -r --name-status "$ptree" "$tree"
 [ $dry = 1 ] && { [ $bad = 1 ] && exit 1; echo "(--dry-run: push 안 함)"; exit 0; }
 
 commit=$(g commit-tree "$tree" ${parent:+-p "$parent"} -m "herdr-tools $short 내보냄") || die "커밋을 만들지 못했다"
-g push -q "$url" "$commit:refs/heads/main" || die "push 실패: $url (fast-forward만 한다)"
+rgit push -q "$url" "$commit:refs/heads/main" || die "push 실패 (publish.repo, fast-forward만 한다)"
 g update-ref refs/heads/main "$commit"
-echo "내보냄 $(g rev-parse --short "$commit") (비공개 $short → $url)"
+echo "내보냄 $(g rev-parse --short "$commit") (비공개 $short → publish.repo)"
+done_ok

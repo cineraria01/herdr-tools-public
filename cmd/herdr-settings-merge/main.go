@@ -9,10 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/cksum"
@@ -151,8 +149,24 @@ func main() {
 			}
 		}
 	}
+	// 훅의 판별 글자는 HOME 바꾸기 뒤에도 입력 검사 때와 같은 하나여야 한다(판별 글자에 맥 HOME이 든 설정) — 아니면 쓰기 전에 종료 2
+	wh, _ := want.M["hooks"].([]any)
+	ih, _ := in.M["hooks"].([]any)
+	for i, hv := range wh {
+		ev, _ := obj(hv).M["event"].(string)
+		c, _ := obj(hv).M["command"].(string)
+		oc, _ := obj(ih[i]).M["command"].(string)
+		if m := markers(keys, ev, c); len(m) != 1 || m[0] != markers(keys, ev, oc)[0] {
+			die2("훅(%s)의 판별 글자가 HOME 바꾸기 뒤 하나로 정해지지 않음", ev)
+		}
+	}
 
 	S := home + "/.claude/settings.json"
+	ST := home + "/.local/state/herdr-sync"
+	B := ST + "/settings-base.json"
+	if !check {
+		lockMerge(ST) // 같은 HOME의 병합끼리 — 설정·base를 잠금 안에서 읽고 쓴다
+	}
 	var work any = ojson.NewObject()
 	sexists := false
 	if sb, err := os.ReadFile(S); err == nil || !os.IsNotExist(err) {
@@ -162,14 +176,21 @@ func main() {
 		}
 		work, sexists = v, true
 	}
-	ST := home + "/.local/state/herdr-sync"
-	B := ST + "/settings-base.json"
+	// base는 파일이 없을 때만 빈 장부 — 못 읽거나 깨졌으면 다른 키 이력을 지우지 않게 쓰기 전에 멈춘다
 	base0 := []byte("{}\n")
 	base := ojson.NewObject()
+	baseMode := os.FileMode(0)
 	if bb, err := os.ReadFile(B); err == nil {
-		if v, err := ojson.Parse(bb); err == nil && obj(v) != nil {
-			base, base0 = obj(v), bb
+		v, perr := ojson.Parse(bb)
+		if perr != nil || obj(v) == nil {
+			fail("%s 이 올바른 JSON 객체가 아님", B)
 		}
+		base, base0 = obj(v), bb
+		if fi, err := os.Stat(B); err == nil {
+			baseMode = fi.Mode().Perm()
+		}
+	} else if !os.IsNotExist(err) {
+		fail("%s 를 읽을 수 없음", B)
 	}
 	baseSet := false
 	setbase := func(k, canon string) { base.Set(k, ck(canon)); baseSet = true }
@@ -224,12 +245,11 @@ func main() {
 		}
 	}
 
-	hooks, _ := want.M["hooks"].([]any)
-	for _, hv := range hooks {
+	for _, hv := range wh {
 		h := obj(hv)
 		ev, _ := h.M["event"].(string)
 		command, _ := h.M["command"].(string)
-		mk := markers(keys, ev, command)[0]
+		mk := markers(keys, ev, command)[0] // 위에서 하나임을 확인했다
 		k := "hook:" + ev + ":" + mk
 		hk := ojson.NewObject()
 		hk.Set("type", "command")
@@ -294,10 +314,14 @@ func main() {
 	os.Stdout.Write(out.Bytes()) // settings를 다 썼으니 판정 줄은 참이다
 	if baseSet {
 		if nb := []byte(ojson.Pretty(base)); !bytes.Equal(nb, base0) {
-			if err := os.MkdirAll(ST, 0o755); err != nil {
-				die1("base 쓰기 실패")
+			// 새 base는 셸 판 `>`와 같게 umask를 따르고, 이미 있으면 그 권한 그대로(좁혀 둔 권한을 넓히지 않게)
+			err := os.MkdirAll(ST, 0o777)
+			if err == nil && baseMode == 0 {
+				err = atomic.WriteFile(B, nb, 0o666)
+			} else if err == nil {
+				err = atomic.WriteFileMode(B, nb, baseMode)
 			}
-			if err := atomic.WriteFile(B, nb, 0o644); err != nil {
+			if err != nil {
 				die1("base 쓰기 실패")
 			}
 		}
@@ -515,61 +539,4 @@ func putHook(work any, ev, mk string, d *ojson.Object) (any, error) {
 	add.Set("matcher", d.M["matcher"])
 	add.Set("hooks", []any{d.M["hook"]})
 	return ojson.SetPath(work, []string{"hooks", ev}, append(next, add))
-}
-
-// writeSettings: 백업(bak/<시각>/settings.json, 같은 초면 -<pid>) 뒤 원본 권한으로 임시 → fsync → rename. 링크면 링크 대상에 쓴다
-func writeSettings(S, ST string, exists bool, work any) {
-	data := []byte(ojson.Pretty(work))
-	if obj(work) == nil {
-		die1("고친 결과가 올바른 JSON이 아니라 쓰지 않음")
-	}
-	if err := os.MkdirAll(filepath.Dir(S), 0o755); err != nil {
-		os.Exit(1)
-	}
-	if exists {
-		bak := ST + "/bak/" + time.Now().Format("20060102-150405")
-		if _, err := os.Lstat(bak); err == nil {
-			bak = fmt.Sprintf("%s-%d", bak, os.Getpid())
-		}
-		if err := os.MkdirAll(bak, 0o755); err != nil || copyPreserve(S, bak+"/settings.json") != nil {
-			die1("백업 실패, 쓰지 않음")
-		}
-	}
-	if fi, err := os.Lstat(S); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		f, err := os.OpenFile(S, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666)
-		if err != nil {
-			die1("임시 파일 쓰기 실패, 쓰지 않음")
-		}
-		_, werr := f.Write(data)
-		if cerr := f.Close(); werr != nil || cerr != nil {
-			die1("임시 파일 쓰기 실패, 쓰지 않음")
-		}
-		return
-	}
-	perm := os.FileMode(0o600)
-	if fi, err := os.Stat(S); err == nil {
-		perm = fi.Mode().Perm()
-	}
-	if err := atomic.WriteFile(S, data, perm); err != nil {
-		die1("임시 파일 쓰기 실패, 쓰지 않음")
-	}
-}
-
-// copyPreserve: cp -p (권한·수정 시각)
-func copyPreserve(src, dst string) error {
-	fi, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, fi.Mode().Perm()); err != nil {
-		return err
-	}
-	if err := os.Chmod(dst, fi.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Chtimes(dst, fi.ModTime(), fi.ModTime())
 }

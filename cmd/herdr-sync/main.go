@@ -9,7 +9,6 @@ package main
 import (
 	"bytes"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
@@ -98,13 +96,23 @@ func main() {
 		fmt.Println(version.String("herdr-sync"))
 		return
 	}
+	// 상한을 건 git은 뒤쪽 무리라 단말에서 암호·호스트 키를 물을 수 없다 — 묻지 말고 바로 실패하게(상한까지 멈추지 않게, gofix-ops O-07)
+	os.Setenv("GIT_TERMINAL_PROMPT", "0")
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		os.Setenv("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+	}
 	home = os.Getenv("HOME")
 	REPO = envOr("HERDR_TOOLS_REPO", home+"/Documents/app/herdr-tools")
 	CONF = envOr("HERDR_TOOLS_CONFIG", home+"/.config/herdr-tools")
 	STATE = home + "/.local/state/herdr-sync"
 
-	// 맥 확인: Herdr 앱이 있고 hc가 다른 기계를 아는 곳. 워커 맥의 hc는 다른 기계를 모른다
-	all := machinesFromHC()
+	// 맥 확인: Herdr 앱이 있고 hc가 다른 기계를 아는 곳. 워커 맥의 hc는 다른 기계를 모른다.
+	// hc 조회가 실패하거나 시간을 넘기면(모름) 「맥이 아님」과 가른다(gofix-ops B03)
+	all, herr := machinesFromHC()
+	if herr != nil {
+		fmt.Fprintf(os.Stderr, "herdr-sync: hc machine ls를 읽지 못했다 (%v) — 모름, 아무것도 쓰지 않음\n", herr)
+		os.Exit(1)
+	}
 	if (!isDir(home+"/Applications/Herdr.app") && !isDir(envOr("HERDR_SYNC_SYSAPPS", "/Applications")+"/Herdr.app")) || len(all) == 0 {
 		fmt.Fprintln(os.Stderr, "herdr-sync: 맥에서만 돈다 (~/Applications/Herdr.app 또는 /Applications/Herdr.app이 있고 hc machine ls에 기계가 있는 곳)")
 		os.Exit(2)
@@ -113,17 +121,14 @@ func main() {
 		os.Exit(1)
 	}
 	if os.Getenv("HERDR_SYNC_LOCKED") == "" {
-		f, busy, err := lockx.TryLock(STATE + "/lock")
-		if busy {
-			fmt.Fprintf(os.Stderr, "herdr-sync: 다른 herdr-sync가 돌고 있다 (%s/lock)\n", STATE)
+		lockf = takeLock(STATE + "/lock")
+		os.Setenv("HERDR_SYNC_LOCKED", "1")
+		// 앞 실행이 SIGKILL로 죽으며 남긴 자식 무리(push·commit 등)는 첫 자식을 띄울 때 proc이 거둔다(고아 기록). 거두지 못한 것
+		// (모름 — ps를 못 읽음 등)이 남았으면 그 자식과 겹쳐 쓰지 않게 멈춘다(gofix-ops A06)
+		if n := orphansLeft(); n > 0 {
+			fmt.Fprintf(os.Stderr, "herdr-sync: 앞 실행이 남긴 자식 무리 %d개가 아직 도는지 모른다 (%s) — 다시 돌린다\n", n, proc.RecordDir())
 			os.Exit(75)
 		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "herdr-sync: 잠금 실패 %s/lock: %v\n", STATE, err)
-			os.Exit(1)
-		}
-		lockf = f
-		os.Setenv("HERDR_SYNC_LOCKED", "1")
 	}
 
 	var machines []string
@@ -163,17 +168,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "herdr-sync: 개인 저장소가 없다: %s (sync.list·settings/keys.json, 꼴은 범용 저장소 config.example 참고)\n", CONF)
 		os.Exit(2)
 	}
-	ready(REPO)
-	ready(CONF)
-	// lib/<도구>/가 있는 도구에 bin 줄만 있으면 맞추기 전에 멈춘다(bin만 깔리면 그 도구가 멈춤, --check도)
-	if toolcfg.SyncLint(REPO, CONF+"/sync.list", os.Stdout, os.Stderr) != 0 {
-		os.Exit(2)
-	}
-	STAMP = time.Now().Format("20060102-150405")
+	onSignals()
 	var err error
 	if TMP, err = os.MkdirTemp(os.Getenv("TMPDIR"), "herdr-sync."); err != nil {
 		os.Exit(1)
 	}
+	if !check {
+		recoverJournal() // 앞 실행이 모으다 죽어 남긴 스테이징(gofix-ops B05)
+	}
+	ready(REPO)
+	ready(CONF)
+	// lib/<도구>/가 있는 도구에 bin 줄만 있으면 맞추기 전에 멈춘다(bin만 깔리면 그 도구가 멈춤, --check도)
+	if toolcfg.SyncLint(REPO, CONF+"/sync.list", os.Stdout, os.Stderr) != 0 {
+		exit(2)
+	}
+	STAMP = time.Now().Format("20060102-150405")
 	KEYS = CONF + "/settings/keys.json"
 	parseList()
 	for _, s := range append(append([]string(nil), takes...), pulls...) {
@@ -227,28 +236,6 @@ func specShape(s string) bool {
 func before(s string) string { i := strings.IndexByte(s, ':'); return s[:i] }
 func after(s string) string  { i := strings.IndexByte(s, ':'); return s[i+1:] }
 
-func machinesFromHC() []string {
-	out, err := proc.Output(exec.Command("hc", "machine", "ls"))
-	if err != nil {
-		return nil
-	}
-	var v struct {
-		Machines []struct {
-			Name string `json:"name"`
-		} `json:"machines"`
-	}
-	if json.Unmarshal(out, &v) != nil {
-		return nil
-	}
-	var r []string
-	for _, m := range v.Machines {
-		if m.Name != "" {
-			r = append(r, m.Name)
-		}
-	}
-	return r
-}
-
 // git: 표준 출력(끝 줄바꿈 뺌)과 종료 코드. 표준 오류는 그대로 흘린다
 func git(args ...string) (string, int) {
 	c := exec.Command("git", args...)
@@ -262,15 +249,22 @@ func gitq(args ...string) (string, int) { // 표준 오류를 버린다
 	return strings.TrimRight(string(out), "\n"), proc.Code(err)
 }
 
-// ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only
+// ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only. git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다
+// (gofix-ops B01·O-01·K-01: 실패한 status의 빈 출력을 깨끗함으로 읽어 커밋 안 된 내용을 맥·기계에 깔았다)
 func ready(r string) {
-	if _, rc := gitq("-C", r, "rev-parse", "--git-dir"); rc != 0 {
+	if _, rc := gitq("-C", r, "rev-parse", "--git-dir"); rc == proc.TimeoutCode {
+		die("저장소 상태를 읽지 못했다 (git rev-parse 시간 넘김): %s", r)
+	} else if rc != 0 {
 		die("저장소가 없다: %s", r)
 	}
-	if b, _ := gitq("-C", r, "symbolic-ref", "--short", "HEAD"); b != "main" {
+	if b, rc := gitq("-C", r, "symbolic-ref", "--short", "HEAD"); rc == proc.TimeoutCode {
+		die("저장소 상태를 읽지 못했다 (git symbolic-ref 시간 넘김): %s", r)
+	} else if b != "main" {
 		die("저장소가 main 브랜치가 아니다: %s", r)
 	}
-	if s, _ := git("-C", r, "status", "--porcelain"); s != "" {
+	if s, rc := git("-C", r, "status", "--porcelain"); rc != 0 {
+		die("저장소 상태를 읽지 못했다 (git status 종료 %d — 모름): %s", rc, r)
+	} else if s != "" {
 		die("저장소에 커밋하지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시: %s", r)
 	}
 	if _, rc := git("-C", r, "pull", "-q", "--ff-only"); rc != 0 {
@@ -309,10 +303,20 @@ func parseList() {
 	if err != nil {
 		die("sync.list를 읽지 못했다: %s", CONF)
 	}
+	// 끝 줄바꿈이 없거나 줄 끝에 CR이 있으면 맞추기 전에 멈춘다 — 셸 판은 줄바꿈 없는 마지막 줄을 버리고 CR 줄을 못 맞춘다(Go 판만
+	// 그 줄을 따르면 같은 목록으로 판마다 지움이 갈린다, gofix-ops C04·O-10). 칸은 셸 read처럼 빈칸·탭으로만 나눈다
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		fmt.Fprintf(os.Stderr, "herdr-sync: sync.list 끝 줄바꿈이 없다 — 마지막 줄 뒤에 줄바꿈을 붙인다 (%s/sync.list)\n", CONF)
+		exit(2)
+	}
 	type tl struct{ b, k, r, d, t string }
 	var tls []tl
-	for _, line := range splitLines(string(data)) {
-		f := strings.Fields(line)
+	for n, line := range splitLines(string(data)) {
+		if strings.HasSuffix(line, "\r") {
+			fmt.Fprintf(os.Stderr, "herdr-sync: sync.list %d번 줄 끝에 CR이 있다 — 줄바꿈은 LF만 (%s/sync.list)\n", n+1, CONF)
+			exit(2)
+		}
+		f := strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == '\t' })
 		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
 			continue
 		}
@@ -322,6 +326,11 @@ func parseList() {
 		b, k, r, t := f[0], f[1], f[2], f[3]
 		if t == "" {
 			die("sync.list 줄에 칸이 모자란다: %s %s", b, k)
+		}
+		// 맥 경로는 ~ 아래, 저장소 경로는 그 저장소 아래여야 한다 — 절대 경로·..로 바깥에 쓰거나 지우지 않게(gofix-ops B11)
+		if !inside(strings.TrimSuffix(strings.SplitN(k, "#", 2)[0], "@")) || (r != "-" && !inside(strings.TrimPrefix(r, "tools:"))) {
+			fmt.Fprintf(os.Stderr, "herdr-sync: sync.list %d번 줄 경로가 뿌리 밖이다(절대 경로·..): %s %s\n", n+1, k, r)
+			exit(2)
 		}
 		for _, o := range strings.Split(t, ",") {
 			w := map[string]string{"all9": "all", "mac7": "macos", "mac-only": "local"}[o]
@@ -473,6 +482,20 @@ func parseList() {
 			LKT = append(LKT, u.r)
 		}
 	}
+}
+
+// inside: 상대 경로이고 ..·빈 칸으로 뿌리를 벗어나지 않는가(끝 /·/**·* 꼴은 그대로 받는다)
+func inside(p string) bool {
+	p = strings.TrimSuffix(strings.TrimSuffix(p, "/**"), "/")
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") {
+		return false
+	}
+	for _, s := range strings.Split(p, "/") {
+		if s == ".." || s == "." || s == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func unitKey(k string) bool {

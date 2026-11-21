@@ -212,7 +212,16 @@ func lintContract(t *testing.T, c *ct.C, r *ct.Res, T, tool string, runIn func(s
 	put(R+"/upper.txt", "SECRET-HOST-3 up\n")
 	runIn(R, T+"/c1", "lint", "upper.txt")
 	c.Ok("lint: 대소문자를 무시한다", r.RC == 1 && r.Out == "upper.txt:1: secret-host-[0-9]+")
-	for _, f := range []string{"latin1.txt", "blob.bin", "secret-host-8.md", "upper.txt"} {
+	// 비ASCII(감사 C05/O-05): 바이트 단위·대소문자 무시는 ASCII만(LC_ALL=C grep -iE) — école은 École에 안 걸린다
+	put(T+"/c2/private-patterns.txt", "école\n")
+	put(R+"/up8.txt", "École here\n")
+	put(R+"/lo8.txt", "école here\n")
+	put(R+"/École.md", "x\n")
+	runIn(R, T+"/c2", "lint", "up8.txt", "École.md")
+	c.Ok("lint: 비ASCII 대소문자는 접지 않음(내용·경로)", r.RC == 0 && r.Out == "")
+	runIn(R, T+"/c2", "lint", "lo8.txt", "up8.txt")
+	c.Ok("lint: 비ASCII 같은 바이트는 잡음", r.RC == 1 && r.Out == "lo8.txt:1: école")
+	for _, f := range []string{"latin1.txt", "blob.bin", "secret-host-8.md", "upper.txt", "up8.txt", "lo8.txt", "École.md"} {
 		os.Remove(R + "/" + f)
 	}
 
@@ -243,6 +252,17 @@ func syncLintContract(t *testing.T, c *ct.C, r *ct.Res, T string, run func(strin
 	c.Ok("sync-lint: 다른 대상의 bin 줄은 그 대상 lib 줄이 따로 있어야", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1")
 	run("-", "sync-lint", T+"/sr", T+"/none")
 	c.Ok("sync-lint: sync.list 없음은 종료 2", r.RC == 2)
+	// 빈 <sync.list> 인자는 기본 경로(셸 판 ${2:-…}, 감사 L01)
+	os.MkdirAll(T+"/c4", 0o755)
+	put(T+"/c4/sync.list", ct.Read(T+"/sl"))
+	run(T+"/c4", "sync-lint", T+"/sr", "")
+	c.Ok("sync-lint: 빈 sync.list 인자는 설정 폴더의 sync.list", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1")
+	// 줄 끝 CR·끝 줄바꿈 없음은 오류(herdr-sync 셸 판이 그 줄을 못 맞추거나 버린다 — 감사 O-10), 두 판 같은 출력
+	nl := T + "/nl.list"
+	put(nl, "# 시험\n도구 .local/bin/tool-c tools:bin/tool-c all\r\n도구 .local/bin/tool-d tools:bin/tool-d all")
+	run("-", "sync-lint", T+"/sr", nl)
+	c.Ok("sync-lint: 줄 끝 CR·끝 줄바꿈 없음은 줄 번호와 종료 1", r.RC == 1 && r.Out == "" &&
+		r.Err == "herdr-tools-config: "+nl+":2: 줄 끝 CR — 줄바꿈은 LF만\nherdr-tools-config: "+nl+":3: 끝 줄바꿈 없음 — 마지막 줄 뒤에 줄바꿈을 붙인다\n")
 	// 함께 쓰는 lib(lib/<이름>/OWNER = 쓰는 도구): hc-lane bin 줄은 hc-merger 나무 줄도 같은 대상으로 요구한다(2026-11-21 merger-go)
 	os.MkdirAll(T+"/sd/lib/hc-lane", 0o755)
 	put(T+"/sd/lib/hc-merger/OWNER", "hc-lane\n")

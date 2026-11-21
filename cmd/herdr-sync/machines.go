@@ -114,7 +114,8 @@ func sin() (string, bool) {
 
 // goRunWarn: 공통 실행기의 「Go 판을 쓸 수 없다」 경고 줄(그 기계에 go가 없음) — 도구 문제 판정에서 뺀다
 func goRunWarn(l string) bool {
-	return strings.Contains(l, "경고: Go 판을 쓸 수 없다") || strings.Contains(l, "고치기: 그 기계에 go를")
+	return strings.Contains(l, "경고: Go 판을 쓸 수 없다") || strings.Contains(l, "고치기: 그 기계에 go를") ||
+		strings.Contains(l, "이 기계에는 go가 없어 셸 판으로 돈다") // 리눅스 서버 첫 실행 한 번짜리 안내(O-13)
 }
 
 // settings: 대상 기계의 herdr-settings-merge에 넘기고 판정 줄을 옮긴다. 충돌 수를 더하고 다름 묶음(설정·도구문제:설정)을 돌려준다
@@ -324,7 +325,11 @@ func syncMachines(machines []string, mq *qres) {
 			var wo bytes.Buffer
 			for n, ch := range chunks(wm, 3) {
 				pre, tar := wpack(home, ch, fmt.Sprintf("wm%d.src", n))
-				pipeline(pre, tar, on(m, true, "W", STAMP), &wo)
+				// 파일마다 W를 찍은 뒤 base 쓰기에서 실패해도 조각은 0이 아니다 — 그 기계를 같음으로 보이지 않는다(gofix-ops B09)
+				if p, c := pipeline(pre, tar, on(m, true, "W", STAMP), &wo); p != 0 || c != 0 {
+					warn("%s 나무 쓰기 묶음이 실패로 끝났다 (보냄 %d · 받음 %d — base를 못 적었을 수 있다)", m, p, c)
+					diffs = append(diffs, "base")
+				}
 			}
 			for j, r := range wres(wm, wo.String()) {
 				if r[0] == "ok" {
@@ -383,6 +388,7 @@ func syncMachines(machines []string, mq *qres) {
 		}
 		if !check && len(bp) > 0 && runIn(on(m, true, "B"), bytes.NewReader(joinLines(bp)), nil) != 0 {
 			warn("%s base를 쓰지 못했다", m)
+			diffs = append(diffs, "base") // 다음 실행이 다시 적는다 — 그때까지 같음이 아니다(B09)
 		}
 		diffs = append(diffs, settings(m, &conf))
 		for j, k := range RMK {
@@ -444,12 +450,18 @@ func publish(machines []string) {
 	if pub == "" {
 		return
 	}
+	// 게시기는 검사·내보낸 비공개 커밋을 이 파일에 적는다(성공 때만) — 릴리스는 그 커밋으로 짓는다(gofix-ops A02)
+	res := TMP + "/published"
 	c := exec.Command("bash", REPO+"/bin/herdr-tools-publish")
-	c.Env = append(os.Environ(), "HERDR_TOOLS_CONFIG="+CONF, "HERDR_TOOLS_REPO="+REPO)
+	c.Env = append(os.Environ(), "HERDR_TOOLS_CONFIG="+CONF, "HERDR_TOOLS_REPO="+REPO, "HERDR_TOOLS_PUBLISH_RESULT="+res)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	if run(c) != 0 {
 		pubwarn("공개 저장소 내보내기 실패 (맞추기는 끝났다) — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시")
 		return
 	}
-	release(pub, machines, pubwarn)
+	checked := ""
+	if b, err := os.ReadFile(res); err == nil {
+		checked = strings.TrimSpace(string(b))
+	}
+	release(pub, checked, machines, pubwarn)
 }
