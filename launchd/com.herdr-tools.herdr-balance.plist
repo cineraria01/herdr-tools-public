@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- herdr-balance 자동 맞춤(watch) 상주(예시 — 깔지 않는다. 맥만. 쓰는 법은 README 「launchd 작업」). 지킴이가 Herdr 터미널 herdr-balance에서 돌리고,
+     KeepAlive라 60초마다 다시 불려 터미널이 죽었으면 다시 띄운다. 기록 ~/Library/Logs/herdr-balance.log -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.herdr-tools.herdr-balance</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" exec "$HOME/.local/bin/hc-launchd-guard" --log "$HOME/Library/Logs/herdr-balance.log" herdr-balance -- python3 "$HOME/.local/bin/herdr-balance" --watch</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+</dict>
+</plist>

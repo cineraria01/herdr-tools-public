@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- hc-fill watch 보기(기본 꺼짐, 깔지 않는다). 쓰는 법은 README 「hc-fill」. 기록은 ~/.local/state/hc-fill/watch.log -->
+<!-- hc-fill watch 보기(기본 꺼짐, 깔지 않는다). 쓰는 법은 README 「hc-fill」·「launchd 작업」. 기록은 ~/.local/state/hc-fill/watch.log
+     launchd는 지킴이(hc-launchd-guard)만 띄우고, 지킴이가 Herdr 터미널 hc-fill-watch에서 watch를 돌린다(launchd가 띄운 Go 판은
+     macOS 문서 폴더 권한 창에 멈춘다). KeepAlive라 지킴이가 60초마다 다시 불려 터미널이 죽었으면 다시 띄운다 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -8,7 +10,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>mkdir -p "$HOME/.local/state/hc-fill" &amp;&amp; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" exec "$HOME/.local/bin/hc-fill" watch --every 60 &gt;&gt;"$HOME/.local/state/hc-fill/watch.log" 2&gt;&amp;1</string>
+    <string>mkdir -p "$HOME/.local/state/hc-fill" &amp;&amp; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" exec "$HOME/.local/bin/hc-launchd-guard" --log "$HOME/.local/state/hc-fill/watch.log" hc-fill-watch -- hc-fill watch --every 60</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

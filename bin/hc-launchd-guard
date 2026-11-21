@@ -1,0 +1,52 @@
+#!/bin/bash
+# hc-launchd-guard: launchd 작업을 Herdr 코어 문맥으로 옮기는 얇은 지킴이 (2026-11-21 go-launchd-tcc)
+#
+# hc-launchd-guard [--log <파일>] <이름> -- <도구> [인자…]
+#   이 기계에 <이름> 터미널이 살아 있으면 아무것도 안 하고 0.
+#   없으면 hc run --bg --no-parent --outlive-parent --rm --name <이름> --cwd $HOME -- env -u HC_TERMINAL_ID -u HC_SCOPE -u HC_TERMINAL_SOCKET <도구 절대 경로> [인자…]
+#   hc가 안 되면(hc ls 실패·목록 아님, hc run 실패) 그 자리에서 HERDR_IMPL=bash로 도구를 exec(셸 판 — 종료 코드 그대로).
+#   --log: 도구 출력(두 길 모두)과 이 지킴이의 줄을 그 파일 끝에 잇는다.
+#
+# 왜: launchd가 띄운 새 Go 바이너리는 ~/Documents 첫 접근에서 macOS 개인 정보 보호 창에 사람 응답까지 잠든다(빌드마다 서명이 바뀌어
+# 판마다 다시 묻는다 — 2026-11-21 맥 hc-fill 37분). Herdr 터미널(herdr-core가 띄움)에서는 창이 안 뜬다. 터미널 표식을 지우는 것은
+# 도구가 launchd에서처럼 「터미널 밖」으로 돌게 하려는 것이다 — 도구가 띄우는 hc run이 이 터미널의 자식이 되지 않게(자식은 부모와 같이 끝난다).
+# 상주 작업(KeepAlive)이면 launchd가 이 지킴이를 ThrottleInterval마다 다시 불러 터미널이 죽었으면 다시 띄운다. 주기 작업(StartInterval)은
+# 앞 판이 아직 돌면 건너뛴다. hc ls가 잠깐 실패해도 셸 판이 같이 돌 수 있다 — 도구의 잠금(hc-fill watch.lock 등)이 겹침을 막는다.
+# 의존: hc·jq(macOS /usr/bin/jq). 이 기계 터미널만 본다(주소에 / 없음). 예시 plist는 launchd/, 켜는 법은 README 「launchd 작업」.
+set -u
+log=
+[ "${1-}" = --log ] && { log=${2-}; shift 2 || exit 2; }
+name=${1-}
+case $name in '' | *[!a-z0-9_-]*) echo "hc-launchd-guard: 이름은 a-z 0-9 - _ (1~32자): $name" >&2; exit 2 ;; esac
+[ ${#name} -le 32 ] && [ "${2-}" = -- ] && [ -n "${3-}" ] || { echo "쓰는 법: hc-launchd-guard [--log <파일>] <이름> -- <도구> [인자…]" >&2; exit 2; }
+shift 2
+tool=$(command -v "$1") || { echo "hc-launchd-guard: 도구를 못 찾았다: $1" >&2; exit 127; }
+shift
+[ -z "$log" ] || exec >>"$log" 2>&1
+
+# alive: 0 살아 있음 · 1 없음 · 2 모름(hc·jq 실패, 목록 아님)
+alive() {
+  local out
+  out=$(hc ls --json 2>/dev/null </dev/null) || return 2
+  printf '%s' "$out" | jq -e --arg n "$name" 'if (.terminals | type) != "array" then error("목록 아님")
+    else any(.terminals[]; .state == "live" and .name == $n and ((.address // "/") | contains("/") | not)) end' >/dev/null 2>&1
+  case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+
+shell() {
+  echo "$(date '+%F %T') hc-launchd-guard $name: $1 — 셸 판으로 그 자리에서 돈다" >&2
+  shift
+  HERDR_IMPL=bash exec "$tool" "$@"
+}
+
+alive; r=$?
+[ $r = 0 ] && exit 0
+[ $r = 1 ] || shell "hc ls를 못 읽음" "$@"
+cmd=(/usr/bin/env -u HC_TERMINAL_ID -u HC_SCOPE -u HC_TERMINAL_SOCKET "$tool" "$@")
+[ -z "$log" ] || cmd=(/bin/sh -c 'exec "$@" >>"$0" 2>&1' "$log" "${cmd[@]}")
+if hc run --bg --no-parent --outlive-parent --rm --name "$name" --cwd "$HOME" -- "${cmd[@]}" >/dev/null 2>&1 </dev/null; then
+  echo "$(date '+%F %T') hc-launchd-guard $name: Herdr 터미널로 띄움" >&2
+  exit 0
+fi
+alive && exit 0   # 이름 겹침: 그사이 다른 지킴이가 띄웠다
+shell "hc run 실패" "$@"

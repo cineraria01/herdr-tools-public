@@ -11,6 +11,7 @@
 | `herdr-tools-config` | 개인 설정 읽기·개인 값 검사(`lint`) | 맥 |
 | `herdr-tools-publish` | 범용 저장소를 기록 없이 공개 저장소로 내보내기(herdr-sync가 부른다) | 맥 |
 | `herdr-balance` | Herdr 창에서 지휘 pane 옆 worker 높이 맞추기(`--watch`) | 맥 |
+| `hc-launchd-guard` | launchd 작업을 Herdr 터미널에서 돌리는 지킴이(아래 「launchd 작업」) | macOS 기계 |
 | `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `worker-mac-check`·`worker-mac-setup` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 워커 맥 점검·설정(`worker-mac-setup mesh`: 워커끼리 ssh·hc 연결) | 맥·macOS 기계 |
 | `claude/hooks/` | 같은 작업 트리 동거 편집 가드, 무인 루프 질문 창 막기, `hc-lane wait` 분리(&) 실행 막기, 레인 세션의 셸 파일 고치기·heredoc 커밋·zsh 확장 경로 막기(`lane-no-shell-edit.sh`) | macOS 기계 |
 
@@ -311,7 +312,15 @@ hc-fill rm <레인>               # 대기열에서만 뺀다(떠 있는 터미�
 | `repo` | 프로젝트 기계 경로 | 그 기계의 저장소. 경로가 없는 기계에는 그 프로젝트를 띄우지 않는다. local 기계 경로로 선행 판정 |
 | `inbox` | 기계 폴더 | 받은편지를 걷어 올 기계와 그 기계의 폴더(`~/`는 그 기계 HOME). 여러 줄 가능, 없으면 받은편지를 보지 않는다 |
 
-- 늘 돌리기(기본 꺼짐): `cp launchd/com.herdr-tools.hc-fill.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-tools.hc-fill.plist`. 끄기 `launchctl bootout gui/$(id -u)/com.herdr-tools.hc-fill`. 기록 `~/.local/state/hc-fill/watch.log`.
+- 늘 돌리기(기본 꺼짐): `cp launchd/com.herdr-tools.hc-fill.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-tools.hc-fill.plist`. 끄기 `launchctl bootout gui/$(id -u)/com.herdr-tools.hc-fill`(그다음 Herdr 터미널 `hc-fill-watch`도 `hc kill hc-fill-watch`). 기록 `~/.local/state/hc-fill/watch.log`. launchd는 지킴이만 띄운다(아래 「launchd 작업」).
+
+## launchd 작업: 지킴이(`hc-launchd-guard`)로 Herdr 터미널에서
+
+launchd가 바로 띄운 새 Go 바이너리는 `~/Documents`에 처음 닿을 때 macOS 개인 정보 보호 창(「'hc-fill'이(가) 문서 폴더의 파일에 접근하려고 합니다」)을 띄우고 사람이 누를 때까지 잠든다. Go 바이너리는 빌드마다 서명이 바뀌어 한 번 허용해도 새 판마다 다시 묻는다(2026-11-21 맥 hc-fill 37분 멈춤). Herdr 터미널(herdr-core가 띄움)과 `hc exec`에서는 창이 안 뜬다. 그래서 두 겹으로 막는다.
+
+- **지킴이**: launchd는 `hc-launchd-guard [--log <파일>] <이름> -- <도구> [인자…]`만 띄운다. 이 기계에 `<이름>` 터미널이 살아 있으면 아무것도 안 하고, 없으면 `hc run --bg --no-parent --outlive-parent --rm --name <이름> --cwd $HOME -- env -u HC_TERMINAL_ID -u HC_SCOPE -u HC_TERMINAL_SOCKET <도구> …`로 Herdr 터미널에서 돌린다. 터미널 표식을 지워 도구는 launchd에서처럼 「터미널 밖」으로 돈다(도구가 띄우는 레인이 그 터미널의 자식이 되어 같이 끝나지 않게). `hc ls`·`hc run`이 안 되면 그 자리에서 `HERDR_IMPL=bash`로 도구를 돌린다(셸 판). 상주 작업은 `KeepAlive`+`ThrottleInterval 60`으로 60초마다 지킴이가 다시 불려 죽은 터미널을 다시 띄우고, 주기 작업(`StartInterval`)은 앞 판이 돌면 건너뛴다. 예시 plist `launchd/`(hc-fill·hc-sweep·herdr-balance). 시험 `tests/hc-launchd-guard.test.sh`.
+- **공통 실행기**(`lib/go-run.sh`): 스위치가 `auto`인데 launchd 문맥(TERM 없음·`dumb`, `HC_TERMINAL_ID`·`SSH_CONNECTION` 없음, 조상에 herdr-core·sshd 없음 — macOS 27 실측으로 launchd 작업도 `XPC_SERVICE_NAME=0`이라 그것으로는 못 가른다)이면 Go 판을 부르지 않고 셸 판으로 돈다. 안내는 도구마다 처음 한 번(`~/.local/state/herdr-go/launchd-noted-<도구>`). `<도구>_IMPL=go`로 못박으면 그대로 Go 판.
+- 지킴이 없이 남은 launchd 작업도 공통 실행기 덕에 창에 멈추지 않는다(셸 판). 지킴이로 옮기면 Go 판이 돈다.
 
 ## 설정
 

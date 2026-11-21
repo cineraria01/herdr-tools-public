@@ -21,8 +21,21 @@ go_run_src() {
     xargs -0 cksum | cksum | awk '{print $1"."$2}')
 }
 
+# go_run_daemon: launchd·cron이 띄운 문맥인가(0 그렇다). 그 문맥의 새 Go 바이너리는 ~/Documents 첫 접근에서 macOS 개인 정보 보호(TCC)
+# 창을 띄우고 사람 응답까지 잠든다 — ad-hoc 서명이 빌드마다 바뀌어 「허용」해도 새 판마다 다시 묻는다(2026-11-21 맥 hc-fill 37분 멈춤).
+# 실측(2026-11-21 macOS 27): launchd 작업도 XPC_SERVICE_NAME=0이라 그것으로는 못 가른다. launchd 작업에는 TERM·HC_TERMINAL_ID가 없고,
+# Herdr 터미널·hc exec(코어 문맥 — 창이 안 뜸)는 조상에 herdr-core가 있다. 그래서: 터미널·Herdr 터미널·SSH 표식이 다 없고
+# 조상에 herdr-core·sshd가 없으면 그렇다. ps를 못 읽으면 그렇다(셸 판은 늘 돈다 — 창에 멈추는 쪽을 고르지 않는다).
+# TERM=dumb도 없음으로 본다: launchd의 bash는 TERM이 없으면 스스로 dumb을 둔다(실측)
+go_run_daemon() {
+  [ -z "${HC_TERMINAL_ID-}" ] && [ "${TERM:-dumb}" = dumb ] && [ -z "${SSH_CONNECTION-}" ] || return 1
+  ps -axo pid=,ppid=,comm= 2>/dev/null | awk -v p="$$" '
+    { c = $3; for (i = 4; i <= NF; i++) c = c " " $i; sub(/.*\//, "", c); pp[$1] = $2; cm[$1] = c }
+    END { for (k = 0; k < 64 && (p in pp) && p > 1; k++) { if (cm[p] ~ /^(herdr-core|sshd|sshd-session)$/) exit 1; p = pp[p] }; exit 0 }'
+}
+
 go_run() {
-  local tool=$1 up v impl bin gob a fresh= stale=
+  local tool=$1 up v impl bin gob a fresh= stale= note
   shift
   up=$(printf %s "$tool" | tr 'a-z-' 'A-Z_')
   v=${up}_IMPL impl=${!v:-${HERDR_IMPL:-auto}}
@@ -31,6 +44,15 @@ go_run() {
     go|auto) ;;
     *) echo "$tool: ${up}_IMPL·HERDR_IMPL은 go·bash 가운데 하나: $impl" >&2; return 2 ;;
   esac
+  # launchd 문맥이면 auto는 셸 판(IMPL=go로 못박으면 그대로 Go 판). 안내는 도구마다 처음 한 번(표식 파일)
+  if [ "$impl" = auto ] && go_run_daemon; then
+    note=${XDG_STATE_HOME:-$HOME/.local/state}/herdr-go/launchd-noted-$tool
+    if [ ! -e "$note" ]; then
+      mkdir -p "${note%/*}" 2>/dev/null && : >"$note" 2>/dev/null
+      echo "$tool: launchd 문맥(터미널 밖)이라 셸 판으로 돈다 — Go 바이너리는 macOS 문서 폴더 권한 창에 멈춘다. Go 판은 hc-launchd-guard로 Herdr 터미널에서(README 「launchd 작업」)" >&2
+    fi
+    return 0
+  fi
   v=${up}_BIN bin=${!v-}
   if [ -z "$bin" ]; then
     bin=$go_run_root/.bin/$tool
