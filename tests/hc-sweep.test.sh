@@ -30,7 +30,8 @@ esac
 exit 1
 EOF
 chmod +x "$T/bin/hc"
-export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg" XDG_CACHE_HOME="$T/cache"
+mkdir -p "$T/tmp"   # 디스크 쓸기(lib/hc-sweep/disk.py)가 진짜 임시 폴더를 쓸지 않게
+export PATH="$T/bin:$PATH" HOME="$T/home" HERDR_TOOLS_CONFIG="$T/cfg" XDG_CACHE_HOME="$T/cache" TMPDIR="$T/tmp"
 sweep() { out=$(python3 "$SWEEP" --only-under "$T" "$@" 2>&1); rc=$?; }
 cfg() { printf '%s\n' "$@" >"$T/cfg/config"; }
 LOG=$T/home/.claude-tasks/closed.log

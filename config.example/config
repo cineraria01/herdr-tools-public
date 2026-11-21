@@ -22,6 +22,10 @@ balance.remote     worker-a/ worker-b/
 sweep.wt_suffix    .wt
 sweep.orphan_keep  example-daemon herdr-core
 sweep.orphan_kill  off
+# hc-sweep 디스크 쓸기: $TMPDIR 바로 아래 go-build*·Test*를 지울 나이(시간, 없으면 3, 0이면 끔),
+# 홈 볼륨 여유가 이 GB 아래면 hc-disk-low 사건 한 번(없으면 10, 0이면 끔)
+sweep.tmp_hours    3
+sweep.disk_free_gb 10
 
 # hc-lane: --brief 사본 자리(대상 기계 경로, ~ 는 그 기계 집. 없으면 지시문과 같은 폴더),
 # -- 뒤 명령이 없을 때 실행 명령 틀({brief} 자리에 사본 경로, 셸 문법. 없으면 -- 뒤 명령이 꼭 있어야 함),
