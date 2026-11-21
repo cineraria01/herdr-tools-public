@@ -37,7 +37,8 @@ trap 'stop 129' HUP
 # 싼 검사(몇 초): 맨 앞에 돌리고, 문법·개인 값·싼 검사 가운데 하나라도 실패면 무거운 시험을 돌리지 않고 끝(종료 1).
 # HERDR_VERIFY_ALL=1이면 실패해도 끝까지 다 돈다. 아래 루프는 이 목록을 다시 돌리지 않는다.
 # 2026-11-21 줄 수 한도에 걸린 레인이 이름순으로 hc-lane 시험(20분+) 뒤에야 반송돼 병합 큐 전체가 기다렸다.
-CHEAP="tests/line-budget.test.sh"
+# 2026-11-21 publish-lint-go: 공개 내보내기의 비밀 꼴(가짜 SHA 40자 등)이 착지 뒤에야 걸려 릴리스가 막혔다 — 착지 전에 본다
+CHEAP="tests/line-budget.test.sh tests/publish-secrets.test.sh"
 run() {
   t=$1
   [ -f "$t" ] || return 0

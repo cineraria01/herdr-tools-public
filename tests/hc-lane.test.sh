@@ -14,6 +14,8 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 isolate_file=$here/../lib/hc-lane/test-isolate.sh
 [ -f "$isolate_file" ] || isolate_file=$here/../../lib/hc-lane/test-isolate.sh
 . "$isolate_file" || exit 1
+# hc-lane 판(go·bash) — Go 판(cmd/hc-lane)이 맡은 하위 명령은 Go로, 나머지는 셸로. 두 판이 같은 계약을 지킨다(tests/hc-lane-bash.test.sh가 bash로)
+export HC_LANE_IMPL=${HC_LANE_IMPL:-go}
 W="$T/공백 있는 폴더"   # 모든 저장소를 공백·한글 경로 아래에 둔다
 mkdir -p "$T/bin" "$W"
 # 가짜 hc: run 인자는 $HCLOG, exec 인자는 $HCLOG.exec에 한 줄씩. exec는 -- 뒤 명령을 그 자리에서 돌린다(--on 시험용).
@@ -396,6 +398,18 @@ rm -f "$T/teardown-ran"
 run clean --repo "$R" --branch c-untracked
 t "clean: 무시되지 않은 untracked → 멈추고 목록" '[ $rc != 0 ] && grep -Fq note.txt "$T/err" && last "\"clean\":\"stopped\""'
 t "clean: 그때 아무것도 안 지움(파일·무시 폴더·등록·브랜치, teardown도 안 돌림)" 'kept c-untracked && reg c-untracked && [ -f "$R.wt/c-untracked/note.txt" ] && [ -f "$R.wt/c-untracked/.omc/state/s.json" ] && [ ! -e "$T/teardown-ran" ]'
+
+# 정리가 worktree remove 도중 끊긴 자리(추적 파일 일부가 지워짐, 등록·가지는 남음): 변경이 지움뿐이면 다시 부를 때 이어서 끝낸다
+# (2026-11-21 hc-lane-go-land 지시문 추가분 — clean이 이 레인 몫이라 넘겨받음). 지움 말고 다른 변경이 섞이면 그대로 멈춘다
+land c-cut
+rm -- "$R.wt/c-cut/c-cut.txt"
+run clean --repo "$R" --branch c-cut
+t "clean: 끊긴 정리(변경이 지움뿐) → 이어서 지움, 종료 0" '[ $rc = 0 ] && gone c-cut && printf "%s" "$out" | grep -Fq "정리가 끊긴 자리: 추적 파일 1개" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+land c-cut2
+rm -- "$R.wt/c-cut2/c-cut2.txt"; echo x >"$R.wt/c-cut2/new.txt"
+run clean --repo "$R" --branch c-cut2
+t "clean: 지움에 새 파일이 섞이면 멈춤(안 지움)" '[ $rc = 1 ] && kept c-cut2 && reg c-cut2 && grep -Fq new.txt "$T/err" || { cat "$T/err"; false; }'
+rm -- "$R.wt/c-cut2/new.txt"; git -C "$R.wt/c-cut2" checkout -q -- c-cut2.txt; run clean --repo "$R" --branch c-cut2   # 뒤 시험에 남기지 않게
 
 land c-tracked
 echo changed >>"$R.wt/c-tracked/a"
@@ -1937,8 +1951,11 @@ conf 'lane.start_wait 1' 'lane.first_turn_wait 60'
 sk; echo 0 >"$HCLOG.time"
 out=$(PATH="$clockbin:$PATH" HC_LANE_POLL=10 HC_FAKE_NOSTATUS=idle HC_FAKE_GET9_FAIL=2-99 HC_LANE_FILL=1 XDG_STATE_HOME=$SD \
   "$LANE" --name lane-ftq --repo "$R" -- claude "첫 지시" 2>&1); rc=$?
-echo go >&8; exec 8>&-
+# 사건이 보일 때까지 FIFO를 열어 둔다: 감시가 첫 sleep에 닿기 전에 닫으면 「go」가 버려져 5초 뒤 late가 된다(Go 판은 감시를 새 프로세스로
+# 띄워 셸 판 서브셸보다 늦게 닿는다 — 2026-11-21 hc-lane-go-start). 띄우기가 감시를 기다렸으면 여전히 late
+echo go >&8
 for ((i=0; i<100; i++)); do fev lane-ftq >/dev/null && break; sleep 0.05; done
+exec 8>&-
 t "대기열은 첫 idle에 주소를 받고, 연결이 끊겨도 감시는 따로 막힘을 적는다" '[ $rc = 0 ] && [ ! -e "$HCLOG.late" ] && printf "%s\n" "$out" | tail -n 1 | jq -e ".lane == \"t9zz\" and .start == \"ok\"" >/dev/null && [ "$(fev lane-ftq | grep -c .)" = 1 ]'
 conf 'lane.start_wait 1' 'lane.first_turn_wait 1'
 sk; echo 100 >"$HCLOG.time"
@@ -2926,27 +2943,32 @@ HERDR_LAND_PRIORITY=2 HC_LANE_FILL=1 HC_FAKE_RUN_ADDR=t9lp run --start-wait 0 --
 t "띄우기: HERDR_LAND_PRIORITY를 레인 환경에" '[ $rc = 0 ] && has HERDR_LAND_PRIORITY=2 || { cat "$T/err"; false; }'
 
 # 23. 주차·이어 띄우기(2026-11-20 fill-existing-defects, 사용자 「노는 워크트리 없이」): 먼저 띄운 레인이 준비를 끝내면 hc-lane park로
-# 가지를 원격 lane/<레인>에 두고 임대를 같은 --atomic push로 놓은 뒤 「주차」 사건 → clean이 「제출됨」으로 지움 → 선행 착지 뒤
-# hc-lane --resume이 그 가지에서 새 작업 트리를 만든다
+# 가지를 원격 refs/park/<레인>(2026-11-21 hc-lane-go-start — 제출 가지 lane/<레인>과 다른 이름)에 두고 임대를 같은 --atomic push로
+# 놓은 뒤 「주차」 사건 → clean이 「주차됨」으로 지움 → 선행 착지 뒤 hc-lane --resume이 그 가지에서 새 작업 트리를 만든다
+pref() { git -C "$D/origin.git" rev-parse -q --verify "refs/park/$1" 2>/dev/null; }
 mk t23
 seed .claude/herdr-verify.sh 'exit 0'
 EVF=$T/.local/state/hc-lane/events.tsv
 run --name pk-a --repo "$R" -- claude; pa_=$(lref pk-a); wt="$R.wt/pk-a"
 (cd "$wt" && echo prep >pk.txt)
 out=$(cd "$wt" && HC_LANE=pk-a HC_LANE_LEASE=$pa_ "$LANE" park 2>"$T/err"); rc=$?
-t "park: 커밋 안 된 새 파일이 있으면 종료 1, 원격 lane/<레인> 안 만듦·임대 그대로" '[ $rc = 1 ] && ! git -C "$D/origin.git" rev-parse -q --verify refs/heads/lane/pk-a >/dev/null && [ "$(lref pk-a)" = "$pa_" ] || { cat "$T/err"; false; }'
+t "park: 커밋 안 된 새 파일이 있으면 종료 1, 원격 refs/park/<레인> 안 만듦·임대 그대로" '[ $rc = 1 ] && [ -z "$(pref pk-a)" ] && [ "$(lref pk-a)" = "$pa_" ] || { cat "$T/err"; false; }'
 (cd "$wt" && git add -- pk.txt && git commit -qm "pk-a: 준비" -- pk.txt); ps_=$(git -C "$wt" rev-parse HEAD)
 out=$(cd "$wt" && HC_LANE=pk-a HC_LANE_LEASE=$pa_ "$LANE" park "실패 시험만" 2>"$T/err"); rc=$?
-t "park: HEAD를 원격 lane/<레인>에, 임대는 같은 push로 놓음, 「주차」 사건(sha·한 줄)" '[ $rc = 0 ] && [ "$(git -C "$D/origin.git" rev-parse refs/heads/lane/pk-a)" = "$ps_" ] && [ -z "$(lref pk-a)" ] && tail -n 1 "$EVF" | grep -F "${tab}pk-a${tab}주차${tab}$ps_${tab}" | grep -Fq "실패 시험만" && printf "%s" "$out" | grep -Fq "임대 놓음" || { printf "%s\n" "$out"; cat "$T/err"; tail -n 2 "$EVF"; false; }'
+t "park: HEAD를 원격 refs/park/<레인>에(lane 가지는 안 만듦), 임대는 같은 push로 놓음, 「주차」 사건(sha·한 줄)" '[ $rc = 0 ] && [ "$(pref pk-a)" = "$ps_" ] && ! git -C "$D/origin.git" rev-parse -q --verify refs/heads/lane/pk-a >/dev/null && [ -z "$(lref pk-a)" ] && tail -n 1 "$EVF" | grep -F "${tab}pk-a${tab}주차${tab}$ps_${tab}" | grep -Fq "실패 시험만" && printf "%s" "$out" | grep -Fq "임대 놓음" || { printf "%s\n" "$out"; cat "$T/err"; tail -n 2 "$EVF"; false; }'
 out=$(cd "$wt" && HC_LANE=pk-a "$LANE" park 2>"$T/err"); rc=$?
-t "park: 같은 커밋으로 다시 불러도 종료 0(같은 값으로 모임)" '[ $rc = 0 ] && [ "$(git -C "$D/origin.git" rev-parse refs/heads/lane/pk-a)" = "$ps_" ] || { cat "$T/err"; false; }'
+t "park: 같은 커밋으로 다시 불러도 종료 0(같은 값으로 모임)" '[ $rc = 0 ] && [ "$(pref pk-a)" = "$ps_" ] || { cat "$T/err"; false; }'
 out=$(cd "$R" && "$LANE" clean --repo "$R" --branch pk-a 2>"$T/err"); rc=$?
-t "park 뒤 clean: 원격 lane/<레인>에 그대로 있는 가지라 「제출됨」으로 지움(자리 비움)" '[ $rc = 0 ] && [ ! -e "$wt" ] && ! git -C "$R" show-ref -q --verify refs/heads/pk-a && printf "%s" "$out" | grep -Fq "제출됨" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
+t "park 뒤 clean: 원격 refs/park/<레인>에 그대로 있는 가지라 「주차됨」으로 지움(자리 비움)" '[ $rc = 0 ] && [ ! -e "$wt" ] && ! git -C "$R" show-ref -q --verify refs/heads/pk-a && printf "%s" "$out" | grep -Fq "주차됨: 브랜치 pk-a 은 원격 refs/park/pk-a" || { printf "%s\n" "$out"; cat "$T/err"; false; }'
 seedp c c   # 그사이 선행이 main에 들어감
 run --resume --name pk-a --repo "$R" -- claude
 t "--resume: 주차한 가지에서 새 작업 트리(준비 커밋 그대로), upstream은 origin/main, 임대 새로 잡음" '[ $rc = 0 ] && [ "$(git -C "$wt" rev-parse HEAD)" = "$ps_" ] && [ "$(git -C "$wt" rev-parse --abbrev-ref "@{u}")" = origin/main ] && [ -n "$(lref pk-a)" ] || { cat "$T/err"; false; }'
 run --resume --name pk-z --repo "$R" -- claude
-t "--resume: 주차한 가지가 없으면 안 띄움(종료 1, 작업 트리 없음)" '[ $rc != 0 ] && [ ! -e "$R.wt/pk-z" ] && grep -Fq "origin/lane/pk-z" "$T/err" || { cat "$T/err"; false; }'
+t "--resume: 주차한 가지가 없으면 안 띄움(종료 1, 작업 트리 없음)" '[ $rc != 0 ] && [ ! -e "$R.wt/pk-z" ] && grep -Fq "refs/park/pk-z" "$T/err" || { cat "$T/err"; false; }'
+# 옛 판이 주차한 lane/<레인>(refs/park/<레인> 없음)도 받는다 — 바꾼 날 주차해 둔 레인
+git -C "$D/origin.git" update-ref refs/heads/lane/pk-o "$ps_"
+run --resume --name pk-o --repo "$R" -- claude
+t "--resume: refs/park 없으면 옛 주차 가지 lane/<레인>에서" '[ $rc = 0 ] && [ "$(git -C "$R.wt/pk-o" rev-parse HEAD)" = "$ps_" ] || { cat "$T/err"; false; }'
 run --read --resume --name pk-r --repo "$R" -- claude
 t "--resume은 --read와 함께 쓰지 않음" '[ $rc != 0 ]'
 mk t23n; git -C "$R" remote remove origin

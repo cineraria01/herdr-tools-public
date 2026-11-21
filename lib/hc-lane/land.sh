@@ -326,7 +326,7 @@ park_cmd() {
   st_=$(git status --porcelain --untracked-files=normal) || die "park: git status 실패 — 작업 트리를 모른다"
   [ -z "$st_" ] || die "park: 커밋 안 된 변경·새 파일이 있다(git status) — 준비를 커밋한 뒤 다시"
   sh_=$(git rev-parse -q --verify HEAD) || die "park: HEAD를 읽지 못했다"
-  pr_=refs/heads/lane/$ln_ pl_=refs/hc-lanes/$ln_
+  pr_=refs/park/$ln_ pl_=refs/hc-lanes/$ln_   # 제출 가지 lane/<레인>과 다른 이름 — 병합기·clean이 주차를 제출로 안 읽게(hc-lane-go-start)
   rs_=$(git ls-remote origin "$pr_" "$pl_" </dev/null) || die "park: 원격을 읽지 못했다(git ls-remote) — 같은 줄을 다시"
   cur_=$(printf '%s\n' "$rs_" | awk -v r="$pr_" '$2 == r { print $1 }')
   lv_=$(printf '%s\n' "$rs_" | awk -v r="$pl_" '$2 == r { print $1 }')
@@ -336,14 +336,14 @@ park_cmd() {
   [ "$cur_" = "$sh_" ] && [ -z "$dl_" ] || po_=$(git push -q --atomic --porcelain origin "$@" </dev/null 2>&1)
   rb_=$(git ls-remote origin "$pr_" "$pl_" </dev/null) || die "park: 원격을 다시 읽지 못했다 — 같은 줄을 다시(주차는 같은 값으로 모인다)"
   [ "$(printf '%s\n' "$rb_" | awk -v r="$pr_" '$2 == r { print $1 }')" = "$sh_" ] ||
-    { printf '%s\n' "${po_-}" >&2; die "park: push 실패 — lane/$ln_ 이 이 커밋이 아니다. 같은 줄을 다시"; }
+    { printf '%s\n' "${po_-}" >&2; die "park: push 실패 — $pr_ 이 이 커밋이 아니다. 같은 줄을 다시"; }
   lk_="임대 없음"; [ -z "${HC_LANE_LEASE-}" ] || lk_="임대 남음(다른 값) — hc-lane clean이 놓는다"
   if [ -n "$dl_" ]; then
     [ -z "$(printf '%s\n' "$rb_" | awk -v r="$pl_" '$2 == r')" ] && lk_="임대 놓음" || lk_="임대를 놓지 못했다 — hc-lane clean이 놓는다"
   fi
-  (report_cmd 주차 "$sh_" "lane/$ln_ — 선행 착지 뒤 hc-fill이 이 가지에서 다시 띄운다${pmsg:+ · $pmsg}" --name "$ln_") >/dev/null ||
-    die "park: 주차 사건을 쓰지 못했다(가지는 lane/$ln_ 에 있다) — 같은 줄을 다시"
-  echo "hc-lane park: 주차 $(git rev-parse --short "$sh_") → lane/$ln_ ($lk_). 다음: 착지·정리 절차의 hc-lane clean 줄 → 턴을 끝낸다"
+  (report_cmd 주차 "$sh_" "$pr_ — 선행 착지 뒤 hc-fill이 이 가지에서 다시 띄운다${pmsg:+ · $pmsg}" --name "$ln_") >/dev/null ||
+    die "park: 주차 사건을 쓰지 못했다(가지는 $pr_ 에 있다) — 같은 줄을 다시"
+  echo "hc-lane park: 주차 $(git rev-parse --short "$sh_") → $pr_ ($lk_). 다음: 착지·정리 절차의 hc-lane clean 줄 → 턴을 끝낸다"
 }
 
 land_cmd() {

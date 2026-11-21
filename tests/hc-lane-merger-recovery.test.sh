@@ -153,7 +153,7 @@ SH
   (cd "$wt" && HC_LANE=submitted HC_LANE_LEASE=$lease "$lane_bin" park >>"$HOME/log" 2>&1)
   "$lane_bin" clean --repo "$writer" --branch alias >>"$HOME/log" 2>&1
   test ! -e "$wt"
-  test "$(og rev-parse refs/heads/lane/submitted)" = "$sha"
+  test "$(og rev-parse refs/park/submitted)" = "$sha"   # 주차는 refs/park/<레인>(2026-11-21 hc-lane-go-start)
 }
 clean_rebased_receipt() {
   fixture clean-rebased

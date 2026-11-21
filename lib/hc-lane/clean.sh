@@ -67,7 +67,7 @@ busy_terms() {
   done
 }
 clean_cmd() {
-  td=none did=
+  td=none did= delonly_=
   [ "$branch" != "$base" ] || die "기본 브랜치($base)는 정리하지 않는다"
   here=$(pwd -P 2>/dev/null)
   common=$(x git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || stop "git 관리 폴더를 찾지 못했다: $repo"
@@ -119,17 +119,21 @@ clean_cmd() {
     case $c in refs/heads/*) lab="브랜치 $branch" ;; *) lab="워크트리 HEAD $(printf %.12s "$c")" ;; esac
     x git -C "$repo" merge-base --is-ancestor "$c" "$bref"; ia=$?
     [ $ia != 0 ] || continue
-    # 제출·주차한 레인 자신의 원격 가지가 원본을 쥘 때만 정리한다.
+    # 제출·주차한 레인 자신의 원격 표식이 원본을 쥘 때만 정리한다. 「제출됨」은 큐 표식 refs/merge-queue/<UTC초>-<레인>이 그 커밋일
+    # 때만, 「주차됨」은 refs/park/<레인>이 그 커밋일 때만(2026-11-21 hc-lane-go-start — 예전엔 원격 lane/<레인>을 봐서, 반송돼 큐에서
+    # 빠진 제출 가지·주차 가지가 같은 이름으로 섞였다)
     if [ $ia = 1 ] && [ $remote = 1 ] && [ $br = 1 ]; then
       if [ "$lrr_" = - ]; then
         clean_owner || stop "레인 소유 기록 조회 실패: $branch"
-        lane_ref=refs/heads/lane/$owner done_ref=refs/merge-done/$owner
-        lrr_=$(x git -C "$repo" ls-remote origin "$lane_ref" "$done_ref") || stop "git ls-remote 실패: $lab · $lane_ref"
+        lane_ref=refs/park/$owner done_ref=refs/merge-done/$owner
+        lrr_=$(x git -C "$repo" ls-remote origin 'refs/merge-queue/*' "$lane_ref" "$done_ref") || stop "git ls-remote 실패: $lab · refs/merge-queue/*-$owner"
         receipt=$(awk -v r="$done_ref" '$2 == r { print $1 }' <<<"$lrr_")
       fi
       s_=$(x git -C "$repo" rev-parse -q --verify "$c^{commit}") || stop "커밋을 읽지 못했다: $lab"
+      lh_=$(printf '%s\n' "$lrr_" | awk -v s="$s_" -v o="$owner" '$1 == s { n = $2 } $1 == s && sub(/^refs\/merge-queue\/[0-9]+-/, "", n) && n == o { print $2; exit }')
+      if [ -n "$lh_" ]; then echo "${P}제출됨: $lab 은 큐 표식 $lh_ 에 그대로 있다(병합기가 넣는다)"; subm=1; continue; fi
       lh_=$(printf '%s\n' "$lrr_" | awk -v s="$s_" -v r="$lane_ref" '$1 == s && $2 == r { print $2; exit }')
-      if [ -n "$lh_" ]; then echo "${P}제출됨: $lab 은 원격 $lh_ 에 그대로 있다(병합기가 넣는다)"; subm=1; continue; fi
+      if [ -n "$lh_" ]; then echo "${P}주차됨: $lab 은 원격 $lh_ 에 그대로 있다(선행이 들어가면 hc-fill이 이어 띄운다)"; subm=1; continue; fi
       # 병합기가 먼저 rebase해 넣으면 원본은 완료 기록의 부모로 남는다.
       if [ -n "$receipt" ]; then
         if [ -z "$receipt_info" ]; then
@@ -157,7 +161,13 @@ clean_cmd() {
   # 2) 지울 폴더에 추적 변경·무시되지 않은 untracked가 없는지(status.showUntrackedFiles 설정과 무관하게 모두 본다)
   if [ $reg = 1 ] && [ $dir = 1 ]; then
     st=$(x git -c core.quotePath=false -C "$wt" status --porcelain --untracked-files=all --ignore-submodules=none) || stop "git status 실패: $wt"
-    [ -z "$st" ] || stop "워크트리에 커밋 안 된 변경이나 무시되지 않은 untracked가 있다: $wt" "$st"
+    # 추적 파일이 지워지기만 했으면(정리가 worktree remove 도중 끊김) 이어서 지운다 — git이 「modified」로 거절하니 아래 remove에 --force
+    delonly_=
+    if [ -n "$st" ] && ! printf '%s\n' "$st" | grep -qv '^ D '; then
+      delonly_=1
+      echo "${P}정리가 끊긴 자리: 추적 파일 $(printf '%s\n' "$st" | grep -c .)개가 이미 지워졌다(변경은 지움뿐) — 이어서 지운다"
+    fi
+    [ -z "$st" ] || [ -n "$delonly_" ] || stop "워크트리에 커밋 안 된 변경이나 무시되지 않은 untracked가 있다: $wt" "$st"
     ig=$(x git -c core.quotePath=false -C "$wt" status --porcelain --ignored --untracked-files=normal | sed -n 's/^!! //p' | tr '\n' ' ')
     [ -z "$ig" ] || echo "${P}무시된 것도 같이 지운다: $ig"
   elif [ $dir = 1 ]; then
@@ -223,7 +233,7 @@ clean_cmd() {
     if [ $dry = 1 ]; then echo "[dry-run] git -C $(q "$repo") worktree remove $(q "$wt")"
     else
       # 무시된 파일 때문에 "Directory not empty"로 끝나도 등록은 지워질 수 있다(git이 멈추지 않는다). 등록으로 판정한다.
-      x git -C "$repo" worktree remove "$wt" >&2
+      x git -C "$repo" worktree remove ${delonly_:+--force} "$wt" >&2
       wl=$(x git -C "$repo" worktree list --porcelain) || stop "git worktree list 실패: $repo"
       printf '%s\n' "$wl" | grep -Fxq "worktree $wt" && stop "git worktree remove 실패: $wt"
       did="${did:+$did, }워크트리 등록 제거"

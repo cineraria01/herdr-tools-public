@@ -11,6 +11,37 @@ set -u
 hl_s=$0
 while [ -L "$hl_s" ]; do hl_l=$(readlink "$hl_s"); case $hl_l in /*) hl_s=$hl_l ;; *) hl_s=$(dirname "$hl_s")/$hl_l ;; esac; done
 hl_d=$(dirname "$hl_s")/../lib/hc-lane
+
+# Go 판(2026-11-21 사용자 「모두 고로 옮기고 싶어」, hc-lane-go-*): Go 판(cmd/hc-lane)이 이 하위 명령·인자를 맡으면(「__has <인자…>」 0)
+# 그것으로 exec — 돌아오지 않는다. 120(아직 셸·도움말 등)이면 아래 셸 판. 부르기·빌드·경고는 공통 실행기 lib/go-run.sh(go_run).
+#  · HC_LANE_IMPL(없으면 HERDR_IMPL)=bash: 되돌리기 스위치 — 셸 판 그대로. =go인데 Go 판을 못 쓰면 종료 1
+#  · HC_LANE_GO_BIN: 이 바이너리를 그대로(HC_LANE_BIN은 시험이 이 스크립트 경로로 써서 go_run 앞에서 바꿔 넣고, Go 판이 되돌린다)
+#  · HC_LANE_SH: Go 판이 아직 셸 판인 하위 명령(report 등)을 부를 때 쓰는 이 스크립트 경로
+hl_go() {
+  local self r
+  case ${HC_LANE_IMPL:-${HERDR_IMPL:-auto}} in bash|sh) return 0 ;; esac
+  [ $# -gt 0 ] || return 0
+  if ! . "$hl_d/../go-run.sh" 2>/dev/null; then
+    [ "${HC_LANE_IMPL:-${HERDR_IMPL:-auto}}" != go ] || { echo "hc-lane: 공통 실행기를 못 읽었다(HC_LANE_IMPL=go): $hl_d/../go-run.sh" >&2; exit 1; }
+    echo "hc-lane: !!!!!! 경고: 공통 실행기를 못 읽었다($hl_d/../go-run.sh — herdr-sync가 lib/go-run.sh도 까는지) — 셸 판으로 돈다 !!!!!!" >&2
+    return 0
+  fi
+  case $0 in /*) self=$0 ;; */*) self=$PWD/$0 ;; *) self=$(command -v "$0" 2>/dev/null || echo "$0") ;; esac
+  # 잠금 fd(18·19)는 Go 판에 물려주지 않는다
+  ( HC_LANE_SH_BIN=${HC_LANE_BIN-} HC_LANE_BIN=${HC_LANE_GO_BIN-} go_run hc-lane __has "$@" >/dev/null; r=$?
+    [ $r = 0 ] && exit 121; exit $((r + 121)) ) 18>&- 19>&-
+  r=$?
+  case $r in
+    0) ;;
+    120|121) return 0 ;;
+    122) echo "hc-lane: Go 판을 쓸 수 없다(HC_LANE_IMPL=go)" >&2; exit 1 ;;
+    *) echo "hc-lane: HC_LANE_IMPL은 go·bash 가운데 하나: ${HC_LANE_IMPL:-${HERDR_IMPL-}}" >&2; exit 2 ;;
+  esac
+  HC_LANE_SH=$self HC_LANE_SH_BIN=${HC_LANE_BIN-} HC_LANE_BIN=${HC_LANE_GO_BIN-} go_run hc-lane "$@" 18>&- 19>&-
+  echo "hc-lane: Go 판 exec 실패 — 셸 판으로 돈다" >&2
+}
+hl_go "$@"
+
 for hl_f in common report watch land merger merger-result merger-go verdict guard start clean gc; do
   . "$hl_d/$hl_f.sh" || { printf 'hc-lane: 함수 파일을 못 읽었다: %s (herdr-sync가 lib도 까는지)\n' "$hl_d/$hl_f.sh" >&2; exit 1; }
 done
@@ -283,15 +314,22 @@ else
   x git -C "$repo" rev-parse -q --verify "$bref^{commit}" >/dev/null || die "$blab 가 없다: $repo"
   [ $dry = 1 ] || [ $remote = 0 ] || ffmain "$repo" "$base"
 fi
-# --resume: park가 레인 이름으로 올린 원격 가지를 직접 받는다. 일반 fetch는 지워진 가지의 추적 참조를 남길 수 있다.
+# --resume: park가 원격 refs/park/<레인>에 둔 가지를 직접 받는다(제출 가지 lane/<레인>과 다른 이름 — 병합기·clean이 헷갈리지 않게,
+# 2026-11-21 hc-lane-go-start). 옛 판이 주차한 lane/<레인>은 refs/park/<레인>이 없을 때만 받는다(바꾼 날 주차해 둔 레인)
 wfrom=$bref
 if [ $resume = 1 ]; then
   [ $remote = 1 ] || die "--resume: 원격(origin)이 없는 저장소에는 주차한 가지가 없다: $repo"
-  wfrom=refs/remotes/origin/lane/$name
+  wfrom=refs/hc-park/$name
   if [ $dry = 0 ]; then
-    fetchr x git -C "$repo" fetch -q origin "+refs/heads/lane/$name:$wfrom" || die "--resume: 주차한 가지 origin/lane/$name 가 없거나 받지 못했다: $repo"
+    pls_=$(x git -C "$repo" ls-remote origin "refs/park/$name" "refs/heads/lane/$name") ||
+      die "--resume: 원격을 읽지 못했다(git ls-remote) — 주차한 가지 refs/park/$name 를 모른다: $repo"
+    psrc_=
+    for p_ in "refs/park/$name" "refs/heads/lane/$name"; do
+      [ -n "$psrc_" ] || ! printf '%s\n' "$pls_" | awk -v r="$p_" '$2 == r { f = 1 } END { exit !f }' || psrc_=$p_
+    done
+    [ -n "$psrc_" ] && fetchr x git -C "$repo" fetch -q origin "+$psrc_:$wfrom" || die "--resume: 주차한 가지 refs/park/$name 가 없거나 받지 못했다: $repo"
   fi
-  x git -C "$repo" rev-parse -q --verify "$wfrom^{commit}" >/dev/null || die "--resume: 주차한 가지 origin/lane/$name 가 없다: $repo"
+  x git -C "$repo" rev-parse -q --verify "$wfrom^{commit}" >/dev/null || die "--resume: 주차한 가지 refs/park/$name 가 없다: $repo"
 fi
 
 # --brief: 지시문(+착지·정리 절차)을 대상 기계 사본 자리에 두고, 실행 명령의 {brief}를 그 경로로(~는 그 기계 집으로 펼친 것)
@@ -355,7 +393,7 @@ if [ $dry = 1 ]; then
     echo "[dry-run] 메인 폴더 앞당김(기본 브랜치 ${base}·추적 변경 없음·merge/rebase 없을 때만): git -C $(q "$repo") merge --ff-only $bref"
   fi
   if [ $read = 0 ]; then
-    echo "[dry-run] git -C $(q "$repo") worktree add --track -b $branch $(q "$wt") $wfrom"
+    echo "[dry-run] git -C $(q "$repo") worktree add $([ $resume = 1 ] || echo '--track ')-b $branch $(q "$wt") $wfrom"
     echo "[dry-run] ($blab 에 .claude/herdr-setup.sh 가 있으면) 워크트리에서 bash .claude/herdr-setup.sh"
     echo "[dry-run] 임대 잡기 refs/hc-lanes/$name (없을 때만 — 이미 있으면 종료 10, 원격 없음이면 임대 없이)"
   fi
@@ -368,7 +406,9 @@ if [ $dry = 1 ]; then
 else
   if [ $read = 0 ]; then
     # --track: branch.autoSetupMerge 설정과 무관하게 upstream을 붙여 착지 뒤 branch -d가 통한다.
-    x git -C "$repo" worktree add -q --track -b "$branch" "$wt" "$wfrom" || die "워크트리를 만들지 못했다: $wt"
+    # 주차한 가지(refs/hc-park/… — 가지가 아닌 참조)에서는 --track을 붙일 수 없어 아래에서 기본 브랜치로 붙인다
+    tk_=--track; [ $resume = 0 ] || tk_=-q
+    x git -C "$repo" worktree add -q $tk_ -b "$branch" "$wt" "$wfrom" || die "워크트리를 만들지 못했다: $wt"
     # 주차한 가지에서 만들었으면 upstream은 기본 브랜치로(착지·clean의 branch -d가 평소처럼)
     [ $resume = 0 ] || x git -C "$wt" branch -q --set-upstream-to="$blab" "$branch" || die "--resume: upstream을 $blab 로 두지 못했다. $(rollback)"
     # rerere(2026-11-19 lane-overlap-guard): 착지를 다시 설 때 같은 충돌을 다시 풀지 않게(land가 이어 감). 저장소 설정에 true를 쓰지 않고
@@ -431,5 +471,5 @@ else
 fi
 printf '{"lane":"%s","name":"%s","on":"%s","read":%s,"dry_run":%s,"repo":"%s","worktree":"%s","branch":"%s","base":"%s","brief":"%s","start":"%s"}\n' \
   "$(j "$addr")" "$name" "$(j "$on")" "$([ $read = 1 ] && echo true || echo false)" "$([ $dry = 1 ] && echo true || echo false)" \
-  "$(j "$repo")" "$(j "$wt")" "$(j "$branch")" "$(j "$base")" "$(j "${rb-}")" "$start"
+  "$(j "$repo")" "$(j "$wt")" "$(j "$branch")" "$(j "$base")" "$(j "${brief:+$rb}")" "$start"   # rb는 --remote-branches 값(0)과 이름이 겹친다 — --brief가 없으면 빈 값(작업 중 발견해 함께 고침)
 exit $rc

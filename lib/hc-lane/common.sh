@@ -89,6 +89,9 @@ usage() {
                 들어갔는지 → 추적 변경·무시되지 않은 untracked가 없는지(등록이 지워지고 폴더만 남았으면 저장소
                 .gitignore로) 확인하고, 하나라도 걸리면 아무것도 지우지 않고 멈춘다(종료 1) → .claude/herdr-teardown.sh
                 (있으면, 실패해도 계속) → worktree remove → 남은 무시 파일 폴더 삭제 → branch -d
+                정리가 끊긴 작업 폴더(추적 파일이 지워지기만 했고 다른 변경 없음)는 「정리가 끊긴 자리 …」 한 줄 뒤 이어서 지운다
+                「제출됨」(큐 표식 refs/merge-queue/*-<레인>이 그 커밋)·「주차됨」(원격 refs/park/<레인>이 그 커밋)·「착지됨」(완료 기록)
+                가지는 기준에 안 들어갔어도 지운다(그 값 그대로일 때만)
                 무시된 보관물 .qa/(어느 깊이든)는 teardown 전에 메인 폴더(첫 작업 트리)의 같은 자리로 복사(덮지 않음)하고
                 「옮김 <워크트리>/.qa → <메인>/.qa」 한 줄. 같은 이름의 다른 파일·복사 실패·메인 폴더 없음이면 멈춤(안 지움)
                 --archive(명시할 때만): 다른 곳에서 rebase돼 착지해 안 들어간 것으로 보이는 가지도, 작업 폴더가 깨끗하면 안 들어간
@@ -134,7 +137,7 @@ usage() {
                 켜고 끔)에서는 착지 대신 제출: HEAD를 refs/heads/lane/<레인> + refs/merge-queue/<UTC초>-<레인> + 제출 기록에 한 번의
                 원자 push(같은 레인의 옛 표식은 지움, 기본 브랜치는 안 건드림), 접수가 확인되면 「중간 <sha> 제출 <ID> → <큐>」 사건과
                 끝 줄 「제출 …」, 종료 0(이미 들어간 커밋이면 할 것 없음 0). 켜졌는지(원격 설정·켬 표식) 못 읽으면 착지하지 않고 75.
-                HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 원격 lane/*에 그 SHA 그대로 있는 가지를 「제출됨」으로 지운다.
+                HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 큐 표식(refs/merge-queue/*-<레인>)이 그 SHA인 가지를 「제출됨」으로 지운다.
                 HERDR_LAND_PUSH_EXTRA="<git push 인자> …"(refspec — 왼쪽 HEAD = 기본 브랜치에 넣는 커밋 — 와 --force-with-lease=<참조>:<SHA>;
                 병합기는 「:<큐> --force-with-lease=<큐>:<SHA>」와 HEAD:refs/hc-landed/<제출 ID>)면 기본 브랜치와 한 번의 --atomic push로
                 싣고, lease 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6. 병합기 안 착지(HERDR_MERGER=1)는 기본 브랜치에
@@ -179,10 +182,12 @@ usage() {
                 지휘가 hc-fill rm)으로 임대가 남아 다시 못 띄우면 이 drop으로 손으로 놓는다. show: 「값 제목」 또는 「-」
        hc-lane park [<한 줄>]   (먼저 띄운 레인 작업 폴더 안에서)
   park          선행을 기다리는 레인이 자리를 쥐고 놀지 않게(2026-11-20 사용자 「노는 워크트리 없이」): 깨끗한 작업 트리의 HEAD를
-                원격 refs/heads/lane/<레인>(지금 값에 lease)에 올리고, 같은 --atomic push로 이 레인 임대(HC_LANE_LEASE 값일 때만)를
-                놓은 뒤 「주차」 사건. 다음은 hc-lane clean(원격 lane/<레인>에 그대로 있는 가지라 「제출됨」으로 지운다) 뒤 턴을 끝낸다.
+                원격 refs/park/<레인>(지금 값에 lease — 제출 가지 lane/<레인>과 다른 이름)에 올리고, 같은 --atomic push로 이 레인 임대
+                (HC_LANE_LEASE 값일 때만)를 놓은 뒤 「주차」 사건. 다음은 hc-lane clean(원격 refs/park/<레인>에 그대로 있는 가지라
+                「주차됨」으로 지운다) 뒤 턴을 끝낸다.
                 선행이 들어가면 hc-fill이 그 가지에서 다시 띄운다(--resume). 종료 0 주차, 1 실패(같은 줄을 다시), 3 원격 없음(기다림으로)
-  --resume      (띄울 때) 새 작업 트리를 origin/<기본>이 아니라 주차한 가지 origin/lane/<브랜치>에서 만든다(upstream은 origin/<기본>).
+  --resume      (띄울 때) 새 작업 트리를 origin/<기본>이 아니라 주차한 가지 원격 refs/park/<레인>(없으면 옛 판이 주차한 lane/<레인>)에서
+                만든다(upstream은 origin/<기본>).
                 그 가지가 없으면 띄우지 않는다. 레인은 git rebase origin/<기본> 뒤 이어 간다(hc-fill이 지시문에 적음)
        hc-lane report <중간|완료|착지|막힘|판정|제출|주차> [<sha>|-] [<한 줄>…] [--name <레인>] [--to <지휘>[,…]] [--key <키>]   (레인 안에서)
   report        이 기계 ${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv에 한 줄을 더한다(지우지 않음):
@@ -251,6 +256,8 @@ usage() {
                 못 읽은 기계의 레인은 그 바퀴에 blocked·error만 그대로, 쉼·끝남은 「연결 안 됨 <기계> <날짜>」(하루 한 번). 원격은 바퀴마다 기계당 한 번(쉬는 레인 확인만 그 터미널에 hc get·read)
 준비·정리 훅: .claude/herdr-setup.sh(환경 LANE_*: LANE_REPO=메인 폴더, LANE_BASE=기본 브랜치), .claude/herdr-teardown.sh
 실행 명령은 env K=V 로 감싸므로 hc 템플릿 이름은 쓸 수 없다. 마지막 줄은 JSON 한 줄.
+Go 판(cmd/hc-lane): 옮긴 명령은 Go 판으로 돈다(아직 셸 판인 명령은 셸 판 — 계약은 같다). HC_LANE_IMPL=bash(또는 HERDR_IMPL=bash)면
+늘 셸 판, =go면 Go 판을 못 쓸 때 종료 1. Go 바이너리를 직접 줄 때 HC_LANE_GO_BIN
 EOF
   exit 2
 }

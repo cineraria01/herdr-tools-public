@@ -120,6 +120,10 @@ t "충돌: l-d는 refs/merge-failed로, lane/l-d는 남음" 'og for-each-ref --f
 t "충돌: 다음 제출 l-e는 계속 착지" 'mainlog | grep -Fxq l-e && [ -z "$(qrefs)" ]'
 t "충돌: l-d 막힘 사건(까닭·원본·기준·제출 ID·로그 경로)" 'awk -F"\t" "\$4 == \"l-d\" && \$5 == \"막힘\"" "$EV" | grep -F "착지 실패(종료 3)" | grep -F "원본 " | grep -F "기준 " | grep -F "제출 ID" | grep -Fq merger-logs'
 t "충돌: 제출 기록은 refs/merge-failed-meta로" 'og for-each-ref --format="%(refname)" refs/merge-failed-meta/ | grep -Eq "^refs/merge-failed-meta/[0-9]{10}-l-d$" && [ -z "$(og for-each-ref refs/merge-queue-meta/)" ]'
+# 반송된 제출은 원격 lane/l-d가 그 SHA 그대로여도 큐 표식이 없어 「제출됨」이 아니다 — clean이 가지를 지우지 않는다(2026-11-21 hc-lane-go-start)
+(cd "$W/b/proj" && git checkout -q --detach)
+cout=$("$LANE" clean --repo "$W/b/proj" --branch l-d 2>&1); crc=$?
+t "clean: 반송된 제출(lane 가지만 남음)은 지우지 않음(멈춤)" '[ $crc = 1 ] && git -C "$W/b/proj" show-ref -q --verify refs/heads/l-d && ! printf "%s" "$cout" | grep -Fq "제출됨" || { echo "$cout"; false; }'
 
 # 6. 검증 실패도 merge-failed
 lane a l-f f.txt f
@@ -203,13 +207,14 @@ t "레인 이름 꼴: 제출 안 함" '[ $rc = 1 ] && [ -z "$(qrefs)" ] && grep 
 lane b l-cl cl.txt cl
 land b l-cl
 lane b l-cs cs.txt cs; land b l-cs
+# (2026-11-21 hc-lane-go-start: 「제출됨」은 큐 표식 refs/merge-queue/*-<레인>만 본다 — lane 가지만 남은 반송 제출은 지우지 않는다)
 og update-ref -d refs/heads/lane/l-cs   # 원격에서는 지워짐(로컬 추적 참조 origin/lane/l-cs는 남음)
+for r in $(og for-each-ref --format='%(refname)' refs/merge-queue/ refs/merge-queue-meta/ | grep l-cs); do og update-ref -d "$r"; done
 (cd "$W/b/proj" && git checkout -q --detach)
 cout=$("$LANE" clean --repo "$W/b/proj" --branch l-cl 2>&1); crc=$?
-t "clean: 원격 lane/<레인>에 그대로 있는 제출 가지는 지움(제출됨)" '[ $crc = 0 ] && ! git -C "$W/b/proj" show-ref -q --verify refs/heads/l-cl && printf "%s" "$cout" | grep -Fq "제출됨" || { echo "$cout"; false; }'
+t "clean: 큐 표식에 그대로 있는 제출 가지는 지움(제출됨)" '[ $crc = 0 ] && ! git -C "$W/b/proj" show-ref -q --verify refs/heads/l-cl && printf "%s" "$cout" | grep -Fq "제출됨: 브랜치 l-cl 은 큐 표식 refs/merge-queue/" || { echo "$cout"; false; }'
 cout=$("$LANE" clean --repo "$W/b/proj" --branch l-cs 2>&1); crc=$?
-t "clean: 원격 참조가 지워지고 낡은 추적 참조만 있으면 지우지 않음(멈춤)" '[ $crc = 1 ] && git -C "$W/b/proj" show-ref -q --verify refs/heads/l-cs || { echo "$cout"; false; }'
-for r in $(og for-each-ref --format='%(refname)' refs/merge-queue/ refs/merge-queue-meta/ | grep l-cs); do og update-ref -d "$r"; done
+t "clean: 원격 표식이 지워지고 낡은 추적 참조만 있으면 지우지 않음(멈춤)" '[ $crc = 1 ] && git -C "$W/b/proj" show-ref -q --verify refs/heads/l-cs || { echo "$cout"; false; }'
 lane b l-ns ns.txt ns
 (cd "$W/b/proj" && git checkout -q --detach)
 cout=$("$LANE" clean --repo "$W/b/proj" --branch l-ns 2>&1); crc=$?

@@ -18,7 +18,8 @@ tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }   # 손자�
 # 고아로 남아 herdr-verify 고아 검사에 걸렸다(2026-11-19 fill-auto-audit 검증, 작업 중 발견해 함께 고침)
 killtree() { kill -STOP $(tree "$1") 2>/dev/null; ktp=$(tree "$1"); kill $ktp 2>/dev/null; kill -CONT $ktp 2>/dev/null; }
 # watch는 $T 안 링크로 띄워 명령 줄에 $T가 들어간다 → 이 시험의 watch만 골라 세고, 끝에 남은 것이 있으면 마저 끈다
-leftw() { pgrep -f "$T/hc-fill watch"; }
+# Go 판(HC_FILL_IMPL=go, 기본)은 포장이 바이너리로 exec해 명령 줄에 $T가 없다 — 이 시험의 watch.lock을 연 hc-fill watch로 고른다
+leftw() { { pgrep -f "$T/hc-fill watch"; for p in $(pgrep -f '/hc-fill watch'); do lsof -p "$p" 2>/dev/null | grep -Fq "$T/home/.local/share/hc-fill/watch.lock" && echo "$p"; done; } | sort -u; }
 trap '[ -z "$bg" ] || killtree "$bg"; for w in $(leftw); do killtree "$w"; done; for g in $(pgrep -f "$T/home/.local/share/hc-fill/gc.lock"); do killtree "$g"; done; rm -rf "$T"' EXIT   # 남은 watch·배경 정리(lockf와 그 안의 _gc)도 같은 방식(목록 잡아 신호 경합 없음)
 mkdir -p "$T/bin" "$T/conf"
 cp "$EX" "$T/conf/hc-fill.tsv" || { echo "FAIL - 예시 설정이 없다: $EX"; exit 1; }
@@ -107,6 +108,9 @@ echo "$*" >>"$T_LOG/balance.log"
 EOF
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" HOME="$T/home" T_LOG="$T" HERDR_TOOLS_CONFIG="$T/conf" HC_FILL_WAIT=0 HC_FILL_POLL=0 HC_FAKE_COORD=t8kk
+# 판: 기본은 Go 판(못 만들면 실패 — 셸 판으로 조용히 통과하지 않게). 셸 판은 tests/hc-fill-bash.test.sh가 HC_FILL_IMPL=bash로
+export HC_FILL_IMPL=${HC_FILL_IMPL:-go}
+unset HERDR_IMPL HC_FILL_INNER HC_FILL_SELF HC_FILL_BIN
 # macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 unset XDG_STATE_HOME   # hc-lane 레인 기록(lanes.tsv)을 가짜 HOME 아래에서 읽게
@@ -755,7 +759,10 @@ case " $* " in *" _set project-sent sent "*)
 esac
 exec /usr/bin/lockf "$@"
 EOF
-chmod +x "$T/projection-bin/lockf"; FILL_UNDER_TEST="$FILL" PATH="$T/projection-bin:$PATH" run run
+chmod +x "$T/projection-bin/lockf"
+# Go 판은 lockf를 부르지 않는다 — 같은 자리(대기열 잠금 직전)의 시험 끼어들기 HC_FILL_TEST_QSET로
+FILL_UNDER_TEST="$FILL" PATH="$T/projection-bin:$PATH" HC_FILL_TEST_QSET="project-sent sent" \
+  HC_FILL_TEST_QSET_CMD="\"$FILL\" rm project-sent >/dev/null && \"$FILL\" add --name project-sent --project app --brief \"$T/replacement.md\" --only slow >/dev/null" run run
 t "옛 회신의 sent는 새 줄에 투영하지 않음" '[ "$(lst "$ri")" = sent ] && [ "$(where project-sent | cut -d" " -f1)" != sent ] && grep -Fq "# 지시문 replacement" "${Q%/*}/briefs/added/project-sent.md"'
 
 # 접수 도중 rm: 대기열은 기록됐고 원격 .req가 아직 남아 있다.
@@ -2305,6 +2312,35 @@ t "복구한 줄: 선행 착지 뒤 --resume으로 이어 띄움" '[ "$(where pq
 lj "box-1/pq:claude-code:pq:working:/home/me/src/app.wt/pq"; export HC_FAKE_LS_LANE='{"terminals":[{"address":"box-1/pq"}]}'; run run
 t "up+parked·터미널 working·마지막 주차: 대기·parked, 채택 안 함" '[ "$(where pq)" = "wait - -" ] && [ "$(awk -F"\t" "\$1==\"pq\" {print \$14}" "$Q")" = parked ] && ! printf "%s" "$out" | grep -q "이미 떠 있음 pq" || { printf "%s\n" "$out"; cat "$Q"; false; }'
 
+# 10z. 2026-11-21 hc-fill-go 추가
+# 받은편지 레인 감사: 지시문이 「hc-fill 감사」를 요구하거나 설정 inbox_audit on이면 쓰기 레인처럼 감사·착지 절·감사 칸 auto
+# (mini-m1 D1 받은편지 레인이 「완료 — 감사 기다림」으로 9시간 멈췄다)
+ifresh; echo "audit    $EXA" >>"$T/conf/hc-fill.tsv"; rm -f "$T/events"
+mj box-1 shared slow; req "$IS" inq-a app - slow; printf '감사: hc-fill 감사(이 실행과 다른 Claude)\n' >>"$IS/inq-a.brief.md"; run run
+t "받은편지 줄이라도 지시문이 「hc-fill 감사」를 요구하면 감사·착지 절·감사 칸 auto" '[ "$(where inq-a | cut -d" " -f1)" = up ] && grep -Fq "감사·착지 (hc-fill 자동)" "$HOME/.local/share/hc-fill/runs/inq-a-run.md" && [ "$(col15 inq-a)" = auto ] || { printf "%s\n" "$out"; false; }'
+ifresh; printf 'audit    %s\ninbox_audit on\n' "$EXA" >>"$T/conf/hc-fill.tsv"; rm -f "$T/events"
+mj box-1 shared slow; req "$IS" inq-b app - slow; run run
+t "설정 inbox_audit on: 받은편지 줄에도 감사 칸 auto" '[ "$(col15 inq-b)" = auto ] || { printf "%s\n" "$out"; false; }'
+# 완료 뒤 멈춤(Go 판 — 셸 판에는 없다): 완료 뒤 감사도 착지·제출도 없이 설정 done_stall분이 지나면 주인 지휘에 막힘 한 번
+if [ "$HC_FILL_IMPL" != bash ]; then
+  fresh; rm -f "$T/events"; cp "$EX" "$T/conf/hc-fill.tsv"; echo "done_stall 30" >>"$T/conf/hc-fill.tsv"
+  add st1 --only box-1; run run; lj "box-1/st1:claude-code:st1:idle:/"
+  printf '2026-11-19T01:00:00Z\tm\tbox-1/st1\tst1\t완료\tfeed123\t끝\t1\n' >"$T/events"; run run
+  t "완료 뒤 멈춤: 감사·착지 없이 done_stall분 지나면 막힘 한 번(키 hf:<레인>:stall:<sha>)" 'grep -F "완료 뒤 멈춤" "$T/report.log" | grep -Fq -- "--key hf:st1:stall:feed123" || { printf "%s\n" "$out"; cat "$T/report.log"; false; }'
+  printf '2026-11-19T01:05:00Z\tm\tbox-1/st1\tst1\t착지\tfeed123\t착지\t1\n' >>"$T/events"; rm -f "$T/report.log"; run run
+  t "완료 뒤 착지를 적었으면 멈춤 알림 없음" '! grep -Fq "완료 뒤 멈춤" "$T/report.log" 2>/dev/null || { cat "$T/report.log"; false; }'
+fi
+# 지휘 기계 파일 붙이기: 다른 기계에 띄울 때 지시문이 가리키는 이 기계 HOME 아래 파일 원문을 run 지시문 끝에(워커 기계는 지휘 기계 경로를 못 읽는다)
+fresh; printf '메모 원문\n' >"$HOME/note.md"
+printf '# 지시문 pst\n본문 `~/note.md` 를 읽는다\n' >"$T/pst.md"; "$FILL" add --name pst --project app --brief "$T/pst.md" --only box-1 >/dev/null 2>&1; run run
+t "다른 기계에 띄우면 지휘 기계 파일 원문을 붙임" '[ "$(where pst)" = "up box-1 box-1/pst" ] && grep -Fq "## (붙임) 지휘 기계 파일 원문 — ~/note.md" "$HOME/.local/share/hc-fill/runs/pst-run.md" && grep -Fxq "메모 원문" "$HOME/.local/share/hc-fill/runs/pst-run.md" || { printf "%s\n" "$out"; false; }'
+printf '# 지시문 psl\n본문 ~/note.md 참고\n' >"$T/psl.md"; "$FILL" add --name psl --project app --brief "$T/psl.md" --only here >/dev/null 2>&1; run run
+t "이 기계에 띄우면 붙이지 않음" '[ "$(where psl | cut -d" " -f1)" = up ] && ! grep -Fq "(붙임)" "$HOME/.local/share/hc-fill/runs/psl-run.md" || { printf "%s\n" "$out"; false; }'
+printf 'token = abcdef0123456789abcdef\n' >"$HOME/sec.md"; printf '# 지시문 pss\n본문 ~/sec.md 참고\n' >"$T/pss.md"
+"$FILL" add --name pss --project app --brief "$T/pss.md" --only box-1 >/dev/null 2>&1; run run
+t "비밀 값 꼴 파일이면 띄우지 않고 지휘에 한 번" '[ "$(where pss)" = "wait - -" ] && printf "%s" "$out" | grep -Fq "원문을 붙이지 못해 띄우지 않음" && grep -Fq -- "--key hf:pss:paste:" "$T/report.log" || { printf "%s\n" "$out"; false; }'
+rm -f "$HOME/note.md" "$HOME/sec.md"
+
 # 11. 잠금: watch는 한 번에 하나, run도 겹치지 않음
 fresh
 ln -s "$FILL" "$T/hc-fill"
@@ -2313,7 +2349,7 @@ bg=$!
 i=0; while [ ! -e "$HOME/.local/share/hc-fill/watch.lock" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; sleep 0.3
 out=$("$T/hc-fill" watch --every 1 2>&1); rc=$?
 t "watch: 이미 돌고 있으면 종료 75" '[ $rc = 75 ] && printf "%s" "$out" | grep -q "이미"'
-t "watch: 띄운 뒤 lockf 안쪽까지 둘 이상 돈다(남은 watch 검사가 제 구실을 하는지)" '[ "$(leftw | grep -c .)" -ge 2 ]'
+t "watch: 띄운 뒤 lockf 안쪽까지 둘 이상 돈다(남은 watch 검사가 제 구실을 하는지 — Go 판은 잠금을 쥔 한 프로세스)" '[ "$(leftw | grep -c .)" -ge "$([ "$HC_FILL_IMPL" = bash ] && echo 2 || echo 1)" ]'
 killtree "$bg"; wait "$bg" 2>/dev/null; bg=
 i=0; while [ -n "$(leftw)" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
 out=$(ps -o pid,ppid,command -p "$(leftw | paste -sd, -)" 2>/dev/null)

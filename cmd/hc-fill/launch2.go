@@ -1,0 +1,516 @@
+package main
+
+// 띄우기 — 셸 판 lib/hc-fill/launch.sh 뒷부분(launch · place · early_sec · resume_sec)과 Go 판에서 더한 지휘 기계 파일 붙이기
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
+// 5 띄웠지만 시작 확인 실패(터미널은 남음)
+func launch(lane, brief, m, repo, dest, owner string) int {
+	// 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다
+	raw, err := os.ReadFile(brief)
+	body := sub(string(raw))
+	if err != nil || body == "" {
+		why := "빈 파일"
+		if err != nil {
+			why = errText(err)
+		}
+		say("실패 %s: 지시문을 읽지 못함(%s): %s", lane, why, brief)
+		return 2
+	}
+	on := ""
+	if m != LOCAL {
+		on = m
+	}
+	// 다른 기계에 띄울 때 본문이 가리키는 이 기계 HOME 아래 파일 원문을 붙인다(Go 판 — 셸 판과 다름)
+	paste := ""
+	if on != "" {
+		p, ok := lcPasteHome(body, dash(owner), lane)
+		if !ok {
+			return 2
+		}
+		paste = p
+	}
+	mm := dash(on)
+	if on == "" {
+		mm = LOCAL
+	}
+	// 받은편지 줄: 보고 경로에 요청 ID(되돌릴곳 #<ID>). 옛 줄(# 없음)은 <레인>.md
+	rid := ""
+	if i := strings.LastIndexByte(dest, '#'); i >= 0 && dash(dest) != "-" {
+		rid = dest[i+1:]
+	}
+	rsec := ""
+	if dash(dest) != "-" {
+		rp := lane
+		if rid != "" {
+			rp += "." + rid
+		}
+		rsec = "\n## 결과 보고 (hc-fill 받은편지 레인)\n" +
+			"끝나면(착지했든 못 했든) 이 기계 `~/.local/share/hc-fill/reports/" + rp + ".md`에 결과를 쓴다 — 같은 폴더의 다른 이름에 다 쓴 뒤\n" +
+			"`mv`로 그 이름에 둔다(반쯤 쓴 파일이 보이지 않게). 마지막 줄은 셋 중 하나다:\n" +
+			"`결과: 고침 <sha>` · `결과: 넘김 <사유>` · `결과: 실패 <사유>`. hc-fill은 마지막 줄이 이 꼴일 때만 요청한 기계로 되돌려 준다(착지·터미널 상태와 상관없이).\n"
+	}
+	// 자동 감사(설정 audit): 감사 줄은 --read, 쓰기 줄은 「감사·착지」 절을 붙이고 감사 칸 auto. 받은편지 줄은 지시문이 「hc-fill 감사」를
+	// 요구하거나 설정 inbox_audit on일 때만(2026-11-21 — 받은편지 레인이 감사를 기다리며 9시간 멈춤)
+	rd, asec := "", ""
+	LAUTO = ""
+	switch dash(AK) {
+	case "-", "auto":
+		if AUD != "" && (dash(dest) == "-" || strings.Contains(string(raw), "hc-fill 감사") || conf("inbox_audit") == "on") {
+			asec, LAUTO = ASEC, "auto"
+		}
+	default:
+		if strings.HasPrefix(AK, "audit=") {
+			rd = "--read"
+		}
+	}
+	sa := []string{"--print-steps"}
+	if rd != "" {
+		sa = append(sa, rd)
+	}
+	if on != "" {
+		sa = append(sa, "--on", on)
+	}
+	so, rc := Cmd{Name: "hc-lane", Args: append(sa, "--name", lane, "--repo", repo), Err: errPass}.Run()
+	if rc != 0 {
+		say("실패 %s @%s: hc-lane --print-steps", lane, m)
+		return 1
+	}
+	steps := sub(so)
+	if rsec != "" && rid == "" && oldReport(m, lane) != 0 {
+		say("실패 %s @%s: 그 기계의 옛 보고를 비켜 두지 못했다", lane, m)
+		return 1
+	}
+	runmd := body + "\n\n" + steps + "\n" + rsec + asec + ESEC + RSEC + paste
+	sz := strconv.Itoa(len(runmd)) // 쓴 run 지시문의 크기가 이것과 같아야 한다(본문이 다 들어갔는지)
+	var rf string
+	if on == "" {
+		rf = HOME + "/.local/share/hc-fill/runs/" + lane + "-run.md"
+		ok := os.MkdirAll(filepath.Dir(rf), 0o755) == nil && writeAtomic(rf, runmd) == nil
+		if ok {
+			st, err := os.Stat(rf)
+			ok = err == nil && strconv.FormatInt(st.Size(), 10) == sz
+		}
+		if !ok {
+			say("실패 %s @%s: run 지시문 쓰기", lane, m)
+			return 1
+		}
+	} else {
+		o, rc := Cmd{Name: "hc", Args: []string{"exec", "-i", "--on", on, "--", "sh", "-c",
+			`d=$HOME/.local/share/hc-fill/runs && mkdir -p "$d" && cat >"$d/$1" && [ "$(wc -c <"$d/$1" | tr -d " ")" = "$2" ] && printf %s "$d/$1"`,
+			"_", lane + "-run.md", sz}, In: strings.NewReader(runmd), Err: errPass}.Run()
+		rf = sub(o)
+		if rc != 0 || rf == "" {
+			say("실패 %s @%s: run 지시문을 그 기계에 두지 못했다", lane, m)
+			return 1
+		}
+	}
+	own := dash(owner)
+	if own == "-" {
+		own = ""
+	}
+	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는 살아 있는 지휘에게
+	if own != "" {
+		if ce, rc := (Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}).Run(); rc != 0 {
+			say("알림: %s 의 주인 지휘 %s 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) (%s)", lane, own, lastLine(sub(ce)))
+			own = ""
+		}
+	}
+	task := strings.ReplaceAll(TASK, "{run}", rf)
+	args, ok := lcLaunchArgs(lane, brief, m, repo, dest, owner, task)
+	if !ok {
+		say("실패 %s @%s: 설정 launch 틀을 인자로 나누지 못함", lane, mm)
+		return 1
+	}
+	// 지휘 주소: 주인 지휘가 있으면 그 지휘, 없으면 hc-lane coord가 확인한 지휘. 안 맞으면 넘기지 않고 한 줄
+	wco := own
+	if own == "" {
+		o, rc := Cmd{Name: "hc-lane", Args: []string{"coord"}, Err: errMerge}.Run()
+		wco = sub(o)
+		if rc != 0 {
+			say("알림: 지휘 없음 — 감시(hc-lane watch)를 띄우지 않음, %s 사건은 events에 남아 지휘가 wait/watch를 걸면 받는다 (%s)", lane, lastLine(wco))
+			wco = ""
+		}
+	}
+	// 시도 기록: 이름·줄 ID·기계·먼저·감사를 띄우기 전에. 채택이 같은 줄 ID·기계면 이것을 쓴다
+	if RESUME {
+		EARLYF = "resumed"
+	}
+	if !dry && tryput(lane, RID, mm, dash(EARLYF), dash(LAUTO), "", "") != 0 {
+		return 2
+	}
+	if rd == "" {
+		ownAdd(lane, proj, mm, "pending:"+mm, pst_, SB, PAFT, PSOLO)
+		ownStore()
+	}
+	la := []string{}
+	if rd != "" {
+		la = append(la, rd)
+	}
+	if RESUME {
+		la = append(la, "--resume")
+	}
+	if on != "" {
+		la = append(la, "--on", on)
+	}
+	la = append(append(la, "--name", lane, "--repo", repo, "--"), args...)
+	out, lr := Cmd{Name: "hc-lane", Args: la, Err: errMerge,
+		Env: []string{"HC_LANE_COORD=" + wco, "HC_LANE_OWNER=" + own, "HC_LANE_FILL=1", "HERDR_LAND_PRIORITY=" + strconv.Itoa(wcnt(lane))}}.Run()
+	out = sub(out)
+	crash("after-launch")
+	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로
+	switch lr {
+	case 0, 5, 6, 7:
+	default:
+		say("실패 %s @%s: hc-lane: %s", lane, mm, lcTail3(out))
+		return 1
+	}
+	SWHY = ""
+	if lr != 0 {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, "hc-lane: 시작 안 됨") {
+				SWHY = runeCut(l, 200)
+				break
+			}
+		}
+	}
+	last := lastLine(out)
+	ADDR = ""
+	if vs, _ := decodeAll(last); len(vs) > 0 {
+		ADDR = jor(jget(vs[0], "lane"), "")
+	}
+	if ADDR == "" {
+		say("실패 %s @%s: hc-lane 출력에서 주소를 못 읽음: %s", lane, mm, last)
+		return 1
+	}
+	// 원격은 hc-lane이 맥 창의 그 기계 공간에 탭으로 붙인다. 못 붙였으면 그 알림 줄을 그대로
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "hc-lane: Herdr 창") {
+			say("알림: %s", strings.TrimPrefix(l, "hc-lane: "))
+		}
+	}
+	bco := own // 로컬 레인은 주인 지휘 옆에(없으면 설정 coord)
+	if bco == "" {
+		bco = COORD
+	}
+	if on == "" && bco != "" {
+		if _, err := exec.LookPath("herdr-balance"); err == nil {
+			for i := 0; ; {
+				if _, rc := run("herdr-balance", "--main", bco, "--add", ADDR); rc == 0 {
+					break
+				}
+				if i++; i >= 5 {
+					say("알림: 분할 붙이기 실패 %s (herdr-balance --main %s --add %s)", ADDR, bco, ADDR)
+					break
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}
+	if lr != 0 {
+		return 5
+	}
+	return 0
+}
+
+// lcTail3: printf '%s\n' "$out" | tail -n 3 | tr '\n' ' '
+func lcTail3(s string) string {
+	l := strings.Split(s, "\n")
+	if len(l) > 3 {
+		l = l[len(l)-3:]
+	}
+	return strings.Join(l, " ") + " "
+}
+
+// lcLaunchArgs: 설정 launch 틀의 {task}를 "$task"로 바꿔 셸이 낱말을 나누게 한다(설정 파일은 믿는다 — 셸 판 eval "set -- …"와 같은 argv).
+// $1~$6은 셸 판 launch의 위치 인자와 같다
+func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, bool) {
+	tmpl := strings.ReplaceAll(LAUNCH, "{task}", `"$task"`)
+	out, rc := Cmd{Name: "sh", Args: []string{"-c", `task=$7; eval "set -- $8" || exit 1; [ $# -eq 0 ] || printf '%s\0' "$@"`,
+		"_", lane, brief, m, repo, dest, owner, task, tmpl}, Err: errPass}.Run()
+	if rc != 0 {
+		return nil, false
+	}
+	if out == "" {
+		return nil, true
+	}
+	return strings.Split(strings.TrimSuffix(out, "\x00"), "\x00"), true
+}
+
+// ---- 지휘 기계 파일 붙이기(Go 판 — 지휘가 지시문에 맥 경로를 적어 워커 기계가 못 읽었다) ----
+
+const (
+	lcPasteFileMax = 64 << 10
+	lcPasteAllMax  = 256 << 10
+)
+
+// lcSecrets: 비밀 꼴 — 실제 값 모양만 본다(문서 속 「API_KEY」 같은 이름만으로는 막지 않는다: 지침 문서가 늘 걸려 레인이 못 떴다)
+var lcSecrets = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	{"개인 키", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
+	{"sk-ant-", regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{16,}`)},
+	{"ghp_", regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{30,}`)},
+	{"github_pat_", regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`)},
+	{"AKIA", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
+	{"xoxb-", regexp.MustCompile(`xox[abprs]-[A-Za-z0-9-]{10,}`)},
+	{"이름=값", regexp.MustCompile(`(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)["']?\s*[=:]\s*["']?[A-Za-z0-9/+_.=-]{12,}`)},
+}
+
+func lcBlank(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f'
+}
+
+// lcPasteScan: 본문이 가리키는 이 기계 HOME 아래 일반 파일(<HOME>/… 또는 ~/…)의 원문 절. 막힐 때는 shown(지시문에 적힌 꼴)·abs·why.
+// 읽히지 않거나 일반 파일이 아닌 경로는 그냥 건너뛴다. 같은 경로는 한 번만
+func lcPasteScan(body string) (paste, shown, abs, why string) {
+	home := strings.TrimRight(HOME, "/")
+	if home == "" {
+		return "", "", "", ""
+	}
+	seen := map[string]bool{}
+	var b strings.Builder
+	total := 0
+	for _, tok := range strings.FieldsFunc(strings.ReplaceAll(body, "`", " "), lcBlank) {
+		x := ovUnwrap(tok)
+		cands := []string{x}
+		if loc := ovParticleRe.FindStringIndex(x); loc != nil {
+			cands = append(cands, ovUnwrap(x[:loc[0]+1]))
+		}
+		for _, c := range cands {
+			var p string
+			switch {
+			case strings.HasPrefix(c, "~/"):
+				p = home + c[1:]
+			case strings.HasPrefix(c, home+"/"):
+				p = c
+			default:
+				continue
+			}
+			p = filepath.Clean(p)
+			// hc-fill 데이터 폴더(runs·reports·verdicts…)는 레인 기계 자기 파일을 가리킨다 — 지휘 기계 것을 붙이지 않는다
+			if !strings.HasPrefix(p, home+"/") || strings.HasPrefix(p, home+"/.local/share/hc-fill/") || DATA != "" && strings.HasPrefix(p, DATA+"/") {
+				continue
+			}
+			st, err := os.Stat(p)
+			if err != nil || !st.Mode().IsRegular() {
+				continue
+			}
+			if seen[p] {
+				break
+			}
+			seen[p] = true
+			if st.Size() > lcPasteFileMax {
+				return "", c, p, fmt.Sprintf("파일 상한 64KiB를 넘는다(%d바이트)", st.Size())
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				break // 읽히지 않으면 붙이지 않는다
+			}
+			if total += len(data); total > lcPasteAllMax {
+				return "", c, p, "붙임 합계 상한 256KiB를 넘는다"
+			}
+			for _, s := range lcSecrets {
+				if s.re.Match(data) {
+					return "", c, p, "비밀 꼴(" + s.name + ")을 담았다"
+				}
+			}
+			b.WriteString("\n## (붙임) 지휘 기계 파일 원문 — " + c + "\n" + string(data))
+			break
+		}
+	}
+	return b.String(), "", "", ""
+}
+
+// lcPasteHome <본문> <주인|-> <레인>: 붙일 글. 상한·비밀 꼴이면 한 줄과 지휘 알림 한 번(키 hf:<레인>:paste:<경로 cksum>), ok=false
+func lcPasteHome(body, owner, lane string) (string, bool) {
+	paste, shown, abs, why := lcPasteScan(body)
+	if why == "" {
+		return paste, true
+	}
+	msg := fmt.Sprintf("실패 %s: 지시문이 가리키는 지휘 기계 파일 %s가 %s — 원문을 붙이지 못해 띄우지 않음", lane, shown, why)
+	say("%s", msg)
+	aesc(lane, owner, msg, fmt.Sprintf("hf:%s:paste:%d", lane, cksum([]byte(abs))))
+	return "", false
+}
+
+// place <레인> <프로젝트> <지시문> <기계제한> <되돌릴곳> <주인> [<선행 — 먼저 띄움일 때>]: machine 차례에서 처음 자리가 남는 기계에.
+// placed 띄움 · bad 지시문을 못 읽어 이 바퀴엔 그만. stuck을 고쳐 적는다. 쓰기 줄은 터미널 주소를 받은 때 실행 기록에 적고 GOTADDR
+func place(lane, p, brief, only, reply, owner, after string) {
+	placed, bad, GOTADDR = false, false, false
+	isa := strings.HasPrefix(dash(AK), "audit=")
+	for _, mc := range machines() {
+		m := mc.Name
+		if only != "-" && !inlist(m, only) {
+			continue
+		}
+		if !mhas(m, NEED) { // 지시문 「필요:」 능력이 없는 기계
+			continue
+		}
+		stk := 0
+		for _, s := range strings.Split(stuck, ",") {
+			if strings.HasPrefix(s, m+"=") {
+				stk++
+			}
+		}
+		if stk != 0 {
+			continue
+		}
+		repo := repoOf(p, m)
+		if repo == "" {
+			continue
+		}
+		if isa {
+			repo = strings.TrimSuffix(repo, "/") + ".wt/" + AK[len("audit="):] // 자동 감사: 그 레인 작업 트리에서 --read
+		}
+		if m != LOCAL && !connHas(m) {
+			if !inlist(m, OFF) {
+				say("건너뜀 %s: 연결 안 됨", m)
+				OFF += "," + m
+			}
+			continue
+		}
+		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m) >= c {
+			continue
+		}
+		// 자동 감사 줄은 레인상한을 보지 않고 레인 수에도 안 든다
+		if !isa && mc.LCap != "-" {
+			if lc, err := strconv.Atoi(mc.LCap); err != nil || lanesOn(m) >= lc {
+				continue
+			}
+		}
+		if dry {
+			pre, suf := "", ""
+			if after != "" {
+				pre, suf = "먼저 ", " 선행 "+after
+			}
+			say("%s%s띄울 %s → %s (%s)%s", P, pre, lane, m, repo, suf)
+			NOW = append(NOW, m)
+			placed, UPNOW = true, UPNOW+","+lane
+			if !isa {
+				NOWL = append(NOWL, m)
+				ownAdd(lane, p, m, "dry:"+m+"/"+lane, utcnow(), brief, dash(PAFT), dash(PSOLO))
+			}
+			break
+		}
+		ADDR, pst_, EARLYF = "", utcnow(), ""
+		if after != "" {
+			EARLYF = "early"
+		}
+		lr := launch(lane, brief, m, repo, reply, owner)
+		if lr == 2 {
+			bad = true
+			break
+		}
+		if lr != 0 && lr != 5 {
+			continue
+		}
+		if !isa {
+			ownBind(lane, "pending:"+m, ADDR)
+			GOTADDR = true
+		}
+		NOW = append(NOW, m) // 상태가 안 잡혀도 자리는 차 있다
+		if lr == 0 && statusOK(ADDR) {
+			if !isa {
+				NOWL = append(NOWL, m)
+			}
+			pe := ""
+			if after != "" {
+				pe = "early"
+			}
+			if RESUME {
+				pe = "resumed" // 주차에서 이어 띄움은 resumed(다시 먼저 띄움 후보가 아님)
+			}
+			if tryput(lane, RID, m, pe, LAUTO, ADDR, START_RUN) != 0 {
+				die("실행 기록 저장 실패")
+			}
+			if qset(true, RID, lane, "up", m, ADDR, stuck, pe, LAUTO) == 0 {
+				if after != "" {
+					say("먼저 띄움 %s → %s %s (%s, 선행 %s)", lane, m, ADDR, repo, after)
+				} else {
+					rs := ""
+					if RESUME {
+						rs = ", 주차한 가지 lane/" + lane + " 에서 이어"
+					}
+					say("띄움 %s → %s %s (%s%s)", lane, m, ADDR, repo, rs)
+				}
+			} else {
+				say("줄 바뀜 %s: 띄우는 동안 대기열 줄이 빠지거나 다시 들어왔다 — 띄운 %s %s 은 옛 줄의 실행이라 새 줄에 적지 않음(지휘가 정리)", lane, m, ADDR)
+			}
+			placed, UPNOW = true, UPNOW+","+lane
+			break
+		}
+		if stuck == "-" {
+			stuck = m + "=" + ADDR
+		} else {
+			stuck += "," + m + "=" + ADDR
+		}
+		if qset(true, RID, lane, "wait", "-", "-", stuck, "", "") != 0 {
+			say("줄 바뀜 %s: 상태 안 잡힘 %s %s 을 새 줄에 적지 않음(지휘가 정리)", lane, m, ADDR)
+			break
+		}
+		why := SWHY
+		if why == "" {
+			why = fmt.Sprintf("%d초 안에 hc get status 없음", WAIT)
+		}
+		say("상태 안 잡힘 %s @%s %s: %s. 그 레인에서 %s 빼고 다음 기계로(그 터미널은 남겨 둠, 확인 뒤 지휘가 정리)", lane, m, ADDR, why, m)
+	}
+}
+
+// early_sec <선행 목록> <기본 가지>: 먼저 띄움 레인의 run 지시문 끝에 붙일 절(셸 판 $(early_sec …) — 끝 줄바꿈 없음). 선행마다 판정 줄이 따로다.
+// 기한은 고정 시각(지금 + 설정 early_wait시간)
+func earlySec(after, base string) string {
+	dl := time.Now().Unix() + int64(EWAIT)*3600
+	dls := time.Unix(dl, 0).Format("2006-01-02 15:04")
+	re1, re2 := `^([a-z]+(\([^)]*\))?!?: *)?`, `([^a-z0-9_-]|$)`
+	fetch := ""
+	if strings.HasPrefix(base, "origin/") {
+		fetch = "git fetch -q origin && "
+	}
+	w := "until " + fetch + "subjects=$(git log " + base + " --format=%s)"
+	for _, a := range words(after) {
+		st, ok := "", false
+		if fetch != "" {
+			st, ok = since(a)
+		}
+		if ok {
+			w += " &&\n  { printf '%s\\n' \"$subjects\" | grep -Eq '" + re1 + a + re2 + "' || { o=$(git ls-remote origin 'refs/hc-landed/" + a +
+				"/*') && printf '%s\\n' \"$o\" | awk '{ s = $2; sub(/^refs\\/hc-landed\\/" + a + "\\//, \"\", s); if (s ~ /^[0-9]+$/ && s + 0 >= " + st +
+				") print $1 }' | ( while read -r s; do git merge-base --is-ancestor \"$s\" " + base + " && exit 0; done; exit 1 ); }; }"
+		} else {
+			w += " &&\n  printf '%s\\n' \"$subjects\" | grep -Eq '" + re1 + a + re2 + "'"
+		}
+	}
+	now := time.Now().Format("2006-01-02 15:04")
+	return "\n## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, " + now + ")\n" +
+		"자리가 비어 hc-fill이 이 레인을 선행 레인(" + strings.ReplaceAll(after, ",", ", ") + ")이 " + base + "에 들어가기 **전에** 띄웠다. 위 지시문의 본 작업은 선행이 들어간 뒤에 한다.\n" +
+		"1. 지금은 준비만: 지시문·계약 읽기, 이 레인 몫 파일의 실패 시험·골든 고정(커밋해도 된다), 선행 레인이 무엇을 바꾸는지 미리 읽기. 선행 레인이 고칠 파일은 아직 고치지 않는다.\n" +
+		"2. 준비가 끝나면 자리를 쥐고 기다리지 않는다(2026-11-20 사용자 「노는 워크트리 없이」): 준비를 커밋한 뒤(커밋할 것이 없어도 된다) 이 작업 폴더에서 `hc-lane park \"<준비 한 줄>\"` → 위 착지·정리 절차의 `hc-lane clean` 줄 → 턴을 끝낸다. hc-lane report 완료는 적지 않는다. 선행이 들어가면 hc-fill이 주차한 가지(원격 lane/<레인>)에서 이 레인을 다시 띄우고 지시문 끝에 「이어 가기」 절을 붙인다.\n" +
+		"3. park가 종료 3(원격 없는 저장소)일 때만 아래 블록을 그대로 한 번에 돌려 선행을 기다린다. 배경 실행 금지(`&`·nohup도, 도구의 배경 실행 run_in_background도). 명령 시간 한도는 도구가 허락하는 최대로 준다(예: Bash 도구 timeout 600000). 선행마다 판정 줄이 따로다 — 합치거나 줄을 고치지 않는다. 그래도 한도로 끊기면 같은 블록을 다시 돌린다(기한은 고정 시각이다).\n" +
+		"   기한(" + dls + ")이 지나면 블록이 `hc-lane early-wait`로 hc-fill이 이 기계에 바퀴마다 써 주는 선행 상태를 본다 — 선행이 살아 진행 중이면(작업 중·감사·착지 기다림·대기열에서 기다림) 멈추지 않고 계속 기다린다.\n" +
+		"```sh\n" +
+		w + "\n" +
+		"do [ \"$(date +%s)\" -lt " + strconv.FormatInt(dl, 10) + " ] || hc-lane early-wait " + strings.ReplaceAll(after, ",", " ") + " || { echo \"선행 대기 초과\"; break; }; sleep 180; done\n" +
+		"```\n" +
+		"4. 「선행 대기 초과」가 찍혔으면(기한 " + dls + "·" + strconv.Itoa(EWAIT) + "시간이 지났고 선행이 막힘·끝남·사라짐이거나 상태를 모름) 그 바로 앞 줄들(`<선행>: <까닭>`)을 붙여 `hc-lane report 막힘 - \"선행 대기 초과: <선행>: <까닭>\"`을 부르고 멈춘다. 이 레인의 대기열 줄은 「떠 있음」으로 남아 hc-fill이 다시 띄우지 않으니, 지휘가 `hc-fill rm <레인>` 뒤 다시 넣는다.\n" +
+		"5. 블록으로 기다려 선행이 모두 들어갔으면 `git rebase " + base + "` 뒤 본 작업을 한다(준비 커밋은 그대로 둔다)."
+}
+
+// resume_sec <레인> <선행 목록> <기본 가지>: 주차한 레인을 그 가지에서 다시 띄울 때 run 지시문 끝 절(끝 줄바꿈 없음)
+func resumeSec(lane, after, base string) string {
+	return "\n## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, " + time.Now().Format("2006-01-02 15:04") + ")\n" +
+		"이 레인은 먼저 띄워 준비한 뒤 주차했다(hc-lane park). 선행(" + strings.ReplaceAll(after, ",", ", ") + ")이 " + base + "에 들어가 hc-fill이 주차한 가지 origin/lane/" + lane + " 에서 이 작업 트리를 만들었다(준비 커밋이 들어 있다).\n" +
+		"1. 먼저 `git fetch origin && git rebase " + base + "` — 충돌은 양쪽 내용을 살려 푼다. 준비 커밋은 그대로 둔다.\n" +
+		"2. 그다음 위 지시문의 본 작업을 끝까지 한다. 다시 주차하지 않는다."
+}

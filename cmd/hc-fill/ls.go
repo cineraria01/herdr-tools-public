@@ -1,0 +1,286 @@
+package main
+
+// ls 명령 — 셸 판 bin/hc-fill의 「ls)」 절(els 포함)
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// lsTerm: hc ls --json 한 터미널(jq '[.address, (.status // "-" | tostring)] | @tsv'에 이름을 더함)
+type lsTerm struct{ Addr, Status, Name string }
+
+// lsScalar: jq @tsv 칸 — 문자열은 그대로, 수·참거짓은 글로, null은 빈 값. 객체·배열은 ok=false(jq 오류)
+func lsScalar(raw json.RawMessage) (string, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", true
+	}
+	switch raw[0] {
+	case '{', '[':
+		return "", false
+	case '"':
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return "", false
+		}
+		return s, true
+	}
+	return string(raw), true
+}
+
+// lsTostring: jq 「.status // "-" | tostring」 — null·false는 -, 문자열은 그대로, 그 밖은 압축 JSON(키 차례 그대로)
+func lsTostring(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	switch {
+	case len(raw) == 0 || string(raw) == "null" || string(raw) == "false":
+		return "-"
+	case raw[0] == '"':
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+	}
+	var c bytes.Buffer
+	if json.Compact(&c, raw) != nil {
+		return string(raw)
+	}
+	return c.String()
+}
+
+// lsTerms: hc ls --json 출력을 읽는다. ok=false면 jq가 실패할 꼴(JSON 아님·.terminals가 배열 아님·칸이 객체)
+func lsTerms(raw string) ([]lsTerm, bool) {
+	d := json.NewDecoder(strings.NewReader(raw))
+	var ts []lsTerm
+	for {
+		var top map[string]json.RawMessage
+		if err := d.Decode(&top); err == io.EOF {
+			return ts, true
+		} else if err != nil || top == nil {
+			return nil, false
+		}
+		var arr []json.RawMessage
+		if json.Unmarshal(top["terminals"], &arr) != nil || arr == nil {
+			return nil, false
+		}
+		for _, e := range arr {
+			var t map[string]json.RawMessage
+			if json.Unmarshal(e, &t) != nil {
+				return nil, false
+			}
+			a, ok := lsScalar(t["address"])
+			if !ok {
+				return nil, false
+			}
+			var name string
+			if json.Unmarshal(t["name"], &name) != nil {
+				name = ""
+			}
+			ts = append(ts, lsTerm{tsvEsc(a), tsvEsc(lsTostring(t["status"])), name})
+		}
+	}
+}
+
+// lsSplit: IFS=$'\t' read 칸 나누기(탭은 IFS 공백이라 이어진 탭은 하나, 앞뒤 탭은 버림). 마지막 변수(n칸째)가 나머지를 받는다
+func lsSplit(line string, n int) []string {
+	f := strings.FieldsFunc(line, func(r rune) bool { return r == '\t' })
+	if len(f) > n {
+		f = append(f[:n-1], strings.Join(f[n-1:], "\t"))
+	}
+	for len(f) < n {
+		f = append(f, "")
+	}
+	return f
+}
+
+// lsFirst: awk -F'\t' -v n=… '($1 "")==n { …; exit }' — 그 이름 첫 줄(없으면 nil)
+func lsFirst(path, n string) Row {
+	for _, r := range readRows(path) {
+		if r.F(1) == n {
+			return r
+		}
+	}
+	return nil
+}
+
+// els <프로젝트> <선행>: 먼저 띄움 레인의 선행을 local 저장소의 지금 있는 origin/<기본>으로(fetch 없이). ok=false면 판정 못 함
+func lsEls(p, after string) (string, bool) {
+	FR = repoOf(p, LOCAL)
+	if FR == "" {
+		return "", false
+	}
+	var ok bool
+	if FB, ok = projectRef(FR); !ok {
+		return "", false
+	}
+	ew, ed := "", ""
+	for _, x := range words(after) {
+		eh, ok := landed(x)
+		if !ok {
+			return "", false
+		}
+		if eh != "" || cachedMark(p, x) {
+			ed += "," + x
+		} else {
+			ew += "," + x
+		}
+	}
+	if ew == "" {
+		return "선행 들어감 — 본 작업", true
+	}
+	s := "선행 기다림 " + ew[1:]
+	if ed != "" {
+		s += " · 들어감 " + ed[1:]
+	}
+	return s, true
+}
+
+func lsLine(c ...string) string {
+	w := []int{24, 10, 14, 24, 8, 4}
+	var b strings.Builder
+	for i, x := range c[:6] {
+		b.WriteString(padB(x, w[i]) + " ")
+	}
+	return b.String() + c[6]
+}
+
+// ls 명령. 셸 판과 다름: 「떠 있음」은 주소와 이름이 함께 맞을 때만(재사용된 주소의 남의 터미널은 「끝남」), 그 기계가 연결 안 됨이면
+// 「모름(연결 안 됨)」(hc machine ls가 실패하면 연결 판정 없이 셸 판처럼)
+func lsCmd(args []string) {
+	out, rc := Cmd{Name: "hc", Args: []string{"ls", "--json"}, Err: errPass}.Run()
+	if rc != 0 {
+		die("hc ls 실패")
+	}
+	terms, ok := lsTerms(sub(out))
+	if !ok {
+		die("hc ls --json 출력을 읽지 못했다")
+	}
+	var conn []string
+	connKnown := false
+	if raw, mrc := run("hc", "machine", "ls", "--json"); mrc == 0 {
+		conn, connKnown = jsonList(raw, "machines", "name", isConnected)
+	}
+	fmt.Println(lsLine("레인", "프로젝트", "상태", "주소", "주인", "우선", "선행·비고"))
+	if !isFile(Q) {
+		exit(0)
+	}
+	for _, l := range readLines(Q) {
+		f := lsSplit(l, 17)
+		name, proj, brief, after, only, state, addr, stuck := f[0], f[1], f[2], f[3], f[4], f[5], f[7], f[8]
+		reply, owner, prio, early, ak, ovk := f[10], f[11], f[12], f[13], f[14], f[15]
+		live, lr, s, a := "", "", "", ""
+		switch state {
+		case "wait":
+			s, a = "대기", "-"
+		case "sent":
+			s, a = "되돌려줌", addr
+		default:
+			m := LOCAL
+			if i := strings.IndexByte(addr, '/'); i >= 0 {
+				m = addr[:i]
+			}
+			if connKnown && m != LOCAL && !has(conn, m) {
+				s = "모름(연결 안 됨)"
+			} else {
+				for _, t := range terms {
+					if t.Addr == addr && t.Name == name {
+						live = t.Status
+						break
+					}
+				}
+				if live != "" {
+					s = "떠 있음(" + live + ")"
+				} else {
+					s = "끝남"
+				}
+			}
+			a = addr
+			// 마지막 보고: run이 바퀴마다 적은 last.tsv(레인 상태 sha8 사건시각 한줄 읽은시각 fresh|old)
+			if x := lsFirst(DATA+"/last.tsv", name); x != nil {
+				if x.F(2) == "-" {
+					lr = "보고 없음"
+				} else {
+					lr = x.F(2)
+					if x.F(3) != "-" {
+						lr += " " + x.F(3)
+					}
+					lr += " " + x.F(4)
+					if x.F(5) != "-" {
+						lr += " " + x.F(5)
+					}
+				}
+				if x.F(7) == "old" {
+					lr += " (옛 값 " + x.F(6) + ")"
+				}
+			}
+		}
+		note := ""
+		if after != "-" {
+			note = "선행 " + after
+		}
+		if only != "-" {
+			note += " 기계 " + only
+		}
+		ew := "선행 " + after
+		if early == "early" && live != "" {
+			if e, ok := lsEls(proj, after); ok {
+				ew = e
+			}
+		}
+		switch early {
+		case "early":
+			note = "먼저 띄움(" + ew + ")" + strings.TrimPrefix(note, "선행 "+after)
+		case "no-early":
+			note += " 먼저 띄움 끔"
+		case "parked":
+			note = "주차(선행 " + after + " — 들어가면 lane/" + name + " 에서 이어 띄움)" + strings.TrimPrefix(note, "선행 "+after)
+		case "resumed":
+			note += " 주차에서 이어 띄움"
+		}
+		if stuck != "-" {
+			note += " 상태 안 잡힘 남김 " + stuck
+		}
+		if dash(reply) != "-" {
+			note += " 받은편지 " + strings.SplitN(reply, ":", 2)[0]
+		}
+		if tn := strings.Join(thenNames(brief), ","); tn != "" {
+			note += " 이어서 " + tn
+		}
+		switch {
+		case ak == "no-audit":
+			note += " 자동 감사 끔"
+		case strings.HasPrefix(ak, "audit="):
+			note += " 감사 대상 " + strings.TrimPrefix(ak, "audit=")
+		case ak == "auto":
+			note += " " + anote(name)
+		}
+		switch ovk {
+		case "overlap-ok":
+			note += " 겹침 봄 끔"
+		case "solo":
+			note += " 단독"
+		}
+		if state == "wait" {
+			// 겹침 대기: run이 바퀴마다 적은 overlap.tsv(레인 앞레인 파일), 능력 막힘: need.tsv(레인 능력 보냄)
+			if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
+				note += " 겹침 대기(" + x.F(2) + ": " + x.F(3) + ")"
+			}
+			if x := lsFirst(DATA+"/need.tsv", name); x != nil {
+				note += " 필요 " + x.F(2) + " — 가진 기계 없음"
+			}
+		}
+		note = strings.TrimPrefix(note, " ")
+		if lr != "" {
+			if note != "" {
+				note = lr + " · " + note
+			} else {
+				note = lr
+			}
+		}
+		fmt.Println(lsLine(name, proj, s, a, dash(owner), plabel(prio), note))
+	}
+	exit(0)
+}

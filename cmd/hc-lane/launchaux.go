@@ -1,0 +1,167 @@
+package main
+
+// 레인 띄우기 곁일: 실행 명령 틀 나누기·hc 출력 읽기·되돌리기·감시 띄우기·원격 공간 이름(셸 판 lib/hc-lane/start.sh와 같은 글)
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+)
+
+// shellWords: 설정 lane.run 틀을 셸 문법으로 나눈다(셸 판 eval "set -- $tpl" — 설정 파일은 믿는다)
+func shellWords(tpl string) []string {
+	var b bytes.Buffer
+	c := exec.Command("bash", "-c", `eval "set -- $1" || exit 1; printf '%s\0' "$@"`, "hc-lane", tpl)
+	c.Stdout = &b
+	if c.Run() != nil {
+		die("설정 lane.run을 셸 문법으로 나누지 못했다: %s", tpl)
+	}
+	s := strings.TrimSuffix(b.String(), "\x00")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\x00")
+}
+
+// runRefused: hc run 오류가 JSON 하나이고 kind가 name_taken·spawn_failed(아무것도 안 띄움이 확실)
+func runRefused(out string) bool {
+	d := json.NewDecoder(strings.NewReader(out))
+	var vs []map[string]any
+	for {
+		var v map[string]any
+		err := d.Decode(&v)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false
+		}
+		vs = append(vs, v)
+	}
+	if len(vs) != 1 {
+		return false
+	}
+	e, _ := vs[0]["error"].(map[string]any)
+	k, _ := e["kind"].(string)
+	return k == "name_taken" || k == "spawn_failed"
+}
+
+var addrRe = regexp.MustCompile(`.*"address":"([^"]*)".*`)
+
+func firstAddr(out string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		if m := addrRe.FindStringSubmatch(ln); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// rollback: 띄우기 전에 실패하면 방금 만든 작업 트리·가지를 지운다 — 고유 커밋이 없을 때만. 돌려준 값은 die에 붙일 한 줄
+func rollback() string {
+	k, r := xoutQ("git", "-C", repo, "rev-list", "--count", bref+"..refs/heads/"+branch)
+	if r != 0 {
+		k = "?"
+	}
+	if k == "0" && xrun(nil, nil, "git", "-C", repo, "worktree", "remove", "--force", wt) == 0 {
+		if xrun(nil, nil, "git", "-C", repo, "branch", "-q", "-d", branch) == 0 {
+			return fmt.Sprintf("방금 만든 워크트리 %s·브랜치 %s 는 지웠다(고유 커밋 없음). 원인을 고친 뒤 같은 명령을 다시 돌린다", wt, branch)
+		}
+		return fmt.Sprintf("방금 만든 워크트리 %s 는 지웠고 브랜치 %s 는 못 지웠다. 지우려면: %sgit -C %s branch -d %s", wt, branch, rx, q(repo), branch)
+	}
+	lg := ""
+	if logPath != "" {
+		lg = ", 기록 " + logPath
+	}
+	return fmt.Sprintf("워크트리 %s%s 는 남겨 둠(고유 커밋 %s개 또는 지우기 실패)%s. 지우려면: %s", wt, onNote(), k, lg, undo)
+}
+
+// autoWatch: 레인·감사를 띄운 지휘에게 도는 watch가 없으면 이 기계에 하나 띄운다
+func autoWatch() {
+	co := os.Getenv("HC_LANE_COORD")
+	if co == "" {
+		co = os.Getenv("HC_TERMINAL_ID")
+	}
+	if co == "" {
+		return
+	}
+	if _, why, r := coordCheck(co); r != 0 {
+		errf("hc-lane: 지휘 없음 — %s. 감시(watch)를 띄우지 않음(사건은 events에 남는다)\n", why)
+		return
+	}
+	wk := ckey(co)
+	wn := strings.ToLower(wk)
+	if len(wn) > 21 {
+		wn = wn[:21]
+	}
+	wn = "lane-watch-" + wn
+	if _, alive := watchAlive(evdir() + "/watch." + wk); alive {
+		return
+	}
+	home := os.Getenv("HOME")
+	if dry {
+		fmt.Printf("[dry-run] hc run --bg --no-notify --rm --name %s --label hc-lane-watch=1 --cwd %s %s watch --all --to %s\n", wn, q(home), q(selfPath), co)
+		return
+	}
+	if exec.Command("hc", "run", "--bg", "--json", "--no-notify", "--rm", "--name", wn, "--label", "hc-lane-watch=1", "--cwd", home, selfPath, "watch", "--all", "--to", co).Run() == nil {
+		fmt.Printf("hc-lane: 감시 %s 띄움(지휘 %s 에게 레인 사건을 hc send로 밀어 줌)\n", wn, co)
+	} else {
+		errf("hc-lane: 감시 %s 를 띄우지 못했다(이미 그 이름이 살아 있으면 괜찮다) — 지휘는 hc-lane wait --all로 볼 것\n", wn)
+	}
+}
+
+func sleepPoll() { sleepFor(poll) }
+
+// showRemote: 띄운 뒤 그 공간이 이름 없이 생겼으면 기계 이름을 붙인다(창이 터미널을 보는 데 몇 초 — poll초씩 5번까지)
+func showRemote() {
+	if hsp == "" || addr == "" {
+		return
+	}
+	id := on + "/" + hsp
+	for i := 0; ; {
+		out, r := outOf(nil, []string{"herdr-app", "ls"})
+		if r != 0 {
+			errf("hc-lane: Herdr 창이 없어 %s 공간 이름은 못 붙였다(창을 열면 %s 가 보인다)\n", on, addr)
+			return
+		}
+		var v struct {
+			Spaces []struct {
+				ID   string  `json:"id"`
+				Name *string `json:"name"`
+			} `json:"spaces"`
+		}
+		found, nm := false, ""
+		if json.Unmarshal([]byte(out), &v) == nil {
+			for _, s := range v.Spaces {
+				if s.ID == id {
+					found = true
+					if s.Name != nil {
+						nm = *s.Name
+					}
+					break
+				}
+			}
+		}
+		if found {
+			if nm == on {
+				return
+			}
+			if exec.Command("herdr-app", "do", "space.rename", "--id", id, "--name", on).Run() == nil {
+				return
+			}
+			errf("hc-lane: Herdr 창의 %s 공간 이름을 붙이지 못했다(herdr-app do space.rename --id %s --name %s)\n", on, id, on)
+			return
+		}
+		i++
+		if i >= 5 {
+			errf("hc-lane: Herdr 창에 %s 공간(%s)이 아직 안 보인다 — 창을 확인\n", addr, id)
+			return
+		}
+		sleepPoll()
+	}
+}

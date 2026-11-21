@@ -24,7 +24,7 @@ print_steps() {
   printf '   # 저장소에 .claude/herdr-land.sh가 있으면 그 스크립트가 fetch·rebase·검증·push를 하고, 없으면 hc-lane이 같은 순서로 하며 .claude/herdr-verify.sh가 없으면 push하지 않고 실패한다\n'
   printf '   # rebase가 충돌로 멈추면(종료 3) 양쪽 내용을 살려 풀고 고친 파일을 git add 한 뒤 git rebase --continue, 그다음 이 줄을 처음부터 다시\n'
   printf '   # 검증이 실패하면 고쳐 커밋하고 이 줄을 다시. push 거절 횟수(종료 4)나 잠금 기다림 상한(종료 75)으로 끝나면 이 줄을 다시, 최대 20번\n'
-  printf '   # 병합기가 켜진 저장소면 이 줄은 큐에 제출만 하고 끝난다(「제출 … 이 레인은 여기서 끝」) — 착지는 병합기가 알리고, report 착지는 적히지 않는다. 아래 clean은 원격 lane/레인이름 에 그대로 있는 가지를 「제출됨」으로 지워 자리를 바로 비운다\n'
+  printf '   # 병합기가 켜진 저장소면 이 줄은 큐에 제출만 하고 끝난다(「제출 … 이 레인은 여기서 끝」) — 착지는 병합기가 알리고, report 착지는 적히지 않는다. 아래 clean은 큐 표식(refs/merge-queue/*-레인이름)에 그대로 있는 가지를 「제출됨」으로 지워 자리를 바로 비운다\n'
   s "cd $(q "$repo") && hc-lane clean --repo $(q "$repo") --branch $branch"
   printf '   # teardown·검사·워크트리·브랜치 정리를 한 번에. clean이 종료 1로 멈추면 출력된 이유를 고치고 같은 줄을 다시 돈다\n'
   printf '   # 폴더를 rm -rf로 직접 지우지 않는다. 보고는 출력 그대로, 건너뜀은 통과가 아니다\n'

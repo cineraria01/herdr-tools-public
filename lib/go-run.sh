@@ -3,7 +3,7 @@
 # go_run <도구> [인자…]: Go 판(cmd/<도구>, 단일 바이너리)으로 exec — 되면 돌아오지 않는다. 돌아오면 종료 코드로 셸 판을 고른다:
 #   0 셸 판으로 돈다(스위치가 bash거나, auto인데 Go 판을 쓸 수 없어 크게 경고함) · 1 스위치가 go인데 쓸 수 없음 · 2 스위치 값이 틀림
 #  · 스위치: <도구>_IMPL(대문자·-는 _, 예 HC_MERGER_IMPL), 없으면 HERDR_IMPL, 없으면 auto. go·auto·bash(sh) 가운데 하나
-#  · 바이너리: <도구>_BIN이 있으면 그것(빌드 안 함). 없으면 <모듈>/.bin/<도구> — 소스(go.mod·cmd/**·internal/**의 *.go)가 그보다
+#  · 바이너리: <도구>_BIN이 있으면 그것(빌드 안 함). 없으면 <모듈>/.bin/<도구> — 소스(go.mod·cmd/**·internal/**의 파일 — go:embed 글 포함)가 그보다
 #    새로우면 그 기계에서 go build(-trimpath, CGO_ENABLED=0, GOTOOLCHAIN=local, 빌드 캐시·GOPATH <모듈>/.bin/ — HOME과 상관없이).
 #    herdr-sync는 소스만 깐다(점으로 시작하는 .bin은 나무 줄이 걷지 않는다)
 #  · 모듈 자리: 저장소에서는 이 파일의 ../(go.mod가 있는 루트), 깔린 곳에서는 이 파일 곁 herdr-go/(~/.local/lib/herdr-go)
@@ -37,8 +37,9 @@ go_run() {
     if [ -f "$bin.src" ]; then   # 받은 바이너리: 소스 판이 같으면 그대로, 다르면 빌드(아래)
       if [ -x "$bin" ] && [ "$(cat "$bin.src" 2>/dev/null)" = "$(go_run_src)" ]; then fresh=1; else stale=1; fi
     fi
+    # 새로움은 *.go만이 아니라 go:embed 파일(cmd/hc-lane/usage.txt)도 본다(hc-lane-go-start)
     if [ -z "$fresh" ] && [ -d "$go_run_root/cmd/$tool" ] && { [ -n "$stale" ] || [ ! -x "$bin" ] || [ -n "$(find "$go_run_root/go.mod" "$go_run_root/cmd" "$go_run_root/internal" \
-      \( -name '*.go' -o -name go.mod \) -newer "$bin" 2>/dev/null | head -n 1)" ]; }; then
+      -type f -newer "$bin" 2>/dev/null | head -n 1)" ]; }; then
       gob=$(command -v go 2>/dev/null) || gob=
       for a in /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do [ -n "$gob" ] || [ ! -x "$a" ] || gob=$a; done
       if [ -n "$gob" ] && mkdir -p "$go_run_root/.bin"; then

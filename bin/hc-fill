@@ -26,13 +26,13 @@ WAIT=${HC_FILL_WAIT:-60} POLL=${HC_FILL_POLL:-5}
 hf_s=$0
 while [ -L "$hf_s" ]; do hf_l=$(readlink "$hf_s"); case $hf_l in /*) hf_s=$hf_l ;; *) hf_s=$(dirname "$hf_s")/$hf_l ;; esac; done
 hf_d=$(dirname "$hf_s")/../lib/hc-fill
-for hf_f in common tick audit launch overlap; do
+for hf_f in go common tick audit launch overlap; do   # go: Go 판으로 exec(lib/hc-fill/go.sh — 되돌리기 HC_FILL_IMPL=bash)
   . "$hf_d/$hf_f.sh" || { printf 'hc-fill: 함수 파일을 못 읽었다: %s (herdr-sync가 lib도 까는지)\n' "$hf_d/$hf_f.sh" >&2; exit 1; }
 done
 
 [ -f "$CONF" ] || die "설정 파일이 없다: $CONF (저장소 config.example/hc-fill.tsv를 복사해 값을 고친다)"
 # 한 값 키: 키 혼자면 빈 값, 같은 키가 두 줄이면 멈춘다
-dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold|audit|audit_max|audit_final|wake_every|ack_max|overlap)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
+dup=$(awk '$1 ~ /^(local|agent|coord|task|launch|gc|early|early_wait|idle|hold|audit|audit_max|audit_final|wake_every|ack_max|overlap|done_stall|inbox_audit)$/ { if (c[$1]++ == 1) print $1 }' "$CONF")
 [ -z "$dup" ] || die "설정에 $(echo $dup) 줄이 두 번 있다: $CONF"
 LOCAL=$(conf local) AGENT=$(conf agent)
 AGENT=${AGENT:-claude-code}

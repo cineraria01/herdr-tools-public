@@ -1,6 +1,7 @@
 #!/bin/bash
 # Go 판 단위 시험(go.mod 모듈 전체 — cmd/hc-merger·internal/*): gofmt·go vet·go test -race(프로세스 무리 정리·잠금 안 물림·git 모름 → 쉼·
 # 우선순위·복구 단계별 죽기·사건 줄 꼴·원자 쓰기). 공통 실행기 lib/go-run.sh가 바이너리를 짓고 고르는지도 본다.
+# 운영 도구 계약 시험(cmd/<도구>/contract*_test.go — 옛 tests/<도구>.test.sh)도 여기서 Go 판(기본)으로 돈다. 셸 판은 tests/ops-go-bash.test.sh
 # go가 없으면 실패한다 — Go 판을 쓰는 기계에는 go가 있어야 한다(없으면 go_run이 경고하고 셸 판으로 돈다)
 # 실행: bash tests/hc-merger-go.test.sh
 set -u

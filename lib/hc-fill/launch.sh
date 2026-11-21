@@ -161,6 +161,32 @@ old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 �
   onm "$1" '[ ! -f "$d" ] || mv -f "$d" "$d.old-$1"' "~/.local/share/hc-fill/reports/$2.md" "$(date +%Y%m%d%H%M%S)"
 }
 
+# paste_home <본문> <레인> <주인|->(2026-11-21 — 지휘가 지시문에 맥 경로를 적어 워커 기계가 못 읽었다): 다른 기계에 띄울 때 본문이 가리키는
+# 이 기계 HOME 아래 일반 파일(~/… · $HOME/…, hc-fill 데이터 폴더 빼고)의 원문 절을 PSEC에. 파일 64KiB·합계 256KiB를 넘거나 비밀 값 꼴이면
+# 한 줄과 지휘에 한 번 알리고 1(그 레인은 이번 바퀴에 안 띄움). 셸 판은 작게 — 낱말 끝 조사는 떼지 않는다(Go 판은 뗀다)
+paste_home() {
+  local t f why seen=, tot=0 sz
+  PSEC=
+  for t in $(printf '%s\n' "$1" | tr '`' ' ' | grep -oE "(~|$HOME)/[^][:space:]\"'()<>[]+" | sed -E 's/[^A-Za-z0-9_/~-]+$//'); do
+    case $t in "~/"*) f=$HOME/${t#"~/"} ;; *) f=$t ;; esac
+    case $f in "$HOME"/.local/share/hc-fill/* | "$DATA"/*) continue ;; esac
+    [ -f "$f" ] && [ -r "$f" ] || continue
+    inlist "$f" "$seen" && continue; seen="$seen$f,"
+    sz=$(wc -c <"$f" | tr -d ' '); tot=$((tot + sz)) why=
+    if [ "$sz" -gt 65536 ]; then why="파일 상한 64KiB를 넘는다(${sz}바이트)"
+    elif [ $tot -gt 262144 ]; then why="붙임 합계 상한 256KiB를 넘는다"
+    elif grep -Eq -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-ant-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}' "$f" ||
+      grep -Eiq -- "(password|passwd|token|secret|api[_-]?key|access[_-]?key)[\"']?[[:space:]]*[=:][[:space:]]*[\"']?[A-Za-z0-9/+_.=-]{12,}" "$f"; then why="비밀 꼴을 담았다"
+    else PSEC="$PSEC
+## (붙임) 지휘 기계 파일 원문 — $t
+$(cat -- "$f")
+"; continue; fi
+    echo "실패 $2: 지시문이 가리키는 지휘 기계 파일 ${t}가 $why — 원문을 붙이지 못해 띄우지 않음"
+    aesc "$2" "$3" "실패 $2: 지시문이 가리키는 지휘 기계 파일 ${t}가 $why — 원문을 붙이지 못해 띄우지 않음" "hf:$2:paste:$(printf %s "$f" | cksum | cut -d ' ' -f 1)"
+    return 1
+  done
+}
+
 # 설정 audit_final <안내>(2026-11-20 지휘 — 레인이 hc-fill 「감사 통과」만 보고 최종 감사 전에 착지했다): 그 뒤에 최종 감사가 따로 있으면
 # 3번을 「통과여도 착지하지 않는다 — 최종 감사 통과 알림 뒤에만」으로. 이 절이 본문보다 앞서므로 본문의 최종 감사 규칙을 덮지 않게
 afin_sec() {
@@ -173,6 +199,7 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
   # 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다(종료 2 = 이 레인은 이번 바퀴에 그만)
   body=$(cat -- "$2" 2>&1) && [ -n "$body" ] || { body=${body##*: }; echo "실패 $1: 지시문을 읽지 못함(${body:-빈 파일}): $2"; return 2; }
   on=; [ "$3" = "$LOCAL" ] || on=$3
+  PSEC=; [ -z "$on" ] || paste_home "$body" "$1" "${6:--}" || return 2
   # 받은편지 줄: 보고 경로에 요청 ID(되돌릴곳 #<ID>) — 같은 이름의 옛 보고가 이 요청 결과로 나가지 않게. 옛 줄(# 없음)은 <레인>.md
   rid=; case ${5:--} in *'#'*) rid=${5##*#} ;; esac
   rsec=; [ "${5:--}" = - ] || rsec="
@@ -183,10 +210,12 @@ launch() {  # launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <�
 "
   # 자동 감사(설정 audit): 감사 줄은 --read, 쓰기 줄(받은편지·--no-audit 빼고)은 「감사·착지」 절을 붙이고 감사 칸 auto
   rd= asec= LAUTO=
-  case ${AK:--} in audit=*) rd=--read ;; -|auto) [ -z "$AUD" ] || [ "${5:--}" != - ] || { asec=$ASEC LAUTO=auto; } ;; esac
+  # 받은편지 줄도 지시문이 「hc-fill 감사」를 요구하거나 설정 inbox_audit on이면(2026-11-21 — 받은편지 레인이 감사를 기다리며 9시간 멈춤)
+  case ${AK:--} in audit=*) rd=--read ;; -|auto) [ -z "$AUD" ] || { [ "${5:--}" != - ] && ! grep -q 'hc-fill 감사' -- "$2" && [ "$(conf inbox_audit)" != on ]; } ||
+    { asec=$ASEC LAUTO=auto; } ;; esac
   steps=$(hc-lane --print-steps $rd ${on:+--on "$on"} --name "$1" --repo "$4") || { echo "실패 $1 @$3: hc-lane --print-steps"; return 1; }
   [ -z "$rsec" ] || [ -n "$rid" ] || old_report "$3" "$1" || { echo "실패 $1 @$3: 그 기계의 옛 보고를 비켜 두지 못했다"; return 1; }
-  runmd() { printf '%s\n\n%s\n' "$body" "$steps"; printf %s "$rsec"; printf %s "$asec"; printf %s "${ESEC-}"; printf %s "${RSEC-}"; }
+  runmd() { printf '%s\n\n%s\n' "$body" "$steps"; printf %s "$rsec"; printf %s "$asec"; printf %s "${ESEC-}"; printf %s "${RSEC-}"; printf %s "$PSEC"; }
   sz=$(runmd | wc -c | tr -d ' ')   # 쓴 run 지시문의 크기가 이것과 같아야 한다(본문이 다 들어갔는지)
   if [ -z "$on" ]; then
     rf=$HOME/.local/share/hc-fill/runs/$1-run.md
