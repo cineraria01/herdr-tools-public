@@ -5,6 +5,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 TOOL=${HERDR_TOOLS_CONFIG_BIN:-$here/../bin/herdr-tools-config}
 EX=$here/../config.example
+# 판(go·bash): 기본 Go 판으로 못박는다(빌드가 깨지면 셸 판으로 조용히 통과하지 않게). tests/ops-go-bash.test.sh가 HERDR_IMPL=bash로 같은 것을
+export HERDR_TOOLS_CONFIG_IMPL=${HERDR_TOOLS_CONFIG_IMPL:-${HERDR_IMPL:-go}}
 T=$(mktemp -d "${TMPDIR:-/tmp}/htc-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
 . "$here/isolate.sh" || exit 1

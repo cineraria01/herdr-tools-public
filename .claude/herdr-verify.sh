@@ -1,5 +1,5 @@
 #!/bin/bash
-# herdr-tools 검증: 문법 검사 + tests/*.test.sh·claude/hooks/tests/*.test.sh 전부. hc-lane land가 이것을 부른다.
+# herdr-tools 검증: 문법·개인 값·싼 검사(CHEAP) 먼저 — 실패면 바로 끝 — 그다음 tests/*.test.sh·claude/hooks/tests/*.test.sh 전부. hc-lane land가 이것을 부른다.
 # 고아 검사: 시험마다 따로 프로세스 무리(pgid)로 돌린다. 시험이 끝난 뒤 그 무리에 남은 프로세스, 또는 검증 중 새로 생겨
 # 부모가 1이 된 프로세스 가운데 명령 줄이나 cwd에 이 폴더 경로가 든 것(과 그 자손)은 고아다: 목록(pid·cwd·명령)을 찍고
 # 끄고(TERM, 3초 뒤 KILL) 검증 실패. 단 cwd로만 걸리고 명령 줄에 /.claude/가 든 것(이 폴더에서 도는 Claude 세션의
@@ -34,8 +34,13 @@ stop() { [ -n "$pg" ] && kill -TERM -- "-$pg" 2>/dev/null; rm -rf "$tmp"; exit "
 trap 'stop 130' INT
 trap 'stop 143' TERM
 trap 'stop 129' HUP
-for t in tests/*.test.sh claude/hooks/tests/*.test.sh; do
-  [ -f "$t" ] || continue
+# 싼 검사(몇 초): 맨 앞에 돌리고, 문법·개인 값·싼 검사 가운데 하나라도 실패면 무거운 시험을 돌리지 않고 끝(종료 1).
+# HERDR_VERIFY_ALL=1이면 실패해도 끝까지 다 돈다. 아래 루프는 이 목록을 다시 돌리지 않는다.
+# 2026-11-21 줄 수 한도에 걸린 레인이 이름순으로 hc-lane 시험(20분+) 뒤에야 반송돼 병합 큐 전체가 기다렸다.
+CHEAP="tests/line-budget.test.sh"
+run() {
+  t=$1
+  [ -f "$t" ] || return 0
   HC_LANE_BIN="$PWD/bin/hc-lane" python3 -c 'import os,sys; os.setpgid(0, 0); os.execvp("bash", ["bash"] + sys.argv[1:])' "$PWD/$t" \
     >"$tmp/log" 2>&1 </dev/null &
   pg=$!
@@ -99,6 +104,16 @@ for _ in range(30):
 send(left, signal.SIGKILL)
 sys.exit(1)
 PY
+}
+for t in $CHEAP; do run "$t"; done
+if [ $fail != 0 ] && [ "${HERDR_VERIFY_ALL-}" != 1 ]; then
+  echo "실패 싼 검사 — 무거운 시험을 건너뛰고 끝 (끝까지 돌리려면 HERDR_VERIFY_ALL=1)"
+  rm -rf "$tmp"
+  exit 1
+fi
+for t in tests/*.test.sh claude/hooks/tests/*.test.sh; do
+  case " $CHEAP " in *" $t "*) continue ;; esac
+  run "$t"
 done
 rm -rf "$tmp"
 exit $fail

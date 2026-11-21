@@ -1,0 +1,115 @@
+// herdr-tools-config: 개인 설정 폴더 읽기·개인 값 검사(Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go).
+// 명령·인자·출력·종료 코드는 셸 판 bin/herdr-tools-config와 같다. 되돌리기 HERDR_TOOLS_CONFIG_IMPL=bash(또는 HERDR_IMPL=bash).
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"herdr-tools/internal/toolcfg"
+	"herdr-tools/internal/version"
+)
+
+const usage = `herdr-tools-config: 개인 설정 폴더($HERDR_TOOLS_CONFIG, 기본 ~/.config/herdr-tools)를 읽는 도우미.
+  get <키> [<기본값>]  config의 값을 찍는다. 키가 없으면 기본값, 기본값도 없으면 종료 3
+  file <이름>          그 폴더의 <이름> 파일 절대 경로. 없으면 종료 3
+  lint [--strict] [<파일>…]  개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
+                       패턴 파일이 없으면 경고 뒤 건너뜀(종료 0), --strict면 패턴 파일·패턴 줄이 없을 때 종료 3
+                       이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
+  sync-lint <범용 저장소> [<sync.list>]  <범용 저장소>/lib/<도구>/가 있는데 sync.list에 tools:bin/<도구> 줄만 있고 같은 대상(또는 all)의
+                       tools:lib/<도구>/ 나무 줄이 없으면 더할 줄을 찍고 종료 1 (bin만 깔리면 그 도구가 「함수 파일을 못 읽었다」로 멈춘다).
+                       도구가 함께 쓰는 lib(lib/<이름>/OWNER에 그 도구 이름)도, Go 판 도구(cmd/<이름>, OWNER — 예: hc-merger → hc-lane)의
+                       Go 소스 나무 줄(go.mod·cmd/**·internal/**·lib/go-run.sh)도 같이 본다
+`
+
+const me = "herdr-tools-config"
+
+func die2(f string, a ...any) {
+	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	os.Exit(2)
+}
+
+func main() {
+	a := os.Args[1:]
+	if len(a) == 0 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	dir := toolcfg.Dir()
+	switch a[0] {
+	case "--version":
+		fmt.Println(version.String(me))
+	case "-h", "--help":
+		fmt.Print(usage)
+	case "get":
+		get(dir, a[1:])
+	case "file":
+		file(dir, a[1:])
+	case "lint":
+		strict := len(a) > 1 && a[1] == "--strict"
+		files := a[1:]
+		if strict {
+			files = a[2:]
+		}
+		os.Exit(toolcfg.Lint(dir, strict, files, os.Stdout, os.Stderr))
+	case "sync-lint":
+		if len(a) < 2 || len(a) > 3 {
+			die2("sync-lint <범용 저장소> [<sync.list>]")
+		}
+		list := dir + "/sync.list"
+		if len(a) == 3 {
+			list = a[2]
+		}
+		os.Exit(toolcfg.SyncLint(a[1], list, os.Stdout, os.Stderr))
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+}
+
+func get(dir string, a []string) {
+	if len(a) < 1 || len(a) > 2 {
+		die2("get <키> [<기본값>]")
+	}
+	if !toolcfg.KeyRe.MatchString(a[0]) {
+		die2("키 이름 꼴이 틀림: %s (<영역>.<이름>, 소문자·숫자·_)", a[0])
+	}
+	v, ok, err := toolcfg.Get(dir, a[0])
+	if d, isDup := err.(*toolcfg.ErrDup); isDup {
+		fmt.Fprintln(os.Stderr, d.Msg)
+		os.Exit(2)
+	} else if err != nil {
+		die2("읽기 실패 %s/config", dir)
+	}
+	switch {
+	case ok:
+		fmt.Println(v)
+	case len(a) == 2:
+		fmt.Println(a[1])
+	default:
+		fmt.Fprintf(os.Stderr, "%s: 설정 없음 %s (%s/config — 예: config.example/config)\n", me, a[0], dir)
+		os.Exit(3)
+	}
+}
+
+func file(dir string, a []string) {
+	if len(a) != 1 || a[0] == "" {
+		die2("file <이름>")
+	}
+	n := a[0]
+	if w := "/" + n + "/"; strings.HasPrefix(w, "//") || strings.Contains(w, "/../") || strings.Contains(w, "/./") {
+		die2("이름은 설정 폴더 안의 상대 경로: %s", n)
+	}
+	if st, err := os.Stat(dir + "/" + n); err == nil && st.Mode().IsRegular() {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			die2("설정 폴더 경로를 풀지 못했다: %s", dir)
+		}
+		fmt.Printf("%s/%s\n", abs, n)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: 설정 파일 없음 %s/%s (예: config.example/%s)\n", me, dir, n, n)
+	os.Exit(3)
+}

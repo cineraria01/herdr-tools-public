@@ -27,11 +27,11 @@ if { [ ! -d "$HOME/Applications/Herdr.app" ] && [ ! -d "${HERDR_SYNC_SYSAPPS:-/A
   exit 2
 fi
 mkdir -p "$STATE" || exit 1
-if [ -z "${HERDR_SYNC_LOCKED-}" ]; then
-  HERDR_SYNC_LOCKED=1 lockf -s -t 0 "$STATE/lock" "$0" "$@"
-  rc=$?
-  [ $rc = 75 ] && echo "herdr-sync: 다른 herdr-sync가 돌고 있다 ($STATE/lock)" >&2
-  exit $rc
+if [ -z "${HERDR_SYNC_LOCKED-}" ]; then   # Go 판(cmd/herdr-sync, 릴리스 바이너리까지)으로 exec. HERDR_SYNC_IMPL=bash면 이 셸 판(릴리스 없음)
+  gr=$(dirname "$0")/../lib/go-run.sh   # 공통 실행기가 곁에 없으면 조용히 셸 판, IMPL=go로 못박았으면 종료 1. 잠금 뒤 다시 부른 것은 셸 판
+  if [ -f "$gr" ]; then . "$gr" || exit 1; go_run herdr-sync "$@" || exit; elif [ "${HERDR_SYNC_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then echo "herdr-sync: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1; fi
+  HERDR_SYNC_LOCKED=1 lockf -s -t 0 "$STATE/lock" "$0" "$@"; rc=$?
+  [ $rc = 75 ] && echo "herdr-sync: 다른 herdr-sync가 돌고 있다 ($STATE/lock)" >&2; exit $rc
 fi
 
 check=0 takes="" pulls="" machines=""
@@ -691,7 +691,7 @@ settings() {   # settings <기계> — 대상 기계의 herdr-settings-merge에 
   case $r in
     0) ;;
     1) # 충돌이 아니고, --check의 다름(표준 오류 없음)도 아니면 도구 문제
-      if [ $conf -gt $c0 ]; then :; elif [ $check = 1 ] && [ $wrote = 1 ] && [ ! -s "$TMP/serr" ]; then :; else r=x; fi ;;
+      if [ $conf -gt $c0 ]; then :; elif [ $check = 1 ] && [ $wrote = 1 ] && ! grep -v -e '경고: Go 판을 쓸 수 없다' -e '고치기: 그 기계에 go를' "$TMP/serr" | grep -q .; then :; else r=x; fi ;;
     127) echo "herdr-sync: ${m}에 ~/.local/bin/herdr-settings-merge가 없다 (설정을 맞추지 않음)" >&2; sdiff=도구문제:설정 ;;
     *) r=x ;;
   esac

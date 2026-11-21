@@ -44,5 +44,19 @@ if [ -f "$gr" ]; then
   t "소스가 새로우면 다시 빌드" "$(gr_)" "새 판"
   printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"; touch "$T/cmd/hc-fake/main.go"
   t "빌드 실패면 옛 바이너리를 그대로(새 판)" "$(gr_)" "새 판"
+  # 받은 바이너리(herdr-sync가 릴리스에서 받아 .bin/<도구>와 <도구>.src를 둠, 2026-11-21 ops-go): 소스 판이 같으면 빌드 없이 그것을
+  printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("기계 빌드") }\n' >"$T/cmd/hc-fake/main.go"
+  dl() { printf '#!/bin/sh\necho 받은 판\n' >"$T/.bin/hc-fake"; chmod +x "$T/.bin/hc-fake"; printf '%s\n' "$1" >"$T/.bin/hc-fake.src"; }
+  src=$(cd "$T" && bash -c '. lib/go-run.sh && go_run_src')
+  dl "$src"; sleep 1; touch "$T/cmd/hc-fake/main.go"   # 소스가 받은 바이너리보다 새로워도(시각) 판이 같으면 빌드하지 않는다
+  t "받은 바이너리: 판이 같으면 빌드 없이 씀" "$(gr_)" "받은 판"
+  dl "다른판.1"
+  t "받은 바이너리: 판이 다르면 기계에서 빌드" "$(gr_)" "기계 빌드"
+  t "받은 바이너리: 빌드하면 .src를 지움" "$([ -e "$T/.bin/hc-fake.src" ] && echo 있음 || echo 없음)" 없음
+  dl "다른판.2"; printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"
+  t "받은 바이너리: 판이 다르고 빌드도 안 되면 셸 판(받은 옛 판을 안 씀)" "$(gr_)" "돌아옴 0"
+  t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
+  dl "다른판.3"
+  t "받은 바이너리: 판이 다르고 빌드가 안 되면 IMPL=go는 1" "$(gr_ HC_FAKE_IMPL=go)" "돌아옴 1"
 fi
 exit $fail

@@ -111,6 +111,27 @@ t "패턴 파일 없음 + HERDR_VERIFY_NO_LINT=1: 건너뜀 줄, 통과" '[ $rc 
 out=$(HC_LANE=x HOME=$T/home HERDR_TOOLS_CONFIG=$T/없음 HERDR_VERIFY_NO_LINT=1 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
 t "레인 안 + HERDR_VERIFY_NO_LINT=1: 무시 줄, 실패 개인 값 검사" '[ $rc != 0 ] && printf "%s" "$out" | grep -q "레인 안이라 HERDR_VERIFY_NO_LINT 무시" && printf "%s" "$out" | grep -q "실패 개인 값 검사" && ! printf "%s" "$out" | grep -q "건너뜀 개인 값 검사"'
 
+# 8. 싼 검사 먼저: 줄 수 한도를 넘긴 파일이 있으면 몇 초 안에 실패하고 무거운 시험(가짜 느린 시험)을 부르지 않는다.
+# HERDR_VERIFY_ALL=1이면 무거운 시험까지 다 돈다. 싼 검사는 한 번만 돈다
+here=$(cd "$(dirname "$0")" && pwd)
+mk cheap "touch '$T/slow-ran'; sleep 30"
+mkdir -p "$R/lib/hc-lane"
+cp "$here/line-budget.test.sh" "$here/isolate.sh" "$R/tests/"
+cp "$here/../lib/hc-lane/test-isolate.sh" "$R/lib/hc-lane/"
+: >"$R/tests/line-budget.tsv"
+seq 601 >"$R/big"
+git -C "$R" add -- big lib tests
+git -C "$R" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm t   # line-budget이 HEAD를 본다
+s=$(date +%s); out=$(HC_LANE= bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?; e=$(( $(date +%s) - s ))
+t "줄 수 한도 넘김: 실패, 싼 검사 줄, 몇 초 안(${e}초)" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "실패 tests/line-budget.test.sh" && printf "%s" "$out" | grep -q "새 거대 파일 big 601줄" && printf "%s" "$out" | grep -q "실패 싼 검사" && [ $e -lt 20 ]'
+t "줄 수 한도 넘김: 무거운 시험은 안 부름" '[ ! -e "$T/slow-ran" ] && ! printf "%s" "$out" | grep -q "tests/x.test.sh"'
+printf '#!/bin/bash\ntouch "%s/slow-ran"\n' "$T" >"$R/tests/x.test.sh"
+out=$(HC_LANE= HERDR_VERIFY_ALL=1 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "HERDR_VERIFY_ALL=1: 무거운 시험까지 돌고 실패, 싼 검사는 한 번" '[ $rc = 1 ] && [ -e "$T/slow-ran" ] && printf "%s" "$out" | grep -q "통과 tests/x.test.sh" && [ "$(printf "%s\n" "$out" | grep -c "tests/line-budget.test.sh$")" = 1 ]'
+seq 10 >"$R/big"
+out=$(HC_LANE= bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "한도 안: 싼 검사 통과 뒤 무거운 시험, line-budget은 한 번" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "통과 tests/x.test.sh" && [ "$(printf "%s\n" "$out" | grep -c "통과 tests/line-budget.test.sh")" = 1 ]'
+
 # 끝: 이 시험이 띄운 것 0
 t "이 시험의 고아 0" allgone
 

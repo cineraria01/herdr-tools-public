@@ -5,6 +5,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 MERGE=${HERDR_SETTINGS_MERGE:-$here/../bin/herdr-settings-merge}
 KEYS=$here/../config.example/settings/keys.json  # 가짜 예시 목록(진짜는 개인 설정)
+# 판(go·bash): 기본 Go 판으로 못박는다. tests/ops-go-bash.test.sh가 HERDR_IMPL=bash로 같은 것을
+export HERDR_SETTINGS_MERGE_IMPL=${HERDR_SETTINGS_MERGE_IMPL:-${HERDR_IMPL:-go}}
 T=$(mktemp -d "${TMPDIR:-/tmp}/hsm-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
 

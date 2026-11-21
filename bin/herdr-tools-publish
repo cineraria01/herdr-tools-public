@@ -6,6 +6,15 @@
 # 막기(fail-closed): 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나, 블롭 내용·경로·링크 대상·공개 커밋 작성자에 개인 값(herdr-tools-config lint)이나 비밀 꼴이 있거나,
 # 검사를 못 하면 아무것도 push하지 않고 종료 1. 설정 키: publish.repo(없으면 종료 2)·publish.dir·publish.author·publish.secrets.
 set -u
+# Go 판(cmd/herdr-tools-publish)으로 exec — 되돌리기 HERDR_TOOLS_PUBLISH_IMPL=bash(또는 HERDR_IMPL=bash). 아래는 셸 판
+# 공통 실행기(lib/go-run.sh)가 곁에 없으면(Go 소스를 안 깐 기계) 조용히 셸 판, IMPL=go로 못박았으면 종료 1
+gr=$(dirname "$0")/../lib/go-run.sh
+if [ -f "$gr" ]; then
+  . "$gr" || exit 1
+  go_run herdr-tools-publish "$@" || exit
+elif [ "${HERDR_TOOLS_PUBLISH_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then
+  echo "herdr-tools-publish: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1
+fi
 me=herdr-tools-publish
 die() { echo "$me: $*" >&2; exit 1; }
 REPO=${HERDR_TOOLS_REPO:-$HOME/Documents/app/herdr-tools}

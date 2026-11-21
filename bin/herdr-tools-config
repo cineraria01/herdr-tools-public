@@ -12,6 +12,15 @@
 # config 꼴: 한 줄에 「<키> <값>」(값은 줄 끝까지, 앞뒤 빈칸 뺌), 「<키>」 혼자면 빈 값, # 줄은 주석.
 # 키는 <영역>.<이름>(^[a-z]+\.[a-z0-9_]+$). 같은 키 두 번·잘못 부름은 종료 2. 예시는 저장소 config.example/.
 set -u
+# Go 판(cmd/herdr-tools-config)으로 exec — 되돌리기 HERDR_TOOLS_CONFIG_IMPL=bash(또는 HERDR_IMPL=bash). 아래는 셸 판
+# 공통 실행기(lib/go-run.sh)가 곁에 없으면(Go 소스를 안 깐 기계) 조용히 셸 판, IMPL=go로 못박았으면 종료 1
+gr=$(dirname "$0")/../lib/go-run.sh
+if [ -f "$gr" ]; then
+  . "$gr" || exit 1
+  go_run herdr-tools-config "$@" || exit
+elif [ "${HERDR_TOOLS_CONFIG_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then
+  echo "herdr-tools-config: Go 판을 쓸 수 없다 — 공통 실행기 없음: $gr" >&2; exit 1
+fi
 me=herdr-tools-config
 dir=${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}
 usage() { sed -n '2,11s/^# \{0,1\}//p' "$0"; }

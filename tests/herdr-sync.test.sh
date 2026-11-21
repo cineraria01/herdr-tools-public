@@ -5,6 +5,9 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 SYNC=${HERDR_SYNC:-$here/../bin/herdr-sync}
+# 판(go·bash): herdr-sync는 기본 Go 판으로 못박는다(tests/ops-go-bash.test.sh가 HERDR_IMPL=bash로 같은 것을). 기계에 까는 도구 사본은
+# 곁에 공통 실행기가 없어 셸 판으로 돈다(Go 소스를 안 깐 기계와 같다)
+export HERDR_SYNC_IMPL=${HERDR_SYNC_IMPL:-${HERDR_IMPL:-go}}
 [ -f "$SYNC" ] || SYNC=$here/../herdr-sync
 MERGE=${HERDR_SETTINGS_MERGE:-$here/../bin/herdr-settings-merge}   # 진짜 herdr-settings-merge를 기계에 깔아 쓴다
 [ -f "$MERGE" ] || MERGE=$here/../herdr-settings-merge
@@ -576,7 +579,7 @@ if [ -f "$LIST" ]; then
   # Go 판 도구(go.mod·cmd/<이름>)는 소스로 깐다: Go 줄 넷이 한 번에, 대상이 같게(2026-11-21 go-foundation)
   if [ -f "$here/../go.mod" ]; then
     golines=$(awk '$3 == "tools:go.mod" || $3 == "tools:cmd/" || $3 == "tools:internal/" || $3 == "tools:lib/go-run.sh" { print $3, $4 }' "$LIST" | sort | paste -sd , -)
-    t "config.example/sync.list: Go 소스 나무 줄 넷, 대상이 같음" '[ "$golines" = "tools:cmd/ macos,tools:go.mod macos,tools:internal/ macos,tools:lib/go-run.sh macos" ]'
+    t "config.example/sync.list: Go 소스 나무 줄 넷, 대상이 같음" '[ "$golines" = "tools:cmd/ all,tools:go.mod all,tools:internal/ all,tools:lib/go-run.sh all" ]'
   fi
   # 점 파일만 남은 폴더(옮긴 도구의 무시된 빌드 산출물 — 예: 옛 lib/hc-merger/.bin)는 lib가 아니다
   for f in "$here"/../lib/*/; do [ -d "$f" ] && [ -n "$(ls "$f")" ] || continue; b=$(basename "$f"); o=$b
@@ -598,6 +601,52 @@ export PUB_FAKE_RC=1
 run
 unset PUB_FAKE_RC
 t "내보내기 실패: 크게 경고, 맞추기 종료 코드는 그대로" '[ $rc = 0 ] && has "!!! herdr-sync: 공개 저장소 내보내기 실패 (맞추기는 끝났다) — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시 !!!"'
+
+# 16. 릴리스(Go 판만, 2026-11-21 사용자 「github 에다가 빌드 한것도 처리해서 … 각 컴퓨터에서는 받아서」): 내보내기가 되면 맥에서 cmd/*를 지어
+# publish.repo 릴리스 bin-<커밋 12자>에 올리고(가짜 gh — $T/rel/<태그>/), macOS 기계는 맥이 넘긴 sha256이 맞을 때만 받는다(file:// 주소)
+if [ "$HERDR_SYNC_IMPL" = go ]; then
+  cat > "$T/bin/gh" << 'EOF'
+#!/bin/bash
+echo "$*" >> "$HCT/gh.calls"
+[ "$1" = release ] || exit 2
+op=$2 tag=$3; shift 3
+d=$HCT/rel/$tag
+case $op in
+  view) [ -d "$d" ] ;;
+  download) while [ $# -gt 0 ]; do case $1 in --pattern) p=$2; shift ;; --dir) o=$2; shift ;; esac; shift; done
+    [ -f "$d/$p" ] && cp "$d/$p" "$o/" ;;
+  create | upload) [ -z "${GH_FAKE_FAIL-}" ] || exit 1
+    mkdir -p "$d"; while [ $# -gt 0 ]; do case $1 in --repo | --title | --notes) shift ;; --clobber) ;; *) cp "$1" "$d/" ;; esac; shift; done ;;
+  *) exit 2 ;;
+esac
+EOF
+  chmod +x "$T/bin/gh"
+  export HERDR_SYNC_RELEASE_URL=file://$T/rel GOCACHE=${GOCACHE:-$here/../.bin/go-build}
+  put "$T/repo/go.mod" 'module herdr-tools\n\ngo 1.24\n'
+  put "$T/repo/cmd/hello/main.go" 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("hello") }\n'
+  git -C "$T/repo" add go.mod cmd && git -C "$T/repo" commit -qm go && HERDR_LAND=1 git -C "$T/repo" push -q origin main
+  sed -i '' 's|^publish.repo .*|publish.repo  https://github.com/test/pub.git|' "$T/conf/config"
+  git -C "$T/conf" commit -qam rel && HERDR_LAND=1 git -C "$T/conf" push -q origin main
+  for h in "$MAC" "$W1" "$LX"; do put "$h/.local/lib/herdr-go/go.mod" 'module herdr-tools\n'; done   # Go 소스를 깐 기계(받는 자리)
+  run
+  c12=$(git -C "$T/repo" rev-parse HEAD | cut -c1-12) tag=bin-$(git -C "$T/repo" rev-parse HEAD | cut -c1-12)
+  src=$(go_run_root=$T/repo; . "$here/../lib/go-run.sh"; go_run_root=$T/repo; go_run_src)
+  t "릴리스: 맥에서 지어 올림(바이너리 + SHA256SUMS)" '[ $rc = 0 ] && has "릴리스 올림 $tag" && [ -x "$T/rel/$tag/hello" ] && grep -q "  hello$" "$T/rel/$tag/SHA256SUMS"'
+  t "릴리스: 커밋을 바이너리에 새김(빌드 입력은 범용 저장소)" '"$T/rel/$tag/hello" >/dev/null && [ "$(shasum -a 256 "$T/rel/$tag/hello" | cut -d" " -f1)" = "$(cut -d" " -f1 "$T/rel/$tag/SHA256SUMS")" ]'
+  t "받기: macOS 기계·맥은 해시가 맞으면 받고 소스 판을 곁에" 'has "w1 받음 hello ($tag)" && [ "$("$W1/.local/lib/herdr-go/.bin/hello")" = hello ] && [ "$(cat "$W1/.local/lib/herdr-go/.bin/hello.src")" = "$src" ] && [ -x "$MAC/.local/lib/herdr-go/.bin/hello" ]'
+  t "받기: 리눅스는 받지 않는다(darwin/arm64만)" '[ ! -e "$LX/.local/lib/herdr-go/.bin/hello" ]'
+  : > "$T/gh.calls"
+  run
+  t "릴리스: 같은 커밋·같은 해시는 다시 안 올림, 이미 받은 기계는 다시 안 받음" '[ $rc = 0 ] && has "릴리스 같음 $tag" && ! grep -Eq "^release (create|upload)" "$T/gh.calls" && ! printf "%s" "$out" | grep -q " 받음 hello"'
+  printf 'x' >> "$T/rel/$tag/hello"; rm -f "$W1/.local/lib/herdr-go/.bin/hello" "$W1/.local/lib/herdr-go/.bin/hello.src"
+  run
+  t "받기: 받은 것의 해시가 다르면 쓰지 않고 크게 경고, 맞추기 종료 코드는 그대로" '[ $rc = 0 ] && [ ! -e "$W1/.local/lib/herdr-go/.bin/hello" ] && printf "%s" "$out" | grep -q "!!! herdr-sync: w1 hello 바이너리를 받지 않음: 해시가 다르다"'
+  t "받기: 실패한 받기는 임시 파일을 남기지 않음" '[ -z "$(find "$W1/.local/lib/herdr-go/.bin" -name ".hello.*")" ]'
+  rm -rf "$T/rel/$tag"
+  GH_FAKE_FAIL=1 run
+  t "릴리스: 올리기 실패는 크게 경고, 받지 않음, 종료 코드 그대로" '[ $rc = 0 ] && has "!!! herdr-sync: 릴리스 만들기 실패 $tag (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 빌드한다 !!!" && [ ! -e "$W1/.local/lib/herdr-go/.bin/hello" ]'
+  unset HERDR_SYNC_RELEASE_URL
+fi
 
 t "임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)" '[ -z "$(ls -A "$T/tmp")" ]'
 

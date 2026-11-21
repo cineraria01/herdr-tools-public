@@ -4,6 +4,8 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 PUB=${HERDR_TOOLS_PUBLISH:-$here/../bin/herdr-tools-publish}
+# 판(go·bash): 기본 Go 판으로 못박는다. tests/ops-go-bash.test.sh가 HERDR_IMPL=bash로 같은 것을
+export HERDR_TOOLS_PUBLISH_IMPL=${HERDR_TOOLS_PUBLISH_IMPL:-${HERDR_IMPL:-go}}
 T=$(mktemp -d "${TMPDIR:-/tmp}/htp-test.XXXXXX") && T=$(cd "$T" && pwd -P) || exit 1
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home HERDR_TOOLS_REPO=$T/priv HERDR_TOOLS_CONFIG=$T/conf GIT_CONFIG_NOSYSTEM=1
@@ -45,7 +47,8 @@ t "publish.repo 없음: 종료 2, 공개 쪽 그대로" '[ $rc = 2 ] && has "pub
 mv "$T/conf/config.keep" "$T/conf/config"
 mkdir -p "$T/lone" && cp "$PUB" "$T/lone/herdr-tools-publish"
 out=$(bash "$T/lone/herdr-tools-publish" 2>&1); rc=$?
-t "곁에 검사 도구(herdr-tools-config) 없음: 종료 1, push 없음" '[ $rc = 1 ] && has "herdr-tools-config" && [ -z "$(pmain)" ]'
+# 셸 판은 곁에 검사 도구가 있어야 한다. Go 판은 검사가 바이너리 안에 있고, 홀로 둔 사본은 공통 실행기가 없어 Go 판을 못 쓴다(못박았으면 종료 1)
+t "곁에 검사 도구(herdr-tools-config)·공통 실행기 없음: 종료 1, push 없음" '[ $rc = 1 ] && { has "herdr-tools-config" || has "공통 실행기 없음"; } && [ -z "$(pmain)" ]'
 mv "$T/conf/private-patterns.txt" "$T/pp.keep"
 run
 t "개인 패턴 파일 없음: 검사 못 함 → 종료 1, push 없음" '[ $rc = 1 ] && has "검사 못 함" && [ -z "$(pmain)" ]'
