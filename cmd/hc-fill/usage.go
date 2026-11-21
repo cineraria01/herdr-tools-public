@@ -61,6 +61,9 @@ const usageText = `사용법: hc-fill add --name <레인> --project <프로젝�
          (overlap-warn.log) · block: 예약끼리 겹치면 「겹침 대기」로 남기고 다음 줄(언급은 경고) · off. 선행 예약은 후속을 막고, 후속(그 선행을
          --after 사슬·--then으로 건너서라도 기다림) 예약은 선행을 안 막음. 감사 줄·--overlap-ok 줄은 안 봄. 설정 overlap_ignore <프로젝트> <glob>… 은 뺀다.
          검사와 띄우기는 바퀴마다 뜬 지시문 사본 하나로 하고, 그 사이 대기열 줄이 바뀌면 다음 바퀴에
+         자동 다시 맞춤(Go 판, 설정 reland_max 기본 2·0이면 끔): 병합기가 rebase 충돌(착지 실패 종료 3)로 반송하면 <레인>-reland
+         (같은 프로젝트·주인, 우선 높음, 자동 감사 끔 — refs/merge-failed/<이름>을 origin/main으로 rebase·검증·다시 제출)를 넣고
+         주인 지휘에 「자동 다시 맞춤 넣음」 한 줄. 같은 레인이 reland_max번 넘게 반송되면 지휘에 막힘만(기록 reland.tsv)
   watch  run을 --every초마다(한 번에 하나만, 이미 돌면 종료 75)
 설정: ${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv (칸 설명은 저장소 config.example/hc-fill.tsv)
 대기열: ~/.local/share/hc-fill/queue.tsv, run 지시문: 그 기계 ~/.local/share/hc-fill/runs/<레인>-run.md

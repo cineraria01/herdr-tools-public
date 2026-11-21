@@ -118,7 +118,7 @@ merge
 t "충돌: 먼저 낸 l-c는 착지" '[ "$(og show main:shared.txt)" = c-side ] || { cat "$T/merr"; false; }'
 t "충돌: l-d는 refs/merge-failed로, lane/l-d는 남음" 'og for-each-ref --format="%(refname)" refs/merge-failed/ | grep -Eq "^refs/merge-failed/[0-9]{10}-l-d$" && og rev-parse -q --verify refs/heads/lane/l-d >/dev/null'
 t "충돌: 다음 제출 l-e는 계속 착지" 'mainlog | grep -Fxq l-e && [ -z "$(qrefs)" ]'
-t "충돌: l-d 막힘 사건(까닭·원본·기준·제출 ID·로그 경로)" 'awk -F"\t" "\$4 == \"l-d\" && \$5 == \"막힘\"" "$EV" | grep -F "착지 실패(종료 3)" | grep -F "원본 " | grep -F "기준 " | grep -F "제출 ID" | grep -Fq merger-logs'
+t "충돌: l-d 막힘 사건(까닭·원본·기준·제출 ID·로그 경로, Go 판은 충돌 파일도)" 'awk -F"\t" "\$4 == \"l-d\" && \$5 == \"막힘\"" "$EV" | grep -E "착지 실패\(종료 3(\)|, 충돌 shared\.txt\))" |grep -F "원본 " | grep -F "기준 " | grep -F "제출 ID" | grep -Fq merger-logs'
 t "충돌: 제출 기록은 refs/merge-failed-meta로" 'og for-each-ref --format="%(refname)" refs/merge-failed-meta/ | grep -Eq "^refs/merge-failed-meta/[0-9]{10}-l-d$" && [ -z "$(og for-each-ref refs/merge-queue-meta/)" ]'
 # 반송된 제출은 원격 lane/l-d가 그 SHA 그대로여도 큐 표식이 없어 「제출됨」이 아니다 — clean이 가지를 지우지 않는다(2026-11-21 hc-lane-go-start)
 (cd "$W/b/proj" && git checkout -q --detach)

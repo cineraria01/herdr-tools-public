@@ -5,6 +5,7 @@ package main
 // 완료(패치 일치로 판정하지 않는다). 제출 기록이 없는 큐 항목(손으로 넣음)만 후보 가지 끝으로 본다.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/proc"
 )
 
@@ -114,9 +116,38 @@ func (m *M) judge() {
 		return
 	}
 	removeQuiet(m.mj + "/cap")
-	if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.lgf, "착지 실패(종료 "+m.lr+")") {
+	why := "착지 실패(종료 " + m.lr + ")"
+	if m.lr == "3" { // rebase 충돌 — hc-fill이 이 꼴(「종료 3, 충돌 」)을 보고 다시 맞춤 레인을 넣는다(cmd/hc-fill/reland.go)
+		why = "착지 실패(종료 3, 충돌 " + m.conflicts(m.b[0].s) + ")"
+	}
+	if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.lgf, why) {
 		m.mer = true
 	}
+}
+
+// conflicts: 제출을 기준(m.B)과 합칠 때 충돌하는 파일(git merge-tree --name-only, 종료 1) — 빈칸으로 잇고 200바이트 안.
+// 3자 합침은 깨끗한데 rebase 중간 커밋만 부딪혔거나 못 보면 「파일 모름(로그)」
+func (m *M) conflicts(s string) string {
+	var o bytes.Buffer
+	if gitx.Run("", &o, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", m.B, s) != 1 {
+		return "파일 모름(로그)"
+	}
+	var fs []string
+	seen := map[string]bool{}
+	for i, l := range strings.Split(strings.TrimSpace(o.String()), "\n") {
+		if l = flat(l); i > 0 && l != "" && !seen[l] { // 첫 줄은 트리
+			seen[l] = true
+			fs = append(fs, l)
+		}
+	}
+	if len(fs) == 0 {
+		return "파일 모름(로그)"
+	}
+	j := strings.Join(fs, " ")
+	if c := bcut(200, j); c != j {
+		return c + " …"
+	}
+	return j
 }
 
 func ids(b []entry) []string {

@@ -119,6 +119,7 @@ func runRound() {
 	replyTick() // 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다
 	auditTick()
 	stallTick()
+	relandTick() // 병합기 rebase 충돌 반송 → 다시 맞춤 줄(이 바퀴에 띄울 수 있게 orderRows 앞)
 	auditSeats()
 	orderRows()
 	NOW, NOWL, OFF, FETCHED, FETCHBAD = nil, nil, "", "", ""
