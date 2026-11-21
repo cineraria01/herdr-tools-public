@@ -1,7 +1,10 @@
 # hc-fill 함수: tick (bin/hc-fill가 읽는다. 함수는 bin/hc-fill 안 원래 정의 순서 그대로)
 
 # 끝난 레인 정리: 설정 gc 분(기본 60, 0이면 끔)마다 한 번, repo 줄의 기계·저장소마다 hc-lane gc. 원격 중간 참조(--integ)는
-# 프로젝트마다 local 기계의 저장소에서 한 번. 시각은 돌리기 전에 적는다(실패·멈춤이 바퀴마다 되풀이되지 않게). dry-run은 적지 않는다
+# 프로젝트마다 local 기계의 저장소에서 한 번. 정리는 바퀴 밖 배경(hc-fill _gc)에서 돈다 — 바퀴 안에서 차례로 돌 때 큰 저장소 한 번이
+# 9분 넘게 걸려 그동안 감사 수거·띄우기가 멈췄다(2026-11-21 fill-gc-async). 잠금 gc.lock(lockf — 프로세스가 끝나면 풀림)이 쥐여
+# 있으면 앞 정리가 아직 도는 것이라 이번 바퀴는 띄우지 않는다. 시각은 띄울 때 적는다(실패·멈춤이 바퀴마다 되풀이되지 않게).
+# 출력은 $DATA/gc.log에(바퀴 출력과 줄이 섞이지 않게). dry-run은 지금처럼 바퀴 안에서 --dry-run으로 돌고 시각을 적지 않는다
 gc_tick() {
   gm=$(conf gc); gm=${gm:-60}
   case $gm in *[!0-9]*) echo "알림: 설정 gc는 분(숫자)이다, 정리 건너뜀: $gm"; return ;; esac
@@ -10,7 +13,16 @@ gc_tick() {
   gl=$(cat "$DATA/gc.last" 2>/dev/null); gn=$(date +%s)
   case $gl in '' | *[!0-9]*) gl=0 ;; esac
   [ $((gn - gl)) -ge $((gm * 60)) ] || return 0
-  [ $dry = 1 ] || echo "$gn" >"$DATA/gc.last"
+  [ $dry = 0 ] || { gc_all; return 0; }
+  lockf -k -t 0 "$DATA/gc.lock" true 2>/dev/null; glr=$?
+  [ $glr != 75 ] || { echo "gc: 앞 정리가 아직 돈다($DATA/gc.lock) — 이번 바퀴는 안 띄움"; return 0; }
+  [ $glr = 0 ] || { echo "gc 잠금 실패(종료 $glr, $DATA/gc.lock) — 이번 바퀴는 안 띄움"; return 0; }
+  echo "$gn" >"$DATA/gc.last"
+  lockf -k -t 0 "$DATA/gc.lock" "$0" _gc </dev/null >>"$DATA/gc.log" 2>&1 &
+  echo "gc: 배경으로 띄움(pid $!) — 출력 $DATA/gc.log"
+}
+
+gc_all() {   # repo 줄마다 hc-lane gc(출력은 표준 출력). dry=1이면 --dry-run
   gcon=$(connected)
   awk '$1=="repo" {print $2, $3}' "$CONF" | while read -r gp gmach; do
     gr=$(repo_of "$gp" "$gmach"); [ -n "$gr" ] || continue

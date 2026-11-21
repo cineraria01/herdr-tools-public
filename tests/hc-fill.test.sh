@@ -19,7 +19,7 @@ tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }   # 손자�
 killtree() { kill -STOP $(tree "$1") 2>/dev/null; ktp=$(tree "$1"); kill $ktp 2>/dev/null; kill -CONT $ktp 2>/dev/null; }
 # watch는 $T 안 링크로 띄워 명령 줄에 $T가 들어간다 → 이 시험의 watch만 골라 세고, 끝에 남은 것이 있으면 마저 끈다
 leftw() { pgrep -f "$T/hc-fill watch"; }
-trap '[ -z "$bg" ] || killtree "$bg"; for w in $(leftw); do killtree "$w"; done; rm -rf "$T"' EXIT   # 남은 watch도 같은 방식(목록 잡아 신호 경합 없음)
+trap '[ -z "$bg" ] || killtree "$bg"; for w in $(leftw); do killtree "$w"; done; for g in $(pgrep -f "$T/home/.local/share/hc-fill/gc.lock"); do killtree "$g"; done; rm -rf "$T"' EXIT   # 남은 watch·배경 정리(lockf와 그 안의 _gc)도 같은 방식(목록 잡아 신호 경합 없음)
 mkdir -p "$T/bin" "$T/conf"
 cp "$EX" "$T/conf/hc-fill.tsv" || { echo "FAIL - 예시 설정이 없다: $EX"; exit 1; }
 
@@ -55,7 +55,7 @@ if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기:
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
 if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi
-if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
+if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; sleep "${HC_FAKE_GC_SLEEP:-0}"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)
@@ -117,7 +117,10 @@ mkdir -p "$HOME"
 
 n=0 fails=0
 t() { n=$((n + 1)); if eval "$2"; then echo "ok $n - $1"; else fails=$((fails + 1)); echo "FAIL $n - $1"; printf '%s\n' "${out-}" | sed 's/^/    | /'; fi; }
-run() { out=$("$FILL" "$@" 2>&1); rc=$?; }
+run() { out=$("$FILL" "$@" 2>&1); rc=$?; gcwait; }
+# 바퀴가 배경으로 띄운 정리(「배경으로 띄움(pid N)」)가 끝날 때까지 — 다음 시험의 gc.log·DATA에 늦게 쓰지 않게
+gcwait() { gp=$(printf '%s' "${out-}" | sed -n 's/.*배경으로 띄움(pid \([0-9]*\)).*/\1/p'); [ -z "$gp" ] || while kill -0 "$gp" 2>/dev/null; do sleep 0.05; done; }
+GCL=$HOME/.local/share/hc-fill/gc.log
 Q=$HOME/.local/share/hc-fill/queue.tsv
 # 기계 상태: mj box-1 box-2 … (적은 기계만 connected)
 mj() { s='{"machines":['; c=; for m in box-1 box-2 shared slow; do st=disconnected; case " $* " in *" $m "*) st=connected ;; esac; s="$s$c{\"name\":\"$m\",\"state\":\"$st\"}"; c=,; done; export HC_FAKE_MACHINES="$s]}"; }
@@ -480,14 +483,26 @@ run run
 t "gc: 대기열이 비어도 첫 바퀴에 돈다" '[ $rc = 0 ] && [ -s "$T/gc.log" ] || { cat "$T/gc.log"; false; }'
 t "gc: local 저장소는 --on 없이 --integ, 프로젝트마다" 'grep -Fxq "gc --integ --repo /Users/me/src/app" "$T/gc.log" && grep -Fxq "gc --integ --repo /Users/me/src/tools" "$T/gc.log"'
 t "gc: 연결된 다른 기계는 --on, --integ 없이" 'grep -Fxq "gc --on box-1 --repo /home/me/src/app" "$T/gc.log" && grep -Fxq "gc --on shared --repo /srv/me/app" "$T/gc.log"'
-t "gc: 연결 안 된 기계는 건너뜀과 알림" '! grep -Fq "box-2" "$T/gc.log" && printf "%s" "$out" | grep -Fq "gc 건너뜀 app @box-2: 연결 안 됨"'
-t "gc: 출력 줄에 프로젝트·기계" 'printf "%s" "$out" | grep -Fq "gc app @box-1: 지움 0 · 남김 0"'
+t "gc: 연결 안 된 기계는 건너뜀과 알림" '! grep -Fq "box-2" "$T/gc.log" && grep -Fq "gc 건너뜀 app @box-2: 연결 안 됨" "$GCL"'
+t "gc: 출력 줄은 바퀴 출력이 아니라 gc.log에, 프로젝트·기계와 함께" 'grep -Fq "gc app @box-1: 지움 0 · 남김 0" "$GCL" && ! printf "%s" "$out" | grep -Fq "gc app @box-1:" && printf "%s" "$out" | grep -Fq "gc: 배경으로 띄움(pid "'
 rm -f "$T/gc.log"; add g1
 run run
 t "gc: 간격(60분) 안의 다음 바퀴는 안 돈다" '[ ! -e "$T/gc.log" ]'
 echo 0 >"$HOME/.local/share/hc-fill/gc.last"
 HC_FAKE_GC_RC=1 run run
-t "gc: 간격이 지나면 다시, 실패해도 바퀴는 종료 0과 알림" '[ $rc = 0 ] && [ -s "$T/gc.log" ] && printf "%s" "$out" | grep -Fq "gc 실패 app @here (종료 1)"'
+t "gc: 간격이 지나면 다시, 실패해도 바퀴는 종료 0과 알림" '[ $rc = 0 ] && [ -s "$T/gc.log" ] && grep -Fq "gc 실패 app @here (종료 1)" "$GCL"'
+# fill-gc-async(2026-11-21): 정리가 오래 걸려도(큰 저장소 9분) 바퀴는 기다리지 않고, 다음 바퀴의 띄우기도 막히지 않는다
+fresh
+mj box-1 shared
+add gs1
+s0=$SECONDS; out=$(HC_FAKE_GC_SLEEP=8 "$FILL" run 2>&1); rc=$?; el=$((SECONDS - s0))
+t "gc 배경: 정리가 8초 걸려도 바퀴는 기다리지 않음(띄우기는 끝남)" '[ $rc = 0 ] && [ $el -lt 5 ] && [ "$(where gs1 | cut -d" " -f1)" = up ] || { echo "걸린 초 $el"; false; }'
+gslow=$out
+echo 0 >"$HOME/.local/share/hc-fill/gc.last"; add gs2
+s0=$SECONDS; run run; el=$((SECONDS - s0))
+t "gc 배경: 앞 정리가 돌면 다음 바퀴는 안 띄우고 막히지도 않음, 시각 그대로" '[ $rc = 0 ] && [ $el -lt 5 ] && [ "$(where gs2 | cut -d" " -f1)" = up ] && printf "%s" "$out" | grep -Fq "gc: 앞 정리가 아직 돈다" && [ "$(cat "$HOME/.local/share/hc-fill/gc.last")" = 0 ] || { echo "걸린 초 $el"; false; }'
+out=$gslow; gcwait
+t "gc 배경: 끝나면 출력이 gc.log에, 잠금이 풀려 다음 정리를 띄울 수 있음" 'grep -Fq "gc app @box-1: 지움 0 · 남김 0" "$GCL" && lockf -k -t 0 "$HOME/.local/share/hc-fill/gc.lock" true'
 fresh
 sed -i.bak "s/^gc .*/gc       0/" "$T/conf/hc-fill.tsv"
 run run

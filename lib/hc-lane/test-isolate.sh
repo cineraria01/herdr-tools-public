@@ -6,7 +6,8 @@
 #  · XDG 폴더를 지워 각 시험의 HOME 아래 기본값을 쓰게 한다(HOME은 시험마다 정한다)
 #  · 작업 폴더를 T로
 #  · 바깥 레인 환경(HC_LANE·HC_LANE_OWNER 등)을 지운다 — 레인 세션에서 검증을 돌리면 report가 바깥 주인을 11칸에 적어 hc-lane 시험
-#    3개가 졌다(2026-11-21 fill-park-readopt, 작업 중 발견해 함께 고침)
+#    3개(299·579·582)가 졌다(2026-11-21 fill-park-readopt·fill-gc-async가 따로 찾아 합침, 작업 중 발견해 함께 고침).
+#    필요한 시험은 스스로 넣는다
 exec 18>&- 19>&-
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX \
   XDG_STATE_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \

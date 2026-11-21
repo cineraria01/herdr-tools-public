@@ -41,7 +41,7 @@ AGENT=${AGENT:-claude-code}
 LED=$DATA/inbox.tsv
 cmd=${1-}; [ $# = 0 ] || shift
 case $cmd in
-  _set) qset "$@"; exit ;;
+  _set) qset "$@"; exit ;;  _gc) dry=0; echo "--- $(date '+%F %T')"; gc_all; exit 0 ;;   # _gc: gc_tick이 gc.lock을 쥐고 배경으로
   _then)   # _then <이름> <선행> <프로젝트> <지시문>: add --then이 run.lock·qlock 둘 다 쥐고 부른다
     # run은 지시문을 잠금 밖(launch의 cat)에서 읽고 hc-lane 띄우기·status 확인 뒤에야 up으로 바꾼다 — qlock만으로는 그 사이에
     # 붙인 절이 레인에 안 들어가고 사라진다. 그래서 run.lock(run 한 바퀴 내내)도 쥔다
