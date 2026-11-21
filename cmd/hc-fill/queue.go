@@ -69,6 +69,20 @@ func withQ(fn func()) (rc int) {
 
 func qRows() []Row { return readRows(Q) }
 
+// qRowsW: 고쳐 다시 쓸 대기열 줄 — 파일이 있는데 못 읽으면 종료 1(빈 목록으로 읽어 빈 대기열을 써 넣지 않게, Fable L1 — 셸 판은 awk 실패면 mv를 안 했다)
+func qRowsW() []Row {
+	text, ok := readFile(Q)
+	if !ok && exists(Q) {
+		fmt.Fprintf(os.Stderr, "hc-fill: 대기열을 읽지 못해 고치지 않는다: %s\n", Q)
+		exit(1)
+	}
+	var rs []Row
+	for _, l := range lines(text) {
+		rs = append(rs, splitRow(l))
+	}
+	return rs
+}
+
 // qset: 대기열 줄의 상태·기계·주소·남긴것(6~9칸)과 먼저(14)·감사(15) 칸. useID면 17칸이 qrid인 줄만. 0 바꿈 · 1 그 줄 없음 · 2 못 읽음
 func qset(useID bool, qrid, n, s, m, a, k, e, u string) int {
 	if !qHeld {
@@ -146,6 +160,10 @@ func qAdd(tmp string, f ...string) int {
 	return withQ(func() {
 		if qHasName(f[0]) {
 			die("이미 대기열에 있다: %s (hc-fill ls)", f[0])
+		}
+		// 잠금 밖 검사와 이 사이에 같은 이름이 --then으로 붙었을 수 있다 — 잠금 안에서 다시(아스트라 E03)
+		if x := thenof(f[0]); x != "" {
+			die("%s은 이미 %s에 이어 붙였다(--then) — 다른 이름으로", f[0], x)
 		}
 		if tmp != "" {
 			if err := os.Rename(tmp, f[2]); err != nil {
@@ -264,7 +282,7 @@ func rmigrate() int {
 			}
 		}
 		var out []Row
-		for _, r := range qRows() {
+		for _, r := range qRowsW() {
 			if r.F(1) == n && !strings.Contains(r.F(11), "#") {
 				r = r.Set(11, r.F(11)+"#"+rr)
 			}
@@ -466,7 +484,7 @@ func qRm(n string) {
 		crash("rm-after-cancel")
 	}
 	var out []Row
-	for _, r := range qRows() {
+	for _, r := range qRowsW() {
 		if r.F(1) != n {
 			out = append(out, r)
 		}

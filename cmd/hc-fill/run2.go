@@ -285,6 +285,9 @@ func waitRow(r Row) {
 		say("주차 정리 기다림 %s", name)
 		return
 	}
+	if tryUnsure(name, rid) {
+		return
+	}
 	if ndBlock(name, only, dash(owner), prj) {
 		return
 	}

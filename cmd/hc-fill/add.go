@@ -258,6 +258,7 @@ func thenLocked(tl, pre, prj, brief string) {
 	mid := fmt.Sprintf("\n## 이어서: %s (hc-fill add --then, %s)\n위 일을 끝내 커밋한 뒤 같은 작업 트리에서 이어서 한다. 이 절의 커밋 제목 머리는 `%s:`으로 쓴다(이 이름을 --after로 기다리는 레인이 풀리게).\n위 일의 완료 보고·착지는 하지 않는다 — 이 절까지 끝낸 뒤 한 번만 report 완료.\n",
 		tl, nowMin(), tl)
 	if err1 != nil || err2 != nil || writeAtomic(pb, string(old)+mid+string(add)) != nil {
+		DRC = 1 // 검사 거절(2)이 아니라 쓰기 실패 — 셸 판과 같은 1(Fable L3)
 		die("선행 지시문에 붙이지 못했다: %s", pb)
 	}
 	say("이어 붙임 %s → %s (새 레인 없음, 선행 지시문 %s)", tl, pre, pb)

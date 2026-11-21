@@ -30,7 +30,7 @@
 set -u
 M=""; SLOTS=1; SS=0; DRY=0; MESH_ONLY=0; CHECK=0
 [ "${1-}" = mesh ] && { MESH_ONLY=1; shift; }
-while [ $# -gt 0 ]; do case $1 in --slots) SLOTS=${2-}; SS=1; shift 2 || shift;; --dry-run) DRY=1; shift;; --check) CHECK=1; shift;; -h|--help) sed -n '2,29p' "$0"; exit 0;; *) M=$1; shift;; esac; done
+while [ $# -gt 0 ]; do case $1 in --slots) SLOTS=${2-}; SS=1; shift 2 || shift;; --dry-run) DRY=1; shift;; --check) CHECK=1; shift;; -h|--help) sed -n '2,29p' "$0"; exit 0;; -*) M=""; MESH_ONLY=0; break;; *) M=$1; shift;; esac; done  # -*: 모르는 옵션·-로 시작하는 이름은 사용 오류(E10)
 [ -n "$M" ] || [ $MESH_ONLY = 1 ] || { echo "사용: worker-mac-setup <기계> [--slots N] [--dry-run] | mesh [--check] [<기계>]" >&2; exit 64; }
 # cfg <변수> <키> [<기본값>]: 키가 없으면 기본값, 기본값도 없으면 빈 값으로 두고 MISS에 키를 더한다. 설정 오류는 종료 2
 MISS=""
@@ -129,7 +129,7 @@ mesh_run() {
     out=$(rrun "$a" "$(printf 'B=%q H4=%q BU=%q FP=%q;' "$b" "${V4[$j]}" "${U[$j]}" "${FP[$j]}")$MESH_HEAD$MESH_CLI" "$CHECK" "$D"); rc=$?
     line="$a → $b: authorized_keys $r · known_hosts $(sed -n 's/^kh=//p' <<<"$out") · config $(sed -n 's/^cfg=//p' <<<"$out") · hc $(sed -n 's/^hc=//p' <<<"$out") · 접속 $(sed -n 's/^conn=//p' <<<"$out")"
     if [ $rc = 4 ]; then echo "✗ $line"; echo "✗ $a 가 본 $b 호스트 키 지문이 이 맥 known_hosts(${FP[$j]})와 다르다 — 멈춤. 넣지 않았다."; return 4; fi
-    add=$((add + $(grep -o '넣음' <<<"$line $r" | wc -l)))
+    add=$((add + $(grep -o '넣음' <<<"$line" | wc -l)))  # $line에 $r(authorized_keys)이 이미 든다 — 한 번만(B31)
     if [ $rc = 0 ] && [ "$r" != 실패 ] && ! grep -Eq '(없음|다름|실패|안 됨)' <<<"$line" && grep -q '접속 됨' <<<"$line"; then echo "  $line"
     else echo "✗ $line"; bad=$((bad+1)); fi
   done; done
@@ -141,6 +141,7 @@ mesh_run() {
 }
 if [ $MESH_ONLY = 1 ]; then
   [ -n "$MESH" ] || { echo "설정 worker.mesh가 없다(서로 잇는 워커 이름들, 예: config.example/config)" >&2; exit 2; }
+  [ $DRY = 1 ] && CHECK=1  # --dry-run도 읽기만(머리말 「워커 연결은 --check」, B15)
   mesh_run "$M"; exit $?
 fi
 cfg SLOTS_FILE worker.slots_file; cfg TRUST worker.trust 'Documents/app'; cfg KEY worker.ssh_key '~/.ssh/id_ed25519'

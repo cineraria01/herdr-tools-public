@@ -1,6 +1,7 @@
 // ovis-split: Ovis(herdr-core 모드)에서 worker를 지휘 탭 옆 탭에 보이게 한다(Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」).
 // 계약은 셸 판(lib/ovis-split/ovis-split.py)과 같다 — 인자·출력 JSON 꼴(한글 그대로)·hc label 인자·종료 코드. 바뀐 것: hc가 실패하면
-// 셸 판은 예외 추적을 찍고 1로 죽었고 Go 판은 「ovis-split: hc … 실패(종료 N): …」 한 줄로 1이다.
+// 셸 판은 예외 추적을 찍고 1로 죽었고 Go 판은 「ovis-split: hc … 실패(종료 N): …」 한 줄로 1이다. 주소(address)가 없거나 문자열이
+// 아닌 hc 응답도 셸 판(KeyError)처럼 1이고, Go 판은 라벨을 하나라도 붙이기 전에 모든 대상 주소를 본다(B21 — 셸 판은 앞 대상에 붙인 뒤 죽기도 했다).
 //
 //	ovis-split --main <지휘> [--add tX ...]   지휘와 같은 공간에 worker마다 탭 하나. --add가 없으면 지휘의 이름 붙은 자식 전부
 //	ovis-split --main <지휘> --drop tX ...     공간에서 뺀다(Ovis의 Other terminals로). 지휘 자신과 그 자식만
@@ -25,6 +26,7 @@ import (
 	"herdr-tools/internal/argp"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/pyjson"
+	"herdr-tools/internal/version"
 )
 
 const (
@@ -121,6 +123,16 @@ func hc(args ...string) obj {
 	return m
 }
 
+// addrOf: 터미널 주소. 없거나 문자열이 아니면 종료 1 — 셸 판 KeyError와 같은 결과(B21). 라벨을 붙이기 전에 모든 대상을 이것으로 본다
+// (「None」을 주소로 넘기지 않는다)
+func addrOf(m obj, what string) string {
+	s, ok := m["address"].(string)
+	if !ok || s == "" {
+		die("%s 응답에 address(문자열)가 없다", what)
+	}
+	return s
+}
+
 func label(address string, pairs map[string]string) {
 	args := []string{"label", address}
 	for _, k := range labelKeys {
@@ -199,7 +211,7 @@ func terminals(m obj) []obj {
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("ovis-split 1")
+		fmt.Println(version.String("ovis-split")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
 	a, _ := parser.Parse(os.Args[1:])
@@ -214,17 +226,21 @@ func main() {
 		parser.Error("--main이 필요하다")
 	}
 	main := hc("get", "--json", a.Get("main"))
-	mainAddr := pystr(main["address"])
+	mainAddr := addrOf(main, "hc get "+a.Get("main"))
 	if len(a.Vals["drop"]) > 0 {
 		dropped := []any{}
+		var targets []string
 		for _, name := range a.Vals["drop"] {
 			target := hc("get", "--json", name)
 			if !droppable(target, mainAddr) {
 				fmt.Fprintf(os.Stderr, "건너뜀 %s: 지휘나 그 자식이 아니거나 Herdr 앱 칸이다\n", name)
 				continue
 			}
-			label(pystr(target["address"]), map[string]string{space: "", tabL: "", wsName: "", tabName: ""})
-			dropped = append(dropped, target["address"])
+			targets = append(targets, addrOf(target, "hc get "+name))
+		}
+		for _, t := range targets {
+			label(t, map[string]string{space: "", tabL: "", wsName: "", tabName: ""})
+			dropped = append(dropped, t)
 		}
 		fmt.Println(pyjson.Dumps(pyjson.Obj{{K: "main", V: main["address"]}, {K: "dropped", V: dropped}}, false))
 		return
@@ -241,12 +257,14 @@ func main() {
 	}
 	var candidates []obj
 	for _, t := range live {
+		addrOf(t, "hc ls") // 셸 판은 살아 있는 터미널 주소로 표를 만들다 KeyError — 여기서는 라벨 전에
 		if str(t, "where") != "" {
 			candidates = append(candidates, t)
 		}
 	}
 	for _, t := range terminals(hc("ls", "--json", "--label", wsName+"="+folder)) {
 		if str(t, "state") == "live" {
+			addrOf(t, "hc ls --label")
 			candidates = append(candidates, t)
 		}
 	}

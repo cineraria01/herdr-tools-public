@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -64,13 +65,39 @@ func corpus(t *testing.T) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, c := range strings.Split(string(b), "\x00") {
+		for i, c := range strings.Split(string(b), "\x00") {
 			if c != "" && !strings.Contains(c, "\x00") {
 				out = append(out, c)
+				if _, ok := corpusExt[c]; !ok {
+					corpusExt[c] = i + 1
+				}
 			}
 		}
 	}
 	return out
+}
+
+// corpusExt: HERDR_HOOKS_CORPUS에서 읽은 실제 명령 → 그 파일 안 번호(1부터). 실패 로그에는 원문·출력 대신 번호만
+// (아스트라 H04 — 실제 명령 이력에는 토큰·내부 주소가 섞일 수 있다)
+var corpusExt = map[string]int{}
+
+// show: 실패 로그에 적을 입력과 실제 명령인지 — 실제 명령이면 번호만
+func show(s string) (string, bool) {
+	if n, ok := corpusExt[s]; ok {
+		return fmt.Sprintf("HERDR_HOOKS_CORPUS #%d", n), true
+	}
+	return strconv.Quote(s), false
+}
+
+// diffErr: 다름 한 건 — 실제 명령이면 출력(명령 조각이 든다)은 빼고 번호와 detail(종료 코드 등)만
+func diffErr(t *testing.T, kind, s, detail string, outs ...any) {
+	t.Helper()
+	label, ext := show(s)
+	if ext {
+		t.Errorf("%s %s: 다름 %s(원문·출력은 그 파일에서 번호로)", kind, label, detail)
+		return
+	}
+	t.Errorf("%s %s: %s"+strings.Repeat(" %q", len(outs)), append([]any{kind, label, detail}, outs...)...)
 }
 
 // perlBody: 셸 판 훅의 `"$PERL" -e '…'` 본문
@@ -120,7 +147,7 @@ func TestDiffKillGuard(t *testing.T) {
 		if got != want[i] {
 			bad++
 			if bad <= 15 {
-				t.Errorf("kill %q: go %s, perl %s", s, got, want[i])
+				diffErr(t, "kill", s, "go "+got+", perl "+want[i])
 			}
 		}
 	}
@@ -135,7 +162,7 @@ func TestDiffShellEdit(t *testing.T) {
 		if got := strconv.Itoa(shellEditVerdict(s)); got != want[i] {
 			bad++
 			if bad <= 15 {
-				t.Errorf("edit %q: go %s, perl %s", s, got, want[i])
+				diffErr(t, "edit", s, "go "+got+", perl "+want[i])
 			}
 		}
 	}
@@ -169,7 +196,7 @@ func TestDiffHeredoc(t *testing.T) {
 		if got := heredocStrip(s); got != want[i] {
 			bad++
 			if bad <= 10 {
-				t.Errorf("heredoc %q: go %q, perl %q", s, got, want[i])
+				diffErr(t, "heredoc", s, "go·perl", got, want[i])
 			}
 		}
 	}
@@ -201,14 +228,15 @@ func TestDiffTokenizer(t *testing.T) {
 		c.Stdin = strings.NewReader(strings.ReplaceAll(s, "\x00", "") + "\n")
 		out, err := c.Output()
 		if err != nil {
-			t.Fatalf("awk %q: %v", s, err)
+			label, _ := show(s)
+			t.Fatalf("awk %s: %v", label, err)
 		}
 		want := strings.TrimRight(string(out), "\n")
 		got := strings.Join(cgAnalyze(s, "/w/d", "/h"), "\n")
 		if got != want {
 			bad++
 			if bad <= 10 {
-				t.Errorf("tok %q:\n go  %q\n awk %q", s, got, want)
+				diffErr(t, "tok", s, "go·awk", got, want)
 			}
 		}
 	}

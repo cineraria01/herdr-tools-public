@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 )
 
 // gc_tick: 설정 gc 분마다 한 번, 바퀴 밖 배경(<SELF> _gc <잠금>)으로. 잠금이 쥐여 있으면 앞 정리가 아직 도는 것
@@ -64,7 +64,7 @@ func gcTick() {
 	defer log.Close()
 	c := exec.Command(SELF, "_gc", lock)
 	c.Stdout, c.Stderr = log, log
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // 바퀴와 따로(바퀴가 끝나도 정리는 이어 감)
+	proc.Group(c) // 바퀴와 따로(바퀴가 끝나도 정리는 이어 감)
 	if err := c.Start(); err != nil {
 		say("gc 잠금 실패(종료 1, %s/gc.lock) — 이번 바퀴는 안 띄움", DATA)
 		return

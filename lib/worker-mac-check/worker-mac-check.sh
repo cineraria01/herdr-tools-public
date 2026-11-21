@@ -120,6 +120,7 @@ else
     r 통과 "TCC $nm" "기록만:${out} (워커 맥 필수 아님)"
   done
 fi
+printf 'E\t끝\n' # 끝 표식 — 맥 쪽은 이 줄이 없으면 점검이 끊긴 것으로 본다(E01)
 EOS
 
 # 맥(이 기계)의 판
@@ -141,13 +142,16 @@ check_one() {
     line 모름 "$i" "설정 없음($k) — ${HERDR_TOOLS_CONFIG:-$HOME/.config/herdr-tools}/config, 예: config.example/config"
   done
   b64=$(printf '%s\n%s' "$PRE" "$REMOTE" | base64 | tr -d '\n')
-  out=$(tmo 90 ssh -n -o BatchMode=yes "$M" "bash -c \"\$(echo $b64 | base64 -D)\"" 2>/dev/null)
+  out=$(tmo 90 ssh -n -o BatchMode=yes "$M" "bash -c \"\$(echo $b64 | base64 -D)\"" 2>/dev/null); orc=$?
   while IFS=$'\t' read -r k a b c; do
     case $k in
       R) line "$a" "$b" "$c";;
       V) m=$(mac_ver "$a"); if [ "$b" = "$m" ]; then line 통과 "판 $a" "$b (맥과 같음)"; else line 실패 "판 $a" "$b (맥 ${m:-없음})"; fi;;
     esac
   done <<< "$out"
+  # 받은 줄은 두고, 다 받지 못한 점검은 통과로 세지 않는다(E01 — Go 판 cut과 같은 말)
+  if [ $orc = 142 ]; then why="시간 초과(90초)"; elif [ $orc != 0 ]; then why="끊김(종료 $orc)"; elif ! grep -qx $'E\t끝' <<<"$out"; then why="끝 표식 없음"; else why=""; fi
+  [ -z "$why" ] || line 실패 "원격 점검" "$why — 받은 줄까지만 봤다"
 
   # hc 터미널 문맥(코어가 띄운 프로그램) 점검
   if ! hc machine ls 2>/dev/null | grep -q "\"name\":\"$M\",[^}]*\"state\":\"connected\""; then
@@ -177,7 +181,7 @@ check_one() {
   [ $F -eq 0 ]
 }
 
-[ $# -ge 1 ] || { echo "사용: worker-mac-check <기계> [<기계>...]" >&2; exit 64; }
+[ $# -ge 1 ] && ! printf '%s\n' "$@" | grep -q '^-' || { echo "사용: worker-mac-check <기계> [<기계>...]" >&2; exit 64; }  # -로 시작하는 이름은 ssh 옵션(E10)
 # cfg <변수> <키> [<기본값>]: 키가 없으면 기본값, 기본값도 없으면 빈 값으로 두고 MISS에 키를 더한다. 설정 오류는 종료 2
 MISS=""
 cfg() {

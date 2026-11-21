@@ -393,7 +393,7 @@ func ndBlock(lane, only, owner, p string) bool {
 	} else if !dry && aesc(lane, owner, lane+": 필요 "+NEED+" — "+nl+". 설정에 능력을 더하거나 지시문의 「필요:」 줄을 고친다(hc-fill ls)", "") == 0 {
 		ns = "1"
 	}
-	NDNOW = append(NDNOW, lane+"\t"+NEED+"\t"+ns)
+	NDNOW = append(NDNOW, lane+"\t"+NEED+"\t"+ns+"\n") // 줄마다 줄바꿈(셸 판과 같은 꼴 — 없으면 둘째 레인부터 바퀴마다 다시 알렸다, Fable F1)
 	return true
 }
 
@@ -447,7 +447,8 @@ func snap(lane, brief string) bool {
 // pred_state <선행> <기다리는 줄 프로젝트>: PSV=「go|stop<TAB>까닭」
 func predState(pred, p string) {
 	LMS = ""
-	if lcFetch(p, true) == 0 {
+	switch lcFetch(p, true) {
+	case 0:
 		switch landingHit(pred) {
 		case 0:
 			PSV = "go\t들어감(" + strings.SplitN(hit, " ", 2)[0] + ")"
@@ -456,6 +457,9 @@ func predState(pred, p string) {
 			PSV = "go\t모름(착지 조회 실패)"
 			return
 		}
+	case 2: // fetch 실패·시간 넘김: 기본 가지를 모른다 — 빠진 선행을 「착지 안 하고 끝남」으로 정하지 않는다(gofix-fill F05)
+		PSV = "go\t모름(기본 가지 조회 실패)"
+		return
 	}
 	r := qrow(pred)
 	if r == nil {

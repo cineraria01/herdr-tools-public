@@ -12,9 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
-
-	"herdr-tools/internal/proc"
 )
 
 // ---------- hc-lane-wait-guard ----------
@@ -394,13 +393,20 @@ func loopNoQuestion(_ []byte, _, stderr io.Writer) int {
 	if fi, err := os.Stat(hc); err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
 		return 0
 	}
-	c := exec.Command(hc, "get", id, "--json")
-	c.Stdin = nil
-	out, err := proc.Output(c)
-	if err != nil {
+	// 훅 제한 10초 안(hookexec.go). 시간 넘김은 「hc 터미널 아님」이 아니라 모름 — 무인 루프일 수 있으니 질문 창을 막는다
+	// (아스트라 H02: proc 상한 120초·새 무리로 기다리다 시간 넘김을 「허용」으로 읽었다. 셸 판은 상한 없이 끝까지 읽어 막음)
+	hookBudget(8 * time.Second)
+	out, _, rc := hookRun([]string{"hc", "get"}, 0, nil, "", hc, "get", id, "--json")
+	if rc == timeoutRC {
+		fmt.Fprintf(stderr, "hc get %s 가 시간 안에 답하지 않아 무인 루프인지 모른다 — 질문 창을 띄우지 않는다. 답할 사람이 없으면 루프 전체가 멈춘다.\n"+
+			"- 되돌릴 수 있는 판단은 추천안으로 정해 상태 파일에 「가정/결정」으로 적고 진행한다.\n"+
+			"- 사람에게 꼭 물어야 하면 잠시 뒤 다시 시도한다(hc가 답하면 루프가 아닌 터미널에서는 질문 창이 열린다).\n", id)
+		return 2
+	}
+	if rc != 0 {
 		return 0
 	}
-	j := capture(string(out))
+	j := capture(out)
 	name := plutilRaw(j, "name")
 	job := plutilRaw(j, "labels", "job")
 	if !strings.Contains(asciiLower(name+" "+job), "loop") {

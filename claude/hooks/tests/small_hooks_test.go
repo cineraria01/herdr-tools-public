@@ -27,7 +27,7 @@ func TestHcLaneWaitGuard(t *testing.T) {
 		{"run_in_background false", 2, "hc-lane wait --mine &", "false"},
 		// 통과할 것
 		{"포그라운드 파이프", 0, "hc-lane wait --mine --timeout 5 2>&1 | tail -3", ""},
-		{"run_in_background true", 0, "hc-lane wait --mine --timeout 600", "true"},
+		{"run_in_background true", 0, "hc-lane wait --mine &", "true"}, // 같은 분리 명령이 false면 2(위) — 이 분기만 가린다(아스트라 E09)
 		{"&& echo", 0, "hc-lane wait --mine --timeout 5 && echo done", ""},
 		{"2>&1 · &>", 0, "hc-lane wait --mine 2>&1 | tail -3; hc-lane wait --mine &>/tmp/w.log", ""},
 		{"다른 명령의 &", 0, "sleep 5 & wait", ""},

@@ -126,11 +126,75 @@ func TestTimeout(t *testing.T) {
 	}
 	t.Setenv("SSH_HANG", "")
 	b.Reset()
-	if rc := checkOne(context.Background(), &b, settings{}, "w1"); rc != 0 || !strings.Contains(b.String(), "통과\t앞\tx\n") ||
-		!strings.Contains(b.String(), "모름\t키체인(hc 문맥)\thc 기계 w1 연결 안 됨") || !strings.Contains(b.String(), "-- w1: 통과 2 · 실패 0 · 모름 4") {
+	// [B27] 받은 앞줄은 보존하되, 끊긴 원격 점검은 성공(0)이 아니다
+	if rc := checkOne(context.Background(), &b, settings{}, "w1"); rc != 1 || !strings.Contains(b.String(), "통과\t앞\tx\n") ||
+		!strings.Contains(b.String(), "실패\t원격 점검\t") ||
+		!strings.Contains(b.String(), "모름\t키체인(hc 문맥)\thc 기계 w1 연결 안 됨") || !strings.Contains(b.String(), "-- w1: 통과 2 · 실패 1 · 모름 4") {
 		t.Errorf("rc %d\n%s", rc, b.String())
 	}
 	if time.Since(start) > 15*time.Second {
 		t.Error("상한이 안 먹음")
 	}
 }
+
+// [E01·B27] 원격 점검 본문이 255(끊김)로 끝나면 받은 줄은 두고 「실패 원격 점검」 한 줄 — 종료 1
+func TestRemoteCut(t *testing.T) {
+	d := t.TempDir()
+	os.WriteFile(filepath.Join(d, "ssh"), []byte("#!/bin/sh\ncase \"$*\" in *'bash -c'*) printf 'R\\t통과\\t앞\\tx\\n'; exit 255 ;; esac\nexit 0\n"), 0o755)
+	os.WriteFile(filepath.Join(d, "hc"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	t.Setenv("PATH", d+":"+os.Getenv("PATH"))
+	var b bytes.Buffer
+	if rc := checkOne(context.Background(), &b, settings{}, "w1"); rc != 1 || !strings.Contains(b.String(), "통과\t앞\tx\n") ||
+		!strings.Contains(b.String(), "실패\t원격 점검\t") {
+		t.Errorf("rc %d\n%s", rc, b.String())
+	}
+}
+
+// [E01] ssh가 0이어도 끝 표식이 없으면(원격 bash가 중간에 죽음) 끊긴 것 — 표식이 있으면 「원격 점검」 줄 없이 통과. 목적지 앞에 --(E10)
+func TestRemoteEndMark(t *testing.T) {
+	d := t.TempDir()
+	os.WriteFile(filepath.Join(d, "ssh"), []byte("#!/bin/sh\necho \"$*\" >>"+d+"/args\ncase \"$*\" in *'bash -c'*) printf 'R\\t통과\\t앞\\tx\\n'; [ -n \"$MARK\" ] && printf 'E\\t끝\\n' ;; esac\nexit 0\n"), 0o755)
+	os.WriteFile(filepath.Join(d, "hc"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	t.Setenv("PATH", d+":"+os.Getenv("PATH"))
+	var b bytes.Buffer
+	t.Setenv("MARK", "")
+	if rc := checkOne(context.Background(), &b, settings{}, "w1"); rc != 1 || !strings.Contains(b.String(), "실패\t원격 점검\t끝 표식 없음") {
+		t.Errorf("표식 없음: rc %d\n%s", rc, b.String())
+	}
+	b.Reset()
+	t.Setenv("MARK", "1")
+	if rc := checkOne(context.Background(), &b, settings{}, "w1"); rc != 0 || strings.Contains(b.String(), "원격 점검") || !strings.Contains(b.String(), "-- w1: 통과 2 · 실패 0 · 모름 4") {
+		t.Errorf("표식 있음: rc %d\n%s", rc, b.String())
+	}
+	for _, l := range strings.Split(strings.TrimSpace(readF(d+"/args")), "\n") {
+		if !strings.Contains(l, " -- w1 ") {
+			t.Errorf("목적지 앞에 -- 없음: %q", l)
+		}
+	}
+	if !strings.HasSuffix(remote, "printf 'E\\t끝\\n' # 끝 표식 — 맥 쪽은 이 줄이 없으면 점검이 끊긴 것으로 본다(E01)\n") {
+		t.Error("remote.sh 마지막 줄이 끝 표식이 아님")
+	}
+	if cut("x\n", 142, 90) != "시간 초과(90초)" || cut("", 255, 90) != "끊김(종료 255)" || cut("E\t끝\n", 0, 90) != "" {
+		t.Error("cut")
+	}
+}
+
+// [E10] -로 시작하는 기계 이름
+func TestDashName(t *testing.T) {
+	if !dashName([]string{"w1", "-oProxyCommand=x"}) || dashName([]string{"w1", "w-2"}) {
+		t.Error("dashName")
+	}
+}
+
+// [B25] --version에 릴리스 커밋(-ldflags -X …version.Commit)이 보인다
+func TestVersionShowsCommit(t *testing.T) {
+	bin := t.TempDir() + "/worker-mac-check"
+	if b, err := exec.Command("go", "build", "-ldflags", "-X herdr-tools/internal/version.Commit=abc123def456", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("빌드: %v %s", err, b)
+	}
+	if out, err := exec.Command(bin, "--version").Output(); err != nil || string(out) != "worker-mac-check (Go abc123def456)\n" {
+		t.Fatalf("--version: %q %v", out, err)
+	}
+}
+
+func readF(p string) string { b, _ := os.ReadFile(p); return string(b) }

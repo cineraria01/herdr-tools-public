@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 // emit: 커서에 적고 찍는다. watch는 먼저 지휘 터미널에 한 줄로 밀어 주고(hc send), 보낸 뒤에만 커서에 적는다.
@@ -394,6 +396,7 @@ func (e *ev) watchLock() {
 	go func() {
 		s := <-sc
 		code := map[os.Signal]int{syscall.SIGTERM: 143, syscall.SIGINT: 130, syscall.SIGHUP: 129}[s]
+		proc.StopCurrent(proc.Grace) // 상한으로 따로 무리가 된 자식(hc ls 등)도 함께 거둔다
 		exit(code)
 	}()
 }
@@ -409,11 +412,15 @@ func watchAlive(lk string) (string, bool) {
 		return op, false
 	}
 	pid, _ := strconv.Atoi(op)
-	if syscall.Kill(pid, 0) != nil {
+	if !proc.Alive(pid) {
 		return op, false
 	}
 	out, rc := capt(0, errDrop, "ps", "-p", op, "-o", "command=")
-	return op, rc == 0 && reWatchCmd.MatchString(out)
+	if rc != 0 {
+		// ps를 못 읽음(권한·시간 넘김) — 살아 있는 pid의 소유자를 모르면 잠금을 넘겨받지 않는다(gofix E05). 그사이 끝났으면 넘겨받는다
+		return op, proc.Alive(pid)
+	}
+	return op, reWatchCmd.MatchString(out)
 }
 
 var reWatchCmd = regexp.MustCompile(`hc-lane.*watch`)

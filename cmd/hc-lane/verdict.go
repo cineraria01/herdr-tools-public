@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/proc"
 )
 
@@ -443,7 +444,7 @@ func lverdictPrecheck() {
 func lverdictSave(rev, kind string) {
 	sha, rc := gitOut("rev-parse", "--verify", rev+"^{commit}")
 	if rc == 0 {
-		if os.WriteFile(lvdn+".candidate.tmp", []byte(sha+" "+kind+"\n"), 0o666) == nil && os.Rename(lvdn+".candidate.tmp", lvdn+".candidate") == nil {
+		if atomic.WriteFile(lvdn+".candidate", []byte(sha+" "+kind+"\n"), 0o666) == nil { // fsync까지(gofix E06)
 			return
 		}
 	}
@@ -511,8 +512,7 @@ func lverdictDone(sha string) {
 	if sha == "" {
 		die("land: 끝 표시에 쓸 커밋 조회 실패")
 	}
-	t := fmt.Sprintf("%s.tmp.%d", lvdn, os.Getpid())
-	if os.WriteFile(t, []byte("landed\t"+sha+"\t"+utc()+"\n"), 0o666) != nil || os.Rename(t, lvdn) != nil {
+	if atomic.WriteFile(lvdn, []byte("landed\t"+sha+"\t"+utc()+"\n"), 0o666) != nil { // fsync까지(gofix E06)
 		eprintf("hc-lane land: 착지는 됐는데 끝 표시를 못 썼다: %s — hc-lane report 착지 를 꼭 부른다\n", lvdn)
 	}
 }

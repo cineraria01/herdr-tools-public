@@ -5,7 +5,7 @@ package main
 // common.go·hcx.go·ffmain.go·lease.go·coord.go(land·report 레인)의 것을 쓴다.
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 var (
@@ -67,7 +69,7 @@ func command(argv []string) *exec.Cmd { return exec.Command(argv[0], argv[1:]...
 func xrun(stdout, stderr io.Writer, args ...string) int {
 	c := command(xargv(args))
 	c.Stdout, c.Stderr = stdout, stderr
-	return code(c.Run())
+	return code(proc.Run(c)) // git·hc는 상한 안에서만(proc.Limit) — 넘기면 124(모름, gofix M3·E02)
 }
 
 // xout: $(x …) — 표준 출력(끝 줄바꿈 뺌)·종료 코드, 오류 출력은 화면. xoutQ는 오류 출력을 버림(2>/dev/null)
@@ -75,18 +77,17 @@ func xout(args ...string) (string, int)  { return outOf(os.Stderr, xargv(args)) 
 func xoutQ(args ...string) (string, int) { return outOf(nil, xargv(args)) }
 
 func outOf(stderr io.Writer, argv []string) (string, int) {
-	var b bytes.Buffer
 	c := command(argv)
-	c.Stdout, c.Stderr = &b, stderr
-	r := code(c.Run())
-	return trim(b.String()), r
+	c.Stderr = stderr
+	b, err := proc.Output(c) // 시간 넘김이면 출력 없이 124 — 반쪽 출력을 읽지 않는다
+	return trim(string(b)), code(err)
 }
 
 // zx: 대상 기계의 그 폴더에서(zxArgs)
 func zx(stdout, stderr io.Writer, dir string, args ...string) int {
 	c := command(zxArgs(dir, args...))
 	c.Stdout, c.Stderr = stdout, stderr
-	return code(c.Run())
+	return code(proc.Run(c))
 }
 
 // xi: 표준 입력을 넘긴다(--on이면 hc exec -i)
@@ -95,11 +96,10 @@ func xi(stdin io.Reader, args ...string) (string, int) {
 	if on != "" {
 		argv = append([]string{"hc", "exec", "-i", "--on", on, "--timeout", "600", "--"}, args...)
 	}
-	var b bytes.Buffer
 	c := command(argv)
-	c.Stdin, c.Stdout, c.Stderr = stdin, &b, os.Stderr
-	r := code(c.Run())
-	return trim(b.String()), r
+	c.Stdin, c.Stderr = stdin, os.Stderr
+	b, err := proc.Output(c)
+	return trim(string(b)), code(err)
 }
 
 // captArgv: secs초 안에 안 끝나면 끊는 명령 줄 — 셸 판 capt와 같은 꼴(perl alarm, 없으면 그대로). 계약 시험이 PATH의 가짜 perl로
@@ -181,6 +181,9 @@ func termPairs() ([][2]string, int) {
 	out, r := outOf(nil, []string{"hc", "ls", "--json"})
 	if r != 0 {
 		return nil, 1
+	}
+	if !json.Valid([]byte(out)) { // 잘린 목록(0으로 끝났어도)은 「터미널 없음」이 아니다 — 모르면 지우지 않는다(gofix E01)
+		return nil, 2
 	}
 	var ps [][2]string
 	for _, ch := range strings.Split(out, "{") {

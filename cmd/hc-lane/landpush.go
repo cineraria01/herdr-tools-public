@@ -139,7 +139,7 @@ func landLocal(cand string) bool {
 	}
 	var ok bool
 	if at != "" {
-		ok = runCmd(cmdOpt{stdout: os.Stdout, stderr: os.Stderr, env: []string{"HERDR_LAND=1"}}, "git", "-C", at, "merge", "--ff-only", "--no-squash", "-q", nw) == 0
+		ok = runCmd(cmdOpt{stdout: os.Stdout, stderr: os.Stderr, env: []string{"HERDR_LAND=1"}, noLimit: true}, "git", "-C", at, "merge", "--ff-only", "--no-squash", "-q", nw) == 0
 	} else {
 		ok = gitRun("merge-base", "--is-ancestor", old, nw) == 0 && gitRun("update-ref", bref, nw, old) == 0
 	}

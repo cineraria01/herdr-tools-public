@@ -1,7 +1,7 @@
 package hcfill_test
 
-// go-followups-2(2026-11-21): 바깥 명령 시간 상한 · 「완료 뒤 멈춤」 헛알림 빼기 · 큰 파일·바이너리 붙이기. 셋 다 Go 판에서 고친 것 —
-// 셸 판은 고치지 않았다(알려진 차이: 셸 판은 바깥 명령 상한이 없고, 멈춤 알림·파일 붙이기는 Go 판에만 있다).
+// go-followups-2(2026-11-21): 바깥 명령 시간 상한 · 「완료 뒤 멈춤」 헛알림 빼기 · 큰 파일·바이너리 붙이기. 앞 둘은 Go 판에만 있다
+// (알려진 차이: 셸 판은 바깥 명령 상한·멈춤 알림이 없다). 큰 파일·바이너리는 경로만은 두 판 같다(gofix-fill F14 — 셸 판도 맞춤).
 
 import (
 	"strconv"
@@ -14,6 +14,7 @@ func init() { reg(95, "j", secJ) }
 
 func secJ(k *K) {
 	if k.impl == "bash" {
+		secJPaste(k)
 		return
 	}
 	secJTimeout(k)
@@ -77,6 +78,8 @@ func secJStall(k *K) {
 	k.check("헛알림: 완료 sha가 이미 기본 브랜치에 있으면 알리지 않음", !stalled(), read(rep))
 	k.runE([]string{"HC_FAKE_MB_RC=128"}, "run")
 	k.check("헛알림: 기본 브랜치에 있는지 모르면(merge-base 실패) 알리지 않음", !stalled(), read(rep))
+	k.runE([]string{"HC_FAKE_MB_RC=1", "HC_FAKE_REVFAIL=beef456"}, "run")
+	k.check("헛알림: 완료 sha 조회가 실패(I/O 오류 128 — 모름)면 「이 클론에 없음」으로 보지 않고 알리지 않음(아스트라 F12)", !stalled(), read(rep))
 	k.runE([]string{"HC_FAKE_MB_RC=1"}, "run")
 	k.check("헛알림: 터미널이 살아 있고 커밋이 기본 브랜치에 없을 때만 알림", stalled(), read(rep))
 }
@@ -86,15 +89,15 @@ func secJPaste(k *K) {
 	runs := k.DATA + "/runs"
 	k.fresh()
 	k.cpConf()
-	write(k.t, k.HOME+"/big.txt", strings.Repeat("가나다라마바사\n", 4000)) // 64KiB 넘음
-	write(k.t, k.HOME+"/bin.dat", "ELF\x00\x01\x02 바이너리\n")
-	write(k.t, k.T+"/pbg.md", "# 지시문 pbg\n설명: ~/big.txt 와 ~/bin.dat 는 읽지 않아도 된다\n")
+	write(k.t, k.HOME+"/.claude-tasks/big.txt", strings.Repeat("가나다라마바사\n", 4000)) // 64KiB 넘음
+	write(k.t, k.HOME+"/.claude-tasks/bin.dat", "ELF\x00\x01\x02 바이너리\n")
+	write(k.t, k.T+"/pbg.md", "# 지시문 pbg\n설명: ~/.claude-tasks/big.txt 와 ~/.claude-tasks/bin.dat 는 읽지 않아도 된다\n")
 	k.fill(nil, "add", "--name", "pbg", "--project", "app", "--brief", k.T+"/pbg.md", "--only", "box-1")
 	k.run("run")
 	rf := runs + "/pbg-run.md"
 	k.check("큰 파일·바이너리: 붙이지 않고 경로만 적고 레인은 띄움", k.where("pbg") == "up box-1 box-1/pbg" &&
-		hasF(rf, "## (붙임) 지휘 기계 파일 — ~/big.txt\n(붙이지 않음: 큼/바이너리 — 경로만)") &&
-		hasF(rf, "## (붙임) 지휘 기계 파일 — ~/bin.dat\n(붙이지 않음: 큼/바이너리 — 경로만)") &&
+		hasF(rf, "## (붙임) 지휘 기계 파일 — ~/.claude-tasks/big.txt\n(붙이지 않음: 큼/바이너리 — 경로만)") &&
+		hasF(rf, "## (붙임) 지휘 기계 파일 — ~/.claude-tasks/bin.dat\n(붙이지 않음: 큼/바이너리 — 경로만)") &&
 		!hasF(rf, "가나다라마바사") && !hasF(rf, "ELF"), k.where("pbg"), k.out)
-	rm(k.HOME+"/big.txt", k.HOME+"/bin.dat")
+	rm(k.HOME + "/.claude-tasks")
 }

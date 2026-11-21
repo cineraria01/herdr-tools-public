@@ -41,5 +41,20 @@ func main() {
 	if err != nil {
 		in = nil // 셸 판도 못 읽은 입력은 빈 입력과 같게 다룬다
 	}
-	os.Exit(hooks[os.Args[1]](in, os.Stdout, os.Stderr))
+	os.Exit(call(os.Args[1], in, os.Stdout, os.Stderr))
+}
+
+// call: 훅 하나 — 뜻밖의 패닉은 Go 기본 종료 2(= Claude Code의 「막음」)가 아니라, 편의 막 넷은 0(fail-open, 셸 판 헤더와 같게)·
+// cotenant-guard는 1(설정 onFailure로 막힘). 스택 대신 한 줄(Fable L2)
+func call(name string, in []byte, stdout, stderr io.Writer) (code int) {
+	defer func() {
+		if r := recover(); r != nil {
+			code = 0
+			if name == "cotenant-guard" {
+				code = 1
+			}
+			fmt.Fprintf(stderr, "%s: 내부 오류(%v) — 종료 %d\n", name, r, code)
+		}
+	}()
+	return hooks[name](in, stdout, stderr)
 }

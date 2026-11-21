@@ -9,8 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 type procInfo struct {
@@ -287,22 +288,43 @@ func tree(pids []int, procs map[int]procInfo) map[int]bool {
 	return out
 }
 
-func alive(p int) bool { return syscall.Kill(p, 0) == nil }
+// startOf: 그 pid의 시작 시각(ps lstart, 초). 모르면 오류
+func startOf(pid int) (time.Time, error) {
+	s, err := proc.StartTime(pid)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.ParseInLocation("Mon Jan 2 15:04:05 2006", strings.Join(strings.Fields(s), " "), time.Local)
+}
 
-// killTree: pids와 그 자손을 끈다(TERM, wait 뒤 남으면 KILL). 지금 다시 본 ppid·명령이 같은 것만. KILL까지 간 수
-func killTree(pids []int, procs map[int]procInfo, wait time.Duration) (int, error) {
+// killTree: pids와 그 자손을 끈다(TERM, wait 뒤 남으면 KILL). 처음 본 그 실행만(E04 — pid 재사용): 다시 본 ppid·명령이 같고 나이가
+// 처음 본 뒤 흐른 만큼 늘었고(seenAt), 신호 직전 시작 시각(lstart)이 그 나이와 맞는 것. KILL 직전에도 시작 시각을 다시 견준다.
+// 시작 시각을 모르면(ps 실패) 그 프로세스는 건드리지 않는다. (KILL까지 간 수, pids[0]에 신호를 보냈나)
+func killTree(pids []int, procs map[int]procInfo, seenAt time.Time, wait time.Duration) (int, bool, error) {
 	now, err := processes(run)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
+	at, grown := time.Now(), time.Since(seenAt).Seconds()
+	born := map[int]time.Time{}
 	var todo []int
 	for p := range tree(pids, procs) {
-		if n, ok := now[p]; ok && n.ppid == procs[p].ppid && n.cmd == procs[p].cmd {
-			todo = append(todo, p)
+		n, ok := now[p]
+		// 오차 3초: etime·lstart는 초 단위로 잘리고, 부하(1분 평균 20)에서 ps 한 번이 1초를 넘기도 한다
+		if !ok || n.ppid != procs[p].ppid || n.cmd != procs[p].cmd || float64(n.age) < float64(procs[p].age)+grown-3 ||
+			float64(n.age) > float64(procs[p].age)+grown+3 {
+			continue
 		}
+		st, err := startOf(p)
+		want := at.Add(-time.Duration(n.age) * time.Second)
+		if err != nil || st.Sub(want) > 3*time.Second || want.Sub(st) > 3*time.Second {
+			continue
+		}
+		born[p] = st
+		todo = append(todo, p)
 	}
 	for _, p := range todo {
-		syscall.Kill(p, syscall.SIGTERM)
+		term(p)
 	}
 	end := time.Now().Add(wait)
 	for time.Now().Before(end) {
@@ -317,12 +339,17 @@ func killTree(pids []int, procs map[int]procInfo, wait time.Duration) (int, erro
 	}
 	left := 0
 	for _, p := range todo {
-		if alive(p) {
-			syscall.Kill(p, syscall.SIGKILL)
-			left++
+		if !alive(p) {
+			continue
 		}
+		if st, err := startOf(p); err != nil || !st.Equal(born[p]) {
+			continue // 그사이 끝나고 다른 실행이 그 pid를 받았거나 모름
+		}
+		hardKill(p)
+		left++
 	}
-	return left, nil
+	_, rootDone := born[pids[0]]
+	return left, rootDone, nil
 }
 
 // seen: closed.log에 이 pid·명령 앞부분의 관찰 기록이 이미 있나(제목 「나이 N분 <명령>」의 나이는 견주지 않는다)
@@ -345,14 +372,15 @@ func seen(pid int, head, path string) bool {
 	return false
 }
 
-// sweepOrphans: 고아 쓸기 한 바퀴. 끌 것 수
-func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
+// sweepOrphans: 고아 쓸기 한 바퀴. (끌 것 수, 판정 실패 — 셸 판의 예외처럼 종료 코드에 넣는다)
+// 기록·출력에는 명령 줄(인자)을 남기지 않는다(E05 — 자격증명이 섞일 수 있다): 실행 파일·pid·나이·작업 트리·까닭만
+func sweepOrphans(termsAny any, dry bool, minAge float64, only string) (int, error) {
 	suffix, ok1 := conf("sweep.wt_suffix", ".wt")
 	keepS, ok2 := conf("sweep.orphan_keep", "codebase-memory-mcp herdr-core")
 	mode, ok3 := conf("sweep.orphan_kill", "off")
 	if !ok1 || !ok2 || !ok3 || suffix == "" || strings.Contains(suffix, "/") {
 		fmt.Println("고아 쓸기 건너뜀: 설정 sweep.wt_suffix·sweep.orphan_keep·sweep.orphan_kill을 못 읽음")
-		return 0
+		return 0, nil
 	}
 	if mode != "on" && mode != "off" {
 		fmt.Printf("고아 쓸기: sweep.orphan_kill은 on·off다(지금 '%s') — 끄지 않는다\n", mode)
@@ -370,7 +398,7 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 	}
 	if !isList {
 		fmt.Println("고아 쓸기 건너뜀: hc ls에 terminals 목록이 없다")
-		return 0
+		return 0, nil
 	}
 	var local []map[string]any
 	var liveCwds []string
@@ -385,15 +413,16 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 		if !strings.Contains(str(t, "address"), "/") {
 			if !hasCwd {
 				fmt.Println("고아 쓸기 건너뜀: cwd를 모르는 이 기계 터미널이 있다")
-				return 0
+				return 0, nil
 			}
 			local = append(local, t)
 		}
 	}
 	procs, err := processes(run)
+	seenAt := time.Now()
 	if err != nil {
 		fmt.Println("고아 쓸기 실패:", err)
-		return 0
+		return 0, err
 	}
 	var ones []int
 	for p, pi := range procs {
@@ -404,7 +433,7 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 	exeOf, err := exes(run)
 	if err != nil {
 		fmt.Println("고아 쓸기 실패:", err)
-		return 0
+		return 0, err
 	}
 	keep := map[string]bool{}
 	for _, k := range strings.Fields(keepS) {
@@ -439,8 +468,12 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 				}
 			}
 		}
-		line := fmt.Sprintf("pid %d 나이 %d분 %s (%s) %s", o.pid, o.age/60, o.root, o.why, cutRunes(o.cmd, 80))
-		head := flat(cutRunes(o.cmd, 80))
+		head := exeOf[o.pid]
+		if f := strings.Fields(o.cmd); head == "" && len(f) > 0 {
+			head = f[0]
+		}
+		head = flat(cutRunes(head, 120))
+		line := fmt.Sprintf("pid %d 나이 %d분 %s (%s) %s", o.pid, o.age/60, o.root, o.why, head)
 		title := fmt.Sprintf("나이 %d분 %s", o.age/60, head)
 		addr := "pid:" + strconv.Itoa(o.pid)
 		switch {
@@ -455,9 +488,13 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 				record(addr, "-", "고아 관찰("+o.why+")", o.root, "-", title)
 			}
 		default:
-			hard, err := killTree([]int{o.pid}, procs, 5*time.Second)
+			hard, did, err := killTree([]int{o.pid}, procs, seenAt, 5*time.Second)
 			if err != nil {
 				fmt.Println("고아 못 끔:", line, err)
+				continue
+			}
+			if !did {
+				fmt.Println("고아 안 끔(그사이 끝났거나 다른 실행이 그 pid를 받음·시작 시각 모름):", line)
 				continue
 			}
 			k, mark := "", ""
@@ -469,5 +506,5 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) int {
 		}
 		targets++
 	}
-	return targets
+	return targets, nil
 }

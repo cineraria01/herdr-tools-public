@@ -91,6 +91,9 @@ func newK(t *testing.T) *K {
 	for _, key := range dropEnv {
 		delete(k.env, key)
 	}
+	// 터미널 문맥 고정(gofix L17): 바깥이 TERM=dumb(launchd·비대화)이면 보조 도구(herdr-tools-config 등)의 go_run이 launchd 문맥으로
+	// 읽어 셸 판으로 돌고 첫 공지 한 줄을 더한다 — 시험 결과가 바깥 터미널에 따라 바뀌지 않게
+	k.env["TERM"] = "xterm-256color"
 	bin := filepath.Join(T, "bin")
 	mkdirs(t, bin, k.W)
 	for _, f := range []string{"hc", "ps", "herdr-app"} {

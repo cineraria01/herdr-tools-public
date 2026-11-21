@@ -149,12 +149,15 @@ func selfTest() (failed error) {
 		os.Chmod(filepath.Join(root, "repo.wt"), 0o755)
 	}
 
-	check(unlanded("/x", fakeRun(0, "+ abc\n", "", nil)) && !unlanded("/x", fakeRun(0, "- abc\n", "", nil)) && !unlanded("/x", fakeRun(0, "", "", nil)), "cherry")
+	here, gone := root, filepath.Join(root, "no-such-dir")
+	check(unlanded(here, fakeRun(0, "+ abc\n", "", nil)) && !unlanded(here, fakeRun(0, "- abc\n", "", nil)) && !unlanded(here, fakeRun(0, "", "", nil)), "cherry")
 	check(!unlanded("", fakeRun(0, "+ x", "", nil)), "cwd 없음")
-	check(!unlanded("/x", fakeRun(128, "", "fatal: not a git repository (or any of the parent directories): .git", nil)), "저장소 아님")
-	check(!unlanded("/x", fakeRun(1, "", `{"error":{"message":"cannot start folder /x: No such file or directory"}}`, nil)), "폴더 없음")
-	for _, bad := range []runner{fakeRun(-1, "", "", fmt.Errorf("시간 초과")), fakeRun(124, "", "timed out", nil), fakeRun(128, "", "fatal: bad revision 'origin/main'", nil)} {
-		check(unlanded("/x", bad), "판정 실패는 남김")
+	check(!unlanded(here, fakeRun(128, "", "fatal: not a git repository (or any of the parent directories): .git", nil)), "저장소 아님")
+	check(!unlanded(gone, fakeRun(0, "+ x\n", "", nil)), "폴더 없음(파일로 확인 — git을 부르지 않음)")
+	// E07: 폴더가 있는데 git이 다른 까닭으로 실패 — 문구에 No such file or directory가 들어도 모름
+	for _, bad := range []runner{fakeRun(-1, "", "", fmt.Errorf("시간 초과")), fakeRun(124, "", "timed out", nil), fakeRun(128, "", "fatal: bad revision 'origin/main'", nil),
+		fakeRun(128, "", "fatal: unable to read .git/objects/info/alternates: No such file or directory", nil)} {
+		check(unlanded(here, bad), "판정 실패는 남김")
 	}
 	check(busyRe.MatchString(screenTail("t1", fakeRun(1, "", "", nil))), "화면 못 읽음")
 	check(!busyRe.MatchString(screenTail("t1", fakeRun(0, "a\n\n"+prompt+"\n", "", nil))), "화면 프롬프트")

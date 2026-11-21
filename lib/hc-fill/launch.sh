@@ -162,8 +162,9 @@ old_report() {  # old_report <기계> <레인>: 같은 이름의 옛 보고가 �
 }
 
 # paste_home <본문> <레인> <주인|->(2026-11-21 — 지휘가 지시문에 맥 경로를 적어 워커 기계가 못 읽었다): 다른 기계에 띄울 때 본문이 가리키는
-# 이 기계 HOME 아래 일반 파일(~/… · $HOME/…, hc-fill 데이터 폴더 빼고)의 원문 절을 PSEC에. 파일 64KiB·합계 256KiB를 넘거나 비밀 값 꼴이면
-# 한 줄과 지휘에 한 번 알리고 1(그 레인은 이번 바퀴에 안 띄움). 셸 판은 작게 — 낱말 끝 조사는 떼지 않는다(Go 판은 뗀다)
+# 이 기계 HOME 아래 일반 파일(~/… · $HOME/…, hc-fill 데이터 폴더 빼고)의 원문 절을 PSEC에. 파일 64KiB·합계 256KiB를 넘거나 바이너리면 경로만,
+# 비밀 값 꼴이면 한 줄과 지휘에 한 번 알리고 1(그 레인은 이번 바퀴에 안 띄움). 셸 판은 작게 — 낱말 끝 조사는 떼지 않는다(Go 판은 뗀다),
+# 붙일 폴더(paste_dirs)·받은편지 줄 빼기·링크 풀기는 Go 판만(알려진 차이 — 셸 판은 곧 걷는다)
 paste_home() {
   local t f why seen=, tot=0 sz
   PSEC=
@@ -172,10 +173,16 @@ paste_home() {
     case $f in "$HOME"/.local/share/hc-fill/* | "$DATA"/*) continue ;; esac
     [ -f "$f" ] && [ -r "$f" ] || continue
     inlist "$f" "$seen" && continue; seen="$seen$f,"
-    sz=$(wc -c <"$f" | tr -d ' '); tot=$((tot + sz)) why=
-    if [ "$sz" -gt 65536 ]; then why="파일 상한 64KiB를 넘는다(${sz}바이트)"
-    elif [ $tot -gt 262144 ]; then why="붙임 합계 상한 256KiB를 넘는다"
-    elif grep -Eq -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-ant-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}' "$f" ||
+    sz=$(wc -c <"$f" | tr -d ' ') why=
+    # 큰 파일·바이너리·합계 넘김은 붙이지 않고 경로만 — 레인은 띄운다(Go 판과 같게, gofix-fill F14)
+    if [ "$sz" -gt 65536 ] || [ $((tot + sz)) -gt 262144 ] || ! LC_ALL=C tr -d '\000' <"$f" | cmp -s - "$f"; then   # 마지막: NUL이 있으면 바이너리
+      PSEC="$PSEC
+## (붙임) 지휘 기계 파일 — $t
+(붙이지 않음: 큼/바이너리 — 경로만)
+"; continue
+    fi
+    tot=$((tot + sz))
+    if grep -Eq -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-ant-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}' "$f" ||
       grep -Eiq -- "(password|passwd|token|secret|api[_-]?key|access[_-]?key)[\"']?[[:space:]]*[=:][[:space:]]*[\"']?[A-Za-z0-9/+_.=-]{12,}" "$f"; then why="비밀 꼴을 담았다"
     else PSEC="$PSEC
 ## (붙임) 지휘 기계 파일 원문 — $t

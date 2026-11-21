@@ -8,6 +8,24 @@ import (
 	"strings"
 )
 
+// legacyParked: 이 기계 사건(events.tsv)에서 그 레인의 마지막 주차·제출 사건이 그 커밋(sha, 7자 이상 앞부분도)의 「주차」인가 —
+// 옛 판 주차(원격 lane/<레인>)를 반송된 제출 가지와 가른다(gofix L07). 못 읽으면 false(멈춤 쪽)
+func legacyParked(lane, sha string) bool {
+	ls, err := readLines(evdir() + "/events.tsv")
+	if err != nil {
+		return false
+	}
+	ok := false
+	for _, l := range ls {
+		f := strings.Split(l, "\t")
+		if len(f) < 6 || f[3] != lane || (f[4] != "주차" && f[4] != "제출") {
+			continue
+		}
+		ok = f[4] == "주차" && len(f[5]) >= 7 && strings.HasPrefix(sha, f[5])
+	}
+	return ok
+}
+
 // cleanOwner: 가지 별칭으로 정리할 때도 띄울 때 기록한 레인 이름과 임대 커밋을 쓴다(owner·saved). 조회 실패면 false
 func cleanOwner() bool {
 	owner = name

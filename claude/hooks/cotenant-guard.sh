@@ -24,9 +24,9 @@
 # .git/agent-leases. Change this file only as: temp copy -> bash -n -> test passes -> mv over it.
 # Test (repo): go test ./claude/hooks/tests/ -run CotenantGuard (fake HOME = registry + settings, fake hc on PATH; go·bash both).
 # Go 판(cmd/herdr-hooks, 같은 판정)으로 — HERDR_HOOKS_IMPL=bash(또는 HERDR_IMPL=bash)면 셸 판, 바이너리가 없거나 낡으면 이번은 셸 판·짓기는 뒤에서(lib/go-run.sh GO_RUN_BUILD=bg, 2026-11-21 hooks-go)
-for _hg in "${BASH_SOURCE[0]%/*}/../../lib/go-run.sh" "${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh"; do
-  [ -r "$_hg" ] && { . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks cotenant-guard || exit 1; break; }
-done
+_hd=${BASH_SOURCE[0]%/*} _hg=${BASH_SOURCE[0]%/*}/../../.local/lib/go-run.sh; [ -r "$_hd/../../cmd/herdr-hooks/main.go" ] && _hg=$_hd/../../lib/go-run.sh # 놓인 배치(저장소 lib/·설치 ~/.local/lib/)의 실행기 하나만, 없는데 IMPL=go면 1
+if [ -r "$_hg" ]; then . "$_hg" && GO_RUN_BUILD=bg go_run herdr-hooks cotenant-guard || exit 1
+elif [ "${HERDR_HOOKS_IMPL:-${HERDR_IMPL:-auto}}" = go ]; then echo "cotenant-guard: 공통 실행기가 없다: $_hg (HERDR_HOOKS_IMPL=go — 셸 판으로 넘어가지 않는다)" >&2; exit 1; fi
 CFG=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 US=$'\037'
 # absolute tools: a GNU stat, a PATH without /sbin or a stray jq must not change the verdict

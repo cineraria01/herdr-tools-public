@@ -35,6 +35,7 @@ func landMain(a []string) int {
 }
 
 func landCmd() int {
+	timeoutExit = 75 // 바깥 명령 시간 넘김 뒤의 die는 「다시」(gofix M01)
 	top, rc := gitOutQ("rev-parse", "--show-toplevel")
 	if rc != 0 || os.Chdir(top) != nil {
 		wd := os.Getenv("PWD")

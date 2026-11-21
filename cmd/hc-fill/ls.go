@@ -148,10 +148,10 @@ func lsLine(c ...string) string {
 }
 
 // ls 명령. 셸 판과 다름: 「떠 있음」은 주소와 이름이 함께 맞을 때만(재사용된 주소의 남의 터미널은 「끝남」), 그 기계가 연결 안 됨이면
-// 「모름(연결 안 됨)」(hc machine ls가 실패하면 연결 판정 없이 셸 판처럼)
+// 「모름(연결 안 됨)」, hc machine ls가 실패해 연결을 모르면 목록에 없는 원격 레인은 「모름(연결 확인 못 함)」
 func lsCmd(args []string) {
 	out, rc := Cmd{Name: "hc", Args: []string{"ls", "--json"}, Err: errPass}.Run()
-	if rc != 0 {
+	if rc != 0 || sub(out) == "" { // 빈 응답은 빈 목록이 아니다 — 읽은 것이 없다(아스트라 E04)
 		die("hc ls 실패")
 	}
 	terms, ok := lsTerms(sub(out))
@@ -191,9 +191,12 @@ func lsCmd(args []string) {
 						break
 					}
 				}
-				if live != "" {
+				switch {
+				case live != "":
 					s = "떠 있음(" + live + ")"
-				} else {
+				case !connKnown && m != LOCAL: // 연결을 모르면 목록에 없음 ≠ 끝남(아스트라 E04)
+					s = "모름(연결 확인 못 함)"
+				default:
 					s = "끝남"
 				}
 			}

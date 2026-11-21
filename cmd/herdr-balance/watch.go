@@ -30,9 +30,9 @@ type seenAt struct {
 }
 
 // round: --watch 한 회차. 맞춘 탭마다 「맞춤 {…}」 한 줄. 오류면 그 회차를 거기서 멈춘다(셸 판과 같다)
-func round(remote []string, seen map[string]seenAt) error {
+func round(ctx context.Context, remote []string, seen map[string]seenAt) error {
 	now := time.Now
-	ts, err := tabs()
+	ts, err := tabs(ctx)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func round(remote []string, seen map[string]seenAt) error {
 			continue
 		}
 		delete(seen, tid)
-		r, err := balance(main.Terminal, nil, nil)
+		r, err := balance(ctx, main.Terminal, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -86,9 +86,9 @@ func hasPrefix(s string, ps []string) bool {
 
 func stamp() string { return time.Now().Format("2006-01-02 15:04:05") }
 
-// watch: 2초 회차. ctx가 끝나면(TERM·INT) 그 회차를 마치고 돌아온다
+// watch: 2초 회차. ctx가 끝나면(TERM·INT) 돌던 herdr-app 호출을 끊고 돌아온다(worker를 떼던 맞춤만은 마치고 — balance)
 func watch(ctx context.Context) {
-	remote := remotePrefixes()
+	remote := remotePrefixes(ctx)
 	seen := map[string]seenAt{}
 	lastErr, hadErr := "", false
 	for {
@@ -97,7 +97,11 @@ func watch(ctx context.Context) {
 			return
 		case <-time.After(2 * time.Second):
 		}
-		if err := round(remote, seen); err != nil {
+		err := round(ctx, remote, seen)
+		if ctx.Err() != nil {
+			return // 끊은 호출의 오류는 적지 않는다
+		}
+		if err != nil {
 			if !hadErr || err.Error() != lastErr { // 창이 없거나 일시 오류: 같은 오류는 한 번만 남기고 다음 회차에 다시
 				fmt.Println(stamp(), err)
 				lastErr, hadErr = err.Error(), true

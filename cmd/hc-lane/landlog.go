@@ -3,7 +3,6 @@ package main
 // landlog.go: 착지 로그·실패 알림·rebase 도우미(land.go에서 나눔 — 줄 예산 600)
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -114,30 +113,27 @@ func lfail(rc int) {
 		}
 	}
 	eprintf("hc-lane land: 실패 줄(로그에서, 최대 40줄):\n")
-	var all bytes.Buffer
-	if b, err := os.ReadFile(llog); err == nil {
-		all.Write(b)
-	}
-	for _, d := range qn {
-		filepath.WalkDir(d, func(p string, e fs.DirEntry, err error) error {
-			if err == nil && e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".log") {
-				if b, err := os.ReadFile(p); err == nil {
-					all.Write(b)
-				}
-			}
-			return nil
-		})
-	}
+	// 줄 단위로 읽고 서로 다른 실패 40줄을 찾으면 멈춘다(로그 전체를 한 버퍼에 올리지 않는다, gofix L14)
 	seen, n := map[string]bool{}, 0
-	for _, l := range strings.Split(all.String(), "\n") {
-		if n >= 40 {
-			break
-		}
+	pick := func(l string) bool {
 		if failLine.MatchString(l) && !seen[l] {
 			seen[l] = true
 			eprintf("%s\n", l)
 			n++
 		}
+		return n < 40
+	}
+	eachLine(llog, pick)
+	for _, d := range qn {
+		filepath.WalkDir(d, func(p string, e fs.DirEntry, err error) error {
+			if n >= 40 {
+				return filepath.SkipAll
+			}
+			if err == nil && e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".log") {
+				eachLine(p, pick)
+			}
+			return nil
+		})
 	}
 	wd := os.Getenv("PWD")
 	for _, d := range qn {
@@ -286,14 +282,14 @@ func rb(onto string) int {
 	if flag != "" {
 		args = append(args, flag)
 	}
-	ro, rr := gitOut2([]string{"LC_ALL=C"}, append(args, onto)...)
+	ro, rr := gitWrite2([]string{"LC_ALL=C"}, append(args, onto)...)
 	lerr(ro)
 	for rr != 0 && rrOK(ro) {
 		lerr(fmt.Sprintf("hc-lane land: rerere가 기록한 풀이로 충돌을 다 풀었다(%s) — rebase를 이어 간다", strings.Join(rrPaths(ro), ",")))
 		if lpid != "" {
 			resolved = append(resolved, rrPaths(ro)...)
 		}
-		ro, rr = gitOut2([]string{"LC_ALL=C", "GIT_EDITOR=true"}, "rebase", "--continue")
+		ro, rr = gitWrite2([]string{"LC_ALL=C", "GIT_EDITOR=true"}, "rebase", "--continue")
 		lerr(ro)
 	}
 	if rr != 0 && mgx == "1" {

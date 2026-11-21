@@ -358,7 +358,7 @@ func (k *cgTok) cmd() {
 		case awkShells.MatchString(name):
 			j := k.optend(at+1, "oO", " --rcfile --init-file ", true)
 			for q := at + 1; q < j; q++ {
-				if awkShellC.MatchString(k.t[q]) {
+				if awkShellC.MatchString(k.tt(q)) { // 값 없는 마지막 -o·-O면 optend가 nt+2 — awk t[nt+1]은 ""
 					if j <= k.nt {
 						k.emit("SUB", k.cwd, k.t[j])
 					}

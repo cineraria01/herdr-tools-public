@@ -8,7 +8,10 @@
 package util_test
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 var repo string // 저장소 루트
@@ -111,39 +116,77 @@ func (e Env) list() []string {
 	return l
 }
 
-// run: dir에서 env로 name을 돌려 합친 출력과 종료 코드. 띄우지 못하면 rc -1과 그 오류를 출력에.
-func run(dir string, e Env, name string, args ...string) (string, int) {
-	cmd := exec.Command(name, args...)
+// cmdMax: 시험이 부르는 명령 하나의 상한 — go test 기본 마감(10분)보다 짧게(B29). 넘기면 그 명령의 무리만 거두고 rc 124
+var cmdMax = 4 * time.Minute
+
+// [B29] 상한을 넘긴 명령은 그 무리(배경 자식까지)를 거두고 124로 곧 돌아온다 — 시험 마감에 걸려 자식이 남지 않게
+func TestRunBounded(t *testing.T) {
+	old := cmdMax
+	cmdMax = 500 * time.Millisecond
+	defer func() { cmdMax = old }()
+	T := tmpdir(t)
+	out, rc := run(T, isolated(T), "/bin/sh", "-c", "sleep 30 & echo $! >"+T+"/pid; wait")
+	b, _ := os.ReadFile(T + "/pid")
+	kid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if rc != 124 || kid <= 0 {
+		t.Fatalf("rc %d kid %d out %q", rc, kid, out)
+	}
+	for i := 0; i < 20 && syscall.Kill(kid, 0) == nil; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if syscall.Kill(kid, 0) == nil {
+		syscall.Kill(kid, syscall.SIGKILL)
+		t.Fatalf("배경 자식 %d가 남음", kid)
+	}
+}
+
+// start: name을 새 프로세스 무리로, cmdMax 상한과 함께. 끝나면 무리에 남은 것(출력을 문 손자 등)도 거둔다 — 시험이 띄운 무리만
+func start(dir string, e Env, name string, args ...string) (*exec.Cmd, context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), cmdMax)
+	cmd := exec.CommandContext(ctx, name, args...)
+	proc.Group(cmd)
+	cmd.Cancel = func() error { proc.StopGroup(cmd.Process.Pid, 2*time.Second); return nil }
 	cmd.Dir, cmd.Env = dir, e.list()
 	cmd.WaitDelay = 10 * time.Second // 출력을 물고 남은 손자가 있어도 끝나게
-	b, err := cmd.CombinedOutput()
-	if err == nil {
-		return string(b), 0
+	return cmd, ctx, cancel
+}
+
+// finish: start한 cmd의 결과 — 상한·출력 관 기다림 넘김이면 그 무리를 끄고 (124, 까닭)
+func finish(cmd *exec.Cmd, err error, ctxErr error) (int, string) {
+	if cmd.Process != nil && (ctxErr != nil || errors.Is(err, exec.ErrWaitDelay)) {
+		proc.StopGroup(cmd.Process.Pid, 2*time.Second)
+		return 124, fmt.Sprintf("시험 실행기: 시간 넘김(%s 또는 출력 관) — 무리를 껐다: %s\n", cmdMax, cmd.Path)
 	}
 	var ee *exec.ExitError
-	if errors.As(err, &ee) && ee.ExitCode() >= 0 {
-		return string(b), ee.ExitCode()
+	switch {
+	case err == nil:
+		return 0, ""
+	case errors.As(err, &ee) && ee.ExitCode() >= 0:
+		return ee.ExitCode(), ""
 	}
-	return string(b) + err.Error(), -1
+	return -1, err.Error()
+}
+
+// run: dir에서 env로 name을 돌려 합친 출력과 종료 코드. 띄우지 못하면 rc -1과 그 오류를 출력에. 상한은 cmdMax(rc 124)
+func run(dir string, e Env, name string, args ...string) (string, int) {
+	cmd, ctx, cancel := start(dir, e, name, args...)
+	defer cancel()
+	var b bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &b, &b
+	err := cmd.Run()
+	rc, why := finish(cmd, err, ctx.Err())
+	return b.String() + why, rc
 }
 
 // run2: run과 같되 stdout·stderr를 따로. 셸 시험의 "$(…)"처럼 stdout 끝 줄바꿈은 뗀다.
 func run2(dir string, e Env, name string, args ...string) (stdout, stderr string, rc int) {
-	cmd := exec.Command(name, args...)
-	cmd.Dir, cmd.Env = dir, e.list()
-	cmd.WaitDelay = 10 * time.Second
+	cmd, ctx, cancel := start(dir, e, name, args...)
+	defer cancel()
 	var so, se strings.Builder
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err := cmd.Run()
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.As(err, &ee) && ee.ExitCode() >= 0:
-		rc = ee.ExitCode()
-	default:
-		rc = -1
-		se.WriteString(err.Error())
-	}
+	rc, why := finish(cmd, err, ctx.Err())
+	se.WriteString(why)
 	return strings.TrimRight(so.String(), "\n"), se.String(), rc
 }
 

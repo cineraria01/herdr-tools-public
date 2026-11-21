@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -74,12 +75,18 @@ func captErr(sec int, eb io.Writer, name string, args ...string) (string, int) {
 	return captTo(sec, false, eb, name, args...)
 }
 
-// captTo: merge면 표준 오류도 출력에, 아니면 eb(nil이면 버림)에. 상한에 걸리면 종료 코드는 0이 아니다
+// captTo: merge면 표준 오류도 출력에, 아니면 eb(nil이면 버림)에. sec초(0이면 proc.Limit 표 — hc 120초 등, 표도 0이면 상한 없음) 안에
+// 안 끝나면 그 프로세스를 끄고 출력 없이 proc.TimeoutCode(124, 모름 — gofix M4·L04: 끝없이 기다리거나 끊긴 반쪽 출력을 읽지 않는다).
+// 무리를 따로 두지 않는다(이 프로세스와 같은 무리 — 끄는 신호를 함께 받고, watch의 신호 정리와 proc 신호 처리기가 다투지 않게)
 func captTo(sec int, merge bool, eb io.Writer, name string, args ...string) (string, int) {
+	d := time.Duration(sec) * time.Second
+	if sec == 0 {
+		d = proc.Limit(append([]string{name}, args...))
+	}
 	ctx := context.Background()
-	if sec > 0 {
+	if d > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(sec)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, d)
 		defer cancel()
 	}
 	c := exec.CommandContext(ctx, name, args...)
@@ -90,8 +97,8 @@ func captTo(sec int, merge bool, eb io.Writer, name string, args ...string) (str
 		c.Stderr = &b
 	}
 	rc := proc.Code(c.Run())
-	if ctx.Err() != nil && rc == 0 {
-		rc = 142
+	if ctx.Err() != nil {
+		return "", proc.TimeoutCode
 	}
 	return strings.TrimRight(b.String(), "\n"), rc
 }
@@ -231,6 +238,18 @@ func jget(m map[string]any, k string) (string, bool) {
 	return jscalar(m[k])
 }
 
+// jlistOK: hc 출력이 통째로 JSON 객체이고 listKey가 배열이며 그 원소가 모두 객체다 — 아니면(잘림·형식 바뀜) 목록을 모른다.
+// 0으로 끝난 잘린 목록을 「대상 없음」으로 읽지 않게(gofix L05·K2)
+func jlistOK(s, listKey string) bool {
+	d := json.NewDecoder(strings.NewReader(s))
+	var m map[string]json.RawMessage
+	if d.Decode(&m) != nil || d.More() {
+		return false
+	}
+	var arr []map[string]json.RawMessage
+	return json.Unmarshal(m[listKey], &arr) == nil && m[listKey] != nil
+}
+
 // jlist: 목록(listKey)의 객체마다 키 값들(없거나 null이면 -). 첫 키가 없는 객체는 버린다(셸 판 jrec를 JSON으로 읽기)
 func jlist(s, listKey string, keys ...string) [][]string {
 	m := jparse(s)
@@ -325,6 +344,70 @@ func mustRe(key, pat string, i bool) *regexp.Regexp {
 		die("설정 %s 정규식을 읽지 못했다: %s (%v)", key, pat, err)
 	}
 	return re
+}
+
+// tailFileLines: 파일 끝의 n줄만(끝에서 64KB씩 거꾸로 읽는다 — 줄 수와 무관하게 파일 전체를 올리지 않는다, gofix L14). n이 0 이하면 readLines
+func tailFileLines(path string, n int) ([]string, error) {
+	if n <= 0 {
+		return readLines(path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	end, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+	const chunk = 64 << 10
+	var buf []byte
+	for pos := end; pos > 0 && bytes.Count(bytes.TrimRight(buf, "\n"), []byte("\n")) < n; {
+		sz := int64(chunk)
+		if pos < sz {
+			sz = pos
+		}
+		pos -= sz
+		b := make([]byte, sz)
+		if _, err := f.ReadAt(b, pos); err != nil {
+			return nil, err
+		}
+		buf = append(b, buf...)
+	}
+	s := strings.TrimRight(string(buf), "\n")
+	if s == "" {
+		return nil, nil
+	}
+	ls := strings.Split(s, "\n")
+	if len(ls) > n {
+		ls = ls[len(ls)-n:]
+	}
+	return ls, nil
+}
+
+// eachLine: 파일을 줄마다 fn에(한 줄은 64KB까지 — 넘는 꼬리는 버림). fn이 false면 멈춘다. 파일 전체를 올리지 않는다
+func eachLine(path string, fn func(string) bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 64<<10)
+	for {
+		l, pre, err := r.ReadLine()
+		if err != nil {
+			return
+		}
+		s := string(l)
+		for pre { // 너무 긴 줄의 나머지는 버린다
+			if _, pre, err = r.ReadLine(); err != nil {
+				break
+			}
+		}
+		if !fn(s) {
+			return
+		}
+	}
 }
 
 // readLines: 파일의 줄들(없거나 못 읽으면 nil, err)

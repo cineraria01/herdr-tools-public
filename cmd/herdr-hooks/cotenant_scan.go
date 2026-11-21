@@ -3,13 +3,12 @@ package main
 // cotenant-guard Go 판 — 남의 미커밋 임대 훑기(scan_foreign)·hc 에이전트 찾기·동거 판정·foreign_under (cotenant.go에서 옮김)
 
 import (
-	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -28,7 +27,7 @@ func (g *cg) scanForeign() {
 	var lr, lw, ld, lp, dirty, fd, gone, cr []string
 	var ci []int
 	hit := map[int]bool{}
-	sfail, part := false, false
+	part := false
 	if !g.claimgen(g.leases + "/.cleaning") {
 		g.changedLeases()
 		return
@@ -82,18 +81,16 @@ func (g *cg) scanForeign() {
 		pathspecs[i] = ":(literal)" + p
 	}
 	out, ok := g.statusZ(pathspecs)
-	if !ok {
-		out += "status-failed\x00"
+	if !ok { // 실패한 출력은 파싱하지 않는다(아스트라 E02) — 정리 없이 바뀐 경로만 다시(그 status도 실패면 막힘)
+		rmF(cleaning)
+		g.changedLeases()
+		return
 	}
-	recs := strings.Split(out, "\x00") // 마지막 칸은 NUL로 안 끝난 찌꺼기(read -d ''가 버림)
+	recs := strings.Split(out, "\x00") // statusZ가 NUL로 끝남을 확인했다 — 마지막 칸은 빈 칸
 	tail := recs[len(recs)-1]
 	recs = recs[:len(recs)-1]
 	for i := 0; i < len(recs); i++ {
 		e := recs[i]
-		if e == "status-failed" {
-			sfail = true
-			continue
-		}
 		st := e
 		if len(st) > 2 {
 			st = st[:2]
@@ -137,11 +134,6 @@ func (g *cg) scanForeign() {
 			}
 		}
 	}
-	if sfail {
-		rmF(cleaning)
-		g.changedLeases()
-		return
-	}
 	if part {
 		g.changedLeases()
 	} else if len(fd) > 0 {
@@ -184,7 +176,10 @@ func (g *cg) scanForeign() {
 		gone = append(gone, ld[i])
 	}
 	if len(cr) > 0 && len(gone) < 1000 && g.secs() < 3 {
-		out, _ := g.gitRun(nil, strings.Join(cr, "\x00")+"\x00", "-C", g.root, "check-ignore", "-z", "--stdin")
+		out, rc := g.gitRun(nil, strings.Join(cr, "\x00")+"\x00", "-C", g.root, "check-ignore", "-z", "--stdin")
+		if rc != 0 { // 1 = 무시된 것 없음, 그 밖(실패·시간 넘김)은 모름 — 어느 쪽이든 지우지 않는다
+			out = ""
+		}
 		ign := strings.Split(out, "\x00")
 		ign = ign[:len(ign)-1]
 		j := 0
@@ -219,23 +214,27 @@ func (g *cg) scanForeign() {
 	}
 }
 
-// hcWho: hc ls에서 이 기계의 산 에이전트 CLI 가운데 ROOT 안에 있는 것(허용 목록 — 개발 서버·빌드·셸은 아님)
+// hcWho: hc ls에서 이 기계의 산 에이전트 CLI 가운데 ROOT 안에 있는 것(허용 목록 — 개발 서버·빌드·셸은 아님).
+// hc가 있는데 hc ls가 실패·2초 넘김·읽을 수 없는 JSON이면 모름 — WHO에 그렇게 적어 동거로 친다(아스트라 E03·E04·Fable E2:
+// 「hc 에이전트 없음」으로 읽어 남의 미커밋 파일을 넘겼다. 셸 판은 그대로 없음). 2초는 출력 관을 쥔 손자까지(hookRun)
 func (g *cg) hcWho() {
 	hc, err := exec.LookPath("hc")
 	if err != nil {
 		return
 	}
-	c := exec.Command(hc, "ls", "--json")
-	var out bytes.Buffer
-	c.Stdout = &out
-	if c.Start() != nil {
+	out, _, rc := hookRun([]string{"hc", "ls"}, 2*time.Second, nil, "", hc, "ls", "--json")
+	vals, jerr := jqValues([]byte(out))
+	if rc != 0 || jerr != nil {
+		why := fmt.Sprintf("종료 %d", rc)
+		if rc == timeoutRC {
+			why = "시간 넘김"
+		} else if rc == 0 {
+			why = "JSON을 읽지 못함"
+		}
+		g.who += ", hc ls 실패(" + why + ") — 같은 트리의 hc 에이전트를 모름"
 		return
 	}
-	t := time.AfterFunc(2*time.Second, func() { c.Process.Signal(syscall.SIGALRM) })
-	c.Wait()
-	t.Stop()
 	var b strings.Builder
-	vals, _ := jqValues(out.Bytes())
 hcLoop:
 	for _, v := range vals {
 		m, ok := v.(map[string]any)

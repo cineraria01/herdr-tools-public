@@ -107,7 +107,18 @@ send(left, signal.SIGKILL)
 sys.exit(1)
 PY
 }
-for t in $CHEAP; do run "$t"; done
+# 싼 검사 파일이 레인에서 사라지면 조용히 빠지지 않게(B28): 기준 브랜치 origin/main에 있던 파일이 없으면 이름을 찍고 실패.
+# 기준 브랜치가 없는 저장소(원격 없는 시험용 가짜 저장소)는 그대로 건너뜀
+for t in $CHEAP; do
+  if [ ! -f "$t" ] && git rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    if ! on=$(git ls-tree --name-only origin/main -- "$t" 2>&1); then   # 못 읽음은 「없었음」이 아니다
+      echo "실패 $t: 없고, 기준 브랜치(origin/main)에 있었는지 못 읽음: $on"; fail=1; continue
+    elif [ -n "$on" ]; then
+      echo "실패 $t: 기준 브랜치(origin/main)에 있는 싼 검사 파일이 없음"; fail=1; continue
+    fi
+  fi
+  run "$t"
+done
 # --cheap-only: 싼 검사까지만(제출 전 사전 검사 .claude/herdr-precheck.sh — go-followups)
 if [ "${1-}" = --cheap-only ]; then rm -rf "$tmp"; exit $fail; fi
 if [ $fail != 0 ] && [ "${HERDR_VERIFY_ALL-}" != 1 ]; then

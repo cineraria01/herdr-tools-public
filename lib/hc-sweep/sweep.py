@@ -44,6 +44,15 @@ hc ls가 실패하거나 terminals 목록이 아니거나, cwd 모르는 이 기
 아래(안 붙은 디스크 — 링크를 풀어서도 본다), root가 하나라도 있거나 읽기 오류(TCC 등 — exists()와 같은 뜻). 터미널·고아 쓸기와 따로 돈다: hc ls가 실패해도 돌고, 이 쓸기의 오류는 나머지를 막지 않는다.
 
 디스크 쓸기(임시 찌꺼기 go-build*·Test* 지우기, 디스크 부족 알림 hc-disk-low): lib/hc-sweep/disk.py 머리글. 색인 쓸기처럼 따로 돈다.
+
+두 판 공통 잠금: --dry-run이 아니면 ${XDG_STATE_HOME:-~/.local/state}/hc-sweep/sweep.lock을 flock 배타로 잡는다(Go 판과 같은 파일·같은 뜻).
+남이 쥐면 한 줄 찍고 종료 75(다음 바퀴에), 잠금 파일을 못 만들면 경고하고 돈다.
+
+알려진 차이(2026-11-21 Go 전환 감사 base — Go 판만 고쳤다, 셸 판은 곧 걷는다): Go 판은 닫기 직전 hc get으로 같은 실행·같은 상태인지
+다시 보고(B04), kill 뒤 hc get이 not_found가 아닌 실패면 닫힘이 아니라 모름(B05 — 작업 트리 정리 안 함), keep을 못 읽으면 그 바퀴
+닫지 않고(E12), 빈 화면은 모름(E08), 폴더가 있는데 git cherry가 실패하면 모름(E07), 착지 증거는 이 실행 키·이 터미널 뒤의 사건·원격
+표식만(B03), 고아는 시작 시각까지 견주고(E04) 기록에 명령 인자를 남기지 않으며(E05), lsof·ps 출력이 온전하지 않으면 그 정리를
+건너뛰고(E13·B22), 디스크 알림은 대기 표식 → 보고 → 보냄 순서로 같은 키를 다시 쓴다(E06). 자식은 두 판 모두 쓸기와 같은 무리다(B19).
 """
 import sys
 
@@ -320,6 +329,21 @@ def main():
     if args.self_test:
         from selftest import self_test
         return self_test()
+    if not args.dry_run:  # 두 판 공통 잠금(머리글) — 파이썬이 연 fd는 자식에 물리지 않는다
+        import fcntl
+        d = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hc-sweep")
+        try:
+            os.makedirs(d, exist_ok=True)
+            lock = open(os.path.join(d, "sweep.lock"), "a")
+        except OSError as err:
+            print("hc-sweep: 경고 — 잠금을 못 잡음(그대로 돈다):", err, file=sys.stderr)
+        else:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("hc-sweep: 다른 쓸기가 도는 중(sweep.lock) — 이번 바퀴는 건너뜀", file=sys.stderr)
+                sys.exit(75)
+            main.lock = lock  # 끝날 때까지 쥔다
     for what, sweep in (("색인", lambda: sweep_index(args.dry_run, args.min_age * 60)),
                         ("디스크", lambda: __import__("disk").run(args.dry_run, conf, record, os.path.join(BIN, "hc-lane")))):
         try:  # 색인·디스크 쓸기는 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다

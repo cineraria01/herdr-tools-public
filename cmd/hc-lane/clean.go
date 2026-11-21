@@ -120,7 +120,9 @@ func leftCheck(what, common string) {
 	}
 }
 
-// qaScript: 무시된 보관물 .qa를 메인 폴더의 같은 자리로 복사(덮지 않음) — 「c|s|d|f|n <경로>」 줄. 3 메인 폴더 없음
+// qaScript: 무시된 보관물 .qa를 메인 폴더의 같은 자리로 복사(덮지 않음) — 「c|s|d|f|n <경로>」 줄. 3 메인 폴더 없음.
+// 옆 임시 파일에 다 복사한 뒤 ln -P(이미 있으면 실패 — 덮지 않는 원자 넣기)로 넣는다: 두 작업 트리가 같은 경로를 동시에 보관해도
+// 한쪽이 다른 쪽을 덮지 않고, 진 쪽은 다시 견줘 다르면 d(그 작업 트리 보존, gofix E04)
 const qaScript = `cd "$1" || exit 2
       r=$(find . -path ./.git -prune -o -type d -name .qa -print -prune) || exit 2
       [ -n "$r" ] || exit 0
@@ -132,7 +134,15 @@ const qaScript = `cd "$1" || exit 2
       [ "$4" = 0 ] || { printf "%s\n" "$i" | sed "s/^/n /"; exit 0; }
       printf "%s\n" "$i" | while IFS= read -r p; do
         if [ -e "$2/$p" ] || [ -L "$2/$p" ]; then k=s; cmp -s "$p" "$2/$p" || k=d
-        else k=c; { mkdir -p "$2/$(dirname "$p")" && cp -pP "$p" "$2/$p" && cmp -s "$p" "$2/$p"; } || k=f; fi
+        else
+          t=$2/$(dirname "$p")/.hc-lane-qa.$$.${p##*/}
+          if { mkdir -p "$2/$(dirname "$p")" && cp -pP "$p" "$t" && cmp -s "$p" "$t"; }; then
+            if ln -P "$t" "$2/$p" 2>/dev/null; then k=c
+            elif [ -e "$2/$p" ] || [ -L "$2/$p" ]; then k=s; cmp -s "$p" "$2/$p" || k=d
+            else k=f; fi
+          else k=f; fi
+          rm -f "$t"
+        fi
         echo "$k $p"
       done`
 
@@ -270,7 +280,7 @@ func cleanMain(args []string) int {
 					stop("레인 소유 기록 조회 실패: " + branch)
 				}
 				doneRef, parkRef = "refs/merge-done/"+owner, "refs/park/"+owner
-				out, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", parkRef, doneRef)
+				out, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", parkRef, doneRef, "refs/heads/lane/"+owner)
 				if r != 0 {
 					stop("git ls-remote 실패: " + lab + " · refs/merge-queue/*-" + owner)
 				}
@@ -302,6 +312,13 @@ func cleanMain(args []string) int {
 			}
 			if contains(lrr, s+"\t"+parkRef) {
 				fmt.Printf("%s주차됨: %s 은 원격 %s 에 그대로 있다(선행이 들어가면 hc-fill이 이어 띄운다)\n", P, lab, parkRef)
+				subm = true
+				continue
+			}
+			// 옛 판 주차(원격 lane/<레인>): 이 레인의 마지막 주차·제출 사건이 같은 SHA의 「주차」일 때만 — 반송된 제출 가지와 가른다.
+			// --resume은 refs/park가 없으면 lane/<레인>을 받는다(gofix L07)
+			if contains(lrr, s+"\trefs/heads/lane/"+owner) && legacyParked(owner, s) {
+				fmt.Printf("%s주차됨: %s 은 원격 refs/heads/lane/%s(옛 판 주차)에 그대로 있다\n", P, lab, owner)
 				subm = true
 				continue
 			}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 )
 
 func cotenantBasics(c *cg) (A, B, C int) {
@@ -33,6 +34,24 @@ func cotenantBasics(c *cg) (A, B, C int) {
 	c.check("동거 없음: git add -A 차단 없음", 0)
 	c.run("sa", "Edit", R+"/a.txt")
 	c.check("내 임대는 계속 허용", 0)
+	// 명령 분석만 보는 단언(강제 push·감싼 명령·감싸기 문법 표)은 TestCotenantCommands가 따로 돈다(cotenantCommands)
+	return cotenantBasicsB(c, R, A)
+}
+
+// TestCotenantCommands: 명령 분석만 보는 단언 — 등록부·동거 에이전트 없이 저장소 하나로 따로 돈다(아스트라 M07: 시나리오 한가운데 있어
+// -run으로 이것만 골라도 앞 준비(에이전트 등록·ps)가 다 돌고, 준비가 깨지면 하나도 못 돌았다)
+func TestCotenantCommands(t *testing.T) {
+	hook := hookPath(t, "cotenant-guard")
+	forImpls(t, "cotenant-guard", func(t *testing.T, impl []string) {
+		c := newCG(t, hook, impl)
+		c.R = c.T + "/r"
+		c.mkrepo(c.R)
+		cotenantCommands(c, c.R)
+	})
+}
+
+// cotenantCommands: 임대·동거와 상관없는 명령 분석 단언(세션 sa, 저장소 R)
+func cotenantCommands(c *cg, R string) {
 	// force push is refused always, cotenant or not (2026-11-17: the coordinator force-pushed a shared temp ref)
 	for _, cmd := range []string{"git push -f origin main", "git push --force origin main", "git push -qf origin main", "git push --force-with-lease origin main",
 		"git push --force-with-lease=main origin main", "git push -f --force-with-lease=main:abc origin main",
@@ -144,7 +163,12 @@ func cotenantBasics(c *cg) (A, B, C int) {
 		c.run("sa", "Bash", cmd)
 		c.check("강제 push 아님(기대값 적은 lease·선점 포함)은 허용: "+cmd, 0)
 	}
+}
 
+// cotenantBasicsB: 기본 시나리오 뒤쪽 — B 합류부터
+func cotenantBasicsB(c *cg, R string, a int) (A, B, C int) {
+	A = a
+	T, H := c.T, c.H
 	c.write(H+"/.claude/sessions/1.json", `{"pid": 1, "sessionId": "broken`) // a half-written registry file
 	B = c.agent()
 	c.reg(B, "sb", R, "agent-b")
@@ -265,8 +289,14 @@ func cotenantBasics(c *cg) (A, B, C int) {
 			}(i, s)
 		}
 		wg.Wait()
-		c.RC, c.OUT, c.ERR = ra+rb, "", ""
-		c.check(fmt.Sprintf("동시 두 획득 중 하나만 성공 (%d)", k), 2)
+		// 종료 코드가 정확히 {0, 2}이고 임대 주인이 이긴 쪽 세션(합이 2인 것만 보면 둘 다 1로 실패해도 통과 — 아스트라 E08)
+		win := "sa"
+		if ra != 0 {
+			win = "sb"
+		}
+		ok := ((ra == 0 && rb == 2) || (ra == 2 && rb == 0)) && field(c.leasefile(R, fmt.Sprintf("new%d.txt", k)), 1) == win
+		c.RC, c.OUT, c.ERR = rc(ok), fmt.Sprintf("sa %d · sb %d", ra, rb), ""
+		c.check(fmt.Sprintf("동시 두 획득 중 하나만 성공 (%d)", k), 0)
 	}
 
 	// ---------- dead owner and pid reuse ----------

@@ -6,7 +6,7 @@ if [ -n "${HC_FAKE_GIT_HANG-}" ] && [ "${2-}" = "$HC_FAKE_GIT_HANG" ] && [ "${3-
 fi
 if [ -n "${HC_REAL_REPO-}" ] && [ "${1-}" = -C ] && [ "${2-}" = "$HC_REAL_REPO" ]; then exec "$HC_REAL_GIT" "$@"; fi
 for a in "$@"; do case $a in
-  fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)
+  fetch) sleep "${HC_FAKE_FETCH_SLOW:-0}"; [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_SLOW: 초만큼 늦게 · FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)
          [ -z "${HC_FAKE_FETCH_HOOK-}" ] || [ -e "$T_LOG/fetch-hook.done" ] || { : >"$T_LOG/fetch-hook.done"; bash -c "$HC_FAKE_FETCH_HOOK" >/dev/null 2>&1; }
          exit 0 ;;
   remote) [ -z "${HC_FAKE_NOORIGIN-}" ] || exit 2; exit 0 ;;   # NOORIGIN: 원격 없는 저장소(get-url 종료 2, ls-remote도 실패)
@@ -19,7 +19,10 @@ for a in "$@"; do case $a in
     [ -z "${HC_FAKE_MGM-}" ] || printf '0123abcd\trefs/herdr/merger/%s\n' "$HC_FAKE_MGM"; exit 0 ;;
   symbolic-ref) echo origin/main; exit 0 ;;
   # 완료 sha를 40자로: <sha>^{commit} → 뒤를 0으로 채운 40자($HC_FAKE_SHA40이면 그 값). $HC_FAKE_REVNONE과 같은 sha는 없음(종료 1, 출력 없음)
-  *'^{commit}') s_=${a%'^{commit}'}; [ "$s_" != "${HC_FAKE_REVNONE-}" ] || exit 1; [ -z "${HC_FAKE_SHA40-}" ] || { echo "$HC_FAKE_SHA40"; exit 0; }
+  *'^{commit}') s_=${a%'^{commit}'}; [ "$s_" != "${HC_FAKE_REVNONE-}" ] || exit 1
+    [ "$s_" != "${HC_FAKE_REVSLOW-}" ] || sleep 3   # REVSLOW: 그 sha 조회가 3초 늦음(상한 시험)
+    [ "$s_" != "${HC_FAKE_REVFAIL-}" ] || { echo "fatal: I/O error(가짜)" >&2; exit 128; }   # REVFAIL: 그 sha 조회가 실패(모름)
+ [ -z "${HC_FAKE_SHA40-}" ] || { echo "$HC_FAKE_SHA40"; exit 0; }
     printf '%s%0*d\n' "$s_" $((40 - ${#s_})) 0; exit 0 ;;
   --grep=*) grep -E -- "${a#--grep=}" "$T_LOG/commits" 2>/dev/null | head -n 1; exit 0 ;;
   push) exit "${HC_FAKE_PUSH_RC:-0}" ;;

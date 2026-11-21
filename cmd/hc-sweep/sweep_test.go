@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,9 @@ func TestSelfTest(t *testing.T) {
 func TestLandedClean(t *testing.T) {
 	dir := t.TempDir()
 	ev := filepath.Join(dir, "events.tsv")
-	os.WriteFile(ev, []byte("2026\tm\tt1\tland-x\t제출\tabc\t-\t3\n"), 0o644)
+	// 옛 8칸 줄: 같은 주소 t1, 이 터미널(created_ms 2026-01-01) 뒤 시각이라 이 실행의 증거
+	os.WriteFile(ev, []byte("2026-11-01T00:00:00Z\tm\tt1\tland-x\t제출\tabc\t-\t3\n"), 0o644)
+	created := float64(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli())
 	seq := func(outs ...result) runner {
 		i := 0
 		return func(_ time.Duration, _ []string, _ string, args ...string) result {
@@ -30,7 +33,7 @@ func TestLandedClean(t *testing.T) {
 		}
 	}
 	ok := func(s string) result { return result{out: s} }
-	term := map[string]any{"cwd": "/r.wt/land-x", "name": "land-x"}
+	term := map[string]any{"cwd": "/r.wt/land-x", "name": "land-x", "address": "t1", "created_ms": created}
 	repo, br, why := landedClean(term, seq(ok(""), ok("land-x\n"), ok("/r/.git\n"), ok("- abc\n")), ev)
 	if repo != "/r" || br != "land-x" || why != "" {
 		t.Fatalf("착지: %q %q %q", repo, br, why)
@@ -41,36 +44,48 @@ func TestLandedClean(t *testing.T) {
 	if _, _, why = landedClean(term, seq(ok(""), ok("land-x\n"), ok("/r/.git\n"), ok("+ abc\n")), ev); !strings.HasPrefix(why, "착지 전") {
 		t.Fatal(why)
 	}
-	other := map[string]any{"cwd": "/r.wt/land-n", "name": "land-n"}
+	other := map[string]any{"cwd": "/r.wt/land-n", "name": "land-n", "address": "t2", "created_ms": created}
 	if _, _, why = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("")), ev); !strings.HasPrefix(why, "착지 증거 없음") {
 		t.Fatal(why)
 	}
-	if repo, _, _ = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("abc\trefs/hc-landed/land-n/1\n")), ev); repo != "/r" {
-		t.Fatal("원격 표식이면 착지")
+	after := strconv.FormatInt(int64(created/1000)+60, 10)
+	if repo, _, _ = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("abc\trefs/hc-landed/land-n/"+after+"\n")), ev); repo != "/r" {
+		t.Fatal("이 터미널 뒤 원격 표식이면 착지")
+	}
+	// [B03] 이 터미널보다 먼저 생긴 표식(같은 이름의 옛 레인)·다른 주소의 옛 사건은 증거 아님
+	if _, _, why = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("abc\trefs/hc-landed/land-n/1\n")), ev); !strings.HasPrefix(why, "착지 증거 없음") {
+		t.Fatal("옛 표식을 증거로 봄: " + why)
+	}
+	moved := map[string]any{"cwd": "/r.wt/land-x", "name": "land-x", "address": "t9", "created_ms": created}
+	if _, _, why = landedClean(moved, seq(ok(""), ok("land-x\n"), ok("/r/.git\n"), ok(""), ok("")), ev); !strings.HasPrefix(why, "착지 증거 없음") {
+		t.Fatal("다른 주소의 옛 사건을 증거로 봄: " + why)
 	}
 	if _, _, why = landedClean(term, seq(ok(""), result{rc: 1}), ev); !strings.HasPrefix(why, "모름") {
 		t.Fatal(why)
 	}
 }
 
-// run: 상한 시간이면 무리째 거둔다(배경 자식도)
-func TestRunTimeoutKillsGroup(t *testing.T) {
+// run: 상한 시간이면 그 자식을 끄고 모름(err)으로 곧 돌아온다. 자식은 같은 무리라(B19 — 셸 판과 같게) 쓸기 무리를 끄면 함께 끝난다
+// (무리 확인은 sys_unix_test.go). 손자는 거두지 않는다 — 부르는 명령은 손자를 두지 않는다(run 주석)
+func TestRunTimeout(t *testing.T) {
 	pidf := filepath.Join(t.TempDir(), "pid")
-	r := run(300*time.Millisecond, nil, "sh", "-c", "sleep 30 & echo $! >"+pidf+"; wait")
-	if r.err == nil {
-		t.Fatal("시간 초과가 아님")
+	t0 := time.Now()
+	r := run(300*time.Millisecond, nil, "sh", "-c", "echo $$ >"+pidf+"; exec sleep 30")
+	if r.err == nil || r.rc != -1 {
+		t.Fatalf("시간 초과가 아님: %+v", r)
+	}
+	if d := time.Since(t0); d > 5*time.Second {
+		t.Fatalf("늦게 돌아옴 %v", d)
 	}
 	b, _ := os.ReadFile(pidf)
-	pid := strings.TrimSpace(string(b))
-	time.Sleep(200 * time.Millisecond)
-	if pid == "" {
-		t.Fatal("자식 pid 없음")
-	}
 	var n int
-	for _, c := range pid {
+	for _, c := range strings.TrimSpace(string(b)) {
 		n = n*10 + int(c-'0')
 	}
+	if n <= 0 {
+		t.Fatal("자식 pid 없음")
+	}
 	if alive(n) {
-		t.Fatalf("배경 자식 %d가 남음", n)
+		t.Fatalf("자식 %d가 남음", n)
 	}
 }

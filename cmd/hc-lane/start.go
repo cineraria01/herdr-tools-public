@@ -38,9 +38,26 @@ func hcGet(a string) string {
 	return out
 }
 
+// hcRead: 실패한(시간 넘김 포함) hc read의 반쪽 화면은 빈 화면으로 — 그것으로 신뢰·가져오기 키를 보내지 않는다(gofix E07)
 func hcRead(a string) string {
-	out, _ := outOf(nil, []string{"hc", "read", a})
+	out, r := outOf(nil, []string{"hc", "read", a})
+	if r != 0 {
+		return ""
+	}
 	return out
+}
+
+var (
+	reHitURL = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://\S+`)
+	reHitKV  = regexp.MustCompile(`(?i)\b(token|key|secret|password|passwd|code|sig|signature|auth|authorization|bearer)\b(\s*[=:]\s*|\s+)\S+`)
+	reHitLng = regexp.MustCompile(`[A-Za-z0-9_+/=.-]{24,}`)
+)
+
+// redactHit: 막힘 줄(화면 원문)에서 비밀일 수 있는 값을 지운다 — 주소·「키=값」·긴 토큰 꼴(이 줄은 hc-fill 바퀴 기록에도 남는다, gofix E08)
+func redactHit(s string) string {
+	s = reHitURL.ReplaceAllString(s, "<주소>")
+	s = reHitKV.ReplaceAllString(s, "$1=<가림>")
+	return reHitLng.ReplaceAllString(s, "<가림>")
 }
 
 func hcKeys(args ...string) bool {
@@ -162,7 +179,7 @@ func startCheck(a string) int {
 			}
 		}
 	}
-	hit = strings.TrimLeft(hit, " \t")
+	hit = redactHit(strings.TrimLeft(hit, " \t"))
 	if rs := []rune(hit); len(rs) > 160 {
 		hit = string(rs[:160])
 	}

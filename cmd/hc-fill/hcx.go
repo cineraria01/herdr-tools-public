@@ -87,7 +87,11 @@ func parseTerms(raw string) ([]Term, bool) {
 		}
 		good = true
 		for _, t := range arr {
-			addr := jstr(jget(t, "address"))
+			// 주소가 글자가 아니거나 비면 그 목록으로 자리·중복을 셀 수 없다 — 셸 판(jq .address | contains 오류)처럼 못 읽음(gofix-fill F02)
+			addr, isStr := jget(t, "address").(string)
+			if !isStr || addr == "" {
+				return nil, false
+			}
 			m := LOCAL
 			if i := strings.IndexByte(addr, '/'); i >= 0 {
 				m = addr[:i]
@@ -218,8 +222,12 @@ func pget(addr string) int {
 func statusOK(addr string) bool {
 	end := time.Now().Unix() + int64(WAIT)
 	for {
-		out, _ := run("hc", "get", addr, "--json")
-		vs, _ := decodeAll(out)
+		// hc get이 성공하고 응답 전체가 JSON일 때만(셸 판 pipefail + jq -e — 잘린 응답·실패 종료는 안 잡힘, gofix-fill F03)
+		out, rc := run("hc", "get", addr, "--json")
+		vs, ok := decodeAll(out)
+		if rc != 0 || !ok {
+			vs = nil
+		}
 		got, created := false, ""
 		for _, v := range vs {
 			if _, isObj := jget(v, "status").(map[string]any); isObj {

@@ -82,4 +82,19 @@ func TestInboxRejectWritesWhy(t *testing.T) {
 	if string(why) != "사유 하나\n" || !isFile(filepath.Join(d, "rejected", "x.req")) || !isFile(filepath.Join(d, "rejected", "x.brief.md")) || exists(filepath.Join(d, "x.req")) {
 		t.Fatalf("거절 꼴이 틀림: why=%q", why)
 	}
+	// 사유를 못 쓰면 요청을 옮기지 않는다(차례 — 아스트라 F18: 최종 파일만 봐서는 옛 차례 「옮긴 뒤 사유」를 못 가렸다)
+	for _, f := range []string{"y.req", "y.brief.md"} {
+		if err := os.WriteFile(filepath.Join(d, f), []byte("a\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(d, "rejected", "y.why.tmp"), 0o755); err != nil { // 사유 임시 파일 자리를 폴더로 막는다
+		t.Fatal(err)
+	}
+	if _, rc := onm(nil, LOCAL, inbIrejSh, d, "y", "사유 둘"); rc == 0 {
+		t.Fatal("사유를 못 썼는데 종료 0")
+	}
+	if !isFile(filepath.Join(d, "y.req")) || !isFile(filepath.Join(d, "y.brief.md")) || exists(filepath.Join(d, "rejected", "y.req")) {
+		t.Fatal("사유를 못 썼는데 요청을 옮겼다")
+	}
 }

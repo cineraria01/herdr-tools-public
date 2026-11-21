@@ -83,6 +83,12 @@ func macFP(ctx context.Context, v4 string) string {
 // meshRun: worker.mesh 기계끼리 모든 방향(f가 있으면 f와 얽힌 방향만). check면 읽기만. 0 모두 됨 · 1 문제 · 4 지문 대조 실패 · 64 f가 목록 밖
 func meshRun(ctx context.Context, mesh, f string, check bool, d string) int {
 	ws := strings.Fields(mesh)
+	for _, w := range ws {
+		if strings.HasPrefix(w, "-") { // ssh·hc가 옵션으로 읽는다(E10)
+			fmt.Fprintf(os.Stderr, "✗ worker.mesh의 %s: 기계 이름은 -로 시작하지 않는다\n", w)
+			return 64
+		}
+	}
 	if f != "" && !inList(ws, f) {
 		fmt.Fprintf(os.Stderr, "✗ %s 은(는) worker.mesh(%s)에 없다\n", f, strings.Join(ws, " "))
 		return 64

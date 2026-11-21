@@ -109,10 +109,10 @@ func (g *cg) bashWrite(dir, arg string, noglob bool) {
 		a = dir + "/" + a
 	}
 	if !noglob && strings.ContainsAny(a, "*?[") {
-		for _, w := range strings.FieldsFunc(a, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' }) {
-			for _, f := range bashGlob(w) {
-				g.bashWrite("/", f, true)
-			}
+		// arg는 낱말 가르기가 낸 셸 낱말 하나라 안의 공백은 따옴표·\로 지킨 것 — 다시 가르지 않고 통째로 펼친다
+		// (아스트라 E07: `tee "팀 문서"/*.txt`가 없는 「팀」에만 임대를 썼다. 셸 판 m=($a)는 그대로 가른다 — 알려진 차이)
+		for _, f := range bashGlob(a) {
+			g.bashWrite("/", f, true)
 		}
 		return
 	}

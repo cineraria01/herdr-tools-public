@@ -54,23 +54,24 @@ func secI(k *K) {
 
 	// 지휘 기계 파일 붙이기: 다른 기계에 띄울 때 지시문이 가리키는 이 기계 HOME 아래 파일 원문을 run 지시문 끝에
 	k.fresh()
-	write(k.t, k.HOME+"/note.md", "메모 원문\n")
-	write(k.t, k.T+"/pst.md", "# 지시문 pst\n본문 `~/note.md` 를 읽는다\n")
+	// 붙일 폴더는 기본 ~/.claude-tasks(Go 판 gofix-fill F07 — 그 밖은 sec_k)
+	write(k.t, k.HOME+"/.claude-tasks/note.md", "메모 원문\n")
+	write(k.t, k.T+"/pst.md", "# 지시문 pst\n본문 `~/.claude-tasks/note.md` 를 읽는다\n")
 	k.fill(nil, "add", "--name", "pst", "--project", "app", "--brief", k.T+"/pst.md", "--only", "box-1")
 	k.run("run")
 	k.check("다른 기계에 띄우면 지휘 기계 파일 원문을 붙임", k.where("pst") == "up box-1 box-1/pst" &&
-		hasF(runs+"/pst-run.md", "## (붙임) 지휘 기계 파일 원문 — ~/note.md") && hasFx(runs+"/pst-run.md", "메모 원문"))
-	write(k.t, k.T+"/psl.md", "# 지시문 psl\n본문 ~/note.md 참고\n")
+		hasF(runs+"/pst-run.md", "## (붙임) 지휘 기계 파일 원문 — ~/.claude-tasks/note.md") && hasFx(runs+"/pst-run.md", "메모 원문"))
+	write(k.t, k.T+"/psl.md", "# 지시문 psl\n본문 ~/.claude-tasks/note.md 참고\n")
 	k.fill(nil, "add", "--name", "psl", "--project", "app", "--brief", k.T+"/psl.md", "--only", "here")
 	k.run("run")
 	k.check("이 기계에 띄우면 붙이지 않음", k.state("psl") == "up" && !hasF(runs+"/psl-run.md", "(붙임)"))
-	write(k.t, k.HOME+"/sec.md", "token = abcdef0123456789abcdef\n")
-	write(k.t, k.T+"/pss.md", "# 지시문 pss\n본문 ~/sec.md 참고\n")
+	write(k.t, k.HOME+"/.claude-tasks/sec.md", "token = abcdef0123456789abcdef\n")
+	write(k.t, k.T+"/pss.md", "# 지시문 pss\n본문 ~/.claude-tasks/sec.md 참고\n")
 	k.fill(nil, "add", "--name", "pss", "--project", "app", "--brief", k.T+"/pss.md", "--only", "box-1")
 	k.run("run")
 	k.check("비밀 값 꼴 파일이면 띄우지 않고 지휘에 한 번", k.where("pss") == "wait - -" &&
 		strings.Contains(k.out, "원문을 붙이지 못해 띄우지 않음") && hasF(k.T+"/report.log", "--key hf:pss:paste:"))
-	rm(k.HOME+"/note.md", k.HOME+"/sec.md")
+	rm(k.HOME + "/.claude-tasks")
 
 	secILock(k)
 }
@@ -103,7 +104,8 @@ func secILock(k *K) {
 	if k.impl == "bash" {
 		want = 2
 	}
-	k.check("watch: 띄운 뒤 lockf 안쪽까지 둘 이상 돈다(남은 watch 검사가 제 구실을 하는지 — Go 판은 잠금을 쥔 한 프로세스)", len(k.leftw()) >= want)
+	running, rok := k.leftwOK()
+	k.check("watch: 띄운 뒤 lockf 안쪽까지 둘 이상 돈다(남은 watch 검사가 제 구실을 하는지 — Go 판은 잠금을 쥔 한 프로세스)", rok && len(running) >= want)
 	killtree(bg.Process.Pid)
 	bg.Wait()
 	k.bg = nil
@@ -119,7 +121,8 @@ func secILock(k *K) {
 		b, _ := exec.Command("ps", "-o", "pid,ppid,command", "-p", strings.Join(ps, ",")).CombinedOutput()
 		k.out = string(b)
 	}
-	k.check("watch를 멈춘 뒤 남은 watch 0(lockf가 띄운 안쪽 루프가 고아로 남지 않음)", len(k.leftw()) == 0)
+	left, lok := k.leftwOK()
+	k.check("watch를 멈춘 뒤 남은 watch 0(lockf가 띄운 안쪽 루프가 고아로 남지 않음 — 프로세스 목록을 못 읽으면 통과로 세지 않음)", lok && len(left) == 0, k.out)
 	k.run("ls")
 	k.check("watch를 멈춘 뒤 ls 정상", k.rc == 0)
 	k.run("nope")

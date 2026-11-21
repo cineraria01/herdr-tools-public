@@ -127,6 +127,7 @@ func newK(t *testing.T) *K {
 	k.set("GIT_CEILING_DIRECTORIES="+T+":"+filepath.Dir(T), "HC_REAL_GIT="+k.REALGIT,
 		"PATH="+T+"/bin:"+os.Getenv("PATH"), "HOME="+k.HOME, "T_LOG="+T, "HERDR_TOOLS_CONFIG="+T+"/conf",
 		"HC_FILL_WAIT=0", "HC_FILL_POLL=0", "HC_FAKE_COORD=t8kk", "HC_FILL_IMPL="+k.impl,
+		"HERDR_PROC_DIR="+T+"/proc", // 고아 무리 기록(internal/proc)도 시험 폴더에 — 사용자 캐시를 쓰거나 남의 기록을 거두지 않게
 		// macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
 	mkdirs(t, T+"/bin", T+"/conf", k.HOME)
@@ -418,26 +419,39 @@ func killtree(pid int) {
 	}
 }
 
-func pgrep(args ...string) []int {
-	b, _ := exec.Command("pgrep", args...).Output()
+// pgrepOK: ok=false면 프로세스 목록을 못 읽음(종료 2 이상 — 「없음」(종료 1)과 다르다, 아스트라 E06)
+func pgrepOK(args ...string) ([]int, bool) {
+	b, err := exec.Command("pgrep", args...).Output()
+	if c := exitCode(err); c != 0 && c != 1 {
+		return nil, false
+	}
 	var l []int
 	for _, f := range strings.Fields(string(b)) {
 		if p, err := strconv.Atoi(f); err == nil {
 			l = append(l, p)
 		}
 	}
-	return l
+	return l, true
 }
+
+// pgrep: 정리용(못 읽으면 빈 목록 — 정리할 것을 못 찾을 뿐). 단언에는 pgrepOK·leftwOK
+func pgrep(args ...string) []int { l, _ := pgrepOK(args...); return l }
 
 func pgrepF(pat string) []int { return pgrep("-f", pat) }
 
-// leftw: 이 시험의 hc-fill watch — 명령 줄에 $T가 든 것(셸 판), 또는 이 시험의 watch.lock을 연 것(Go 판).
-func (k *K) leftw() []int {
+// leftw: 정리용 leftwOK(못 읽으면 빈 목록)
+func (k *K) leftw() []int { l, _ := k.leftwOK(); return l }
+
+// leftwOK: 이 시험의 hc-fill watch — 명령 줄에 $T가 든 것(셸 판), 또는 이 시험의 watch.lock을 연 것(Go 판).
+// ok=false면 프로세스 목록을 못 읽었다 — 「남은 것 0」으로 세지 않는다
+func (k *K) leftwOK() ([]int, bool) {
 	seen := map[int]bool{}
-	for _, p := range pgrepF(k.T + "/hc-fill watch") {
+	mine, ok1 := pgrepOK("-f", k.T+"/hc-fill watch")
+	for _, p := range mine {
 		seen[p] = true
 	}
-	for _, p := range pgrepF("/hc-fill watch") {
+	all, ok2 := pgrepOK("-f", "/hc-fill watch")
+	for _, p := range all {
 		b, _ := exec.Command("lsof", "-p", strconv.Itoa(p)).Output()
 		if strings.Contains(string(b), k.DATA+"/watch.lock") {
 			seen[p] = true
@@ -448,7 +462,7 @@ func (k *K) leftw() []int {
 		l = append(l, p)
 	}
 	sort.Ints(l)
-	return l
+	return l, ok1 && ok2
 }
 
 // --- 파일·글 도우미 ---

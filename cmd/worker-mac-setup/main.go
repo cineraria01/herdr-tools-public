@@ -9,12 +9,14 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"herdr-tools/internal/version"
 	wm "herdr-tools/internal/workermac"
 )
 
@@ -36,7 +38,7 @@ func main() {
 	wm.Who = "worker-mac-setup"
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" { // 공통 실행기가 바이너리를 쓰기 전에 본다
-		fmt.Println("worker-mac-setup 1")
+		fmt.Println(version.String("worker-mac-setup")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
 	o, code := parse(args)
@@ -84,6 +86,10 @@ func parse(args []string) (opts, int) {
 			fmt.Print(help)
 			return o, 0
 		default:
+			if strings.HasPrefix(a, "-") { // 모르는 옵션·-로 시작하는 이름: ssh·hc가 옵션으로 읽는다(E10)
+				fmt.Fprintln(os.Stderr, usage)
+				return o, 64
+			}
 			o.m = a
 		}
 	}
@@ -97,7 +103,59 @@ func parse(args []string) (opts, int) {
 func say(f string, a ...any) { fmt.Printf("▸ "+f+"\n", a...) }
 
 func ssh(m string, cmd ...string) []string {
-	return append([]string{"-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", m}, cmd...)
+	return append([]string{"-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--", m}, cmd...) // -- : 이름을 옵션으로 읽지 않게(E10)
+}
+
+// lsSec·addSec: hc machine ls·hc machine add --install의 상한 초(시험이 줄인다). add는 원격에 코어를 깔아 길게
+var lsSec, addSec = 30, 600
+
+// machineKnown: hc machine ls --json을 풀어 정확한 이름 m이 있는가. 조회 실패·시간 넘김·JSON 아님은 err — 「없음」으로 읽지 않는다(E02)
+func machineKnown(ctx context.Context, m string) (bool, error) {
+	out, rc := wm.Output(ctx, lsSec, nil, "hc", "machine", "ls", "--json")
+	switch {
+	case rc == wm.TimeoutCode:
+		return false, fmt.Errorf("시간 넘김(%d초)", lsSec)
+	case rc != 0:
+		return false, fmt.Errorf("종료 %d", rc)
+	}
+	var v struct {
+		Machines []struct {
+			Name string `json:"name"`
+		} `json:"machines"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil || v.Machines == nil {
+		return false, fmt.Errorf("JSON 목록이 아님")
+	}
+	for _, x := range v.Machines {
+		if x.Name == m {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// addMachine: hc machine add <m> --install --name <m>(addSec 상한). 넘기면 등록됐는지 모른다 — 목록을 다시 보고 알리되 실패로 끝낸다(E11)
+func addMachine(ctx context.Context, m string) bool {
+	actx, cancel := context.WithTimeout(ctx, time.Duration(addSec)*time.Second)
+	defer cancel()
+	c := wm.Command(actx, "hc", "machine", "add", m, "--install", "--name", m)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	switch rc := wm.Run(actx, c); {
+	case rc == wm.TimeoutCode:
+		k, err := machineKnown(ctx, m)
+		st := "목록에 없음"
+		if err != nil {
+			st = "목록도 모름(" + err.Error() + ")"
+		} else if k {
+			st = "목록에는 보이나 설치가 끝났는지 모름"
+		}
+		fmt.Fprintf(os.Stderr, "✗ hc machine add 시간 넘김(%d초) — 등록 결과를 모른다(%s). 다시 돌리면 목록부터 다시 본다\n", addSec, st)
+		return false
+	case rc != 0:
+		fmt.Fprintln(os.Stderr, "✗ hc machine add 실패")
+		return false
+	}
+	return true
 }
 
 // remoteCmd: 원격에서 「bash -c <스크립트>」 — 스크립트는 base64로 넘긴다(따옴표·줄바꿈을 원격 셸이 다시 읽지 않게)
@@ -147,8 +205,8 @@ func setup(ctx context.Context, cfg *wm.Config, o opts, mesh, d string) int {
 `, m, key)
 		return 2
 	}
-	u, _ := wm.Output(ctx, 30, os.Stderr, "ssh", "-n", "-o", "BatchMode=yes", m, "id -un")
-	h, _ := wm.Output(ctx, 30, os.Stderr, "ssh", "-n", "-o", "BatchMode=yes", m, "echo $HOME")
+	u, _ := wm.Output(ctx, 30, os.Stderr, "ssh", "-n", "-o", "BatchMode=yes", "--", m, "id -un")
+	h, _ := wm.Output(ctx, 30, os.Stderr, "ssh", "-n", "-o", "BatchMode=yes", "--", m, "echo $HOME")
 	user := wm.Trim(u)
 	dry := ""
 	if o.dry {
@@ -157,18 +215,18 @@ func setup(ctx context.Context, cfg *wm.Config, o opts, mesh, d string) int {
 	say("대상 %s (계정 %s, 홈 %s)%s", m, user, wm.Trim(h), dry)
 
 	// 1. hc 기계 등록(코어 설치). 설치 직후 코어는 SSH 문맥이라 아래 2에서 launchd로 옮긴다.
-	ls, lrc := wm.Output(ctx, 30, nil, "hc", "machine", "ls")
+	known, err := machineKnown(ctx, m)
 	switch {
-	case lrc == 0 && strings.Contains(ls, `"name":"`+m+`"`):
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "✗ hc machine ls 실패(%v) — 등록돼 있는지 몰라 멈춤(등록하지 않았다)\n", err)
+		return 1
+	case known:
 		say("hc 기계 %s: 이미 있음", m)
 	case o.dry:
 		say("(dry-run) hc machine add %s --install --name %s", m, m)
 	default:
 		say("hc 기계 등록")
-		c := wm.Command(ctx, "hc", "machine", "add", m, "--install", "--name", m)
-		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		if wm.Run(ctx, c) != 0 {
-			fmt.Fprintln(os.Stderr, "✗ hc machine add 실패")
+		if !addMachine(ctx, m) {
 			return 1
 		}
 	}
@@ -180,11 +238,19 @@ func setup(ctx context.Context, cfg *wm.Config, o opts, mesh, d string) int {
 	}
 	tctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-	c := wm.Command(tctx, "ssh", "-n", "-o", "BatchMode=yes", m,
+	c := wm.Command(tctx, "ssh", "-n", "-o", "BatchMode=yes", "--", m,
 		remoteCmd("TRUST="+wm.Quote(trust)+" SLOTS_FILE="+wm.Quote(slotsFile)+"\n"+remote, dryArg, o.slots, d))
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	if wm.Run(tctx, c) == 3 {
+	// 끊김(ssh 255)·시간 넘김을 삼키지 않는다 — 위에 찍힌 ▸ 줄까지가 한 것(E03)
+	switch rc := wm.Run(tctx, c); {
+	case rc == 3:
 		return 3
+	case rc == wm.TimeoutCode:
+		fmt.Println("✗ 원격 자동 단계 시간 넘김(180초) — 위 줄까지 했고 나머지는 모른다. 다시 돌린다(있는 것은 건너뛴다)")
+		return 1
+	case rc != 0:
+		fmt.Printf("✗ 원격 자동 단계 끊김(종료 %d) — 위 줄까지 했다. 다시 돌린다(있는 것은 건너뛴다)\n", rc)
+		return 1
 	}
 
 	// 3. 문서 폴더 접근 질문을 지금 띄운다(그 맥 화면에서 허용). 허용 전엔 hc 터미널의 ~/Documents 작업이 멈춘다.
@@ -202,9 +268,10 @@ func setup(ctx context.Context, cfg *wm.Config, o opts, mesh, d string) int {
 	}
 
 	// 4. 워커 연결: 이 기계가 worker.mesh에 있으면 다른 워커들과 서로 잇는다(dry-run은 --check)
+	mrc := 0 // 워커 연결의 문제(1)도 최종 결과에(E03) — 체크리스트는 그대로 찍는다
 	if mesh != "" {
 		if inList(strings.Fields(mesh), m) {
-			if meshRun(ctx, mesh, m, o.dry, d) == 4 {
+			if mrc = meshRun(ctx, mesh, m, o.dry, d); mrc == 4 {
 				return 4
 			}
 		} else {
@@ -219,7 +286,7 @@ func setup(ctx context.Context, cfg *wm.Config, o opts, mesh, d string) int {
 		fmt.Printf("※ 모름 — 설정 없음(%s): %s (%s, 예: config.example/)\n", k, w, wm.ConfigDir())
 	}
 	checklist(m, user, cl)
-	return 0
+	return mrc
 }
 
 func inList(l []string, s string) bool {

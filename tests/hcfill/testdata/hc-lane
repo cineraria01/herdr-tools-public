@@ -1,8 +1,9 @@
 #!/bin/bash
-if [ "${1-}" = coord ] && [ "${2-}" = --check ]; then   # 지휘가 지금 살아 있나: $HC_FAKE_COORD_GONE(공백 목록)에 든 주소는 사라짐
-  echo "${3-}" >>"$T_LOG/coordcheck.log"; case " ${HC_FAKE_COORD_GONE-} " in *" ${3-} "*) echo "hc-lane coord --check: ${3-} 터미널이 없거나 끝남(가짜)" >&2; exit 1 ;; esac; exit 0; fi
+if [ "${1-}" = coord ] && [ "${2-}" = --check ]; then   # 지휘가 지금 살아 있나: $HC_FAKE_COORD_GONE(공백 목록)에 든 주소는 사라짐, $HC_FAKE_COORD_SLOW초 늦게 답함
+  echo "${3-}" >>"$T_LOG/coordcheck.log"; sleep "${HC_FAKE_COORD_SLOW:-0}"; case " ${HC_FAKE_COORD_GONE-} " in *" ${3-} "*) echo "hc-lane coord --check: ${3-} 터미널이 없거나 끝남(가짜)" >&2; exit 1 ;; esac; exit 0; fi
 if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기: $HC_FAKE_COORD_SET_FAIL(공백 목록)에 든 주소는 지휘가 아님
-  echo "${3-}" >>"$T_LOG/coordset.log"; case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
+  echo "${3-}" >>"$T_LOG/coordset.log"; [ -z "${HC_FAKE_COORDSET_HOOK-}" ] || bash -c "$HC_FAKE_COORDSET_HOOK" >/dev/null 2>&1   # COORDSET_HOOK: add가 잠금 밖에서 기다리는 사이 끼어드는 일
+  case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
 if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi
@@ -15,6 +16,7 @@ on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
 echo "$name ${HERDR_LAND_PRIORITY:-없음}" >>"$T_LOG/landprio.log"   # 착지 줄 우선(그 레인을 기다리는 줄 수)
+for x in ${HC_FAKE_LANE_SLOW-}; do case $x in "${on:-here}/$name="*) sleep "${x#*=}" ;; esac; done   # 「<기계>/<이름>=<초>」: 착수(lane.log) 뒤 늦게 답함
 case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜 실패" >&2; exit 1 ;; esac
 case " ${HC_FAKE_LANE_HELD-} " in *" $name "*) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다" >&2; exit 10 ;; esac   # 임대가 남은 레인: 어느 기계든 10
 [ -z "${HC_FAKE_LANE_HOOK-}" ] || eval "$HC_FAKE_LANE_HOOK" >/dev/null 2>&1   # 띄우는 동안 끼어드는 일(대기열 rm·add 등)

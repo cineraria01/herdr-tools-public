@@ -58,6 +58,10 @@ func sendCmd(a []string) int {
 		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 실패 — 아무에게도 안 보냈다")
 		return 1
 	}
+	if !jlistOK(tl, "terminals") {
+		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 출력을 읽지 못했다(잘림·형식) — 아무에게도 안 보냈다")
+		return 1
+	}
 	e := &ev{ed: evdir(), pmap: jlist(tl, "terminals", "address", "parent")}
 	km := e.lkinds()
 	ok, bad := 0, 0

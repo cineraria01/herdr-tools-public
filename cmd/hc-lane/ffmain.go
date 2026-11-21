@@ -192,7 +192,9 @@ func ffLocal(dir, b string) string {
 	if _, rc := g("merge-base", "--is-ancestor", "HEAD", o); rc != 0 {
 		return "건너뜀: 로컬 " + b + " 에 origin/" + b + " 에 없는 커밋이 있다"
 	}
-	if e, rc := g2("merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", "-q", o); rc != 0 {
+	var mo bytes.Buffer // 작업 트리를 바꾸는 merge는 상한 없이(cmdOpt.noLimit — 중간에 끊으면 반쯤 바뀐 메인 폴더가 남는다)
+	if rc := runCmd(cmdOpt{dir: dir, stdout: &mo, stderr: &mo, noLimit: true}, "git", "merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", "-q", o); rc != 0 {
+		e := trim(mo.String())
 		return "건너뜀: git이 거절 — " + strings.SplitN(e, "\n", 2)[0]
 	}
 	// merge는 이미 성공했다 — HEAD를 못 읽으면 「그대로 둠」이 아니라 확인 불가로

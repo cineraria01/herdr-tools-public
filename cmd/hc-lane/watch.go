@@ -183,7 +183,7 @@ func (e *ev) pick() {
 		return
 	}
 	js, rc := hcRun(0, errDrop, "machine", "ls", "--json")
-	if rc != 0 {
+	if rc != 0 || !jlistOK(js, "machines") {
 		fmt.Fprintf(os.Stderr, "hc-lane %s: hc machine ls 실패 — 이 기계만 본다\n", e.ec)
 		e.pbad = true
 		return
@@ -212,18 +212,11 @@ func nosh(s string) bool {
 func rexec(m string, args ...string) (string, int) {
 	var eb strings.Builder
 	a := append([]string{"exec", "--on", m, "--timeout", "60", "--"}, args...)
-	out, rc := captErr(0, &eb, "hc", a...)
+	out, rc := captErr(90, &eb, "hc", a...) // --timeout 60은 원격 명령의 상한 — hc 자신이 멈춰도 끝나게(gofix M4)
 	if rc != 0 && nosh(eb.String()) {
 		rc = 9
 	}
 	return out, rc
-}
-
-func tailLines(ls []string, n int) []string {
-	if n > 0 && len(ls) > n {
-		return ls[len(ls)-n:]
-	}
-	return ls
 }
 
 func nf7(l string) bool { return l != "" && strings.Count(l, tab) >= 6 }
@@ -231,8 +224,8 @@ func nf7(l string) bool { return l != "" && strings.Count(l, tab) >= 6 }
 // evread: 이 기계와 ems 기계의 사건(7칸 이상 줄만). 원격 줄은 기계·터미널 칸을 hc 이름으로. 못 읽은 기계는 「모름 <기계>」
 func (e *ev) evread(n int) []string {
 	var out []string
-	ls, _ := readLines(e.ed + "/events.tsv")
-	for _, l := range tailLines(ls, n) {
+	ls, _ := tailFileLines(e.ed+"/events.tsv", n)
+	for _, l := range ls {
 		if nf7(l) {
 			out = append(out, l)
 		}
@@ -425,7 +418,7 @@ func (e *ev) loop(to int64) int {
 		if e.myp != "" || e.ec == "watch" || wantStop {
 			var rc int
 			e.tl, rc = hcRun(0, errDrop, "ls", "--all", "--json", "--label", "hc-lane=1")
-			e.lsok = rc == 0
+			e.lsok = rc == 0 && jlistOK(e.tl, "terminals") // 잘린 목록은 「레인 없음」이 아니라 실패(gofix K2)
 			if e.myp != "" || e.ec == "watch" {
 				e.pmap = jlist(e.tl, "terminals", "address", "parent")
 			}

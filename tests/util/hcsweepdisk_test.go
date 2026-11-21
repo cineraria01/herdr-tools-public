@@ -160,11 +160,13 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	write(t, G+"/ab/new-d", z)
 	write(t, OLD+"/00/x-a", z)
 	write(t, G+"/README", "r")
-	e = e.With("HC_SWEEP_GO_COMM=hcsweep-fakego", "GOCACHE="+G)
+	// 가짜 go 이름은 실행마다 다르게: ps -x는 이 사용자 프로세스를 다 본다 — 같은 기계에서 이 시험이 함께 돌면(두 판·다른 레인) 남의 가짜 go를 본다
+	fake := fmt.Sprintf("hcsweep-fakego-%d", os.Getpid())
+	e = e.With("HC_SWEEP_GO_COMM="+fake, "GOCACHE="+G)
 	mkdirs(t, T+"/fg")
-	os.Symlink("/bin/sleep", T+"/fg/hcsweep-fakego")
+	os.Symlink("/bin/sleep", T+"/fg/"+fake)
 	cfg("sweep.disk_free_gb 1000000000", "sweep.gocache_gb 0.000009", "sweep.tmp_hours 0") // 항목 다섯 20KB → 9KB 아래: h1·h2·h3을 지움
-	fg := exec.Command(T+"/fg/hcsweep-fakego", "60")
+	fg := exec.Command(T+"/fg/"+fake, "60")
 	if err := fg.Start(); err != nil {
 		t.Fatal(err)
 	}

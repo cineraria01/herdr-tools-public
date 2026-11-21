@@ -14,17 +14,16 @@ import (
 
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/version"
 )
 
 var heldLocks []*os.File // 프로세스가 끝날 때까지 쥐는 잠금(GC가 닫지 않게)
 
 func main() {
-	for fd := 3; fd < 1024; fd++ { // 물려받은 fd를 자식에게 넘기지 않는다
-		syscall.CloseOnExec(fd)
-	}
+	closeInherited()
 	proc.Who = "hc-fill"
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("hc-fill go 1")
+		fmt.Println(version.String("hc-fill")) // 릴리스 바이너리는 커밋 12자(gofix-fill F19)
 		return
 	}
 	// 문자열 비교는 바이트로(셸 판과 같은 환경을 자식에게도)
@@ -141,7 +140,7 @@ func prioCmd(args []string) {
 			die("대기 중이 아니다(%s): %s — 우선순위는 띄우기 전에만 바꾼다", st, args[0])
 		}
 		var out []Row
-		for _, x := range qRows() {
+		for _, x := range qRowsW() {
 			if x.F(1) == args[0] {
 				for i := x.NF() + 1; i < 13; i++ {
 					x = x.Set(i, "-")
@@ -231,6 +230,10 @@ func runCmd(args []string) {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
 		s := <-sig
+		// 끝내기 훅(held.tsv 비움·지시문 사본 지움 — 셸 판 EXIT trap과 같게)을 먼저: internal/proc도 같은 신호를 받아 무리를 끈 뒤
+		// 신호를 다시 올려 끝낸다 — 무리 끄기(TERM 뒤 끝날 때까지)를 기다리면 훅이 못 돈다.
+		// ponytail: 파일 둘이라 proc 쪽보다 먼저 끝나는 것에 기댄다 — 길어지면 proc에 끝내기 훅 자리를 둔다(다른 영역)
+		runExitHooks()
 		say("바퀴를 끝낸다(신호 %v) — 다음 바퀴가 이어 간다", s)
 		proc.StopCurrent(2 * time.Second)
 		os.Exit(128 + int(s.(syscall.Signal)))

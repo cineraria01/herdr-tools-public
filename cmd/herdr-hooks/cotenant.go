@@ -4,22 +4,20 @@ package main
 // 셸 판 claude/hooks/cotenant-guard.sh를 함수마다 옮겼다(이름도 같다: phys·tree·relof·intree·reg·me·alive·dirty·owner·
 // mine·own·claim·claimgen·takeover·refuse_live·lease·changed_leases·scan_foreign·hc_who·cotenant·foreign_under·
 // bash_git·bash_write·analyze·check_bash). 임대 파일 꼴·이름(md5)·claim 이름·문구·종료 코드가 같아 두 판이 섞여 돌아도 된다.
-// 셸 판처럼 정말 cd 한다(cd -P → 물리 경로, 그 뒤 상대 경로도 셸과 같게 풀린다).
+// 셸 판처럼 정말 cd 한다(cd -P → 심볼릭 링크만 푼 경로, 그 뒤 상대 경로도 셸과 같게 풀린다 — cdP).
+// 셸 판과 다른 점(일부러, 안전 판정은 모르면 막는다 — 2026-11-22 gofix-hooks): git·ps·hc는 훅 기한 안에서만 기다리고 넘기면 모름(hookexec.go),
+// git status·rev-parse·ps·hc ls 실패를 깨끗함·밖·죽음·없음으로 읽지 않는다, 임대 시각을 못 읽으면 종료 1(arithFail), 임대를 못 쓰면 막는다.
 
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
-
-	"herdr-tools/internal/proc"
 )
 
 const us = "\x1f"
@@ -66,6 +64,8 @@ type cg struct {
 }
 
 func cotenantGuard(in []byte, stdout, stderr io.Writer) (code int) {
+	hookBudget(4 * time.Second) // 훅 제한 5초에서 bash·실행기 몫을 뺀 것
+	lastPD, patByte = "", byteLocale()
 	g := &cg{stdout: stdout, stderr: stderr, start: time.Now().Unix() + testSecondsOffset(),
 		psc: map[string]string{}, aok: map[string]bool{}}
 	defer func() {
@@ -88,7 +88,8 @@ func (g *cg) block(msg string) {
 	g.exit(2)
 }
 
-// arithFail: 셸 판 `$(( NOW - $(stat …) ))`에서 stat이 실패하면 bash가 산술 오류로 끝난다(종료 1 — 설정 onFailure로 막힘)
+// arithFail: 임대 시각을 못 읽었다(정리자가 그 사이 치웠거나 읽을 수 없음) — 모르니 종료 1(설정 onFailure로 막힘).
+// 셸 판은 `$(( NOW - $(stat …) ))` 산술 오류로 그 case 줄만 버리고 종료 0(통과)이다 — 알려진 차이(Fable M1, 셸 판은 곧 걷는다)
 func (g *cg) arithFail(path string) {
 	fmt.Fprintf(g.stderr, "cotenant-guard: %s: 시각을 읽지 못했다(산술 오류)\n", path)
 	g.exit(1)
@@ -290,15 +291,32 @@ func norm(s string) string {
 	return strings.Join(f, " ")
 }
 
-// cdP: cd -P -- p — 성공하면 물리 경로(bash PWD)
+// lastPD: 마지막으로 성공한 cdP의 PWD — 상대 경로는 bash처럼 이 PWD 기준으로 푼다
+var lastPD string
+
+// cdP: cd -P -- p — 성공하면 bash 3.2의 PWD: 적은 경로에서 심볼릭 링크만 푼 값(철자 — 대소문자·한글 NFC/NFD — 는 적은 그대로).
+// getcwd(디스크 철자)를 쓰면 디스크가 NFD인 한글 폴더에서 셸 판과 임대 열쇠·경로가 달라져 남의 미커밋 파일을 놓쳤다(Fable H1).
+// 대소문자만 다르게 적은 경로를 다른 파일로 보는 것(Fable E3)은 셸 판과 같은 기존 한계다 — 근본은 git 철자로 맞추기
 func cdP(p string) (string, bool) {
 	if p == "" || os.Chdir(p) != nil {
 		return "", false
 	}
-	wd, err := syscall.Getwd()
+	if !strings.HasPrefix(p, "/") {
+		base := lastPD
+		if base == "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				return "", false
+			}
+			base = wd
+		}
+		p = base + "/" + p
+	}
+	wd, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return "", false
 	}
+	lastPD = wd
 	return wd, true
 }
 
@@ -332,47 +350,47 @@ func (g *cg) phys(p string) bool {
 	return true
 }
 
-// gitRun: 이 git으로 실행 — 표준 출력, 종료 코드(실행 못 함 127). 표준 오류는 버린다
+// gitRun: 이 git으로 실행(훅 기한 안 — hookexec.go) — 표준 출력, 종료 코드(실행 못 함 127, 시간 넘김 timeoutRC = 모름). 표준 오류는 버린다
 func (g *cg) gitRun(env []string, stdin string, args ...string) (string, int) {
-	c := exec.Command(g.git, args...)
-	if env != nil {
-		c.Env = append(os.Environ(), env...)
-	}
-	if stdin != "" {
-		c.Stdin = strings.NewReader(stdin)
-	}
-	out, err := proc.Output(c) // 상한(proc.Limit) — 멈춘 git이 도구 호출을 붙잡지 않게
-	if err == nil {
-		return string(out), 0
-	}
-	var ee *exec.ExitError
-	var te *proc.TimeoutError
-	if errors.As(err, &te) {
-		return "", proc.TimeoutCode
-	}
-	if errors.As(err, &ee) {
-		return string(out), ee.ExitCode()
-	}
-	return string(out), 127
+	out, _, rc := g.gitRunE(env, stdin, args...)
+	return out, rc
 }
 
-// tree: 물리 폴더 $1의 ROOT GITDIR LEASES — 작업 트리 밖(.git 안 포함)이면 false
+func (g *cg) gitRunE(env []string, stdin string, args ...string) (string, string, int) {
+	if env != nil {
+		env = append(os.Environ(), env...)
+	}
+	return hookRun(append([]string{"git"}, args...), 0, env, stdin, g.git, args...)
+}
+
+// gitFail: 판정에 쓸 git이 실패·시간 넘김 — 모르니 막는다
+func (g *cg) gitFail(what string, rc int) {
+	why := fmt.Sprintf("종료 %d", rc)
+	if rc == timeoutRC {
+		why = "시간 넘김"
+	}
+	g.block(fmt.Sprintf("git을 실행하지 못했다(%s, %s, %s). 판정할 수 없어 막았다. 잠시 뒤 다시 하고, 되풀이되면 사람에게 알려라.", g.git, why, what))
+}
+
+// tree: 물리 폴더 $1의 ROOT GITDIR LEASES — 작업 트리 밖(.git 안 포함)이면 false. 밖임은 git이 그렇게 말한 때만
+// (종료 128이라도 dubious ownership·설정 깨짐 등은 모름 → 막음 — 아스트라 E01·Fable E4, 셸 판은 128을 모두 밖으로 본다)
 func (g *cg) tree(dir string) bool {
 	if g.tSet && dir == g.tDir {
 		return g.tRC
 	}
 	g.tDir, g.tSet, g.tRC = dir, true, false
-	out, rc := g.gitRun(nil, "", "-C", dir, "rev-parse", "--show-toplevel", "--absolute-git-dir")
-	if rc == 128 {
+	out, errOut, rc := g.gitRunE([]string{"LC_ALL=C", "LANGUAGE="}, "", "-C", dir, "rev-parse", "--show-toplevel", "--absolute-git-dir")
+	if rc == 128 && (strings.Contains(errOut, "fatal: not a git repository") || strings.Contains(errOut, "fatal: this operation must be run in a work tree")) {
 		return false
 	}
 	if rc != 0 {
-		g.block(fmt.Sprintf("git을 실행하지 못했다(%s, 종료 %d). 판정할 수 없어 막았다. 사람에게 알려라.", g.git, rc))
+		g.gitFail("작업 트리(git rev-parse)", rc)
 	}
 	o := capture(out)
-	g.root, g.gitdir = o, o
-	if i := strings.IndexByte(o, '\n'); i >= 0 {
-		g.root, g.gitdir = o[:i], o[i+1:]
+	var ok bool
+	g.root, g.gitdir, ok = strings.Cut(o, "\n")
+	if !ok || !strings.HasPrefix(g.root, "/") || !strings.HasPrefix(g.gitdir, "/") || strings.Contains(g.gitdir, "\n") {
+		g.block("git rev-parse가 작업 트리·git 폴더 두 절대 경로를 내지 않았다(" + g.git + "). 판정할 수 없어 막았다. 사람에게 알려라.")
 	}
 	g.leases = g.gitdir + "/agent-leases"
 	g.tRC = true

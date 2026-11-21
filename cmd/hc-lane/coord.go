@@ -17,16 +17,28 @@ import (
 
 func init() { register("coord", coordCmd, noHelp) }
 
-var reGetKnown = regexp.MustCompile(`"kind" *: *"not_found"|"address" *:`)
+var (
+	reGetKnown = regexp.MustCompile(`"kind" *: *"not_found"|"address" *:`)
+	reNotFound = regexp.MustCompile(`"kind" *: *"not_found"`)
+)
 
 // tinfo: 그 터미널의 맨 위 pid·이름(없으면 -)·레인/감시 라벨. rc 0 살아 있음, 1 없음·끝남·pid 모름, 2 모름(코어 연결 실패 등)
 func tinfo(addr string) (pid, name string, laneLabel bool, rc int) {
-	out, _ := hcRun(10, errMerge, "get", addr, "--json")
+	out, hrc := hcRun(10, errMerge, "get", addr, "--json")
 	if !reGetKnown.MatchString(out) {
 		return "", "", false, 2
 	}
+	if hrc != 0 { // 실패한 hc get의 출력(잘린 응답 등)으로 「끝남」을 정하지 않는다 — 확인된 not_found만 1(gofix L04)
+		if reNotFound.MatchString(out) {
+			return "", "", false, 1
+		}
+		return "", "", false, 2
+	}
 	m := jparse(out)
-	if m == nil || m["state"] != "live" {
+	if m == nil {
+		return "", "", false, 2
+	}
+	if m["state"] != "live" {
 		return "", "", false, 1
 	}
 	pid = topNum(m, "pid", "")

@@ -1,7 +1,8 @@
 package main
 
 // bash 패턴 맞추기(case 패턴·글롭 한 칸)와 글롭 펼치기(nullglob, 숨은 파일은 패턴이 .으로 시작할 때만) — cotenant-guard의
-// `case $f in $1|$1/*)`(*가 /도 넘는다)와 `shopt -s nullglob; m=($a)`를 흉내 낸다. 글자 단위(UTF-8 로캘).
+// `case $f in $1|$1/*)`(*가 /도 넘는다)와 `shopt -s nullglob; m=($a)`를 흉내 낸다. 글자 단위는 bash처럼 로캘을 따른다:
+// UTF-8 로캘이면 글자, C·POSIX(또는 UTF-8 아닌) 로캘이면 바이트(아스트라 M02 — LC_ALL=C에서 bash의 ?는 한 바이트).
 
 import (
 	"os"
@@ -10,6 +11,29 @@ import (
 	"unicode"
 	"unicode/utf8"
 )
+
+// byteLocale: 훅 환경의 LC_CTYPE 자리(LC_ALL → LC_CTYPE → LANG 가운데 처음 비지 않은 값)가 UTF-8이 아니다
+func byteLocale() bool {
+	v := ""
+	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if v = os.Getenv(k); v != "" {
+			break
+		}
+	}
+	v = strings.ToLower(v)
+	return !strings.Contains(v, "utf-8") && !strings.Contains(v, "utf8")
+}
+
+// patByte: 지금 판정이 바이트 단위인가 — 훅마다 들어올 때 정한다(cotenantGuard)
+var patByte bool
+
+// dec: 글자 하나(바이트 단위면 바이트 하나 — 그 값을 글자로)
+func dec(s string) (rune, int) {
+	if patByte {
+		return rune(s[0]), 1
+	}
+	return utf8.DecodeRuneInString(s)
+}
 
 // bashMatch: s가 bash 패턴 p에 통째로 맞는가 (* ? [..] [!..] [^..] [:class:] \x)
 func bashMatch(s, p string) bool {
@@ -29,7 +53,7 @@ func bashMatch(s, p string) bool {
 				if i == len(s) {
 					break
 				}
-				_, w := utf8.DecodeRuneInString(s[i:])
+				_, w := dec(s[i:])
 				i += w
 			}
 			return false
@@ -37,13 +61,13 @@ func bashMatch(s, p string) bool {
 			if s == "" {
 				return false
 			}
-			_, w := utf8.DecodeRuneInString(s)
+			_, w := dec(s)
 			s, p = s[w:], p[1:]
 		case '[':
 			if s == "" {
 				return false
 			}
-			r, w := utf8.DecodeRuneInString(s)
+			r, w := dec(s)
 			ok, n, valid := bracket(p, r)
 			if !valid { // 닫는 ]가 없으면 [는 글자 그대로
 				if s[0] != '[' {
@@ -62,11 +86,11 @@ func bashMatch(s, p string) bool {
 			}
 			fallthrough
 		default:
-			r, w := utf8.DecodeRuneInString(p)
+			r, w := dec(p)
 			if s == "" {
 				return false
 			}
-			r2, w2 := utf8.DecodeRuneInString(s)
+			r2, w2 := dec(s)
 			if r != r2 {
 				return false
 			}
@@ -99,19 +123,19 @@ func bracket(p string, r rune) (match bool, n int, valid bool) {
 				continue
 			}
 		}
-		lo, w := utf8.DecodeRuneInString(p[i:])
+		lo, w := dec(p[i:])
 		if lo == '\\' && i+1 < len(p) {
 			i++
-			lo, w = utf8.DecodeRuneInString(p[i:])
+			lo, w = dec(p[i:])
 		}
 		i += w
 		hi := lo
 		if i+1 < len(p) && p[i] == '-' && p[i+1] != ']' {
 			i++
-			hi, w = utf8.DecodeRuneInString(p[i:])
+			hi, w = dec(p[i:])
 			if hi == '\\' && i+1 < len(p) {
 				i++
-				hi, w = utf8.DecodeRuneInString(p[i:])
+				hi, w = dec(p[i:])
 			}
 			i += w
 		}
@@ -123,6 +147,9 @@ func bracket(p string, r rune) (match bool, n int, valid bool) {
 }
 
 func charClass(name string, r rune) bool {
+	if patByte && r >= 0x80 { // C 로캘의 isalpha 등은 ASCII 밖 바이트에 모두 거짓
+		return false
+	}
 	switch name {
 	case "alpha":
 		return unicode.IsLetter(r)

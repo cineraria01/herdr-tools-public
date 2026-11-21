@@ -15,6 +15,11 @@ import (
 const inbIrejSh = `mkdir -p "$d/rejected" && printf "%s\n" "$2" >"$d/rejected/$1.why.tmp" && mv -f "$d/rejected/$1.why.tmp" "$d/rejected/$1.why" &&
     for e in req brief.md; do [ ! -f "$d/$1.$e" ] || mv -f "$d/$1.$e" "$d/rejected/" || exit 1; done`
 
+var reqIDRe = regexp.MustCompile(`^(r[0-9a-z]+-[0-9a-z]{6}|rl[0-9a-f]{8})$`)
+
+// reqIDOK: 받은편지 요청 ID 꼴(newid("r") 또는 옛 줄 rl<cksum 8자리>)
+func reqIDOK(id string) bool { return reqIDRe.MatchString(id) }
+
 // s_ilist: 받은편지 이름 목록(dry-run이 아니면 .req 없는 접수 표시를 지움)
 const inbSIlist = `if [ "$1" = 0 ]; then for c in "$d"/.hc-fill/claim/*; do [ -f "$c" ] || continue; n=${c##*/}; case $n in *.tmp) continue ;; esac; [ -f "$d/$n.req" ] || rm -f "$c"; done; fi
 for f in "$d"/*.req; do [ -f "$f" ] || continue; f=${f##*/}; printf "%s\n" "${f%.req}"; done`
@@ -155,6 +160,10 @@ func inbOne(im, idir, n string) {
 		crid, cq, cb := F1(cf, 0), F1(cf, 1), F1(cf, 2)
 		hq, hb = F1(cf, 3), restAfter(first, 4)
 		if crid != "-" {
+			if !reqIDOK(crid) { // 경로에 쓰는 값 — 꼴이 아니면 쓰지 않는다(Fable E1: x/../../escaped로 데이터 폴더 밖에 썼다, 셸 판)
+				say("받은편지 %s %s: 접수 표시의 요청 ID 꼴이 아니다(%s) — 건너뜀", im, n, runeCut(crid, 40))
+				return
+			}
 			if cq == hq && cb == hb {
 				rid = crid
 			} else {

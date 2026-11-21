@@ -9,6 +9,47 @@ import (
 	"testing"
 )
 
+// 붙일 폴더(gofix-fill F07·F4): 기본 ~/.claude-tasks 아래만, 링크를 푼 실제 경로가 밖이면(~/.netrc를 가리키는 링크·..) 붙이지 않음
+func TestLcPasteDirs(t *testing.T) {
+	old, oc := HOME, confLines
+	defer func() { HOME, confLines = old, oc }()
+	HOME, confLines = t.TempDir(), nil
+	for name, s := range map[string]string{".netrc": "machine x login me password hunter2hunter2\n", ".ssh/config": "Host x\n",
+		".claude-tasks/a/report.md": "보고 원문\n", "notes/n.md": "메모\n"} {
+		if err := os.MkdirAll(HOME+"/"+name[:strings.LastIndexByte(name, '/')+1], 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(HOME+"/"+name, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(HOME+"/.netrc", HOME+"/.claude-tasks/a/link.md"); err != nil {
+		t.Fatal(err)
+	}
+	body := "~/.netrc ~/.ssh/config ~/notes/n.md ~/.claude-tasks/a/link.md ~/.claude-tasks/../.netrc ~/.claude-tasks/a/report.md"
+	got, ok := lcPasteHome(body, "-", "ln")
+	if want := "\n## (붙임) 지휘 기계 파일 원문 — ~/.claude-tasks/a/report.md\n보고 원문\n"; !ok || got != want {
+		t.Errorf("기본 폴더\n got %q (ok %v)\nwant %q", got, ok, want)
+	}
+	confLines = []string{"paste_dirs ~/notes ~/.claude-tasks /etc"}
+	if got, _ := lcPasteHome(body, "-", "ln"); strings.Count(got, "원문 — ") != 2 || !strings.Contains(got, "메모") || strings.Contains(got, "hunter2") {
+		t.Errorf("설정 폴더: %q", got)
+	}
+}
+
+// ovGlob은 글자 단위(gofix-fill F13 — 한글 무시 패턴이 바이트마다 다시 적혀 안 맞았다)
+func TestOvGlobUnicode(t *testing.T) {
+	for _, c := range []struct {
+		pat, s string
+		want   bool
+	}{{"문서/*", "문서/안내.md", true}, {"?.md", "안.md", true}, {"\\문서/*", "문서/x", true}, {"[가나]*", "나무", true},
+		{"[!가]*", "가지", false}, {"문서/*", "자료/안내.md", false}} {
+		if got := ovGlob(c.pat, c.s); got != c.want {
+			t.Errorf("ovGlob(%q, %q) = %v, 기대 %v", c.pat, c.s, got, c.want)
+		}
+	}
+}
+
 // rowsBar: 줄을 「칸\t칸|」 꼴로(기록한 골든과 같은 꼴)
 func rowsBar(rs []Row) string {
 	var b strings.Builder
@@ -95,9 +136,10 @@ func TestOvcmpGolden(t *testing.T) {
 }
 
 func TestLcPaste(t *testing.T) {
-	old := HOME
-	defer func() { HOME = old }()
+	old, oc := HOME, confLines
+	defer func() { HOME, confLines = old, oc }()
 	HOME = t.TempDir()
+	confLines = []string{"paste_dirs ~/"} // 이 시험은 HOME 아래 어디든(붙일 폴더 한정은 TestLcPasteDirs)
 	w := func(name, s string) {
 		if err := os.MkdirAll(HOME+"/"+name[:strings.LastIndexByte(name, '/')+1], 0o755); err != nil {
 			t.Fatal(err)

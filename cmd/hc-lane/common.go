@@ -41,12 +41,24 @@ var dieHook func(msg string)
 // die: 「hc-lane: <글>」 한 줄 뒤 종료 1
 func die(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
+	rc := 1
+	if timeoutExit != 0 && lastTimeout {
+		rc = timeoutExit
+		msg += " (바로 앞 바깥 명령이 시간 상한에 걸림 — 결과 모름, 같은 줄을 다시)"
+	}
 	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
 	if dieHook != nil {
 		dieHook(msg)
 	}
-	exit(1)
+	exit(rc)
 }
+
+// lastTimeout: 바로 앞 runCmd가 상한에 걸렸다(124 — 모름). timeoutExit가 0이 아니면 그 뒤 die는 1(실패) 대신 이 값(land: 75 — 다시,
+// gofix M01: 병합기·레인이 「시간 넘김」을 반송·실패로 읽지 않게)
+var (
+	lastTimeout bool
+	timeoutExit int
+)
 
 func eprintf(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }
 
@@ -55,15 +67,9 @@ func code(err error) int {
 	if err == nil {
 		return 0
 	}
-	if ee, ok := err.(*exec.ExitError); ok {
-		if st := ee.ExitCode(); st >= 0 {
-			return st
-		}
-		return 128 + 15
-	}
-	var te *proc.TimeoutError
-	if errors.As(err, &te) {
-		return proc.TimeoutCode // 상한에 걸림(proc.Limit) — 모름
+	var ee *exec.ExitError
+	if errors.As(err, &ee) || errors.Is(err, proc.ErrTimeout) {
+		return proc.Code(err) // 신호면 128+그 신호(gofix L09), 상한에 걸림(proc.Limit)이면 124 — 모름
 	}
 	return 127
 }
@@ -75,6 +81,9 @@ type cmdOpt struct {
 	stderr io.Writer // nil이면 버림
 	stdin  io.Reader // nil이면 /dev/null
 	env    []string  // 더할 환경(K=V)
+	// noLimit: 상한 없이 이 프로세스의 무리에서(작업 트리를 바꾸는 rebase·merge — 중간에 끊으면 반쯤 바뀐 작업 트리와 멈춘 rebase가
+	// 남는다, gofix M2. 셸 판도 상한이 없다. 무리가 같아 hc-lane을 끄는 신호는 함께 받는다)
+	noLimit bool
 }
 
 func runCmd(o cmdOpt, name string, args ...string) int {
@@ -83,7 +92,14 @@ func runCmd(o cmdOpt, name string, args ...string) int {
 	if len(o.env) > 0 {
 		c.Env = append(os.Environ(), o.env...)
 	}
-	return code(proc.Run(c)) // git·hc·ssh 등은 상한 안에서만(proc.Limit)
+	var err error
+	if o.noLimit {
+		err = c.Run()
+	} else {
+		err = proc.Run(c) // git·hc·ssh 등은 상한 안에서만(proc.Limit)
+	}
+	lastTimeout = errors.Is(err, proc.ErrTimeout)
+	return code(err)
 }
 
 // trim: $(…)처럼 끝 줄바꿈을 모두 뺀다
@@ -115,6 +131,13 @@ func gitOutQ(args ...string) (string, int) {
 func gitOut2(env []string, args ...string) (string, int) {
 	var b bytes.Buffer
 	rc := runCmd(cmdOpt{stdout: &b, stderr: &b, env: env}, "git", args...)
+	return trim(b.String()), rc
+}
+
+// gitWrite2: gitOut2와 같되 상한 없이(cmdOpt.noLimit — 작업 트리를 바꾸는 rebase)
+func gitWrite2(env []string, args ...string) (string, int) {
+	var b bytes.Buffer
+	rc := runCmd(cmdOpt{stdout: &b, stderr: &b, env: env, noLimit: true}, "git", args...)
 	return trim(b.String()), rc
 }
 

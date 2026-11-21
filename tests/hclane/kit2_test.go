@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -136,9 +137,11 @@ func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
 
 // Bg: 배경으로 띄운 명령(셸 `… &`). 자기 프로세스 무리로 띄우고, 절이 끝나면(Cleanup) 무리째 끈다.
 type Bg struct {
-	Pid  int
-	done chan struct{}
-	rc   int
+	Pid    int
+	done   chan struct{}
+	rc     int
+	mu     sync.Mutex // 거두기(wait4)와 신호를 가른다 — 거두기 전에는 그 pid·무리 번호가 다른 프로세스에 쓰이지 않는다
+	reaped bool
 }
 
 // bg: dir에서 이름을 배경으로. stdout·stderr는 파일 경로(빈 값이면 버림). `VAR=값`은 extra.
@@ -167,16 +170,44 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 		k.t.Fatal(err)
 	}
 	b := &Bg{Pid: cmd.Process.Pid, done: make(chan struct{}), rc: -1}
-	go func() {
-		cmd.Wait()
-		b.rc = cmd.ProcessState.ExitCode()
-		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			b.rc = 128 + int(ws.Signal())
+	go func() { // 잠금 안에서 WNOHANG으로 거둔다 — signal이 거둔 뒤의 번호에 신호를 보내지 않게(cmd.Wait는 거두는 순간을 알 수 없다)
+		for {
+			var ws syscall.WaitStatus
+			b.mu.Lock()
+			wp, err := syscall.Wait4(b.Pid, &ws, syscall.WNOHANG, nil)
+			if wp == b.Pid || (err != nil && err != syscall.EINTR) {
+				b.reaped = true
+				switch {
+				case err != nil:
+				case ws.Signaled():
+					b.rc = 128 + int(ws.Signal())
+				default:
+					b.rc = ws.ExitStatus()
+				}
+				b.mu.Unlock()
+				close(b.done)
+				return
+			}
+			b.mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
 		}
-		close(b.done)
 	}()
-	k.t.Cleanup(func() { syscall.Kill(-b.Pid, syscall.SIGKILL); b.Wait() })
+	// 아직 안 거둔(Wait 전) 무리에만 신호 — 거둔 뒤의 번호는 다른 무리에 다시 쓰일 수 있다(gofix L18)
+	k.t.Cleanup(func() { b.signal(true, syscall.SIGKILL); b.Wait() })
 	return b
+}
+
+// signal: 끝나 거두기 전일 때만 그 pid(group이면 무리)에 신호. 거둔 뒤면 보내지 않고 ESRCH
+func (b *Bg) signal(group bool, s syscall.Signal) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.reaped {
+		return syscall.ESRCH
+	}
+	if group {
+		return syscall.Kill(-b.Pid, s)
+	}
+	return syscall.Kill(b.Pid, s)
 }
 
 // Wait: 끝날 때까지 기다려 종료 코드(신호로 끝났으면 128+신호 — 셸 wait 꼴).
@@ -193,7 +224,7 @@ func (b *Bg) Done() bool {
 }
 
 // stop: TERM을 보내고 기다린다(셸 stopw).
-func (b *Bg) stop() { syscall.Kill(b.Pid, syscall.SIGTERM); b.Wait() }
+func (b *Bg) stop() { b.signal(false, syscall.SIGTERM); b.Wait() }
 
 // runs: 가짜 hc run을 부른 횟수(hc.log의 「run」 줄 수).
 func (k *K) runs() int {

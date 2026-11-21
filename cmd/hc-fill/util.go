@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -410,10 +409,15 @@ func exit(code int) {
 	if qHeld {
 		panic(lockExit{code})
 	}
+	runExitHooks()
+	os.Exit(code)
+}
+
+// runExitHooks: 끝내기 훅(나중에 단 것부터) — exit와 run의 신호 처리(셸 판 EXIT trap은 TERM에도 돈다, Fable L2)
+func runExitHooks() {
 	for i := len(exitHooks) - 1; i >= 0; i-- {
 		exitHooks[i]()
 	}
-	os.Exit(code)
 }
 
 func die(format string, a ...any) {
@@ -439,6 +443,8 @@ func crash(at string) {
 	if qHeld {
 		panic(lockExit{137})
 	}
-	syscall.Kill(os.Getpid(), syscall.SIGKILL)
+	if p, err := os.FindProcess(os.Getpid()); err == nil {
+		p.Kill() // SIGKILL(Windows는 TerminateProcess)
+	}
 	select {}
 }

@@ -239,7 +239,7 @@ func s21b1(k *K) {
 	pause(2500)
 	write(k.t, live, "tb2 2222\n") // ta1이 끝남
 	if !upto(wa.Done) {
-		syscall.Kill(wa.Pid, syscall.SIGTERM)
+		wa.signal(false, syscall.SIGTERM)
 	}
 	wa.Wait()
 	os.Remove(L + ".sendfail")

@@ -10,7 +10,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"syscall"
 
 	"herdr-tools/internal/proc"
 )
@@ -56,9 +55,7 @@ func pick(args []string) (s sub, rest []string, ok bool) {
 func main() {
 	proc.Who = "hc-lane"
 	// 물려받은 fd(바깥 병합기 잠금 fd 18·19 등)를 자식에게 넘기지 않는다. Go가 여는 fd는 기본 O_CLOEXEC
-	for fd := 3; fd < 1024; fd++ {
-		syscall.CloseOnExec(fd)
-	}
+	closeInherited()
 	// 포장이 go_run 앞에서 HC_LANE_BIN(시험이 bin/hc-lane 경로로 씀)을 바꿔 넣었다 — 자식(검증 등)에는 원래 값으로
 	if v, ok := os.LookupEnv("HC_LANE_SH_BIN"); ok {
 		if v == "" {

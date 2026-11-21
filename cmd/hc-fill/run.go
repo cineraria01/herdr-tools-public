@@ -168,7 +168,9 @@ func sweepTmp() {
 
 // readTables: 이번 바퀴 터미널 표·hc-lane 레인 주소·연결된 기계. hc가 실패하면 멈춘다(빈 표로 읽어 다 빈 것처럼 띄우지 않게)
 func readTables() {
-	raw, rc := run("hc", "ls", "--json")
+	// hc의 오류 글은 버리지 않는다(셸 판처럼 로그에 — Fable L9)
+	hcOut := func(args ...string) (string, int) { return Cmd{Name: "hc", Args: args, Err: errPass}.Run() }
+	raw, rc := hcOut("ls", "--json")
 	if rc != 0 || sub(raw) == "" {
 		die("hc ls 실패, 이번 바퀴는 띄우지 않았다")
 	}
@@ -176,14 +178,14 @@ func readTables() {
 	if TERMS, ok = parseTerms(raw); !ok {
 		die("hc ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다")
 	}
-	raw, rc = run("hc", "ls", "--label", "hc-lane=1", "--json")
+	raw, rc = hcOut("ls", "--label", "hc-lane=1", "--json")
 	if rc == 0 {
 		LANEADDR, ok = jsonList(raw, "terminals", "address", nil)
 	}
 	if rc != 0 || !ok {
 		die("hc ls --label hc-lane=1 실패, 이번 바퀴는 띄우지 않았다")
 	}
-	raw, rc = run("hc", "machine", "ls", "--json")
+	raw, rc = hcOut("machine", "ls", "--json")
 	if rc != 0 || sub(raw) == "" {
 		die("hc machine ls 실패, 이번 바퀴는 띄우지 않았다")
 	}

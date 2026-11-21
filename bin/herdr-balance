@@ -1,7 +1,14 @@
-#!/bin/bash
-# herdr-balance: Go 판(cmd/herdr-balance) 포장 (2026-11-21 사용자 「모두 고로 옮기고 싶어」) — 되돌리기 HERDR_BALANCE_IMPL=bash(또는 HERDR_IMPL=bash)면 셸 판 lib/herdr-balance/herdr-balance.py
-s=$0; while [ -L "$s" ]; do l=$(readlink "$s"); case $l in /*) s=$l ;; *) s=$(dirname "$s")/$l ;; esac; done
-d=$(cd "$(dirname "$s")" && pwd) || exit 1
-if . "$d/../lib/go-run.sh" 2>/dev/null; then go_run herdr-balance "$@" || exit
-else echo "herdr-balance: !!!!!! 경고: 공통 실행기를 못 읽었다($d/../lib/go-run.sh) — 셸 판으로 돈다 !!!!!!" >&2; fi
-exec python3 "$d/../lib/herdr-balance/herdr-balance.py" "$@"
+#!/usr/bin/env python3
+"""herdr-balance: Go 판(cmd/herdr-balance) 포장 (2026-11-21 사용자 「모두 고로 옮기고 싶어」) — 되돌리기 HERDR_BALANCE_IMPL=bash(또는 HERDR_IMPL=bash)면
+셸 판 lib/herdr-balance/herdr-balance.py.
+파이썬 파일인 까닭(go-final-audit B01): 이미 깔린 launchd plist가 「python3 ~/.local/bin/herdr-balance --watch」로 부른다 — bash 포장이면
+깔리는 순간 자동 맞춤이 멈춘다(bin/hc-sweep과 같다). 그래서 공통 실행기(lib/go-run.sh, bash)를 bash로 부르고, 셸 판을 고르면 그 bash가
+같은 파이썬으로 herdr-balance.py를 돈다."""
+import os
+import sys
+
+d = os.path.dirname(os.path.realpath(__file__))
+os.execv("/bin/bash", ["bash", "-c", r'''
+if . "$1/../lib/go-run.sh" 2>/dev/null; then go_run herdr-balance "${@:3}" || exit
+else echo "herdr-balance: !!!!!! 경고: 공통 실행기를 못 읽었다($1/../lib/go-run.sh) — 셸 판으로 돈다 !!!!!!" >&2; fi
+exec "$2" "$1/../lib/herdr-balance/herdr-balance.py" "${@:3}"''', "herdr-balance", d, sys.executable or "python3"] + sys.argv[1:])

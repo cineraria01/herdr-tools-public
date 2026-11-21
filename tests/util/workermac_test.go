@@ -107,17 +107,20 @@ func testWorkerMac(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/brew", T+"/brew2")
 	e = e.With("WORKER_MAC_BREW_DIR="+T+"/brew", "PATH="+T+"/bin:"+T+"/brew:"+e["PATH"])
 
-	// 가짜 ssh: 옵션을 건너뛰고 기계 이름을 ssh.log에, 나머지 명령은 원격 HOME에서(원격 가짜 명령 폴더를 PATH 앞에) sh -c로 돈다. SSH_FAKE_FAIL이면 연결 안 됨.
+	// 가짜 ssh: 옵션(과 --)을 건너뛰고 기계 이름을 ssh.log에, 나머지 명령은 원격 HOME에서(원격 가짜 명령 폴더를 PATH 앞에) sh -c로 돈다.
+	// SSH_FAKE_FAIL이면 연결 안 됨, SSH_FAKE_CUT이면 원격 본문(base64)은 앞 두 줄만 내고 255(끊김).
 	script(t, T+"/bin/ssh", T, `#!/bin/bash
-while [ $# -gt 0 ]; do case $1 in -o) shift 2 ;; -n|-t) shift ;; *) break ;; esac; done
+while [ $# -gt 0 ]; do case $1 in -o) shift 2 ;; -n|-t) shift ;; --) shift; break ;; *) break ;; esac; done
 echo "$1" >>"$T_LOG/ssh.log"; shift
 [ -z "${SSH_FAKE_FAIL-}" ] || exit 255
-cd "$RHOME" && HOME=$RHOME PATH=$RHOME/.local/bin:$PATH exec /bin/sh -c "$*"
+cd "$RHOME" || exit 255
+if [ -n "${SSH_FAKE_CUT-}" ] && [[ "$*" == *base64* ]]; then HOME=$RHOME PATH=$RHOME/.local/bin:$PATH /bin/sh -c "$*" | head -n 2; exit 255; fi
+HOME=$RHOME PATH=$RHOME/.local/bin:$PATH exec /bin/sh -c "$*"
 `)
-	// 가짜 hc(맥 쪽): machine ls는 w1 연결됨, exec는 -- 뒤 명령을 원격 HOME에서. 그 밖은 hc.log에.
+	// 가짜 hc(맥 쪽): machine ls(진짜 hc --json 꼴)는 w1 연결됨, exec는 -- 뒤 명령을 원격 HOME에서. 그 밖은 hc.log에.
 	script(t, T+"/bin/hc", T, `#!/bin/bash
 case $1 in
-  machine) [ "$2" = ls ] && { echo '{"name":"w1","state":"connected"}'; exit 0; }; echo "$*" >>"$T_LOG/hc.log" ;;
+  machine) [ "$2" = ls ] && { echo '{"machines":[{"name":"w1","state":"connected"}]}'; exit 0; }; echo "$*" >>"$T_LOG/hc.log" ;;
   exec) while [ "$1" != -- ]; do shift; done; shift; cd "$RHOME" && HOME=$RHOME exec "$@" ;;
   *) echo "$*" >>"$T_LOG/hc.log" ;;
 esac
@@ -278,6 +281,21 @@ esac
 	c.ok("check: brew 폴더가 있는데 hc 터미널 PATH에 없으면 실패", rc == 1 && has("실패\tbrew PATH(hc 문맥)\t"+T+"/brew2 없음") && has("hc-core-relaunch w1"))
 	tool(e.With("WORKER_MAC_BREW_DIR="+T+"/nobrew"), "worker-mac-check", "w1")
 	c.ok("check: brew 폴더가 없는 기계는 해당 없음", has("통과\tbrew PATH(hc 문맥)\t해당 없음: "+T+"/nobrew 없음"))
+
+	// [E01] 원격 점검 본문이 끊기면(ssh 255) 받은 줄은 두고 「실패 원격 점검」, 종료 1 — 끝까지 온 점검에는 그 줄이 없다
+	c.ok("[E01] check: 끝까지 온 원격 점검에는 「원격 점검」 줄 없음", !has("원격 점검") && has("TCC 화면 기록"))
+	tool(e.With("SSH_FAKE_CUT=1"), "worker-mac-check", "w1")
+	c.ok("[E01] check: 끊긴 원격 점검은 받은 줄 + 실패·종료 1", rc == 1 && has("통과\t자동 로그인\t") && !has("TCC 화면 기록") &&
+		has("실패\t원격 점검\t끊김(종료 255) — 받은 줄까지만 봤다"))
+
+	// [E10] -로 시작하는 기계 이름은 ssh·hc 옵션으로 읽힌다 — 사용 오류 64, 접속 안 함
+	newhome()
+	check("-oProxyCommand=x")
+	c.ok("[E10] check: -로 시작하는 이름 → 64, 접속 안 함", rc == 64 && read(TLOG+"/ssh.log") == "")
+	setup("w1", "-x")
+	c.ok("[E10] setup: 모르는 옵션 → 64, 접속 안 함", rc == 64 && read(TLOG+"/ssh.log") == "")
+	setup("mesh", "-oProxyCommand=x")
+	c.ok("[E10] setup mesh: -로 시작하는 이름 → 64", rc == 64 && read(TLOG+"/ssh.log") == "")
 
 	// ── hc-core-relaunch ──
 	// 원격에 남긴 core-restart.sh를 가짜 로그인 셸로 직접 돌려, 코어 재시작이 로그인 환경에서 --fresh로 가는지 본다.

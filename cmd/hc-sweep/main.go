@@ -1,7 +1,7 @@
 // hc-sweep: 끝났는데 안 닫힌 hc 에이전트 터미널을 닫고, 레인이 남긴 고아 프로세스·지운 작업 트리의 색인·임시 찌꺼기를 쓴다
 // (Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」). 규칙·출력·기록 꼴은 셸 판 lib/hc-sweep/sweep.py·disk.py 머리글과 같다 —
-// 두 판이 같은 closed.log·events.tsv·disk-low 표식을 번갈아 써도 된다. 되돌리기: HC_SWEEP_IMPL=bash(bin/hc-sweep 포장).
-// 바뀐 것: 외부 명령은 새 프로세스 무리로 띄우고 상한 시간에 무리째 거둔다(run), 판정은 모두 「모름이면 남김」 그대로.
+// 두 판이 같은 closed.log·events.tsv·disk-low 표식·sweep.lock을 번갈아 써도 된다. 되돌리기: HC_SWEEP_IMPL=bash(bin/hc-sweep 포장).
+// 셸 판과 다른 점(Go 전환 감사 2026-11-21 base에서 고침 — 셸 판은 곧 걷는다): 「알려진 차이」는 lib/hc-sweep/sweep.py 머리글 끝.
 package main
 
 import (
@@ -17,8 +17,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/version"
 )
 
 const minute = 60 * 1000.0 // ms
@@ -66,15 +68,15 @@ type result struct {
 
 type runner func(timeout time.Duration, env []string, name string, args ...string) result
 
-// run: 새 프로세스 무리로 띄우고(표준 입력 /dev/null) 상한 시간이면 무리째 KILL. env가 nil이면 물려받은 환경
+// run: 띄우고(표준 입력 /dev/null) 상한 시간이면 그 자식을 KILL. env가 nil이면 물려받은 환경.
+// 자식은 이 프로세스와 같은 무리에 둔다(셸 판 subprocess와 같게, B19) — launchd·사람이 쓸기 무리를 끄면(SIGKILL 포함) 자식도 함께 끝난다.
+// ponytail: 상한에 걸린 자식의 손자는 거두지 않는다 — 부르는 것(hc·ps·lsof·du·sqlite3·getconf, 포장이 exec하는 Go 도구)은 손자를 두지 않는다
 func run(timeout time.Duration, env []string, name string, args ...string) result {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, name, args...)
 	var o, e bytes.Buffer
 	c.Stdout, c.Stderr, c.Env = &o, &e, env
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 	c.WaitDelay = 3 * time.Second
 	err := c.Run()
 	r := result{out: o.String(), errs: e.String()}
@@ -87,10 +89,37 @@ func run(timeout time.Duration, env []string, name string, args ...string) resul
 		if r.rc < 0 {
 			r.rc, r.err = -1, err
 		}
-	case err != nil:
+	case err != nil: // 못 띄움·출력 관 기다림 넘김(ErrWaitDelay) — 모름
 		r.rc, r.err = -1, err
 	}
 	return r
+}
+
+// hcError: hc가 실패함. notFound = 그 터미널이 없다고 코어가 답함(error.kind not_found) — 그 밖(망·시간 초과·모르는 답)은 모름
+type hcError struct {
+	msg      string
+	notFound bool
+}
+
+func (e *hcError) Error() string { return e.msg }
+
+func isNotFound(err error) bool {
+	var he *hcError
+	return errors.As(err, &he) && he.notFound
+}
+
+// notFoundIn: hc가 찍은 오류 JSON(줄마다) 가운데 error.kind(또는 kind)가 not_found인 것이 있나
+func notFoundIn(s string) bool {
+	for _, l := range strings.Split(s, "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(strings.TrimSpace(l)), &m) != nil {
+			continue
+		}
+		if str(obj(m, "error"), "kind") == "not_found" || str(m, "kind") == "not_found" {
+			return true
+		}
+	}
+	return false
 }
 
 // hc <인자…> --json: 결과 JSON(대상이 객체면 argv는 셸 칸 판정에만 쓰고 버린다 — 자격증명이 섞여 있다)
@@ -103,7 +132,7 @@ func hc(args ...string) (map[string]any, error) {
 		} else if r.err != nil {
 			first = r.err.Error()
 		}
-		return nil, errors.New(cutRunes(first, 200))
+		return nil, &hcError{msg: cutRunes(first, 200), notFound: r.err == nil && notFoundIn(r.errs+"\n"+r.out)}
 	}
 	if strings.TrimSpace(r.out) == "" {
 		return map[string]any{"shell": false}, nil
@@ -255,7 +284,7 @@ func conf(key, def string) (string, bool) {
 }
 
 func confWith(tool, key, def string) (string, bool) {
-	if syscall.Access(tool, 1) != nil { // X_OK
+	if !executable(tool) {
 		return def, true
 	}
 	r := run(20*time.Second, nil, tool, "get", key, def)
@@ -265,24 +294,56 @@ func confWith(tool, key, def string) (string, bool) {
 	return strings.TrimSpace(r.out), true
 }
 
+// sweepLock: 두 판(Go·셸) 공통 잠금 <상태>/hc-sweep/sweep.lock(flock 배타, 쥔 프로세스가 죽으면 커널이 푼다). 둘이 함께 돌면 같은
+// 터미널을 두 번 닫고 디스크 알림을 두 번 보낸다(B07). 남이 쥐면 busy
+func sweepLock() (f *os.File, busy bool, err error) {
+	d := filepath.Join(stateHome(), "hc-sweep")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return nil, false, fmt.Errorf("잠금 폴더: %w", err)
+	}
+	return lockx.TryLock(filepath.Join(d, "sweep.lock"))
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("hc-sweep 1")
+		fmt.Println(version.String("hc-sweep"))
 		return
 	}
+	os.Exit(sweepMain(os.Args[1:]))
+}
+
+func sweepMain(args []string) int {
 	fs := flag.NewFlagSet("hc-sweep", flag.ExitOnError)
 	dry := fs.Bool("dry-run", false, "닫을 것과 이유만 출력")
 	self := fs.Bool("self-test", false, "가짜 기록으로 규칙 판정 확인")
 	minAge := fs.Float64("min-age", 10, "고아·색인 최소 나이(분, 기본 10)")
 	only := fs.String("only-under", "", "이 폴더 아래 작업 트리만(시험용)")
-	fs.Parse(os.Args[1:])
+	fs.Parse(args)
+	if fs.NArg() > 0 { // 셸 판 argparse와 같게 쓸기 전에 사용 오류(B02 — flag는 첫 위치 인자에서 멈춰 뒤의 --dry-run을 놓친다)
+		fmt.Fprintf(os.Stderr, "hc-sweep: 모르는 인자: %s\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return 2
+	}
 	if *self {
 		if err := selfTest(); err != nil {
 			fmt.Fprintln(os.Stderr, "hc-sweep self-test 실패:", err)
-			os.Exit(1)
+			return 1
 		}
 		fmt.Println("ok")
-		return
+		return 0
+	}
+	if !*dry {
+		lk, busy, err := sweepLock()
+		if busy {
+			fmt.Fprintln(os.Stderr, "hc-sweep: 다른 쓸기가 도는 중(sweep.lock) — 이번 바퀴는 건너뜀")
+			return 75
+		}
+		if err != nil {
+			// 잠금 파일을 못 만듦(상태 폴더 자리가 막힘 등): 같은 자리를 쓰는 다른 판도 쥘 수 없다 — 경고하고 돈다
+			fmt.Fprintln(os.Stderr, "hc-sweep: 경고 — 잠금을 못 잡음(그대로 돈다):", err)
+		} else {
+			defer lk.Close()
+		}
 	}
 	// 색인·디스크 쓸기는 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
 	sweepIndex(*dry, *minAge*60)
@@ -292,9 +353,12 @@ func main() {
 	ls, err := hc("ls")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hc-sweep: hc ls 실패:", err)
-		os.Exit(1)
+		return 1
 	}
 	terms := ls["terminals"]
 	sweepTerminals(terms, *dry)
-	sweepOrphans(terms, *dry, *minAge*60, *only)
+	if _, err := sweepOrphans(terms, *dry, *minAge*60, *only); err != nil {
+		return 1 // 셸 판처럼 고아 판정 실패(ps 등)는 종료 코드에(B23). 줄은 sweepOrphans가 찍었다
+	}
+	return 0
 }

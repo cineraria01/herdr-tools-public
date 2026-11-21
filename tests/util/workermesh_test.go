@@ -29,7 +29,7 @@ func testWorkerMesh(t *testing.T, T string, e Env) {
 	// 그 기계 known_hosts에 주소가 있고 받는 기계 authorized_keys에 내 공개 키가 있을 때만 0(conn.log에 「보낸→받은」).
 	script(t, T+"/bin/ssh", T, `#!/bin/bash
 G=0
-while [ $# -gt 0 ]; do case $1 in -o) shift 2 ;; -n|-t) shift ;; -G) G=1; shift ;; *) break ;; esac; done
+while [ $# -gt 0 ]; do case $1 in -o) shift 2 ;; -n|-t) shift ;; -G) G=1; shift ;; --) shift; break ;; *) break ;; esac; done
 cfg() { awk -v h="$1" -v k="$2" 'tolower($1)=="host"{m=0; for(i=2;i<=NF;i++) if($i==h) m=1; next} m && tolower($1)==k {print $2; exit}' "$HOME/.ssh/config" 2>/dev/null; }
 if [ "$HOME" = "$T/mac" ]; then
   echo "$1" >>"$T_LOG/ssh.log"
@@ -124,8 +124,14 @@ cat "$T/hk/$2" >>"$HOME/.ssh/known_hosts"`, name, ip4, ip6)
 	mesh("--check")
 	c.ok("mesh --check: 아무것도 없으면 종료 1, 바꾸지 않음", rc == 1 && !exists(T+"/h/wa/.ssh/id_ed25519") && !exists(T+"/h/wb/.ssh/authorized_keys") && has("wa → wb"))
 
+	// [B15] --dry-run은 두 판 다 읽기만(--check와 같음) — 셸 판이 키·설정을 실제로 바꾸고 hc에 등록했다
+	mesh("--dry-run")
+	c.ok("[B15] mesh --dry-run: 바꾸지 않음·등록 0", rc == 1 && !exists(T+"/h/wa/.ssh/id_ed25519") && !exists(T+"/h/wb/.ssh/authorized_keys") && addLog() == "")
+
 	mesh()
 	c.ok("mesh: 성공", rc == 0 && has("6방향"))
+	// [B31] 새로 넣은 것은 방향마다 authorized_keys·known_hosts·config·hc 하나씩 = 24(셸 판은 authorized_keys를 두 번 셌다)
+	c.ok("[B31] mesh: 새로 넣은 것 24", has("새로 넣은 것 24)"))
 	c.ok("mesh: 기계마다 키를 만들고 주석은 <기계>-workers-<날짜>", exists(T+"/h/wa/.ssh/id_ed25519") && grep(read(T+"/h/wa/.ssh/id_ed25519.pub"), ` wa-workers-[0-9]{8}$`))
 	c.ok("mesh: 받는 쪽 authorized_keys에 from=보낸 기계 Tailscale 주소",
 		strings.Contains(read(T+"/h/wb/.ssh/authorized_keys"), `from="192.0.2.1,2001:db8::1",no-agent-forwarding,no-X11-forwarding ssh-ed25519 `+pubbody("wa")+" "))

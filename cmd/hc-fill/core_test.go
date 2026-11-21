@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,5 +164,76 @@ func TestCountSeatsSimple(t *testing.T) {
 	}
 	if !HELDW || len(HNEW) != 2 {
 		t.Fatalf("HELDW %v HNEW %v", HELDW, HNEW)
+	}
+}
+
+// 대기열을 못 읽으면 고쳐 쓰는 쪽은 빈 목록으로 읽지 않고 끝난다(Fable L1)
+func TestQRowsWUnreadable(t *testing.T) {
+	setData(t)
+	if err := os.Mkdir(Q, 0o755); err != nil { // 읽히지 않는 대기열(폴더)
+		t.Fatal(err)
+	}
+	qHeld = true // 잠금 안: exit가 lockExit로 올라온다
+	defer func() {
+		qHeld = false
+		if e, ok := recover().(lockExit); !ok || e.code != 1 {
+			t.Fatalf("종료 1이어야: %v", e)
+		}
+	}()
+	qRowsW()
+	t.Fatal("못 읽었는데 돌아왔다")
+}
+
+// Windows·Linux 교차 빌드가 깨지지 않는다(gofix-fill F15 — syscall.Kill·Setpgid·CloseOnExec(int)로 Windows 빌드가 깨졌다)
+func TestCrossBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	for _, osys := range []string{"windows", "linux"} {
+		c := exec.Command("go", "build", "-o", filepath.Join(t.TempDir(), "hf"), ".")
+		c.Env = append(os.Environ(), "GOOS="+osys, "GOARCH=amd64", "CGO_ENABLED=0")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Errorf("%s 빌드 실패: %v\n%s", osys, err, out)
+		}
+	}
+}
+
+// 릴리스 바이너리의 --version은 커밋을 보인다(gofix-fill F19)
+func TestVersionShowsCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	bin := filepath.Join(t.TempDir(), "hf")
+	if out, err := exec.Command("go", "build", "-ldflags", "-X herdr-tools/internal/version.Commit=abcdef012345", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("빌드: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "hc-fill (Go abcdef012345)" {
+		t.Fatalf("--version = %q (%v)", out, err)
+	}
+}
+
+// newid 꼴: <접두><36진 초>-<6글자> — Go 판이 실제로 쓰는 ID(받은편지·감사)를 본다(gofix-fill F17 — 계약 시험은 셸 함수만 봤다)
+func TestNewidShape(t *testing.T) {
+	re := regexp.MustCompile(`^r[0-9a-z]+-[0-9a-z]{6}$`)
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		id := newid("r")
+		if !re.MatchString(id) || !reqIDOK(id) {
+			t.Fatalf("newid 꼴이 틀림: %q", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) < 45 {
+		t.Fatalf("newid가 겹친다: %d/50", len(seen))
+	}
+	// 접수 표시에서 읽은 요청 ID는 꼴이 맞을 때만 경로에 쓴다(Fable E1)
+	for _, bad := range []string{"x/../../../../escaped", "r1-abc", "", "rl0123", "r1abc-abcdef/.."} {
+		if reqIDOK(bad) {
+			t.Errorf("reqIDOK(%q) = 참", bad)
+		}
+	}
+	if !reqIDOK("rl0a1b2c3d") {
+		t.Error("옛 줄 rl<8자리>를 거절")
 	}
 }

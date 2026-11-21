@@ -80,7 +80,7 @@ usage() {
                 안일 때만 허용을 고른다(lane.auto_trust off면 안 함). 밖이 하나라도 있으면 「모름 — 외부 가져오기 질문(<경로>)」, 종료 5
                 --start-wait <초>(이 호출만) 또는 설정 lane.start_wait초(기본 60, 0이면 이 단계를 끔. status를 내지 않는
                 명령·CLI는 0으로) 안에 hc get status가 안 잡히면 화면 끝에서 막힘 낱말을 찾아
-                한 줄로 알리고 종료 5 시작 안 됨(원인 모름·신뢰 질문·끝남), 6 로그인·인증 막힘, 7 키체인 막힘(터미널은 남긴다)
+                한 줄로 알리고 종료 5 시작 안 됨(원인 모름·신뢰 질문·끝남·hc run 출력에 주소 없음), 6 로그인·인증 막힘, 7 키체인 막힘(터미널은 남긴다)
                 status가 잡힌 뒤 설정 lane.first_turn_wait초(기본 60, 0이면 끔) 안에 turn > 0 또는 status working을
                 한 번도 못 보면 사건 막힘 「첫 턴 없음 <주소>」과 start noturn(종료 0). hc-fill에는 첫 status에서 start ok와
                 주소를 돌려주고 따로 감시한다(진단은 hc-lane/watch.log).
@@ -129,7 +129,7 @@ usage() {
                 않은 가지만 git 기본으로 켜지고 정해 둔 값·조건부 false는 그대로. 「Resolved」로 푼 경로는 land가 git add)
                 원격이 있으면 main push에 --atomic으로 착지 표식 refs/hc-landed/<레인>/<UTC 초>(= 착지한 커밋)와 이 레인 임대 지우기
                 (HC_LANE_LEASE 값 lease)를 함께 싣는다(herdr-land.sh에는 HERDR_LAND_PUSH_EXTRA로 넘김). 못 실었으면 착지 뒤 따로
-                종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음
+                종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음, 75 바깥 명령 시간 넘김(모름 — 다시)
                 검증(herdr-land.sh면 그 전체) 출력은 화면 그대로 + ${XDG_STATE_HOME:-~/.local/state}/hc-lane/land-logs/<레인>-<시각>-<pid>.log
                 (14일 지난 것은 지움). 실패면 실패 줄(--- FAIL·FAIL <패키지>·panic·(fail)·✗·✖·not ok, 최대 40줄 — 이번에 생긴
                 .qa/<날짜>/herdr-verify-* 폴더의 *.log도 뒤짐)·그 폴더·「전체 로그 <경로>」를 오류 출력에, $HC_LANE이면 중간 사건에도 경로

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/atomic"
 )
 
 // 제출 기록 값(셸 mmeta가 채우는 mbs_ mid_ mjb_ mvd_ mpid_)
@@ -321,7 +323,14 @@ func submitCmd() {
 		exit(0)
 	}
 	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
-	if isFile(precheck) {
+	// 돌리는 것은 제출 커밋 속 판만(무시·추적 안 된 로컬 파일을 돌리지 않는다 — committedHook, gofix L12)
+	_, inCommit := gitOutQ("rev-parse", "-q", "--verify", sh+":"+precheck)
+	if inCommit == 0 {
+		committedHook(sh, precheck)
+	} else if isFile(precheck) {
+		die("land(제출): %s 가 제출 커밋(%s)에 없다(추적 안 됨·무시됨) — 커밋하거나 지운 뒤 같은 줄을 다시", precheck, cut(sh, 9))
+	}
+	if inCommit == 0 {
 		if rc := lrun("bash", precheck); rc != 0 {
 			lfail(rc)
 			die("land(제출): 사전 검사(%s)가 실패해 큐에 넣지 않았다(종료 %d) — 고쳐 커밋한 뒤 같은 줄을 다시", precheck, rc)
@@ -412,8 +421,8 @@ func submitCmd() {
 	for _, o := range olds {
 		args = append(args, ":"+o[0], "--force-with-lease="+o[0]+":"+o[1])
 	}
-	if os.MkdirAll(ssd+"/hc-submitting", 0o777) != nil || os.WriteFile(spending+".tmp", []byte(qn+" "+mc+" "+sh+"\n"), 0o666) != nil ||
-		os.Rename(spending+".tmp", spending) != nil {
+	// fsync·rename·폴더 fsync — push 뒤 기계가 갑자기 꺼져도 접수 전 기록이 남게(gofix E06)
+	if os.MkdirAll(ssd+"/hc-submitting", 0o777) != nil || atomic.WriteFile(spending, []byte(qn+" "+mc+" "+sh+"\n"), 0o666) != nil {
 		die("land(제출): 접수 전 기록을 쓰지 못했다")
 	}
 	po, pr := gitOut2(nil, append([]string{"push", "--atomic", "--porcelain", "origin"}, args...)...)

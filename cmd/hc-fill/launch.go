@@ -241,7 +241,10 @@ func wtThere(m, dir string) string {
 	if !connHas(m) {
 		return "?"
 	}
-	v, _ := run("hc", "exec", "--on", m, "--", "sh", "-c", `[ -d "$1" ] && echo yes || echo no`, "_", dir)
+	v, rc := run("hc", "exec", "--on", m, "--", "sh", "-c", `[ -d "$1" ] && echo yes || echo no`, "_", dir)
+	if rc != 0 { // 실패·시간 넘김의 출력은 믿지 않는다 — 모름(자리를 계속 센다, gofix-fill E05)
+		return "?"
+	}
 	switch v = sub(v); v {
 	case "yes", "no":
 		return v
@@ -310,6 +313,37 @@ func tryOldBusy(name, rid string) bool {
 		if t.M == machine && t.Name == name && (addr == "" || addr == "-" || t.Addr == addr) {
 			return true
 		}
+	}
+	return false
+}
+
+// tryUnsure: 같은 줄 ID의 미확정 시도(주소 칸 ? — 띄우기 시간 넘김·주소 못 읽음·띄운 직후 죽음)가 있으면 그 기계가 끊겼거나
+// 그 이름의 터미널이 보이는 동안 기다린다(참 — 다른 기계에 또 띄우지 않는다, gofix-fill F01·E02). 연결된 기계에 그 이름 터미널이
+// 없으면 안 떴다 — 기록을 확정 실패(-)로 고치고 거짓
+func tryUnsure(name, rid string) bool {
+	var r Row
+	for _, x := range readRows(DATA + "/try.tsv") {
+		if x.F(1) == name && x.F(2) == rid && x.F(6) == "?" {
+			r = x
+			break
+		}
+	}
+	if r == nil {
+		return false
+	}
+	m := r.F(3)
+	if m != LOCAL && !connHas(m) {
+		say("미확정 시도 기다림 %s @%s: 연결 안 됨 — 떴는지 몰라 다른 기계에 띄우지 않음", name, m)
+		return true
+	}
+	for _, t := range TERMS {
+		if t.M == m && t.Name == name {
+			say("미확정 시도 기다림 %s @%s: 같은 이름 터미널 %s 가 있다(채택하지 못함 — 지휘가 정리)", name, m, t.Addr)
+			return true
+		}
+	}
+	if !dry && tryput(name, rid, m, r.F(4), r.F(5), "", "") != 0 {
+		return true
 	}
 	return false
 }

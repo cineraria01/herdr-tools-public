@@ -4,7 +4,9 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -165,18 +167,16 @@ func checkArgs(cmd string, rest []string) {
 		if k == "" || strings.Trim(k, "0123456789") != "" {
 			die("--min-age는 숫자에 s·m·h·d(단위 없으면 시간): %s", m)
 		}
-		var n int64
-		fmt.Sscan(k, &n)
-		switch u {
-		case "s":
-			gcSecs = n
-		case "m":
-			gcSecs = n * 60
-		case "d":
-			gcSecs = n * 86400
-		default:
-			gcSecs = n * 3600
+		// 셸 판 $((k))처럼 0으로 시작하면 8진(08은 오류 — 0이 되지 않는다), 넘침은 오류(gofix L03)
+		n, err := strconv.ParseInt(k, 0, 64)
+		mul := map[string]int64{"s": 1, "m": 60, "d": 86400}[u]
+		if mul == 0 {
+			mul = 3600
 		}
+		if err != nil || n > (math.MaxInt64-59)/mul {
+			die("--min-age를 읽지 못했다(숫자·넘침): %s", m)
+		}
+		gcSecs = n * mul
 		gcMins = (gcSecs + 59) / 60
 	case "launch":
 		if name == "" || repo == "" {

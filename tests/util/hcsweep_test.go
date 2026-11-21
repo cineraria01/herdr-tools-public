@@ -53,9 +53,15 @@ func testHcSweep(t *testing.T, T string, e Env) {
 	var rc int
 	c := checker{t: t, out: &out}
 	pids := map[string]int{}
+	// sig: 이 시험이 띄운 양수 pid에만 신호(pid 0·음수는 무리 전체 — B16: 자식 조회 실패 뒤 0이 들어가 시험 무리가 TERM으로 죽었다)
+	sig := func(p int, s syscall.Signal) {
+		if p > 0 {
+			syscall.Kill(p, s)
+		}
+	}
 	t.Cleanup(func() {
 		for _, p := range pids {
-			syscall.Kill(p, syscall.SIGKILL)
+			sig(p, syscall.SIGKILL)
 		}
 	})
 	pid := func(n string) int { return pids[n] }
@@ -177,12 +183,13 @@ exit 1
 	kid := func(n string) {
 		for i := 0; i < 10; i++ {
 			o, _ := exec.Command("pgrep", "-P", strconv.Itoa(pids[n])).Output()
-			if k, err := strconv.Atoi(strings.TrimSpace(strings.SplitN(string(o), "\n", 2)[0])); err == nil {
+			if k, err := strconv.Atoi(strings.TrimSpace(strings.SplitN(string(o), "\n", 2)[0])); err == nil && k > 0 {
 				pids[n+"-kid"] = k
 				return
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
+		t.Fatalf("준비 실패: %s(pid %d)의 자식을 못 찾음(pgrep)", n, pids[n]) // 0을 남기면 아래 신호가 무리 전체로 간다(B16)
 	}
 
 	W := T + "/app.wt"
@@ -268,9 +275,14 @@ exit 1
 	c.ok("작업 트리 있고 쓰는 터미널 없음 e: 끔", gone(pid("e")))
 	c.ok("남김: cwd로만 a, 링크 경로 터미널 b, 본 저장소 h, 자손 터미널 k, 밖 o, 공백 경로 keep s", allalive("a", "b", "h", "k", "o", "s"))
 	log = read(LOG)
-	c.ok("기록: pid·나이·명령 앞부분",
-		grep(log, fmt.Sprintf("pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 /bin/bash /", pid("e"), q(E))) &&
-			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pid("c"))))
+	// [E05] Go 판은 명령 줄(인자 — 자격증명이 섞일 수 있다)을 남기지 않고 실행 파일만. 셸 판은 명령 앞 80자(알려진 차이)
+	tail := "/bin/bash /"
+	if e[implVar("hc-sweep")] != "bash" {
+		tail = "/bin/bash$"
+	}
+	c.ok("기록: pid·나이·실행 파일(셸 판은 명령 앞부분)",
+		grep(log, fmt.Sprintf("(?m)pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 %s", pid("e"), q(E), tail)) &&
+			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pid("c"))) && (tail == "/bin/bash /" || !strings.Contains(log, E+"/bin/idle")))
 
 	os.RemoveAll(H)
 	sweep("--min-age", "0")
@@ -311,8 +323,8 @@ exit 1
 	}())
 	c.ok("정리됨: kill 전에 적음(그 사이 wait가 끝남을 봐도 뜻밖의 종료로 안 알리게)", strings.Contains(read(T+"/ev-at-kill"), "정리됨"))
 
-	syscall.Kill(pid("b-kid"), syscall.SIGTERM)
-	syscall.Kill(pid("k-kid"), syscall.SIGTERM)
+	sig(pid("b-kid"), syscall.SIGTERM)
+	sig(pid("k-kid"), syscall.SIGTERM)
 	// H110: 정리됨을 못 쓰면(events.tsv 자리 못 만듦) 레인 터미널은 닫지 않는다 — 닫으면 hc-lane wait가 reason killed로 보고
 	// 조용히 넘겨 뜻밖의 종료 알림이 사라진다. 레인 아닌 터미널은 그대로 닫는다
 	rmKilled := func() {
@@ -404,13 +416,14 @@ esac
 		has("남김: t83 land-n — 작업 트리 남음 — 착지 증거 없음") && has("남김: t84 land-u — 작업 트리 남음 — 착지 전 커밋"))
 	sweep("--min-age", "0")
 	_, ref := run(T, e, "git", "-C", R, "show-ref", "-q", "--verify", "refs/heads/land-x")
-	c.ok("교착: 착지·깨끗한 레인은 한 바퀴에 터미널 닫고 작업 트리·가지 지움", exists(T+"/killed-t81") && !exists(R+".wt/land-x") && ref != 0)
+	// B26: 부재는 show-ref 종료 1만(128 = 저장소를 못 엶은 실패)
+	c.ok("교착: 착지·깨끗한 레인은 한 바퀴에 터미널 닫고 작업 트리·가지 지움", exists(T+"/killed-t81") && !exists(R+".wt/land-x") && ref == 1)
 	c.ok("교착: closed.log에 정리 한 줄", strings.Contains(read(LOG), "\tt81\tland-x\t작업 트리 정리(hc-lane clean land-x)\t"+R+"\t"))
 	c.ok("교착: 더러움·증거 없음·착지 전은 터미널·작업 트리 그대로", !exists(T+"/killed-t82") && !exists(T+"/killed-t83") && !exists(T+"/killed-t84") &&
 		exists(R+".wt/land-d") && exists(R+".wt/land-n") && exists(R+".wt/land-u"))
 
 	for _, n := range []string{"a", "b", "k", "o", "s"} {
-		syscall.Kill(pid(n), syscall.SIGTERM)
+		sig(pid(n), syscall.SIGTERM)
 	}
 	c.ok("이 시험의 고아 0", func() bool {
 		for _, p := range pids {

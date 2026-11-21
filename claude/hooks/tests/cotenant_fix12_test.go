@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -82,9 +83,22 @@ func cotenantFix12(c *cg, A, B, C int) {
 	}
 	os.Remove(T + "/hc.json") //nolint:errcheck // rm -f
 
-	cmdline := settingsHookCommand(os.Getenv("HOME")+"/.claude/settings.json", "cotenant-guard")
-	ri := strings.Index(cmdline, "[ -r ") // case $CMDLINE in *'[ -r '*'|| exit 0'*)
-	c.checkOK("M3 이 기계 설정 등록 명령은 훅 파일이 없을 때만 허용하는 꼴", ri >= 0 && strings.Contains(cmdline[ri:], "|| exit 0"), 0)
+	// 등록 명령은 저장소에 적힌 꼴(훅 헤더의 「The entry runs」 줄)에서 읽는다 — 시험하는 사람의 실제 설정에 기대지 않는다(아스트라 E13).
+	// 이 기계 설정에 등록이 있으면 그것도 같은 꼴인지 따로 본다(없으면 건너뜀)
+	src, err := os.ReadFile(c.hook)
+	c.fatal(err)
+	cmdline := ""
+	if m := regexp.MustCompile(`(?m)^#\s+(/bin/bash -c '\[ -r .*cotenant-guard\.sh"')\s*$`).FindStringSubmatch(string(src)); m != nil {
+		cmdline = m[1]
+	}
+	safeForm := func(s string) bool {
+		ri := strings.Index(s, "[ -r ") // case $CMDLINE in *'[ -r '*'|| exit 0'*)
+		return ri >= 0 && strings.Contains(s[ri:], "|| exit 0")
+	}
+	c.checkOK("M3 훅 헤더의 등록 명령은 훅 파일이 없을 때만 허용하는 꼴", safeForm(cmdline), 0)
+	if real := settingsHookCommand(os.Getenv("HOME")+"/.claude/settings.json", "cotenant-guard"); real != "" {
+		c.checkOK("M3 이 기계 설정 등록 명령도 같은 꼴", safeForm(real), 0)
+	}
 	c.fatal(os.MkdirAll(T+"/h2/.claude/hooks", 0o755))
 	m3 := func() int {
 		cmd := exec.Command("/bin/sh", "-c", cmdline)

@@ -16,7 +16,7 @@ herdr-balance --watch                                              자동 맞춤
   worker 목록이 바뀌어 4초 동안 그대로면 그 탭을 맞춘다. 마지막으로 맞춘 목록은
   ~/.local/state/herdr-balance/<탭>.json에 남겨 같은 목록이면 다시 하지 않는다.
 """
-import argparse, json, os, shutil, subprocess, sys, time
+import argparse, fcntl, json, os, shutil, subprocess, sys, time
 
 STATE = os.path.expanduser("~/.local/state/herdr-balance")
 
@@ -141,6 +141,14 @@ def balance(main, add=(), drop=()):
 
 
 def watch():
+    # 두 판(Go·셸) 공통 잠금 — 같은 파일·flock 배타라 감시기 둘이 같은 탭을 함께 맞추지 않는다(go-final-audit M2). 남이 쥐면 75
+    os.makedirs(STATE, exist_ok=True)
+    lock = open(f"{STATE}/watch.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"herdr-balance: --watch가 이미 돈다(잠금 {STATE}/watch.lock) — 끝냄", file=sys.stderr)
+        sys.exit(75)
     remote = remote_prefixes()
     seen = {}  # tab id -> (workers, 처음 본 시각)
     last_err = None

@@ -1,9 +1,24 @@
 package main
 
 import (
+	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
+
+// B25: --version에 릴리스 커밋(-ldflags -X …version.Commit)이 보인다
+func TestVersionShowsCommit(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ovis-split")
+	if b, err := exec.Command("go", "build", "-ldflags", "-X herdr-tools/internal/version.Commit=abc123def456", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("빌드: %v %s", err, b)
+	}
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "ovis-split (Go abc123def456)" {
+		t.Fatalf("--version: %q %v", out, err)
+	}
+}
 
 func TestSelfTest(t *testing.T) {
 	if err := selfTest(); err != nil {

@@ -201,16 +201,33 @@ func submitted(t map[string]any, path string) bool {
 	return last == "제출"
 }
 
+// thisRun: 사건 줄이 이 터미널의 이 실행 것인가(B03 — 이름은 다시 쓰인다). 실행 키 칸(10째)이 있으면 <주소>@<created_ms>와 같아야
+// 하고, 없거나 「-」인 옛 꼴이면 같은 주소이고 그 시각이 이 터미널이 생긴 뒤(초 단위)여야 한다. 모르면 false(증거 아님)
+func thisRun(t map[string]any, row []string) bool {
+	created, ok := num(t, "created_ms")
+	if !ok || created <= 0 {
+		return false
+	}
+	if len(row) >= 10 && row[9] != "-" {
+		return row[9] == str(t, "address")+"@"+pyStr(t["created_ms"])
+	}
+	at, err := time.Parse("2006-01-02T15:04:05Z", row[0])
+	return err == nil && len(row) > 2 && row[2] == str(t, "address") && float64(at.UnixMilli()) >= created-1000
+}
+
 // hcGit: cwd에서 git(hc exec — launchd가 띄운 git은 ~/Documents에서 TCC에 멈춘다)
 func hcGit(r runner, cwd string, secs int, args ...string) result {
 	a := append([]string{"exec", "--cwd", cwd, "--env", "LC_ALL=C", "--timeout", strconv.Itoa(secs), "--", "git"}, args...)
 	return r(time.Duration(secs+20)*time.Second, nil, "hc", a...)
 }
 
-// unlanded: cwd 저장소에 origin/main에 없는 커밋이 있나(로컬 origin/main, fetch 안 함). cwd가 없거나 저장소가 아니면 false,
-// 그 밖에 판정이 안 되면 true(닫지 않는 쪽)
+// unlanded: cwd 저장소에 origin/main에 없는 커밋이 있나(로컬 origin/main, fetch 안 함). cwd 폴더가 없거나(파일로 확인) 저장소가
+// 아니면 false, 그 밖에 판정이 안 되면 true(닫지 않는 쪽). 폴더가 있는데 git이 다른 까닭으로 실패하면(문구에 No such file이 들어도) 모름(E07)
 func unlanded(cwd string, r runner) bool {
 	if cwd == "" {
+		return false
+	}
+	if _, err := os.Stat(cwd); os.IsNotExist(err) {
 		return false
 	}
 	res := hcGit(r, cwd, 20, "cherry", "origin/main", "HEAD")
@@ -225,10 +242,10 @@ func unlanded(cwd string, r runner) bool {
 		}
 		return false
 	}
-	return !(strings.Contains(res.errs, "not a git repository") || strings.Contains(res.errs, "No such file or directory"))
+	return !strings.Contains(res.errs, "not a git repository")
 }
 
-// screenTail: 화면 마지막 비지 않은 6줄. 못 읽으면 busyRe에 걸리는 값(닫지 않는 쪽)
+// screenTail: 화면 마지막 비지 않은 6줄. 못 읽거나 빈 화면이면(읽었다는 근거가 없다 — E08) busyRe에 걸리는 값(닫지 않는 쪽)
 func screenTail(address string, r runner) string {
 	res := r(40*time.Second, nil, "hc", "read", address)
 	if res.err != nil || res.rc != 0 {
@@ -239,6 +256,9 @@ func screenTail(address string, r runner) string {
 		if strings.TrimSpace(l) != "" {
 			keep = append(keep, l)
 		}
+	}
+	if len(keep) == 0 {
+		return "still running (빈 화면 — 모름)"
 	}
 	if len(keep) > 6 {
 		keep = keep[len(keep)-6:]
@@ -290,16 +310,27 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 	}
 	said := false
 	for _, row := range rows {
-		if len(row) > 4 && row[3] == name && (row[4] == "착지" || row[4] == "제출" || row[4] == "완료" || row[4] == "판정") {
+		if len(row) > 4 && row[3] == name && (row[4] == "착지" || row[4] == "제출" || row[4] == "완료" || row[4] == "판정") && thisRun(t, row) {
 			said = true
 		}
 	}
-	if !said {
+	if !said { // 원격 표식 refs/hc-landed/<가지>/<UTC 초>: 이 터미널이 생긴 뒤 것만(같은 이름의 옛 레인 표식은 증거 아님 — B03)
 		out, err := git(30, "ls-remote", "origin", "refs/hc-landed/"+branch+"/*")
 		if err != nil {
 			return "", "", "모름(" + err.Error() + ")"
 		}
-		if strings.TrimSpace(out) == "" {
+		created, _ := num(t, "created_ms")
+		for _, l := range strings.Split(out, "\n") {
+			f := strings.Fields(l)
+			if len(f) != 2 || !strings.HasPrefix(f[1], "refs/hc-landed/"+branch+"/") {
+				continue
+			}
+			if s, err := strconv.ParseInt(strings.TrimPrefix(f[1], "refs/hc-landed/"+branch+"/"), 10, 64); err == nil && created > 0 &&
+				float64(s)*1000 >= created-1000 {
+				said = true
+			}
+		}
+		if !said {
 			return "", "", "착지 증거 없음(사건·원격 표식)"
 		}
 	}
@@ -357,18 +388,34 @@ func sessionID(pid int) string {
 	return "-"
 }
 
-func keepList() map[string]bool {
+// keepList: ~/.claude-tasks/keep의 이름·주소. 파일이 없으면 빈 목록, 있는데 못 읽으면 ok=false(그 바퀴는 닫지 않는다 — E12)
+func keepList() (map[string]bool, bool) {
 	keep := map[string]bool{}
 	b, err := os.ReadFile(filepath.Join(tasksDir, "keep"))
+	if os.IsNotExist(err) {
+		return keep, true
+	}
 	if err != nil {
-		return keep
+		return nil, false
 	}
 	for _, l := range strings.Split(string(b), "\n") {
 		if strings.TrimSpace(l) != "" && !strings.HasPrefix(l, "#") {
 			keep[strings.TrimSpace(l)] = true
 		}
 	}
-	return keep
+	return keep, true
+}
+
+// sameRun: 닫기 직전 다시 본 g가 판정한 t와 같은 실행이고 상태가 그대로인가(B04 — 주소는 다시 쓰인다). 이름·created_ms·status_ms·
+// state live·에이전트 상태 idle·done이 같아야 한다. 이 확인과 hc kill 사이의 재사용은 코어가 실행 조건 kill을 주기 전에는 못 막는다(모델 밖)
+func sameRun(t, g map[string]any) bool {
+	c1, ok1 := num(t, "created_ms")
+	c2, ok2 := num(g, "created_ms")
+	s1, _ := num(t, "status_ms")
+	s2, _ := num(g, "status_ms")
+	st := str(obj(g, "status"), "state")
+	return ok1 && ok2 && c1 == c2 && s1 == s2 && str(g, "name") == str(t, "name") && str(g, "address") == str(t, "address") &&
+		str(g, "state") == "live" && (st == "idle" || st == "done")
 }
 
 // laneEvent: 레인 터미널(라벨 hc-lane=1)이면 events.tsv에 「정리됨」 한 줄(8칸 — 셸 판과 같음). kill 전에 적는다.
@@ -396,8 +443,12 @@ func laneEvent(t map[string]any, why string) bool {
 	return appendLine(filepath.Join(laneDir, "events.tsv"), strings.Join(f, "\t")) == nil
 }
 
+// closeTerm: 닫기. 「닫힘…」이면 닫힌 것이 확인됨(그때만 부른 쪽이 작업 트리를 정리한다), 「남김…」이면 손대지 않음, 그 밖은 실패·모름
 func closeTerm(t map[string]any, why string) string {
 	address, name, cwd, title := str(t, "address"), str(t, "name"), str(t, "cwd"), str(t, "title")
+	if g, err := hc("get", address); err != nil || !sameRun(t, g) {
+		return "남김(닫기 직전 다시 보니 실행·상태가 바뀜 또는 모름)"
+	}
 	pid, _ := num(t, "pid")
 	if err := record(address, name, why, cwd, sessionID(int(pid)), title); err != nil {
 		return "실패(closed.log 못 씀)" // 먼저: closed.log를 못 쓰면 정리됨도 안 남기고 멈춘다
@@ -413,8 +464,12 @@ func closeTerm(t map[string]any, why string) string {
 	finished := false
 	for i := 0; i < 30 && !finished; i++ {
 		g, err := hc("get", address)
-		if err != nil {
+		if isNotFound(err) {
 			return "닫힘(이미 지워짐)" // 감싸는 실행기가 끝날 때 자기 터미널을 지우기도 한다
+		}
+		if err != nil { // 망·시간 초과·모르는 답: 닫혔는지 모른다 — 작업 트리 정리로 가지 않는다(B05). 다음 바퀴에 다시 본다
+			record(address, name, why+" 모름(kill 뒤 hc get 실패): "+err.Error(), cwd, "-", title)
+			return "모름(kill 뒤 hc get 실패)"
 		}
 		if finished = str(g, "state") == "finished"; !finished {
 			time.Sleep(time.Second)
@@ -433,7 +488,12 @@ func closeTerm(t map[string]any, why string) string {
 
 // sweepTerminals: 터미널 쓸기 한 바퀴(요약 한 줄까지)
 func sweepTerminals(terms any, dry bool) {
-	keep, now := keepList(), float64(time.Now().UnixNano())/1e6
+	keep, keepOK := keepList()
+	if !keepOK {
+		fmt.Println("터미널 쓸기 건너뜀: ~/.claude-tasks/keep을 못 읽음(보호 목록을 모름)")
+		return
+	}
+	now := float64(time.Now().UnixNano()) / 1e6
 	list, _ := terms.([]any)
 	var listed []map[string]any
 	for _, x := range list {

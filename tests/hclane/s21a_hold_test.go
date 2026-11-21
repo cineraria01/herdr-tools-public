@@ -61,7 +61,7 @@ func s21aHold(k *K) {
 	we := func() string { return read(T + "/we") }
 	stopOr := func(b *Bg) { // upto '! alive $w' || kill $w
 		if !upto(b.Done) {
-			syscall.Kill(b.Pid, syscall.SIGTERM)
+			b.signal(false, syscall.SIGTERM)
 		}
 	}
 	// 레인이 다 끝나고 lane.watch_idle분(시험은 초) 동안 사건도 없으면 watch가 스스로 끝남

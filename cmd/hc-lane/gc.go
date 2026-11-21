@@ -98,42 +98,76 @@ func jdg(t, c string, ts int64) bool {
 	return true
 }
 
-// globRe: 셸 case 무늬(* ? [..])를 정규식으로 — * 는 / 도 맞는다
-func globRe(p string) *regexp.Regexp {
+// posixClass: 셸 case 무늬의 [:이름:] 묶음(Go 정규식도 같은 이름을 [ ] 안에서 받는다)
+var posixClass = map[string]bool{"alnum": true, "alpha": true, "blank": true, "cntrl": true, "digit": true, "graph": true,
+	"lower": true, "print": true, "punct": true, "space": true, "upper": true, "xdigit": true}
+
+// globRe: 셸 case 무늬(* ? [..] \)를 정규식으로 — 글자(룬) 단위, * 는 / 도 맞는다. [ ] 안은 ! ^ 부정, 맨 앞 ] 는 글자,
+// [:digit:] 같은 묶음. 해석할 수 없는 무늬(닫히지 않은 [·모르는 묶음)는 오류 — 부르는 쪽은 지우지 않고 멈춘다(gofix L02)
+func globRe(p string) (*regexp.Regexp, error) {
 	var b strings.Builder
 	b.WriteString("^")
-	for i := 0; i < len(p); i++ {
-		switch c := p[i]; c {
+	rs := []rune(p)
+	for i := 0; i < len(rs); i++ {
+		switch c := rs[i]; c {
 		case '*':
-			b.WriteString(".*")
+			b.WriteString("(?s:.*)")
 		case '?':
-			b.WriteString(".")
-		case '[':
-			if k := strings.IndexByte(p[i+1:], ']'); k >= 0 {
-				cl := p[i+1 : i+1+k]
-				if strings.HasPrefix(cl, "!") {
-					cl = "^" + cl[1:]
-				}
-				b.WriteString("[" + cl + "]")
-				i += k + 1
-			} else {
-				b.WriteString(`\[`)
+			b.WriteString("(?s:.)")
+		case '\\':
+			if i+1 < len(rs) {
+				i++
 			}
+			b.WriteString(regexp.QuoteMeta(string(rs[i])))
+		case '[':
+			j := i + 1
+			b.WriteString("[")
+			if j < len(rs) && (rs[j] == '!' || rs[j] == '^') {
+				b.WriteString("^")
+				j++
+			}
+			closed := false
+			for first := true; j < len(rs); j, first = j+1, false {
+				r := rs[j]
+				if r == ']' && !first {
+					closed = true
+					break
+				}
+				if r == '[' && j+1 < len(rs) && rs[j+1] == ':' {
+					k := j + 2
+					for k+1 < len(rs) && !(rs[k] == ':' && rs[k+1] == ']') {
+						k++
+					}
+					if k+1 >= len(rs) || !posixClass[string(rs[j+2:k])] {
+						return nil, fmt.Errorf("모르는 문자 묶음: %s", p)
+					}
+					b.WriteString("[:" + string(rs[j+2:k]) + ":]")
+					j = k + 1
+					continue
+				}
+				if strings.ContainsRune(`\[]^`, r) {
+					b.WriteString(`\`)
+				}
+				b.WriteRune(r)
+			}
+			if !closed {
+				return nil, fmt.Errorf("닫히지 않은 [: %s", p)
+			}
+			b.WriteString("]")
+			i = j
 		default:
 			b.WriteString(regexp.QuoteMeta(string(c)))
 		}
 	}
 	b.WriteString("$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return regexp.MustCompile("^" + regexp.QuoteMeta(p) + "$")
-	}
-	return re
+	return regexp.Compile(b.String())
 }
 
+var gcKeepRe []*regexp.Regexp
+
 func kept(br string) bool {
-	for _, p := range gcKeep {
-		if globRe(p).MatchString(br) {
+	for _, re := range gcKeepRe {
+		if re.MatchString(br) {
 			return true
 		}
 	}
@@ -221,6 +255,14 @@ func gcMain(args []string) int {
 	gcP = dryP()
 	gcNow = now()
 	gcKeep = strings.Fields(cfg("gc.keep_branches", ""))
+	gcKeepRe = nil
+	for _, p := range gcKeep {
+		re, err := globRe(p)
+		if err != nil {
+			die("gc: 설정 gc.keep_branches 무늬를 읽지 못했다(%v) — 아무것도 지우지 않았다", err)
+		}
+		gcKeepRe = append(gcKeepRe, re)
+	}
 	ps, r := termPairs()
 	switch r {
 	case 1:
@@ -238,7 +280,10 @@ func gcMain(args []string) int {
 	if xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", bref+"^{commit}") != 0 {
 		die("gc: %s 가 없다: %s", blab, repo)
 	}
-	cur, _ := xout("git", "-C", repo, "symbolic-ref", "-q", "--short", "HEAD")
+	cur, r := xout("git", "-C", repo, "symbolic-ref", "-q", "--short", "HEAD")
+	if r != 0 && r != 1 { // 1 = 분리 HEAD. 그 밖(시간 넘김 포함)은 현재 가지를 모른다 — 지우지 않는다
+		die("gc: 현재 가지를 읽지 못했다(git symbolic-ref 종료 %d) — 아무것도 지우지 않았다", r)
+	}
 	wl, r := xout("git", "-C", repo, "worktree", "list", "--porcelain")
 	if r != 0 {
 		die("gc: git worktree list 실패: %s", repo)
@@ -432,7 +477,12 @@ func gcMain(args []string) int {
 			gcKeepf("가지 "+b, "남길 목록(gc.keep_branches)")
 			continue
 		}
-		rl, _ := xoutQ("git", "-C", repo, "reflog", "-1", "--date=unix", "--format=%gd", rf)
+		rl, r := xoutQ("git", "-C", repo, "reflog", "-1", "--date=unix", "--format=%gd", rf)
+		if r != 0 { // 조회 실패(시간 넘김 포함)는 「기록 없음」(종료 0·빈 출력)이 아니다 — 나이를 모르니 남긴다(gofix E03)
+			gcKeepf("가지 "+b, "가지 기록(reflog)을 읽지 못함")
+			gcErr = true
+			continue
+		}
 		if i := strings.LastIndex(rl, "@{"); i >= 0 {
 			rl = rl[i+2:]
 		}

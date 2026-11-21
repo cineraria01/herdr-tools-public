@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -80,8 +79,11 @@ func (g *cg) me() {
 		}
 	}
 	if g.mypid == "" {
-		g.mypid = ppid
-		g.mystart = norm(psLstart(ppid))
+		st, known := psLstart(ppid)
+		if !known {
+			g.block("이 세션 프로세스(pid " + ppid + ")의 시작 시각을 ps로 읽지 못했다(실패·시간 넘김). 임대 주인을 판정할 수 없어 막았다. 잠시 뒤 다시 하라.")
+		}
+		g.mypid, g.mystart = ppid, norm(st)
 	}
 	if g.myname == "" {
 		g.myname = "claude"
@@ -91,28 +93,38 @@ func (g *cg) me() {
 	}
 }
 
-// psLstart: $(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p PID 2>/dev/null)
-func psLstart(pid string) string {
-	c := exec.Command("/bin/ps", "-o", "lstart=", "-p", pid)
-	c.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	out, _ := c.Output()
-	return capture(string(out))
+// psLstart: $(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p PID) — 훅 기한 안(hookexec.go). known=false면 모름(ps 실패·시간 넘김·
+// 못 띄움). 그 pid가 없으면("", true) — ps 종료 1·빈 출력이고 kill -0도 실패할 때만(아스트라 E05: ps 실패를 「죽음」으로 읽었다)
+func psLstart(pid string) (string, bool) {
+	out, _, rc := hookRun([]string{"ps"}, 0, append(os.Environ(), "LC_ALL=C", "TZ=UTC"), "", "/bin/ps", "-o", "lstart=", "-p", pid)
+	s := capture(out)
+	switch {
+	case rc == 0 && s != "":
+		return s, true
+	case rc == 1 && s == "" && !bashKill0(pid):
+		return "", true
+	}
+	return "", false
 }
 
-// bashKill0: bash 내장 `kill -0 "$1"` — 수 꼴(앞뒤 공백·부호 허용)이 아니면 실패
+// bashKill0: bash 내장 `kill -0 "$1"` — 수 꼴(앞뒤 공백·부호 허용)이 아니면 실패. 1 이하(무리·모든 프로세스 신호)는 프로세스가 아니라 실패
 func bashKill0(p string) bool {
 	s := strings.Trim(p, " \t\n\v\f\r")
 	if s == "" {
 		return false
 	}
 	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
+	if err != nil || int32(v) <= 1 {
 		return false
 	}
-	return syscall.Kill(int(int32(v)), 0) == nil
+	pr, err := os.FindProcess(int(int32(v)))
+	return err == nil && pr.Signal(syscall.Signal(0)) == nil
 }
 
-// alive PID PROCSTART: pid가 있고 기록한 때 시작했다(procStart가 pid 재사용을 막는다)
+// psUnknown: psc 캐시의 「ps로 못 읽음」
+const psUnknown = "\x01"
+
+// alive PID PROCSTART: pid가 있고 기록한 때 시작했다(procStart가 pid 재사용을 막는다). ps를 못 읽으면 산 것으로 친다(임대를 지킨다)
 func (g *cg) alive(pid, st string) bool {
 	if pid == "" || !bashKill0(pid) {
 		return false
@@ -122,8 +134,15 @@ func (g *cg) alive(pid, st string) bool {
 	}
 	ls, ok := g.psc[pid]
 	if !ok {
-		ls = norm(psLstart(pid))
+		s, known := psLstart(pid)
+		ls = norm(s)
+		if !known {
+			ls = psUnknown
+		}
 		g.psc[pid] = ls
+	}
+	if ls == psUnknown {
+		return true
 	}
 	if ls == "" {
 		return false
@@ -138,10 +157,21 @@ func (g *cg) alive(pid, st string) bool {
 	return false
 }
 
-func (g *cg) dirty(rel string) bool {
-	out, _ := g.gitRun([]string{"GIT_OPTIONAL_LOCKS=0"}, "", "-C", g.root, "status", "--porcelain", "-uall", "--", ":(literal)"+rel)
+// dirty: rel에 미커밋 변경이 있는가. git status가 실패·시간 넘김이면 막는다(모름 — 「깨끗함」으로 읽으면 산 주인의 미커밋 파일을
+// 넘겨줬다: 아스트라 H01·Fable E1·M2). drop이 있으면 막기 전에 그 폴더(이번에 막 만든 임대)를 지운다
+func (g *cg) dirty(rel, drop string) bool {
+	out, rc := g.gitRun([]string{"GIT_OPTIONAL_LOCKS=0"}, "", "-C", g.root, "status", "--porcelain", "-uall", "--", ":(literal)"+rel)
+	if rc != 0 {
+		if drop != "" {
+			os.Remove(drop)
+		}
+		g.gitFail(rel+" 의 미커밋 여부(git status)", rc)
+	}
 	return capture(out) != ""
 }
+
+// shq: 셸 낱말 하나로 작은따옴표 인용 — 안내문의 명령을 그대로 붙여 써도 되게(아스트라 E10)
+func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // readLine: bash `read -r … < 파일` — 첫 줄과, 줄바꿈으로 끝났는지(아니면 read가 실패하지만 칸은 채운다)
 func readLine(path string) (string, bool, bool) {
@@ -189,8 +219,14 @@ func (g *cg) own(ld, rel string) {
 	g.me()
 	line := strings.Join([]string{g.sid, g.mypid, g.mystart, g.aid, g.myname, time.Now().Format("2006-01-02 15:04:05"), rel}, us) + "\n"
 	tmp := ld + "/owner." + strconv.Itoa(os.Getpid())
-	if os.WriteFile(tmp, []byte(line), 0o666) == nil {
-		os.Rename(tmp, ld+"/owner")
+	err := os.WriteFile(tmp, []byte(line), 0o666)
+	if err == nil {
+		if err = os.Rename(tmp, ld+"/owner"); err != nil {
+			os.Remove(tmp)
+		}
+	}
+	if err != nil { // 임대를 남기지 못한 채 허용하면 다음 에이전트가 이 편집을 모른다(아스트라 E06 — 셸 판은 통과)
+		g.block(rel + ": 임대를 기록하지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
 	}
 }
 
@@ -291,7 +327,7 @@ func (g *cg) checkIgnore(rel string) bool {
 func (g *cg) refuseLive(ld, rel string) {
 	busy := rel + " 은 " + g.oName + "(pid " + g.oPID + ", since " + g.oSince + ")이 고치는 중이다(임대는 그 프로세스가 끝나면 풀린다)"
 	out := "다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리거나, 꼭 지금이면 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라."
-	if g.dirty(rel) {
+	if g.dirty(rel, "") {
 		g.block(busy + "(미커밋 변경 있음). " + out)
 	}
 	if g.checkIgnore(rel) {
@@ -335,19 +371,21 @@ func (g *cg) lease(rel, mode string) {
 		}
 		return
 	}
-	if !isDir(g.leases) && os.MkdirAll(g.leases, 0o777) != nil {
-		return
+	if !isDir(g.leases) {
+		if err := os.MkdirAll(g.leases, 0o777); err != nil { // 임대 없이 허용하지 않는다(아스트라 E06 — 셸 판은 통과)
+			g.block(rel + ": 임대 폴더를 만들지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
+		}
 	}
 	ld := g.leases + "/" + md5hex(rel)
 	if os.Mkdir(ld, 0o777) == nil {
-		if g.dirty(rel) {
+		if g.dirty(rel, ld) {
 			if mode != "1" {
 				os.Remove(ld)
 				return
 			}
 			if g.cotenant() {
 				os.Remove(ld)
-				g.block(rel + ": 임대 기록 없는 미커밋 변경이 있다(같은 작업 트리: " + g.who + "). 누구 것인지 git diff -- '" + rel + "'로 확인하라. 남의 것이면 다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리고, 네 것(Bash로 바꾼 것 등)이면 그 변경을 커밋한 뒤 고치거나 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라.")
+				g.block(rel + ": 임대 기록 없는 미커밋 변경이 있다(같은 작업 트리: " + g.who + "). 누구 것인지 git diff -- " + shq(rel) + "로 확인하라. 남의 것이면 다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리고, 네 것(Bash로 바꾼 것 등)이면 그 변경을 커밋한 뒤 고치거나 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라.")
 			}
 		}
 		g.own(ld, rel)
@@ -385,9 +423,10 @@ func (g *cg) lease(rel, mode string) {
 		g.takeover(ld, rel)
 		return
 	}
+	left := g.oSID != g.sid && g.dirty(rel, "") // 넘겨받기 전에 — git을 못 읽으면 임대를 그대로 두고 막는다
 	g.takeover(ld, rel)
-	if g.oSID != g.sid && g.dirty(rel) {
-		g.addWarn(rel + " 에 끝난 에이전트 " + g.oName + "(pid " + g.oPID + ", since " + g.oSince + ")의 미커밋 변경이 남아 있다. 고치기 전에 git diff -- '" + rel + "'을 먼저 보라.")
+	if left {
+		g.addWarn(rel + " 에 끝난 에이전트 " + g.oName + "(pid " + g.oPID + ", since " + g.oSince + ")의 미커밋 변경이 남아 있다. 고치기 전에 git diff -- " + shq(rel) + "을 먼저 보라.")
 	}
 }
 
@@ -399,14 +438,15 @@ func (g *cg) statusZ(paths []string) (string, bool) {
 		args = append(args, paths...)
 	}
 	out, rc := g.gitRun([]string{"GIT_OPTIONAL_LOCKS=0"}, "", args...)
-	return out, rc == 0
+	// 실패면 출력을 쓰지 않는다 — 실패 표식을 출력 끝에 붙이던 셸 판 꼴은 마지막 기록이 NUL 전에 끊기면 표식이 경로에 붙어 실패를 놓쳤다(아스트라 E02)
+	return out, rc == 0 && (out == "" || strings.HasSuffix(out, "\x00"))
 }
 
 // changedLeases: FDIRTY를 바뀐 경로와 그 위 폴더의 임대에서만 — 트리 status 한 번
 func (g *cg) changedLeases() {
 	out, ok := g.statusZ(nil)
 	if !ok {
-		out += "\x01\x00"
+		g.block("git status가 실패했다(" + g.root + "). 남의 미커밋 파일을 판정할 수 없어 막았다. 색인·권한을 사람에게 알려라.")
 	}
 	recs := strings.Split(out, "\x00")
 	if recs[len(recs)-1] == "" {
@@ -416,10 +456,6 @@ func (g *cg) changedLeases() {
 	skip, src := false, false
 	seen := map[string]bool{}
 	for _, r := range recs {
-		if r == "\x01" {
-			lines = append(lines, "\x01")
-			continue
-		}
 		if skip {
 			skip = false
 			continue
@@ -457,9 +493,6 @@ func (g *cg) changedLeases() {
 	var fd []string
 	for _, l := range lines {
 		g.setOwner(l)
-		if g.oSID == "\x01" {
-			g.block("git status가 실패했다(" + g.root + "). 남의 미커밋 파일을 판정할 수 없어 막았다. 색인·권한을 사람에게 알려라.")
-		}
 		if g.oPID == g.mypid && g.mine() {
 			continue
 		}

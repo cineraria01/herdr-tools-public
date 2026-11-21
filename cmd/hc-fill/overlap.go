@@ -260,7 +260,8 @@ func ktok(kind string, ls []string, kp []string) []Row {
 }
 
 // ovGlob: 셸 case 패턴 맞춤(* 는 / 도 넘는다, ?, [...] 와 [!...])
-func ovGlob(pat, s string) bool {
+func ovGlob(pattern, s string) bool {
+	pat := []rune(pattern) // 글자 단위(한글 등 UTF-8 여러 바이트 글자를 바이트마다 다시 적지 않게 — gofix-fill F13)
 	var b strings.Builder
 	b.WriteString(`(?s)^`)
 	for i := 0; i < len(pat); i++ {
@@ -273,7 +274,7 @@ func ovGlob(pat, s string) bool {
 		case '\\':
 			if i+1 < len(pat) {
 				i++
-				b.WriteString(regexp.QuoteMeta(pat[i : i+1]))
+				b.WriteString(regexp.QuoteMeta(string(pat[i])))
 			} else {
 				b.WriteString(`\\`)
 			}
@@ -292,7 +293,7 @@ func ovGlob(pat, s string) bool {
 				b.WriteString(`\[`)
 				continue
 			}
-			body := pat[i+1 : j]
+			body := string(pat[i+1 : j])
 			neg := strings.HasPrefix(body, "!") || strings.HasPrefix(body, "^")
 			if neg {
 				body = body[1:]

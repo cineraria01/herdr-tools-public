@@ -1,2 +1,3 @@
 #!/bin/bash
 echo "$*" >>"$T_LOG/balance.log"
+[ -z "${HC_FAKE_BALANCE_SLOW-}" ] || exec sleep "$HC_FAKE_BALANCE_SLOW"   # BALANCE_SLOW: 초만큼 답하지 않음(상한 시험)

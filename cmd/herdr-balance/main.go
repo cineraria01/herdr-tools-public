@@ -1,8 +1,13 @@
 // herdr-balance: Herdr 탭의 오른쪽 worker 열을 고른 높이로 다시 붙인다(Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」).
 // 계약은 셸 판(lib/herdr-balance/herdr-balance.py)과 같다 — 인자·출력 JSON 꼴(한글 그대로)·종료 코드·상태 파일
 // ~/.local/state/herdr-balance/<탭>.json·herdr-app에 넘기는 인자 글자. 바뀐 것: herdr-app 응답이 JSON이 아니거나 상태 파일을
-// 못 쓰면 셸 판은 예외로 죽었고(--watch도 멈춤) Go 판은 그 회차 오류 한 줄로 친다, --watch는 TERM·INT를 받으면 그 회차를 마치고 0으로
-// 끝난다(맞추던 중에 죽어 worker가 떼인 채 남지 않게), 상태 파일은 반쪽 없이 바꿔 넣는다.
+// 못 쓰면 셸 판은 예외로 죽었고(--watch도 멈춤) Go 판은 그 회차 오류 한 줄로 친다, 상태 파일은 반쪽 없이 바꿔 넣는다,
+// herdr-app 목록에 spaces·tabs·탭 id·terminals·터미널 terminal·pane·name이 없으면 셸 판(KeyError로 죽음)처럼 그 맞춤은 실패다(B12 —
+// 「worker 없음」으로 읽어 상태를 저장하지 않는다. app이 없는 터미널만은 에이전트 아님으로 친다 — 셸 판은 첫 터미널이면 죽었다).
+// go-final-audit B11·K2: herdr-app 한 번은 15초 상한(넘으면 그 회차 오류 — 결과 모름이라 상태를 바꾸지 않는다)이고 새 무리로 띄워 무리째
+// 거둔다. TERM·INT를 받으면 돌던 호출을 끊고 128+신호(143·130 — 셸 판이 신호로 죽을 때와 같은 값)로 끝난다. 다만 worker를 떼기
+// 시작한 뒤라면 그 맞춤을 마치고 끝낸다(떼인 채 남지 않게, 그 사이 호출도 상한 안 — 셸 판은 바로 죽는다). --watch는 두 판 공통 잠금
+// ~/.local/state/herdr-balance/watch.lock(flock 배타)을 쥐고 돈다 — 남이 쥐면 한 줄 찍고 75(launchd가 다시 본다).
 //
 //	herdr-balance --main <지휘 터미널> [--add tX ...] [--drop tX ...]   한 탭을 지금 맞춤
 //	herdr-balance --watch                                              자동 맞춤(launchd)
@@ -32,7 +37,10 @@ import (
 
 	"herdr-tools/internal/argp"
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 	"herdr-tools/internal/pyjson"
+	"herdr-tools/internal/version"
 )
 
 var parser = &argp.Parser{
@@ -48,29 +56,67 @@ var parser = &argp.Parser{
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("herdr-balance 1")
+		fmt.Println(version.String("herdr-balance")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
 	a, _ := parser.Parse(os.Args[1:])
 	if a.Has["print-remote"] {
-		fmt.Println(strings.Join(remotePrefixes(), "|"))
+		fmt.Println(strings.Join(remotePrefixes(context.Background()), "|"))
 		return
 	}
 	if a.Has["watch"] {
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer stop()
-		watch(ctx)
-		return
+		os.Exit(watchMain())
 	}
 	if a.Get("main") == "" {
 		parser.Error("--main 또는 --watch가 필요")
 	}
-	r, err := balance(a.Get("main"), a.Vals["add"], a.Vals["drop"])
+	ctx, sig := signals()
+	r, err := balance(ctx, a.Get("main"), a.Vals["add"], a.Vals["drop"])
+	if ctx.Err() != nil {
+		os.Exit(<-sig)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	fmt.Println(pyjson.Dumps(r, false))
+}
+
+// signals: TERM·INT를 받으면 끝나는 ctx와, 그때 낼 종료 코드(128+신호)를 받을 곳
+func signals() (context.Context, <-chan int) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	code := make(chan int, 1)
+	go func() {
+		s := <-ch
+		n, _ := s.(syscall.Signal)
+		code <- 128 + int(n)
+		cancel()
+	}()
+	return ctx, code
+}
+
+// watchMain: 두 판 공통 잠금을 쥐고 watch. 남이 쥐면 75, 잠금을 모르면 띄우지 않고 1. 신호로 끝나면 128+신호
+func watchMain() int {
+	if err := os.MkdirAll(stateDir(), 0o777); err != nil {
+		fmt.Fprintf(os.Stderr, "herdr-balance: 상태 폴더 만들기: %v\n", err)
+		return 1
+	}
+	p := filepath.Join(stateDir(), "watch.lock")
+	lk, busy, err := lockx.TryLock(p)
+	if busy {
+		fmt.Fprintf(os.Stderr, "herdr-balance: --watch가 이미 돈다(잠금 %s) — 끝냄\n", p)
+		return 75
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "herdr-balance: 잠금 %s: %v\n", p, err)
+		return 1
+	}
+	defer lk.Close()
+	ctx, sig := signals()
+	watch(ctx)
+	return <-sig
 }
 
 func home() string {
@@ -81,14 +127,16 @@ func home() string {
 	return h
 }
 
+func stateDir() string { return filepath.Join(home(), ".local/state/herdr-balance") }
+
 // remotePrefixes: balance.remote — 이 창에서 맞춰 줄 다른 기계 탭 이름 앞부분. 나머지 원격 탭은 건드리지 않는다.
 // launchd PATH에는 ~/.local/bin이 없을 수 있어 거기도 본다. 못 읽거나 설정 파일이 없으면 빈 목록 + 경고 한 줄(키만 없으면 조용히)
-func remotePrefixes() []string {
+func remotePrefixes(ctx context.Context) []string {
 	cmd, err := exec.LookPath("herdr-tools-config")
 	if err != nil {
 		cmd = filepath.Join(home(), ".local/bin/herdr-tools-config")
 	}
-	out, errs, rc, err := run10(cmd, "get", "balance.remote", "")
+	out, errs, rc, err := runLim(ctx, 10*time.Second, cmd, "get", "balance.remote", "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "herdr-balance: herdr-tools-config 못 부름(%v) — 원격 탭은 맞추지 않음\n", err)
 		return nil
@@ -99,23 +147,30 @@ func remotePrefixes() []string {
 	}
 	remote := strings.Fields(out)
 	if len(remote) == 0 {
-		if _, _, rc, err := run10(cmd, "file", "config"); err != nil || rc != 0 {
+		if _, _, rc, err := runLim(ctx, 10*time.Second, cmd, "file", "config"); err != nil || rc != 0 {
 			fmt.Fprintln(os.Stderr, "herdr-balance: 설정 파일 없음(herdr-tools-config file config) — 원격 탭은 맞추지 않음")
 		}
 	}
 	return remote
 }
 
-// run10: 10초 안에 끝나야 하는 도우미. err는 못 띄움·시간 초과, rc는 종료 코드
-func run10(name string, args ...string) (string, string, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// runLim: name을 새 무리로 띄워 d 안에 기다린다. d를 넘거나 ctx가 끝나면(신호) 무리째 거둔다(TERM → 2초 → KILL) — 그때는 err(결과 모름).
+// err는 못 띄움·시간 넘김·멈춤, rc는 종료 코드
+func runLim(ctx context.Context, d time.Duration, name string, args ...string) (string, string, int, error) {
+	lctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 	var o, e bytes.Buffer
-	c := exec.CommandContext(ctx, name, args...) // Stdin nil = /dev/null
+	c := exec.CommandContext(lctx, name, args...) // Stdin nil = /dev/null
 	c.Stdout, c.Stderr = &o, &e
+	proc.Group(c)
+	c.Cancel = func() error { proc.StopGroup(c.Process.Pid, 2*time.Second); return nil }
+	c.WaitDelay = 3 * time.Second // 끝났는데 출력 관을 쥔 손자가 남아도 이만큼만
 	err := c.Run()
-	if ctx.Err() != nil {
-		return "", "", 0, fmt.Errorf("시간 초과 10초: %s", name)
+	if err != nil && ctx.Err() != nil {
+		return "", "", 0, fmt.Errorf("멈춤(신호): %s", filepath.Base(name))
+	}
+	if err != nil && lctx.Err() != nil {
+		return "", "", 0, fmt.Errorf("시간 넘김 %d초: %s", int(d/time.Second), filepath.Base(name))
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
@@ -155,24 +210,24 @@ func truthy(v any) bool {
 	return fmt.Sprint(v) != "0"
 }
 
+// appLimit: herdr-app 한 번의 상한(B11·K2 — 창이 멈추면 --watch가 끝까지 멈췄다)
+var appLimit = 15 * time.Second
+
 // appOut: herdr-app 부르기. 종료 코드가 0이 아니면 셸 판과 같은 문구로 실패(출력을 그대로 붙임)
-func appOut(args ...string) ([]byte, error) {
-	var o, e bytes.Buffer
-	c := exec.Command("herdr-app", args...)
-	c.Stdout, c.Stderr = &o, &e
-	if err := c.Run(); err != nil {
-		var ee *exec.ExitError
-		if !errors.As(err, &ee) {
-			return nil, fmt.Errorf("herdr-app %s 실패: %v", strings.Join(args, " "), err)
-		}
-		return nil, fmt.Errorf("herdr-app %s 실패: %s%s", strings.Join(args, " "), o.String(), e.String())
+func appOut(ctx context.Context, args ...string) ([]byte, error) {
+	o, e, rc, err := runLim(ctx, appLimit, "herdr-app", args...)
+	if err != nil {
+		return nil, fmt.Errorf("herdr-app %s 실패: %v", strings.Join(args, " "), err)
 	}
-	return o.Bytes(), nil
+	if rc != 0 {
+		return nil, fmt.Errorf("herdr-app %s 실패: %s%s", strings.Join(args, " "), o, e)
+	}
+	return []byte(o), nil
 }
 
 // appJSON: herdr-app 응답을 v로. 셸 판은 「{」로 시작할 때만 JSON으로 읽었다 — 아니면 obj=false
-func appJSON(v any, args ...string) (obj bool, err error) {
-	out, err := appOut(args...)
+func appJSON(ctx context.Context, v any, args ...string) (obj bool, err error) {
+	out, err := appOut(ctx, args...)
 	if err != nil {
 		return false, err
 	}
@@ -185,29 +240,57 @@ func appJSON(v any, args ...string) (obj bool, err error) {
 	return true, nil
 }
 
-func tabs() ([]tab, error) {
+// tabs: 화면의 탭 전부. 목록이 덜 왔으면(칸이 없음) 오류 — 셸 판 KeyError와 같은 결과(B12)
+func tabs(ctx context.Context) ([]tab, error) {
 	var ls struct {
-		Spaces []struct {
-			Tabs []tab `json:"tabs"`
+		Spaces *[]struct {
+			Tabs *[]struct {
+				ID        *string           `json:"id"`
+				Terminals *[]map[string]any `json:"terminals"`
+			} `json:"tabs"`
 		} `json:"spaces"`
 	}
-	obj, err := appJSON(&ls, "ls")
+	obj, err := appJSON(ctx, &ls, "ls")
 	if err != nil {
 		return nil, err
 	}
 	if !obj {
 		return nil, errors.New("herdr-app ls 응답이 JSON 객체가 아님")
 	}
+	short := func(what string) error {
+		return fmt.Errorf("herdr-app ls 응답에 %s 없음 — 목록을 다 못 받음", what)
+	}
+	if ls.Spaces == nil {
+		return nil, short("spaces")
+	}
 	var out []tab
-	for _, s := range ls.Spaces {
-		out = append(out, s.Tabs...)
+	for _, s := range *ls.Spaces {
+		if s.Tabs == nil {
+			return nil, short("tabs")
+		}
+		for _, t := range *s.Tabs {
+			if t.ID == nil || t.Terminals == nil {
+				return nil, short("탭 id·terminals")
+			}
+			tb := tab{ID: *t.ID}
+			for _, x := range *t.Terminals {
+				id, ok := x["terminal"].(string)
+				_, hasPane := x["pane"]
+				_, hasName := x["name"]
+				if !ok || !hasPane || !hasName {
+					return nil, short("터미널 terminal·pane·name")
+				}
+				tb.Terminals = append(tb.Terminals, term{Terminal: id, Pane: x["pane"], Name: x["name"], App: x["app"]})
+			}
+			out = append(out, tb)
+		}
 	}
 	return out, nil
 }
 
 // where: term이 있는 탭과 그 터미널(없으면 nil)
-func where(t string) (*tab, *term, error) {
-	ts, err := tabs()
+func where(ctx context.Context, t string) (*tab, *term, error) {
+	ts, err := tabs(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -239,9 +322,9 @@ func waitFor(cond func() (bool, error), what string) error {
 }
 
 // do: herdr-app do <명령> <JSON> — 인자 JSON은 파이썬 json.dumps 기본 꼴(셸 판과 같은 글자)
-func do(cmd string, kw pyjson.Obj) error {
+func do(ctx context.Context, cmd string, kw pyjson.Obj) error {
 	var r map[string]any
-	obj, err := appJSON(&r, "do", cmd, pyjson.Dumps(kw, true))
+	obj, err := appJSON(ctx, &r, "do", cmd, pyjson.Dumps(kw, true))
 	if err != nil {
 		return err
 	}
@@ -266,7 +349,7 @@ func workersOf(t tab, main string) []string {
 }
 
 func statePath(tabID string) string {
-	return filepath.Join(home(), ".local/state/herdr-balance", strings.ReplaceAll(tabID, "/", "__")+".json")
+	return filepath.Join(stateDir(), strings.ReplaceAll(tabID, "/", "__")+".json")
 }
 
 func save(tabID string, workers []string) error {
@@ -321,8 +404,8 @@ func build(group []string, pane any, keep func(string, any, string) (any, error)
 	return build(group[mid:], lower, keep)
 }
 
-func balance(main string, add, drop []string) (pyjson.Obj, error) {
-	t, m, err := where(main)
+func balance(ctx context.Context, main string, add, drop []string) (pyjson.Obj, error) {
+	t, m, err := where(ctx, main)
 	if err != nil {
 		return nil, err
 	}
@@ -345,12 +428,12 @@ func balance(main string, add, drop []string) (pyjson.Obj, error) {
 
 	// 맞춘 뒤 돌아갈 곳: 지금 포커스된 pane의 터미널(pane id는 park/keep 뒤 바뀐다)
 	var st map[string]any
-	if obj, err := appJSON(&st, "status"); err != nil {
+	if obj, err := appJSON(ctx, &st, "status"); err != nil {
 		return nil, err
 	} else if !obj {
 		return nil, errors.New("herdr-app status 응답이 JSON 객체가 아님")
 	}
-	ts, err := tabs()
+	ts, err := tabs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -363,32 +446,35 @@ func balance(main string, add, drop []string) (pyjson.Obj, error) {
 		}
 	}
 
+	// 여기부터 worker를 뗀다 — 신호가 와도 이 맞춤은 마친다(떼인 채 남지 않게. 호출마다 상한·기다림 10초는 그대로).
+	// ponytail: 그 사이 KILL·기계 재시작이면 떼인 채 남는다(E09, 기존) — 떼기 전에 목표를 적고 다음 시작에 살아 있는 것만 되붙이는 복구가 그 길
+	crit := context.WithoutCancel(ctx)
 	for _, w := range append(append([]string(nil), workers...), drop...) {
-		wt, _, err := where(w)
+		wt, _, err := where(crit, w)
 		if err != nil {
 			return nil, err
 		}
 		if wt == nil {
 			continue
 		}
-		if err := do("terminal.park", pyjson.Obj{{K: "terminal", V: w}}); err != nil {
+		if err := do(crit, "terminal.park", pyjson.Obj{{K: "terminal", V: w}}); err != nil {
 			return nil, err
 		}
-		if err := waitFor(func() (bool, error) { x, _, err := where(w); return x == nil, err }, w+" park"); err != nil {
+		if err := waitFor(func() (bool, error) { x, _, err := where(crit, w); return x == nil, err }, w+" park"); err != nil {
 			return nil, err
 		}
 	}
 
 	keep := func(tm string, anchor any, place string) (any, error) {
-		if err := do("pane.focus", pyjson.Obj{{K: "pane", V: anchor}}); err != nil {
+		if err := do(crit, "pane.focus", pyjson.Obj{{K: "pane", V: anchor}}); err != nil {
 			return nil, err
 		}
-		if err := do("terminal.keep", pyjson.Obj{{K: "terminal", V: tm}, {K: "place", V: place}}); err != nil {
+		if err := do(crit, "terminal.keep", pyjson.Obj{{K: "terminal", V: tm}, {K: "place", V: place}}); err != nil {
 			return nil, err
 		}
 		var pane any
 		err := waitFor(func() (bool, error) {
-			x, y, err := where(tm)
+			x, y, err := where(crit, tm)
 			if x != nil && x.ID == tabID {
 				pane = y.Pane
 				return true, err
@@ -406,9 +492,9 @@ func balance(main string, add, drop []string) (pyjson.Obj, error) {
 	}
 	// 셸 판의 finally: 맞추다 실패해도 보던 칸으로 돌아간다(여기서 난 오류가 앞 오류를 덮는다)
 	if back != "" {
-		bt, _, ferr := where(back)
+		bt, _, ferr := where(crit, back)
 		if ferr == nil && bt != nil {
-			ferr = do("pane.focus", pyjson.Obj{{K: "terminal", V: back}})
+			ferr = do(crit, "pane.focus", pyjson.Obj{{K: "terminal", V: back}})
 		}
 		if ferr != nil {
 			return nil, ferr

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/version"
 	wm "herdr-tools/internal/workermac"
 )
 
@@ -37,10 +38,10 @@ func main() {
 	wm.Who = "worker-mac-check"
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" { // 공통 실행기가 바이너리를 쓰기 전에 본다
-		fmt.Println("worker-mac-check 1")
+		fmt.Println(version.String("worker-mac-check")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
-	if len(args) < 1 {
+	if len(args) < 1 || dashName(args) {
 		fmt.Fprintln(os.Stderr, "사용: worker-mac-check <기계> [<기계>...]")
 		os.Exit(64)
 	}
@@ -58,6 +59,16 @@ func main() {
 		fmt.Println()
 	}
 	os.Exit(rc)
+}
+
+// dashName: -로 시작하는 기계 이름이 있는가 — ssh·hc가 옵션으로 읽는다(E10, 셸 판도 64)
+func dashName(ms []string) bool {
+	for _, m := range ms {
+		if strings.HasPrefix(m, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 // load: 설정. 키가 없으면 기본값, 기본값도 없으면 빈 값 + miss(그 항목은 「모름 … 설정 없음」). 설정 오류는 err(종료 2)
@@ -106,7 +117,7 @@ var missItem = map[string]string{"worker.repo": "저장소", "worker.slots_file"
 func checkOne(ctx context.Context, w io.Writer, s settings, m string) int {
 	c := &checker{w: w}
 	fmt.Fprintf(w, "== %s (%s)\n", m, time.Now().Format("2006-01-02 15:04:05"))
-	if _, rc := wm.Output(ctx, connectSec, nil, "ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", m, "true"); rc != 0 {
+	if _, rc := wm.Output(ctx, connectSec, nil, "ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--", m, "true"); rc != 0 {
 		c.line("실패", "SSH 연결", "ssh "+m+" 안 됨 (Tailscale·원격 로그인·키 확인)")
 		c.footer(m)
 		return 2
@@ -120,14 +131,33 @@ func checkOne(ctx context.Context, w io.Writer, s settings, m string) int {
 		c.line("모름", i, "설정 없음("+k+") — "+wm.ConfigDir()+"/config, 예: config.example/config")
 	}
 	b64 := base64.StdEncoding.EncodeToString([]byte(s.pre() + "\n" + remote))
-	out, _ := wm.Output(ctx, remoteSec, nil, "ssh", "-n", "-o", "BatchMode=yes", m, `bash -c "$(echo `+b64+` | base64 -D)"`)
+	out, rc := wm.Output(ctx, remoteSec, nil, "ssh", "-n", "-o", "BatchMode=yes", "--", m, `bash -c "$(echo `+b64+` | base64 -D)"`)
 	c.remoteLines(ctx, out)
+	if why := cut(out, rc, remoteSec); why != "" { // 받은 줄은 두고, 다 받지 못한 점검은 통과로 세지 않는다(E01·B27)
+		c.line("실패", "원격 점검", why+" — 받은 줄까지만 봤다")
+	}
 	c.hcChecks(ctx, s, m)
 	c.footer(m)
 	if c.f == 0 {
 		return 0
 	}
 	return 1
+}
+
+// endMark: remote.sh가 끝까지 돌았을 때 찍는 마지막 줄
+const endMark = "E\t끝"
+
+// cut: 원격 점검이 끝까지 오지 않았으면 까닭(시간 초과·ssh 종료 코드·끝 표식 없음), 다 왔으면 빈 값. 셸 판 check_one과 같은 말
+func cut(out string, rc, sec int) string {
+	switch {
+	case rc == wm.TimeoutCode:
+		return fmt.Sprintf("시간 초과(%d초)", sec)
+	case rc != 0:
+		return fmt.Sprintf("끊김(종료 %d)", rc)
+	case !strings.Contains("\n"+out, "\n"+endMark+"\n"):
+		return "끝 표식 없음"
+	}
+	return ""
 }
 
 // remoteLines: 원격 줄(R 상태 항목 세부 / V 도구 판). 판은 맥과 견준다. 시간이 지나 끊긴 출력도 받은 줄까지는 본다

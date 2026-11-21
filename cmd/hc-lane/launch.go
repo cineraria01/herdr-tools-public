@@ -208,24 +208,27 @@ func launchMain(args []string) int {
 			die("--resume: 원격(origin)이 없는 저장소에는 주차한 가지가 없다: %s", repo)
 		}
 		wfrom = "refs/hc-park/" + name
-		if !dry {
-			ls, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/park/"+name, "refs/heads/lane/"+name)
-			if r != 0 {
-				die("--resume: 원격을 읽지 못했다(git ls-remote) — 주차한 가지 refs/park/%s 를 모른다: %s", name, repo)
-			}
-			src := ""
-			for _, want := range []string{"refs/park/" + name, "refs/heads/lane/" + name} {
-				for _, ln := range strings.Split(ls, "\n") {
-					if f := strings.Fields(ln); src == "" && len(f) == 2 && f[1] == want {
-						src = want
-					}
+		// 모의 실행도 원격을 본다(읽기만 — 참조를 쓰지 않고 시작점을 알린다, gofix L08)
+		ls, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/park/"+name, "refs/heads/lane/"+name)
+		if r != 0 {
+			die("--resume: 원격을 읽지 못했다(git ls-remote) — 주차한 가지 refs/park/%s 를 모른다: %s", name, repo)
+		}
+		src, ssha := "", ""
+		for _, want := range []string{"refs/park/" + name, "refs/heads/lane/" + name} {
+			for _, ln := range strings.Split(ls, "\n") {
+				if f := strings.Fields(ln); src == "" && len(f) == 2 && f[1] == want {
+					src, ssha = want, f[0]
 				}
 			}
-			if src == "" || xfetch(repo, "-q", "origin", "+"+src+":"+wfrom) != 0 {
-				die("--resume: 주차한 가지 refs/park/%s 가 없거나 받지 못했다: %s", name, repo)
-			}
 		}
-		if xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", wfrom+"^{commit}") != 0 {
+		switch {
+		case src == "":
+			die("--resume: 주차한 가지 refs/park/%s 가 없다: %s", name, repo)
+		case dry:
+			fmt.Printf("[dry-run] 주차한 가지 %s (%s) 에서 시작\n", src, cut(ssha, 12))
+		case xfetch(repo, "-q", "origin", "+"+src+":"+wfrom) != 0:
+			die("--resume: 주차한 가지 refs/park/%s 를 받지 못했다: %s", name, repo)
+		case xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", wfrom+"^{commit}") != 0:
 			die("--resume: 주차한 가지 refs/park/%s 가 없다: %s", name, repo)
 		}
 	}
@@ -458,7 +461,9 @@ func launchMain(args []string) int {
 		out = trim(ob.String())
 		addr = firstAddr(out)
 		if addr == "" {
-			errf("hc-lane: hc run 출력에서 주소를 읽지 못했다(hc ls --json 으로 확인): %s\n", out)
+			// 실행됐는지 모른다 — 성공(0)으로 끝내지 않는다. 임대·작업 트리는 그대로 둔다(gofix E09: hc-fill 밖에서 부른 쪽도 실패를 본다)
+			errf("hc-lane: hc run 출력에서 주소를 읽지 못했다(hc ls --json 으로 확인 — 임대·작업 트리는 보존): %s\n", out)
+			code = 5
 		}
 		// 레인 기록: 이 레인의 지휘. HC_LANE_OWNER가 앞, 아니면 지휘 터미널에서 띄웠을 때 그 지휘, 모르면 -
 		loOwner = "-"

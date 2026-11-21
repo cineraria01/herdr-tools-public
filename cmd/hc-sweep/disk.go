@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -33,14 +32,6 @@ func tmpDir(r runner) string {
 }
 
 var errNewer = fmt.Errorf("새 항목")
-
-// blocks: 디스크에서 차지하는 바이트(st_blocks × 512)
-func blocks(st os.FileInfo) int64 {
-	if s, ok := st.Sys().(*syscall.Stat_t); ok {
-		return s.Blocks * 512
-	}
-	return st.Size()
-}
 
 // scan: (바이트, 오래됨). 하나라도 cutoff보다 새로우면 오래됨 false로 바로 끝. 못 읽는 곳은 오류(건너뜀)
 func scan(path string, cutoff time.Time) (int64, bool, error) {
@@ -89,17 +80,33 @@ func lsofPath() string {
 	return "lsof"
 }
 
-// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패면 nil
+// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패면 nil. 출력이 온전한지 본다(E13): -F 꼴(모든 줄이 필드 글자로 시작)이고
+// lsof를 부른 이 프로세스(pid 줄 뒤 경로 줄 하나 이상 — 적어도 cwd)가 들어 있어야 한다. 아니면 잘렸거나 다른 출력이라 nil(건너뜀)
 func openPaths(r runner) map[string]bool {
 	res := r(60*time.Second, nil, lsofPath(), "-n", "-P", "-w", "-F", "n")
 	if res.err != nil || res.rc != 0 || res.out == "" {
 		return nil
 	}
-	m := map[string]bool{}
-	for _, l := range strings.Split(res.out, "\n") {
-		if strings.HasPrefix(l, "n/") {
-			m[l[1:]] = true
+	m, me, pid, self := map[string]bool{}, strconv.Itoa(os.Getpid()), "", false
+	for _, l := range strings.Split(strings.TrimSuffix(res.out, "\n"), "\n") {
+		switch {
+		case l == "":
+			return nil
+		case l[0] == 'p':
+			pid = l[1:]
+		case l[0] == 'n':
+			if pid == me {
+				self = true
+			}
+			if strings.HasPrefix(l, "n/") {
+				m[l[1:]] = true
+			}
+		case !('a' <= l[0] && l[0] <= 'z' || 'A' <= l[0] && l[0] <= 'Z'):
+			return nil // 필드 글자로 시작하지 않는 줄(오류 문구·잘린 줄)
 		}
+	}
+	if !self {
+		return nil
 	}
 	return m
 }
@@ -112,7 +119,6 @@ func sweepTmp(base string, hours float64, dry bool, r runner) {
 	}
 	base = realpath(base)
 	cutoff := time.Now().Add(-time.Duration(hours * float64(time.Hour)))
-	uid := uint32(os.Getuid())
 	type cand struct {
 		p    string
 		size int64
@@ -125,10 +131,7 @@ func sweepTmp(base string, hours float64, dry bool, r runner) {
 			continue
 		}
 		st, err := os.Lstat(p)
-		if err != nil || !st.IsDir() {
-			continue
-		}
-		if sys, ok := st.Sys().(*syscall.Stat_t); !ok || sys.Uid != uid {
+		if err != nil || !st.IsDir() || !mine(st) {
 			continue
 		}
 		if size, aged, err := scan(p, cutoff); err == nil && aged {
@@ -180,14 +183,15 @@ func sweepTmp(base string, hours float64, dry bool, r runner) {
 	}
 }
 
-// goBusy: go 명령(빌드·시험)이 도는가(ps comm 이름 go — 시험은 HC_SWEEP_GO_COMM으로 바꾼다). 못 보면 true(건드리지 않음)
+// goBusy: go 명령(빌드·시험)이 도는가(ps comm 이름 go — 시험은 HC_SWEEP_GO_COMM으로 바꾼다). 못 보면 true(건드리지 않음).
+// 종료 0이어도 목록이 비면(ps는 적어도 이 프로세스·ps 자신을 찍는다) 못 본 것이다(B22)
 func goBusy(r runner) bool {
 	name := os.Getenv("HC_SWEEP_GO_COMM")
 	if name == "" {
 		name = "go"
 	}
 	res := r(30*time.Second, nil, "ps", "-x", "-o", "comm=")
-	if res.err != nil || res.rc != 0 {
+	if res.err != nil || res.rc != 0 || strings.TrimSpace(res.out) == "" {
 		return true
 	}
 	for _, l := range strings.Split(res.out, "\n") {
@@ -207,7 +211,7 @@ func trimGocache(capGB float64, dry bool, r runner) {
 	}
 	old := filepath.Join(home, "Library", "Caches", "go-build")
 	if goBusy(r) {
-		fmt.Println("Go 캐시 줄이기: go가 도는 중 — 건너뜀")
+		fmt.Println("Go 캐시 줄이기: go가 도는 중이거나 프로세스 목록을 못 읽음 — 건너뜀")
 		return
 	}
 	type ent struct {
@@ -278,6 +282,27 @@ func du(path string, r runner) string {
 	return "없음"
 }
 
+// pendingMark: 부족 표식 첫 칸 — 「보내는 중」(보고가 받아들여졌는지 아직 모름). 보낸 뒤 「<시각><탭><글>」로 바꾼다(E06).
+// 중단·실패 뒤 다음 바퀴는 표식의 시각으로 만든 같은 키로 다시 보낸다(hc-lane이 같은 키는 한 번만 적는다 — 두 판·두 바퀴 겹쳐도 한 건, B07).
+// 셸 판은 표식이 있기만 하면 보낸 것으로 본다(알려진 차이 — 대기 표식이 남으면 셸 판은 다시 보내지 않는다)
+const pendingMark = "대기"
+
+// readMark: 표식 (있음, 대기 중이면 그 시각). 못 읽으면 있음·대기 아님(다시 보내지 않는 쪽)
+func readMark(state string) (bool, string) {
+	if !lexists(state) {
+		return false, ""
+	}
+	b, err := os.ReadFile(state)
+	if err != nil {
+		return true, ""
+	}
+	f := strings.SplitN(strings.SplitN(string(b), "\n", 2)[0], "\t", 3)
+	if len(f) >= 2 && f[0] == pendingMark && f[1] != "" {
+		return true, f[1]
+	}
+	return true, ""
+}
+
 // diskAlert: 부족 알림 한 바퀴(free·used = diskUsage). 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 ""
 func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane string, r runner) string {
 	if free >= limitGB*1.5*gb {
@@ -286,7 +311,11 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 		}
 		return ""
 	}
-	if free >= limitGB*gb || lexists(state) {
+	marked, pendingAt := readMark(state)
+	if marked && pendingAt == "" {
+		return "" // 이번 부족은 이미 보냄
+	}
+	if free >= limitGB*gb && !marked {
 		return ""
 	}
 	short := func(p string) string {
@@ -308,24 +337,23 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 	if dry {
 		return msg
 	}
-	// 표식을 먼저 쓴다. 디스크가 차서 못 쓰면 날짜 키로 보내 hc-lane이 그날 두 번 적지 않게 한다
-	var key []string
-	if err := os.MkdirAll(filepath.Dir(state), 0o755); err == nil {
-		err = os.WriteFile(state, []byte(time.Now().Format("2006-01-02T15:04:05-0700")+"\t"+msg+"\n"), 0o644)
-		if err != nil {
-			key = []string{"--key", "hc-disk-low:" + time.Now().Format("2006-01-02")}
+	// 대기 표식을 먼저 쓴다. 디스크가 차서 못 쓰면 날짜 키로 보내 hc-lane이 그날 두 번 적지 않게 한다
+	at := pendingAt
+	if at == "" {
+		at = time.Now().Format("2006-01-02T15:04:05") // 키 글자(hc-lane report --key: A-Za-z0-9_.:/-)
+		if os.MkdirAll(filepath.Dir(state), 0o755) != nil || os.WriteFile(state, []byte(pendingMark+"\t"+at+"\t"+msg+"\n"), 0o644) != nil {
+			at = time.Now().Format("2006-01-02")
 		}
-	} else {
-		key = []string{"--key", "hc-disk-low:" + time.Now().Format("2006-01-02")}
 	}
+	key := []string{"--key", "hc-disk-low:" + at}
 	var env []string
 	for _, kv := range os.Environ() {
-		k := kv[:strings.Index(kv, "=")]
+		k, _, _ := strings.Cut(kv, "=") // = 없는 항목도 패닉 없이(L5)
 		if k != "HC_TERMINAL_ID" && k != "HC_LANE" && k != "HC_LANE_OWNER" {
 			env = append(env, kv)
 		}
 	}
-	if syscall.Access(lane, 1) != nil {
+	if !executable(lane) {
 		lane = "hc-lane"
 		if p, err := exec.LookPath("hc-lane"); err == nil {
 			lane = p
@@ -333,11 +361,11 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 	}
 	res := r(60*time.Second, env, lane, append([]string{"report", "중간", "-", msg, "--name", "hc-disk-low"}, key...)...)
 	if res.err != nil || res.rc != 0 {
-		fmt.Println("디스크 부족 알림 실패(hc-lane report) — 다음 바퀴에 다시")
-		if key == nil {
-			os.Remove(state)
-		}
+		fmt.Println("디스크 부족 알림 실패(hc-lane report) — 다음 바퀴에 같은 키로 다시")
 		return ""
+	}
+	if lexists(state) { // 보냄: 대기 표식을 「보냄」으로(못 바꾸면 다음 바퀴가 같은 키로 한 번 더 — hc-lane이 거른다)
+		os.WriteFile(state, []byte(at+"\t"+msg+"\n"), 0o644)
 	}
 	return msg
 }
@@ -345,15 +373,6 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 func freeBytes(path string) (float64, error) {
 	free, _, err := diskUsage(path)
 	return free, err
-}
-
-// diskUsage: shutil.disk_usage처럼 여유(Bavail)와 사용(Blocks-Bfree) 바이트
-func diskUsage(path string) (free, used float64, err error) {
-	var s syscall.Statfs_t
-	if err := syscall.Statfs(path, &s); err != nil {
-		return 0, 0, fmt.Errorf("디스크 여유 읽기: %w", err)
-	}
-	return float64(s.Bavail) * float64(s.Bsize), float64(s.Blocks-s.Bfree) * float64(s.Bsize), nil
 }
 
 // diskRun: 디스크 쓸기 한 바퀴. 설정을 못 읽으면 그 쓸기는 건너뛴다

@@ -299,7 +299,7 @@ func s15sSigint(k *K) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	rdyf := read(T+"/sg.pid") == ""
-	ksig := syscall.Kill(-b.Pid, syscall.SIGINT) == nil // 신호 전송 성공과 hc-lane이 SIGINT로 끝남(130)을 함께 본다
+	ksig := b.signal(true, syscall.SIGINT) == nil // 신호 전송 성공과 hc-lane이 SIGINT로 끝남(130)을 함께 본다
 	// 부모의 시간 상한: 10초 안에 안 끝나면 제어 파이프를 닫아 풀어 준다
 	for i = 0; !b.Done() && i < 100; i++ {
 		time.Sleep(100 * time.Millisecond)

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 )
 
 func init() { register("guard", guardMain, can("guard")) }
@@ -104,8 +103,7 @@ func guardCmd(act, branch string) int {
 			die("guard: 쓰지 못했다: %s", tmp)
 		}
 		// chmod +x: umask가 막지 않는 실행 비트를 더한다
-		um := syscall.Umask(0)
-		syscall.Umask(um)
+		um := umask()
 		fi, err := os.Stat(tmp)
 		if err == nil {
 			err = os.Chmod(tmp, fi.Mode().Perm()|(0o111&^os.FileMode(um)))

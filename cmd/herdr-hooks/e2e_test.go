@@ -3,7 +3,8 @@ package main
 // 끝에서 끝 대조(느림 — HERDR_HOOKS_E2E=1일 때만): 같은 입력 JSON을 셸 판 훅 파일 통째(HERDR_HOOKS_IMPL=bash — jq·perl·awk 포함)와
 // Go 판(이 시험 바이너리를 훅으로 다시 띄움)에 넣어 종료 코드·표준 오류·표준 출력(JSON은 뜻으로)이 같은지 본다.
 // 두 판 모두 이 시험 프로세스의 자식이라 부모 pid(임대 주인)가 같다. cotenant-guard는 가짜 HOME·임시 저장소·동거 에이전트에서,
-// 셸 판을 먼저 돌리고 바로 Go 판을 돌린다(쓰기 대상 임대는 둘 다 이 시험 프로세스 것이라 서로 막지 않는다).
+// 두 판을 같은 처음 상태(임대 폴더를 다시 깖)에서 따로 돌려 종료 코드·출력·남은 임대를 견준다.
+// 실패 로그에 HERDR_HOOKS_CORPUS의 실제 명령 원문·출력은 적지 않는다(번호만 — diffErr).
 
 import (
 	"bytes"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -105,7 +107,7 @@ func TestE2ESmallHooks(t *testing.T) {
 			if a.rc != b.rc || a.err != b.err || a.out != b.out {
 				bad++
 				if bad <= 10 {
-					t.Errorf("%s %q:\n bash %d %q\n go   %d %q", h, c, a.rc, a.err, b.rc, b.err)
+					diffErr(t, h, c, fmt.Sprintf("bash %d·go %d", a.rc, b.rc), a.err, b.err)
 				}
 			}
 		}
@@ -140,7 +142,7 @@ func TestE2ECotenant(t *testing.T) {
 	if err := ag.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer ag.Process.Kill()
+	defer func() { ag.Process.Kill(); ag.Wait() }() // 거둬서(아스트라 L01)
 	pid := fmt.Sprint(ag.Process.Pid)
 	c := exec.Command("/bin/ps", "-o", "lstart=", "-p", pid)
 	c.Env = []string{"LC_ALL=C", "TZ=UTC"}
@@ -148,10 +150,44 @@ func TestE2ECotenant(t *testing.T) {
 	reg, _ := json.Marshal(map[string]any{"pid": ag.Process.Pid, "sessionId": "other", "cwd": repo, "name": "agent-b", "procStart": strings.TrimSpace(string(st))})
 	os.WriteFile(home+"/.claude/sessions/"+pid+".json", reg, 0o644)
 	os.WriteFile(repo+"/a.txt", []byte("changed\n"), 0o644)
-	ld := repo + "/.git/agent-leases/" + md5hex("a.txt")
-	must("mkdir", "-p", ld)
-	os.WriteFile(ld+"/owner", []byte("other\x1f"+pid+"\x1f"+strings.TrimSpace(string(st))+"\x1f\x1fagent-b\x1f2026-01-01 00:00:00\x1fa.txt\n"), 0o644)
+	leases := repo + "/.git/agent-leases"
+	ld := leases + "/" + md5hex("a.txt")
+	owner := []byte("other\x1f" + pid + "\x1f" + strings.TrimSpace(string(st)) + "\x1f\x1fagent-b\x1f2026-01-01 00:00:00\x1fa.txt\n")
+	// 판마다 같은 처음 상태(동거 에이전트의 a.txt 임대 하나)에서 돌리고, 종료 코드·출력과 함께 남은 임대(이름·owner 칸, 시각 빼고)를 견준다
+	// (아스트라 M06: 셸 판 뒤에 Go 판을 같은 상태에 이어 돌려 첫 호출만 경고하는 것을 다름으로 세고, 임대만 다른 것은 놓쳤다)
+	seed := func() {
+		for i := 0; i < 3 && os.RemoveAll(leases) != nil; i++ { // 앞 판정이 뒤에 띄운 rm -rf(휴지통)와 겹치면 한 번 더
+		}
+		os.MkdirAll(ld, 0o755)
+		os.WriteFile(ld+"/owner", owner, 0o644)
+	}
+	snap := func() string {
+		ents, _ := os.ReadDir(leases)
+		var out []string
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			b, _ := os.ReadFile(leases + "/" + e.Name() + "/owner")
+			f := strings.Split(strings.TrimRight(string(b), "\n"), "\x1f")
+			if len(f) == 7 {
+				f[5] = ""
+			}
+			out = append(out, e.Name()+" "+strings.Join(f, "|"))
+		}
+		sort.Strings(out)
+		return strings.Join(out, "\n")
+	}
 	env := []string{"PATH=/usr/bin:/bin", "HOME=" + home}
+	pair := func(in []byte) (a, b hookResult, same bool) {
+		seed()
+		a = runHook(t, "cotenant-guard", false, env, in)
+		la := snap()
+		seed()
+		b = runHook(t, "cotenant-guard", true, env, in)
+		lb := snap()
+		return a, b, a.rc == b.rc && a.err == b.err && sameOut(a.out, b.out) && la == lb
+	}
 	bad, n := 0, 0
 	for _, cmd := range e2eInputs(t, 4000) {
 		// 이 기계의 실제 저장소를 건드리지 않게: 절대 경로·홈·위로 가는 경로는 뺀다
@@ -161,11 +197,11 @@ func TestE2ECotenant(t *testing.T) {
 		}
 		n++
 		in, _ := json.Marshal(map[string]any{"session_id": "me", "cwd": repo, "tool_name": "Bash", "tool_input": map[string]any{"command": cmd}})
-		a, b := runHook(t, "cotenant-guard", false, env, in), runHook(t, "cotenant-guard", true, env, in)
-		if a.rc != b.rc || a.err != b.err || !sameOut(a.out, b.out) {
+		a, b, same := pair(in)
+		if !same {
 			bad++
 			if bad <= 10 {
-				t.Errorf("cotenant %q:\n bash %d %q %q\n go   %d %q %q", cmd, a.rc, a.err, a.out, b.rc, b.err, b.out)
+				diffErr(t, "cotenant", cmd, fmt.Sprintf("bash %d·go %d", a.rc, b.rc), a.err, a.out, b.err, b.out)
 			}
 		}
 	}
@@ -173,9 +209,9 @@ func TestE2ECotenant(t *testing.T) {
 	for _, fp := range []string{repo + "/a.txt", repo + "/b.txt", repo + "/new.txt", repo + "/sub/c.txt", "/etc/hosts", repo + "/.claude/settings.local.json"} {
 		for _, tool := range []string{"Edit", "Write"} {
 			in, _ := json.Marshal(map[string]any{"session_id": "me", "cwd": repo, "tool_name": tool, "tool_input": map[string]any{"file_path": fp, "content": "x"}})
-			a, b := runHook(t, "cotenant-guard", false, env, in), runHook(t, "cotenant-guard", true, env, in)
+			a, b, same := pair(in)
 			n++
-			if a.rc != b.rc || a.err != b.err || !sameOut(a.out, b.out) {
+			if !same {
 				bad++
 				t.Errorf("cotenant %s %s:\n bash %d %q\n go   %d %q", tool, fp, a.rc, a.err, b.rc, b.err)
 			}

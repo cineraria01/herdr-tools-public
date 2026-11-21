@@ -35,9 +35,15 @@ hl_go() {
     0) ;;
     120|121) return 0 ;;
     122) echo "hc-lane: Go 판을 쓸 수 없다(HC_LANE_IMPL=go)" >&2; exit 1 ;;
-    *) echo "hc-lane: HC_LANE_IMPL은 go·bash 가운데 하나: ${HC_LANE_IMPL:-${HERDR_IMPL-}}" >&2; exit 2 ;;
+    123) echo "hc-lane: HC_LANE_IMPL은 go·bash 가운데 하나: ${HC_LANE_IMPL:-${HERDR_IMPL-}}" >&2; exit 2 ;;
+    *) # Go 판 __has가 비정상으로 끝남(신호 등) — 강제 go면 실패, auto면 셸 판(gofix L3)
+      [ "${HC_LANE_IMPL:-${HERDR_IMPL:-auto}}" != go ] || { echo "hc-lane: Go 판 __has가 비정상 종료($((r - 121)))(HC_LANE_IMPL=go)" >&2; exit 1; }
+      echo "hc-lane: 경고 — Go 판 __has가 비정상 종료($((r - 121))) — 셸 판으로 돈다" >&2; return 0 ;;
   esac
   HC_LANE_SH=$self HC_LANE_SH_BIN=${HC_LANE_BIN-} HC_LANE_BIN=${HC_LANE_GO_BIN-} go_run hc-lane "$@" 18>&- 19>&-
+  r=$?
+  # 강제 go인데 실행기가 Go 판을 못 띄웠으면 셸 판이 사건을 쓰지 않게 그 코드로 끝낸다(gofix L10). auto만 셸 판으로 이어 간다
+  [ "${HC_LANE_IMPL:-${HERDR_IMPL:-auto}}" != go ] || { echo "hc-lane: Go 판 실행 실패(HC_LANE_IMPL=go, 종료 $r)" >&2; exit $((r == 0 ? 1 : r)); }
   echo "hc-lane: Go 판 exec 실패 — 셸 판으로 돈다" >&2
 }
 hl_go "$@"

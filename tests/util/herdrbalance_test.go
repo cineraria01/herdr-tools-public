@@ -219,10 +219,6 @@ herdr-balance: error: --main 또는 --watch가 필요`)
 			wrc = ee.ExitCode()
 		}
 	}
-	// Go 판은 회차를 마치고 0, 셸 판은 TERM으로 죽는다(143) — 의도된 차이
-	if impl == "bash" {
-		eq("watch: 셸 판 TERM 종료 코드", strconv.Itoa(wrc), "143")
-	} else {
-		eq("watch: Go 판은 TERM에 0으로 끝남", strconv.Itoa(wrc), "0")
-	}
+	// 두 판 같게 143(go-final-audit B11 — 셸 판은 TERM으로 죽고, Go 판은 128+신호로 끝난다)
+	eq("watch: TERM 종료 코드 143", strconv.Itoa(wrc), "143")
 }

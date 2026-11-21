@@ -1,17 +1,17 @@
 package main
 
-// 띄우기 — 셸 판 lib/hc-fill/launch.sh 뒷부분(launch · place · early_sec · resume_sec)과 Go 판에서 더한 지휘 기계 파일 붙이기
+// 띄우기 — 셸 판 lib/hc-fill/launch.sh 뒷부분(launch · place · early_sec · resume_sec). 지휘 기계 파일 붙이기는 paste.go
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 // launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
@@ -32,9 +32,10 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if m != LOCAL {
 		on = m
 	}
-	// 다른 기계에 띄울 때 본문이 가리키는 이 기계 HOME 아래 파일 원문을 붙인다(Go 판 — 셸 판과 다름)
+	// 다른 기계에 띄울 때 본문이 가리키는 이 기계 붙일 폴더(설정 paste_dirs) 아래 파일 원문을 붙인다(Go 판 — 셸 판과 다름).
+	// 받은편지 줄은 본문을 다른 기계가 썼다 — 이 기계 파일을 붙이지 않는다(gofix-fill F07)
 	paste := ""
-	if on != "" {
+	if on != "" && dash(dest) == "-" {
 		p, ok := lcPasteHome(body, dash(owner), lane)
 		if !ok {
 			return 2
@@ -120,11 +121,15 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if own == "-" {
 		own = ""
 	}
-	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는 살아 있는 지휘에게
+	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면(종료 1 — 없음이 확인됨) 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는
+	// 살아 있는 지휘에게. 그 밖(시간 넘김·연결 실패)은 모름 — 주인을 풀지 않고 이번 바퀴는 미룬다(gofix-fill F06·L8)
 	if own != "" {
-		if ce, rc := (Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}).Run(); rc != 0 {
+		if ce, rc := (Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}).Run(); rc == 1 {
 			say("알림: %s 의 주인 지휘 %s 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) (%s)", lane, own, lastLine(sub(ce)))
 			own = ""
+		} else if rc != 0 {
+			say("미룸 %s: 주인 지휘 %s 확인을 못 함(종료 %d) — 다음 바퀴에 (%s)", lane, own, rc, lastLine(sub(ce)))
+			return 2
 		}
 	}
 	task := strings.ReplaceAll(TASK, "{run}", rf)
@@ -138,6 +143,10 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if own == "" {
 		o, rc := Cmd{Name: "hc-lane", Args: []string{"coord"}, Err: errMerge}.Run()
 		wco = sub(o)
+		if rc == proc.TimeoutCode { // 지휘가 있는지 모름 — 감시 없이 띄우지 않고 다음 바퀴에
+			say("미룸 %s: 지휘 확인(hc-lane coord) 시간 넘김 — 다음 바퀴에", lane)
+			return 2
+		}
 		if rc != 0 {
 			say("알림: 지휘 없음 — 감시(hc-lane watch)를 띄우지 않음, %s 사건은 events에 남아 지휘가 wait/watch를 걸면 받는다 (%s)", lane, lastLine(wco))
 			wco = ""
@@ -147,7 +156,8 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if RESUME {
 		EARLYF = "resumed"
 	}
-	if !dry && tryput(lane, RID, mm, dash(EARLYF), dash(LAUTO), "", "") != 0 {
+	// 주소 칸 ?: 미확정 — 띄우기 결과를 알기 전에 죽거나 시간을 넘기면 그대로 남아 다음 바퀴가 이 기계만 본다(tryUnsure)
+	if !dry && tryput(lane, RID, mm, dash(EARLYF), dash(LAUTO), "?", "") != 0 {
 		return 2
 	}
 	if rd == "" {
@@ -169,11 +179,16 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		Env: []string{"HC_LANE_COORD=" + wco, "HC_LANE_OWNER=" + own, "HC_LANE_FILL=1", "HERDR_LAND_PRIORITY=" + strconv.Itoa(wcnt(lane))}}.Run()
 	out = sub(out)
 	crash("after-launch")
-	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로
+	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로.
+	// 시간 넘김은 모름 — 이미 시작했을 수 있다: 다른 기계에 또 띄우지 않고 시도 기록(?)·pending 소유를 남긴다(gofix-fill F01·F2)
 	switch lr {
 	case 0, 5, 6, 7:
+	case proc.TimeoutCode:
+		say("모름 %s @%s: hc-lane 띄우기 시간 넘김 — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, mm)
+		return 3
 	default:
 		say("실패 %s @%s: hc-lane: %s", lane, mm, lcTail3(out))
+		tryMark(lane, mm, "")
 		return 1
 	}
 	SWHY = ""
@@ -190,9 +205,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if vs, _ := decodeAll(last); len(vs) > 0 {
 		ADDR = jor(jget(vs[0], "lane"), "")
 	}
-	if ADDR == "" {
-		say("실패 %s @%s: hc-lane 출력에서 주소를 못 읽음: %s", lane, mm, last)
-		return 1
+	if ADDR == "" { // 띄웠다고 답했는데 주소가 없다 — 시작했을 수 있으니 시간 넘김과 같이 미확정
+		say("모름 %s @%s: hc-lane 출력에서 주소를 못 읽음 — 다른 기계에 띄우지 않음: %s", lane, mm, last)
+		return 3
 	}
 	// 원격은 hc-lane이 맥 창의 그 기계 공간에 탭으로 붙인다. 못 붙였으면 그 알림 줄을 그대로
 	for _, l := range strings.Split(out, "\n") {
@@ -207,7 +222,8 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if on == "" && bco != "" {
 		if _, err := exec.LookPath("herdr-balance"); err == nil {
 			for i := 0; ; {
-				if _, rc := run("herdr-balance", "--main", bco, "--add", ADDR); rc == 0 {
+				// 상한 안에서만(proc.Limit이 모르는 명령 — Fable F3·아스트라 E01: 멈추면 run.lock을 쥔 채 끝없이 기다렸다)
+				if proc.WaitMax(exec.Command("herdr-balance", "--main", bco, "--add", ADDR), "", balanceMax()) == 0 {
 					break
 				}
 				if i++; i >= 5 {
@@ -222,6 +238,21 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		return 5
 	}
 	return 0
+}
+
+// balanceMax: herdr-balance 한 번의 상한 — HC_FILL_BALANCE_TIMEOUT초(빼면 30)
+func balanceMax() time.Duration {
+	if v := os.Getenv("HC_FILL_BALANCE_TIMEOUT"); isDigits(v) {
+		return time.Duration(atoi10(v)) * time.Second
+	}
+	return 30 * time.Second
+}
+
+// tryMark: 이번 시도 기록의 주소 칸을 고친다(""=확정 실패 -, 주소=떴지만 상태 안 잡힘)
+func tryMark(lane, m, addr string) {
+	if !dry && tryput(lane, RID, m, dash(EARLYF), dash(LAUTO), addr, "") != 0 {
+		say("경고 %s: 시도 기록을 고치지 못함", lane)
+	}
 }
 
 // lcTail3: printf '%s\n' "$out" | tail -n 3 | tr '\n' ' '
@@ -246,111 +277,6 @@ func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, boo
 		return nil, true
 	}
 	return strings.Split(strings.TrimSuffix(out, "\x00"), "\x00"), true
-}
-
-// ---- 지휘 기계 파일 붙이기(Go 판 — 지휘가 지시문에 맥 경로를 적어 워커 기계가 못 읽었다) ----
-
-const (
-	lcPasteFileMax = 64 << 10
-	lcPasteAllMax  = 256 << 10
-)
-
-// lcSecrets: 비밀 꼴 — 실제 값 모양만 본다(문서 속 「API_KEY」 같은 이름만으로는 막지 않는다: 지침 문서가 늘 걸려 레인이 못 떴다)
-var lcSecrets = []struct {
-	name string
-	re   *regexp.Regexp
-}{
-	{"개인 키", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
-	{"sk-ant-", regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{16,}`)},
-	{"ghp_", regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{30,}`)},
-	{"github_pat_", regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`)},
-	{"AKIA", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
-	{"xoxb-", regexp.MustCompile(`xox[abprs]-[A-Za-z0-9-]{10,}`)},
-	{"이름=값", regexp.MustCompile(`(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)["']?\s*[=:]\s*["']?[A-Za-z0-9/+_.=-]{12,}`)},
-}
-
-func lcBlank(r rune) bool {
-	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f'
-}
-
-// lcPasteScan: 본문이 가리키는 이 기계 HOME 아래 일반 파일(<HOME>/… 또는 ~/…)의 원문 절. 막힐 때는 shown(지시문에 적힌 꼴)·abs·why.
-// 읽히지 않거나 일반 파일이 아닌 경로는 그냥 건너뛴다. 64KiB 넘는 파일·바이너리(NUL)·합계 256KiB를 넘기는 파일은 경로만 적는다
-// (막는 것은 비밀 꼴뿐). 같은 경로는 한 번만
-func lcPasteScan(body string) (paste, shown, abs, why string) {
-	home := strings.TrimRight(HOME, "/")
-	if home == "" {
-		return "", "", "", ""
-	}
-	seen := map[string]bool{}
-	var b strings.Builder
-	total := 0
-	for _, tok := range strings.FieldsFunc(strings.ReplaceAll(body, "`", " "), lcBlank) {
-		x := ovUnwrap(tok)
-		cands := []string{x}
-		if loc := ovParticleRe.FindStringIndex(x); loc != nil {
-			cands = append(cands, ovUnwrap(x[:loc[0]+1]))
-		}
-		for _, c := range cands {
-			var p string
-			switch {
-			case strings.HasPrefix(c, "~/"):
-				p = home + c[1:]
-			case strings.HasPrefix(c, home+"/"):
-				p = c
-			default:
-				continue
-			}
-			p = filepath.Clean(p)
-			// hc-fill 데이터 폴더(runs·reports·verdicts…)는 레인 기계 자기 파일을 가리킨다 — 지휘 기계 것을 붙이지 않는다
-			if !strings.HasPrefix(p, home+"/") || strings.HasPrefix(p, home+"/.local/share/hc-fill/") || DATA != "" && strings.HasPrefix(p, DATA+"/") {
-				continue
-			}
-			st, err := os.Stat(p)
-			if err != nil || !st.Mode().IsRegular() {
-				continue
-			}
-			if seen[p] {
-				break
-			}
-			seen[p] = true
-			// 큰 파일·바이너리(설명으로 적은 Go 바이너리 경로 등)는 붙이지 않고 경로만 — 레인은 띄운다(2026-11-21 go-launchd-tcc가
-			// 5.5MB 바이너리 경로에 걸려 아예 안 뜸). 비밀 꼴만 띄우지 않는 까닭이다
-			pathOnly := "\n## (붙임) 지휘 기계 파일 — " + c + "\n(붙이지 않음: 큼/바이너리 — 경로만)\n"
-			if st.Size() > lcPasteFileMax {
-				b.WriteString(pathOnly)
-				break
-			}
-			data, err := os.ReadFile(p)
-			if err != nil {
-				break // 읽히지 않으면 붙이지 않는다
-			}
-			if bytes.IndexByte(data, 0) >= 0 || total+len(data) > lcPasteAllMax {
-				b.WriteString(pathOnly)
-				break
-			}
-			total += len(data)
-			for _, s := range lcSecrets {
-				if s.re.Match(data) {
-					return "", c, p, "비밀 꼴(" + s.name + ")을 담았다"
-				}
-			}
-			b.WriteString("\n## (붙임) 지휘 기계 파일 원문 — " + c + "\n" + string(data))
-			break
-		}
-	}
-	return b.String(), "", "", ""
-}
-
-// lcPasteHome <본문> <주인|-> <레인>: 붙일 글. 상한·비밀 꼴이면 한 줄과 지휘 알림 한 번(키 hf:<레인>:paste:<경로 cksum>), ok=false
-func lcPasteHome(body, owner, lane string) (string, bool) {
-	paste, shown, abs, why := lcPasteScan(body)
-	if why == "" {
-		return paste, true
-	}
-	msg := fmt.Sprintf("실패 %s: 지시문이 가리키는 지휘 기계 파일 %s가 %s — 원문을 붙이지 못해 띄우지 않음", lane, shown, why)
-	say("%s", msg)
-	aesc(lane, owner, msg, fmt.Sprintf("hf:%s:paste:%d", lane, cksum([]byte(abs))))
-	return "", false
 }
 
 // place <레인> <프로젝트> <지시문> <기계제한> <되돌릴곳> <주인> [<선행 — 먼저 띄움일 때>]: machine 차례에서 처음 자리가 남는 기계에.
@@ -421,6 +347,11 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			bad = true
 			break
 		}
+		if lr == 3 { // 미확정: 그 기계 자리는 찬 것으로 보고 이 레인은 이번 바퀴에 그만
+			NOW = append(NOW, m)
+			bad = true
+			break
+		}
 		if lr != 0 && lr != 5 {
 			continue
 		}
@@ -459,6 +390,7 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			placed, UPNOW = true, UPNOW+","+lane
 			break
 		}
+		tryMark(lane, m, ADDR) // 미확정(?) 아님 — 터미널은 stuck으로 다룬다
 		if stuck == "-" {
 			stuck = m + "=" + ADDR
 		} else {
