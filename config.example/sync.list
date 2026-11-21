@@ -10,8 +10,9 @@
 # - 대상: all(모든 기계) · macos(uname이 Darwin인 기계) · local(맥만) · 기계 이름을 쉼표로 (예: box-1,box-2).
 # - 묶음 지움: 그 기계에 있으면 백업 폴더로 옮긴다. 저장소 경로는 -.
 # - Go 판 도구(cmd/<이름>)는 소스로 깐다: Go 줄 넷(go.mod·cmd/**·internal/**·lib/go-run.sh)을 한 번에, 대상은 Go 판을 쓰는 도구 bin 줄을 덮게(sync-lint가 본다 —
-#   herdr-settings-merge가 all이라 Go 줄도 all). 바이너리는 herdr-sync가 맥에서 지어 publish.repo 릴리스로 올리고 macOS 기계는 받아 쓴다.
-#   받은 것이 없거나 판이 다르면 그 기계에서 짓고(go가 있을 때), 그것도 안 되면 셸 판으로 돈다(리눅스는 받지 않는다 — darwin/arm64만).
+#   herdr-settings-merge가 all이라 Go 줄도 all). 바이너리는 herdr-sync가 맥에서 지어 publish.repo 릴리스로 올리고 기계는 받아 쓴다(리눅스는
+#   x86_64만, 리눅스로 가는 bin 줄 — all이거나 리눅스 기계 이름 — 의 도구만 linux/amd64로 짓는다).
+#   받은 것이 없거나 판이 다르면 그 기계에서 짓고(go가 있을 때), 그것도 안 되면 셸 판으로 돈다.
 # - 설정 조각(settings.json의 정한 키)은 개인 저장소 settings/keys.json이 정한다(예: config.example/settings/keys.json).
 지침본문     .claude/CLAUDE.md#body                           claude/CLAUDE.body.md                           all
 주제지침     .claude/docs/*.md                                claude/docs/                                    all

@@ -104,7 +104,9 @@ go_run_src() {
 # 조상에 herdr-core·sshd가 없으면 그렇다. ps를 못 읽으면 그렇다(셸 판은 늘 돈다 — 창에 멈추는 쪽을 고르지 않는다).
 # TERM=dumb도 없음으로 본다: launchd의 bash는 TERM이 없으면 스스로 dumb을 둔다(실측)
 # PATH가 비어도(훅) 돌게 /usr/bin:/bin을 뒤에 — 앞에 두면 PATH의 ps(시험의 가짜 ps)를 가린다(go-integrate)
+# macOS에서만 본다: 리눅스 cron·systemd 문맥에는 그 창이 없다 — 받은 바이너리를 쓴다(2026-11-21 go-linux-dist)
 go_run_daemon() {
+  case ${GO_RUN_OS:-$OSTYPE} in darwin*) ;; *) return 1 ;; esac
   [ -z "${HC_TERMINAL_ID-}" ] && [ "${TERM:-dumb}" = dumb ] && [ -z "${SSH_CONNECTION-}" ] || return 1
   (PATH=${PATH:+$PATH:}/usr/bin:/bin; ps -axo pid=,ppid=,comm= 2>/dev/null | awk -v p="$$" '
     { c = $3; for (i = 4; i <= NF; i++) c = c " " $i; sub(/.*\//, "", c); pp[$1] = $2; cm[$1] = c }
@@ -150,7 +152,7 @@ go_run() {
   [ -z "$stale" ] && go_run_ok "$bin" "$ok" && exec "$bin" "$@"
   [ "$impl" = auto ] || { echo "$tool: Go 판을 쓸 수 없다(${up}_IMPL=go): $bin" >&2; return 1; }
   [ "${GO_RUN_BUILD-}" = bg ] && return 0
-  # macOS가 아니고 go가 없으면(리눅스 서버 등 — 받은 바이너리는 darwin/arm64만) 셸 판이 정상 경로: 크게 경고하지 않고 처음 한 번만 한 줄(go-followups)
+  # macOS가 아니고 go가 없으면(리눅스 서버 등 — 받은 바이너리가 없거나 판이 다르면) 셸 판이 정상 경로: 크게 경고하지 않고 처음 한 번만 한 줄(go-followups)
   case ${GO_RUN_OS:-$OSTYPE} in
     darwin*) ;;
     *) if [ -z "$(go_run_go)" ]; then

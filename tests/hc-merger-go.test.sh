@@ -79,6 +79,12 @@ if [ -f "$gr" ]; then
   dl "$(src_)"; sleep 1; touch "$M/main.go" "$M/msg.txt"   # 소스가 받은 바이너리보다 새로워도(시각) 판이 같으면 빌드하지 않는다
   t "받은 바이너리: 판이 같으면 빌드 없이 씀" "$(gr_)" "받은 판"
   t "받은 바이너리: PATH가 비어도(훅) 판을 대조해 씀" "$(gr_ PATH=/없음)" "받은 판"
+  # 리눅스 cron·systemd 문맥(터미널 표식 없음, 조상에 herdr-core 없음 — 가짜 ps): launchd 판별은 macOS 권한 창 때문이라
+  # 리눅스에서는 받은 바이너리를 쓴다(go-linux-dist)
+  mkdir -p "$T/nops"; printf '#!/bin/sh\n' >"$T/nops/ps"; chmod +x "$T/nops/ps"
+  cron=(TERM= HC_TERMINAL_ID= SSH_CONNECTION= "PATH=$T/nops:$PATH")
+  t "리눅스 cron 문맥: 받은 바이너리를 씀" "$(gr_ "${cron[@]}" GO_RUN_OS=linux-gnu)" "받은 판"
+  t "macOS launchd 문맥은 그대로 셸 판" "$(gr_ "${cron[@]}" GO_RUN_OS=darwin27)" "돌아옴 0"
   printf 'v5\n' >"$M/msg.txt"
   t "받은 바이너리: 임베드 파일만 바뀌어도 판이 달라 기계에서 빌드" "$(gr_)" v5
   t "받은 바이너리: 기계에서 빌드하면 .src는 지은 판" "$(cat "$T/.bin/hc-fake.src" 2>/dev/null)" "$(src_)"

@@ -216,7 +216,7 @@ func (s *sx) release() {
 	wb := W1 + "/.local/lib/herdr-go/.bin"
 	s.ok("받기: macOS 기계·맥은 해시가 맞으면 받고 소스 판을 곁에", s.has("w1 받음 hello ("+tag+")") && ct.Cmd{}.Run(wb+"/hello").Out == "hello "+tag[4:] && strings.TrimRight(ct.Read(wb+"/hello.src"), "\n") == src && ct.IsExec(M+"/.local/lib/herdr-go/.bin/hello"))
 	s.ok("릴리스: 로그에 publish.repo 주소 원문이 없다", !s.contains("github.com/test/pub"))
-	s.ok("받기: 리눅스는 받지 않는다(darwin/arm64만)", !ct.Exists(LX+"/.local/lib/herdr-go/.bin/hello"))
+	s.ok("받기: 리눅스로 가는 bin/ 줄이 없는 도구는 linux/amd64로 짓지도 받지도 않는다(go-linux-dist)", !ct.Exists(rel+"/hello-linux-amd64") && !ct.Exists(LX+"/.local/lib/herdr-go/.bin/hello"))
 	s.put(T+"/gh.calls", "")
 	s.run()
 	calls := ct.Read(T + "/gh.calls")
