@@ -11,7 +11,7 @@ set -u
 hl_s=$0
 while [ -L "$hl_s" ]; do hl_l=$(readlink "$hl_s"); case $hl_l in /*) hl_s=$hl_l ;; *) hl_s=$(dirname "$hl_s")/$hl_l ;; esac; done
 hl_d=$(dirname "$hl_s")/../lib/hc-lane
-for hl_f in common report watch land merger merger-result verdict guard start clean gc; do
+for hl_f in common report watch land merger merger-result merger-go verdict guard start clean gc; do
   . "$hl_d/$hl_f.sh" || { printf 'hc-lane: 함수 파일을 못 읽었다: %s (herdr-sync가 lib도 까는지)\n' "$hl_d/$hl_f.sh" >&2; exit 1; }
 done
 
@@ -164,7 +164,7 @@ gmark='# hc-lane guard v1'
 
 case $cmd in
   land) land_cmd; exit $? ;;
-  merger) merger_cmd ${mga_[@]+"${mga_[@]}"}; exit $? ;;
+  merger) merger_go ${mga_[@]+"${mga_[@]}"}; merger_cmd ${mga_[@]+"${mga_[@]}"}; exit $? ;;   # Go 판(돌아오면 bash 판 — lib/hc-lane/merger-go.sh)
   guard) guard_cmd; exit $? ;;
   lease) lease_cmd; exit $? ;;
   park) park_cmd; exit $? ;;

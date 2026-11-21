@@ -94,7 +94,7 @@ submit_cmd() {
   sid_=$mt_-$(date -u +%Y%m%dT%H%M%S)-$$
   born_=$(terminal_created_ms "${HC_TERMINAL_ID-}") || born_=-
   et_=$(git hash-object -t tree -w /dev/null) &&
-    mc_=$(git commit-tree "$et_" -p "$sh_" -m "merge-queue lane=$ln_ id=$sid_ orig=$sh_ fork=$fk_ base=$base host=$mt_ term=${HC_TERMINAL_ID:--} owner=$ow_$owner_run_field job=$(printf %s "${HC_LANE_JOB:--}" | tr -c 'A-Za-z0-9_.~-' -) created_ms=$born_${lvd:+ verdict=$lvd patch=$lpid}") ||
+    mc_=$(git commit-tree "$et_" -p "$sh_" -m "merge-queue lane=$ln_ id=$sid_ orig=$sh_ fork=$fk_ base=$base host=$mt_ term=${HC_TERMINAL_ID:--} owner=$ow_$owner_run_field job=$(printf %s "${HC_LANE_JOB:--}" | tr -c 'A-Za-z0-9_.~-' -) created_ms=$born_ priority=$(lprio)${lvd:+ verdict=$lvd patch=$lpid}") ||
     die "land(제출): 제출 기록 커밋을 만들지 못했다"
   set -- "$sh_:refs/heads/lane/$ln_" "$sh_:$q_" "$mc_:$qm_" "--force-with-lease=refs/heads/lane/$ln_:$cur_" "--force-with-lease=$q_:" "--force-with-lease=$qm_:"
   while read -r or_ os_; do

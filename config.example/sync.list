@@ -24,6 +24,8 @@ Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.sha
 훅           .claude/hooks/tests/hc-lane-wait-guard.test.sh   tools:claude/hooks/tests/hc-lane-wait-guard.test.sh macos
 도구         .local/bin/hc-lane                               tools:bin/hc-lane                               macos
 도구         .local/lib/hc-lane/**                            tools:lib/hc-lane/                              macos
+도구         .local/lib/hc-merger/**                          tools:lib/hc-merger/                            macos
+도구         .local/bin/tests/hc-merger-go.test.sh            tools:tests/hc-merger-go.test.sh                macos
 도구         .local/bin/hc-sweep                              tools:bin/hc-sweep                              macos
 도구         .local/bin/ovis-split                            tools:bin/ovis-split                            macos
 도구         .local/bin/tests/isolate.sh                      tools:tests/isolate.sh                          macos

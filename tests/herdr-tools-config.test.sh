@@ -186,6 +186,14 @@ run - sync-lint "$T/sr" "$T/sl"
 t "sync-lint: 다른 대상의 bin 줄은 그 대상 lib 줄이 따로 있어야" '[ $rc = 1 ] && [ "$out" = "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1" ]'
 run - sync-lint "$T/sr" "$T/none"
 t "sync-lint: sync.list 없음은 종료 2" '[ $rc = 2 ]'
+# 함께 쓰는 lib(lib/<이름>/OWNER = 쓰는 도구): hc-lane bin 줄은 hc-merger 나무 줄도 같은 대상으로 요구한다(2026-11-21 merger-go)
+mkdir -p "$T/sd/lib/hc-lane" "$T/sd/lib/hc-merger"; echo hc-lane >"$T/sd/lib/hc-merger/OWNER"
+printf '도구 .local/bin/hc-lane tools:bin/hc-lane macos\n도구 .local/lib/hc-lane/** tools:lib/hc-lane/ macos\n' >"$T/sd.list"
+run - sync-lint "$T/sd" "$T/sd.list"
+t "sync-lint: hc-lane에 hc-merger lib 줄이 없으면 더할 줄" '[ $rc = 1 ] && [ "$out" = "도구  .local/lib/hc-merger/**  tools:lib/hc-merger/  macos" ]'
+printf '도구 .local/lib/hc-merger/** tools:lib/hc-merger/ macos\n' >>"$T/sd.list"
+run - sync-lint "$T/sd" "$T/sd.list"
+t "sync-lint: hc-merger lib 줄이 있으면 통과" '[ $rc = 0 ] && [ -z "$out" ]'
 EXR=$(cd "$here/.." && pwd)
 run - sync-lint "$EXR" "$EX/sync.list"
 t "sync-lint: config.example/sync.list 통과" '[ $rc = 0 ] && [ -z "$out" ]'

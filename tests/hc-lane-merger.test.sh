@@ -29,6 +29,7 @@ EOF
 chmod +x "$T/bin/hc"
 export PATH="$T/bin:$PATH" T
 unset HC_LANE HC_TERMINAL_ID HC_LANE_MACHINE XDG_STATE_HOME HC_LANE_OWNER HERDR_MERGER HERDR_TOOLS_CONFIG HERDR_LAND_PUSH_EXTRA
+export HC_LANE_MERGER_IMPL=${HC_LANE_MERGER_IMPL:-go}   # 병합기 판(go·bash) — 두 판이 같은 계약을 지킨다(tests/hc-lane-merger-bash.test.sh가 bash로)
 export HC_LANE_MACHINE=box   # 이 기계 이름 = 켬 표식 refs/herdr/merger/box의 기계(병합기는 바퀴마다 그 표식이 자기 것인지 본다)
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 HOME="$T"
 EV=$T/.local/state/hc-lane/events.tsv LE=$T/.local/state/hc-lane/land-events.tsv tab=$(printf '\t')
@@ -589,6 +590,13 @@ lane a l-zz zz.txt zz; land a l-zz; sleep 1
 lane b l-aa aa.txt aa; land b l-aa
 merge
 t "순서: 먼저 낸 l-zz 다음 l-aa(이름순 아님)" '[ "$(mainlog | head -n 2 | paste -sd , -)" = l-aa,l-zz ] || { mainlog | head -n 3; false; }'
+# 우선(2026-11-21 merger-go): 제출 기록에 priority=<HC_LANE_PRIORITY, 없으면 보통>. Go 판은 우선 → 제출 시각 순(bash 판은 제출 시각 순만)
+lane a l-pl pl.txt pl; land a l-pl; sleep 1
+lane b l-pu pu.txt pu; out=$(cd "$W/b/proj" && HC_LANE_PRIORITY=긴급 HC_LANE=l-pu "$LANE" land 2>"$T/err"); rc=$?
+pmeta() { og log -1 --format=%B "refs/merge-queue-meta/$(qrefs | grep -- "-$1\$" | sed 's|refs/merge-queue/||')"; }
+t "우선: 제출 기록에 priority=긴급·보통(없으면 보통)" '[ $rc = 0 ] && pmeta l-pu | grep -Fq "priority=긴급" && pmeta l-pl | grep -Fq "priority=보통" || { cat "$T/err"; pmeta l-pu; false; }'
+merge
+[ "$HC_LANE_MERGER_IMPL" = bash ] || t "우선: 늦게 낸 긴급이 먼저 착지(Go 판)" '[ $mrc = 0 ] && [ "$(mainlog | head -n 2 | paste -sd , -)" = l-pl,l-pu ] || { mainlog | head -n 3; cat "$T/merr"; false; }'
 # 시험 중간 3: 작업 표식은 rebase해 넣은 커밋을 가리키고, 표식 push가 거절되면(그새 다른 값) main도 그대로
 printf '#!/bin/sh\nrm -f "$T/vhook.l-jr"\nd=$(mktemp -d "$T/jr.XXXXXX") && git clone -q "$O" "$d/c" && cd "$d/c" && printf "jr\\n" >jr-other.txt && git add jr-other.txt && git commit -qm l-jr-other && git push -q origin main\n' >"$T/vhook.l-jr"; chmod +x "$T/vhook.l-jr"
 lane a l-jr jr.txt jr

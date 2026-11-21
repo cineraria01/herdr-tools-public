@@ -1,0 +1,133 @@
+package main
+
+// 후보 작업 트리에서 묶음 쌓기와 착지 부르기(bash 판 mround의 뒤쪽·mrun_candidate).
+
+import (
+	"bufio"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// stack: 묶음 뒤쪽 구성원을 앞 구성원 위에 차례로 얹는다(그 제출이 기준에서 갈라진 뒤의 커밋만). 충돌하는 구성원은 이번 묶음에서
+// 빼고 큐에 그대로. 착지를 부를 수 있으면 true
+func (m *M) stack() bool {
+	// 뒤 제출이 더 새 기준에서 되돌린 변경을 옛 트리에 얹으면 빈 커밋으로 사라진다 — 첫 후보를 이번 기준으로 맞춘다.
+	// 충돌하면 원래 제출 하나로 착지의 rerere 절차를 탄다
+	if inLog(m.mwt, m.lgf, "rebase", "-q", "--reapply-cherry-picks", m.B) != 0 {
+		m.writeCap(1)
+		m.fin()
+		return false
+	}
+	k := []int{0}
+	for i := 1; i < len(m.b); i++ {
+		mf, rc := out("merge-base", m.b[i].s, m.B)
+		if rc != 0 {
+			die("merger: git merge-base 실패(%s)", m.b[i].l)
+		}
+		if inLog(m.mwt, m.lgf, "rebase", "-q", "--onto", m.br, mf, m.b[i].s) == 0 {
+			if inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br) != 0 {
+				m.defer_("후보 가지 전환 실패")
+				return false
+			}
+			k = append(k, i)
+		} else {
+			if inLog(m.mwt, m.lgf, "rebase", "--abort") != 0 || inLog(m.mwt, m.lgf, "checkout", "-q", "-f", m.br) != 0 {
+				m.defer_("앞 구성원의 후보 작업 트리를 복구하지 못했다")
+				return false
+			}
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 묶음에서 뺌 — %s(앞 구성원 위에 얹으면 충돌, 큐에 그대로)\n", m.b[i].l)
+		}
+	}
+	if len(k) < len(m.b) {
+		m.keep(k...)
+		m.jwrite()
+		m.exbuild()
+	}
+	return true
+}
+
+// runCandidate: 준비 훅(.claude/herdr-setup.sh — 실패는 일시 실패 75) 뒤 hc-lane land를 후보 작업 트리에서. 둘 다 새 프로세스 무리로,
+// 출력은 로그 뒤에. 준비 훅의 코드 색인은 색인 도구를 PATH에서 빼 건너뛰게 한다(곧 지울 폴더를 색인하면 검증과 CPU를 다툰다)
+func (m *M) runCandidate() int {
+	lf, err := os.OpenFile(m.lgf, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 착지 로그를 열지 못했다: %v\n", err)
+		return 75
+	}
+	defer lf.Close()
+	if _, err := os.Stat(m.mwt + "/.claude/herdr-setup.sh"); err == nil {
+		c := exec.Command("bash", ".claude/herdr-setup.sh")
+		c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
+		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+m.top, "LANE_BASE="+m.base)
+		if waitGroup(c, m.mj+"/child") != 0 {
+			fmt.Fprintln(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패")
+			return 75
+		}
+	}
+	c := exec.Command(gSelf, "land", m.base)
+	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
+	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
+		"HERDR_LAND_VERDICT="+m.bv, "HERDR_LAND_PATCHID="+m.bp, "HERDR_LAND_SHA="+m.C0)
+	return waitGroup(c, m.mj+"/child")
+}
+
+// ponytail: 도구 이름 하나로 거름, 준비 훅이 다른 색인 길을 쓰면 그때 LANE_MERGER 같은 표시로
+func pathWithout(tool string) string {
+	var keep []string
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if st, err := os.Stat(filepath.Join(d, tool)); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			continue
+		}
+		keep = append(keep, d)
+	}
+	return strings.Join(keep, ":")
+}
+
+// mktempDir: <폴더>/c-XXXXXX(6글자 — 남은 빈 폴더를 wtclean이 이 꼴로 거둔다)
+func mktempDir(parent string) (string, error) {
+	const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	for try := 0; try < 100; try++ {
+		var r [6]byte
+		if _, err := rand.Read(r[:]); err != nil {
+			return "", err
+		}
+		for i := range r {
+			r[i] = abc[int(r[i])%len(abc)]
+		}
+		p := parent + "/c-" + string(r[:])
+		err := os.Mkdir(p, 0o700)
+		if err == nil {
+			return p, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("임시 폴더 이름이 계속 겹친다: %s", parent)
+}
+
+// tail5: 로그 끝 다섯 줄을 화면에
+func tail5(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	var lines []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+		if len(lines) > 5 {
+			lines = lines[1:]
+		}
+	}
+	for _, l := range lines {
+		fmt.Println(l)
+	}
+}

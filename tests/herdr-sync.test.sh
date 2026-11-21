@@ -572,9 +572,11 @@ if [ -f "$LIST" ]; then
   done
   for f in "$here"/../bin/*; do b=${f##*/}; t "config.example/sync.list: bin/$b" 'grep -q " tools:bin/$b " "$LIST"'; done
   # lib/<도구>/(본체가 source하는 함수 파일)는 나무 줄로, 대상은 그 도구 줄과 같게(빠지면 그 기계의 도구가 종료 1)
-  for f in "$here"/../lib/*/; do [ -d "$f" ] || continue; b=$(basename "$f")
-    t "config.example/sync.list: lib/$b/ 나무 줄, 대상은 bin/${b}와 같음" \
-      '[ -n "$(awk -v b="$b" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ] && [ "$(awk -v b="$b" "\$3 == \"tools:lib/\" b \"/\" && \$2 ~ /\\/\\*\\*\$/ {print \$4}" "$LIST")" = "$(awk -v b="$b" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ]'
+  # 도구가 함께 쓰는 lib(bin 없음, lib/<이름>/OWNER에 쓰는 도구 이름)는 그 도구 줄과 견준다 — 예: hc-merger(hc-lane이 빌드해 부르는 병합기 Go 판)
+  for f in "$here"/../lib/*/; do [ -d "$f" ] || continue; b=$(basename "$f"); o=$b
+    [ ! -f "$f/OWNER" ] || o=$(head -n 1 "$f/OWNER")
+    t "config.example/sync.list: lib/$b/ 나무 줄, 대상은 bin/${o}와 같음" \
+      '[ -n "$(awk -v b="$o" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ] && [ "$(awk -v b="$b" "\$3 == \"tools:lib/\" b \"/\" && \$2 ~ /\\/\\*\\*\$/ {print \$4}" "$LIST")" = "$(awk -v b="$o" "\$3 == \"tools:bin/\" b {print \$4}" "$LIST")" ]'
   done
 fi
 
