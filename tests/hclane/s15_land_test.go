@@ -73,6 +73,12 @@ func landRerere(k *K) {
 	k.seed("c", "c")
 	k.lnd(wt)
 	k.check("land: herdr-verify.sh가 없으면 실패, push 안 함", k.rc == 1 && k.otop() == "c" && strings.Contains(k.errf(), "herdr-verify.sh"))
+	// go-followups(land-metrics 높음): 추적 안 된 검증 스크립트로는 검증·착지하지 않는다 — 후보 커밋의 그 파일과 다르면 멈춤(까닭 한 줄)
+	write(k.t, wt+"/.claude/herdr-verify.sh", "echo untracked-verify-ran; exit 0\n")
+	k.lnd(wt)
+	k.check("land: 추적 안 된 herdr-verify.sh면 돌리지 않고 멈춤, push 안 함", k.rc == 1 && k.otop() == "c" &&
+		!strings.Contains(k.out, "untracked-verify-ran") && strings.Contains(k.errf(), "일치하지 않아 실행하지 않았다"))
+	os.Remove(wt + "/.claude/herdr-verify.sh")
 	k.seed(".claude/wt-verify.sh", "exit 0")
 	k.lnd(wt)
 	k.check("land: 옛 wt-verify.sh만 있어도 실패(옛 이름 갈래 없음)", k.rc == 1 && k.otop() == ".claude/wt-verify.sh")
@@ -89,6 +95,14 @@ func landRerere(k *K) {
 	k.sh(wt, `printf 'echo vfail; exit 9\n' >.claude/herdr-verify.sh && git commit -qm vf -- .claude/herdr-verify.sh`)
 	k.lnd(wt)
 	k.check("land: 검증이 실패하면 멈추고 push 안 함", k.rc == 1 && k.otop() == "l-nov" && strings.Contains(k.out, "vfail") && strings.Contains(k.errf(), "검증 실패"))
+	// 커밋의 검증은 실패인데 로컬에서 고친 판(skip-worktree로 git status에도 안 보임)으로 통과시키지 못한다
+	k.run("--name", "l-sw", "--repo", k.R, "--", "true")
+	wt = k.R + ".wt/l-sw"
+	k.sh(wt, `printf 'echo swfail; exit 9\n' >.claude/herdr-verify.sh && git commit -qm sw -- .claude/herdr-verify.sh &&
+  git update-index --skip-worktree .claude/herdr-verify.sh && printf 'echo local-pass; exit 0\n' >.claude/herdr-verify.sh`)
+	k.lnd(wt)
+	k.check("land: 작업 트리의 검증 스크립트가 커밋 판과 다르면(숨긴 로컬 수정) 돌리지 않고 멈춤", k.rc == 1 && k.otop() == "l-nov" &&
+		!strings.Contains(k.out, "local-pass") && strings.Contains(k.errf(), "일치하지 않아 실행하지 않았다"))
 
 	// 15a. land-log
 	tab := "\t"

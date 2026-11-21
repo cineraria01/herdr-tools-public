@@ -32,7 +32,7 @@ if [ -f "$gr" ]; then
   printf 'module fake\n\ngo 1.24\n' >"$T/go.mod"
   printf 'package main\n\nimport (\n\t"fmt"\n\t"os"\n)\n\nfunc main() { fmt.Println("go", len(os.Args)-1, os.Getenv("FAKE_ENV")) }\n' >"$T/cmd/hc-fake/main.go"
   mkdir -p "$T/home"
-  gr_() { (unset HC_FAKE_IMPL HC_FAKE_BIN HERDR_IMPL GOPATH GOCACHE; export HOME=$T/home; for kv in "$@"; do export "$kv"; done
+  gr_() { (unset HC_FAKE_IMPL HC_FAKE_BIN HERDR_IMPL GOPATH GOCACHE XDG_STATE_HOME; export HOME=$T/home; for kv in "$@"; do export "$kv"; done
     . "$T/lib/go-run.sh"; FAKE_ENV=e go_run hc-fake a b; echo "돌아옴 $?") 2>"$T/err"; }
   t() { if [ "$2" = "$3" ]; then echo "ok - go-run: $1"; else echo "FAIL - go-run: $1 — 바람 「$3」, 얻음 「$2」"; cat "$T/err"; fail=1; fi; }
   t "처음엔 빌드해 exec(인자·함수 앞 환경 그대로)" "$(gr_)" "go 2 e"
@@ -44,6 +44,13 @@ if [ -f "$gr" ]; then
   t "_BIN이 깨졌으면 auto는 경고하고 0" "$(gr_ HC_FAKE_BIN=/없는/바이너리)" "돌아옴 0"
   t "그 경고" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
   t "_BIN이 깨졌고 IMPL=go면 1" "$(gr_ HC_FAKE_BIN=/없는/바이너리 HC_FAKE_IMPL=go)" "돌아옴 1"
+  # 리눅스·go 없음(받기 대상이 아님, 셸 판이 정상 경로): 크게 경고하지 않고 처음 한 번만 한 줄(go-followups)
+  nogo=(HC_FAKE_BIN=/없는/바이너리 PATH=/없음 GO_RUN_GOS= GO_RUN_OS=linux-gnu)
+  t "리눅스·go 없음: 0" "$(gr_ "${nogo[@]}")" "돌아옴 0"
+  t "리눅스·go 없음: 크게 경고하지 않고 한 줄 안내" "$(grep -c '경고' "$T/err") $(grep -c 'go가 없어 셸 판' "$T/err") $(wc -l <"$T/err" | tr -d ' ')" "0 1 1"
+  t "리눅스·go 없음: 두 번째부터 조용히" "$(gr_ "${nogo[@]}") $(wc -l <"$T/err" | tr -d ' ')" "돌아옴 0 0"
+  gr_ HC_FAKE_BIN=/없는/바이너리 PATH=/없음 GO_RUN_GOS= GO_RUN_OS=darwin27 >/dev/null
+  t "macOS·go 없음은 그대로 크게" "$(grep -c '경고: Go 판을 쓸 수 없다' "$T/err")" 1
   sleep 1; printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("새 판") }\n' >"$T/cmd/hc-fake/main.go"
   t "소스가 새로우면 다시 빌드" "$(gr_)" "새 판"
   printf 'package main\n\nfunc main() { 깨짐 }\n' >"$T/cmd/hc-fake/main.go"; touch "$T/cmd/hc-fake/main.go"

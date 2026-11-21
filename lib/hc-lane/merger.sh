@@ -76,6 +76,7 @@ submit_cmd() {
   if receipt_matches "refs/merge-done/$ln_" "$dn_"; then
     echo "hc-lane land: 이 커밋은 병합기가 이미 $base 에 넣었다(refs/merge-done/$ln_) — 제출할 것 없음"; exit 0
   fi
+  sprecheck   # 제출 전 싼 사전 검사(merger-result.sh)
   # 같은 레인의 옛 표식·기록(다시 제출하면 새 것만 남는다)
   olds_=$(printf '%s\n' "$rs_" | awk -v l="$ln_" '{ n = $2; if (sub(/^refs\/merge-queue(-meta)?\//, "", n) && n ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-/ && substr(n, 12) == l) print $2, $1 }')
   # 큐 이름은 지금 큐와 반송된 것(refs/merge-failed/)에 없는 초로(3차 중간 2 — 같은 초에 세 번 내면 옛 반송 이름과 겹쳤다)

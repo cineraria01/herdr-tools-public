@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"herdr-tools/internal/argp"
+	"herdr-tools/internal/proc"
 	"herdr-tools/internal/pyjson"
 )
 
@@ -98,7 +99,7 @@ func runHC(args ...string) []byte {
 	var o, e bytes.Buffer
 	c := exec.Command("hc", args...) // Stdin nil = /dev/null
 	c.Stdout, c.Stderr = &o, &e
-	if err := c.Run(); err != nil {
+	if err := proc.Run(c); err != nil { // 상한(proc.Limit) — 넘으면 아래 「못 부름」으로 죽는다
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			die("hc %s 실패(종료 %d): %s", strings.Join(args, " "), ee.ExitCode(), strings.TrimSpace(e.String()))

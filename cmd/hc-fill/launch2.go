@@ -3,6 +3,7 @@ package main
 // 띄우기 — 셸 판 lib/hc-fill/launch.sh 뒷부분(launch · place · early_sec · resume_sec)과 Go 판에서 더한 지휘 기계 파일 붙이기
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -273,7 +274,8 @@ func lcBlank(r rune) bool {
 }
 
 // lcPasteScan: 본문이 가리키는 이 기계 HOME 아래 일반 파일(<HOME>/… 또는 ~/…)의 원문 절. 막힐 때는 shown(지시문에 적힌 꼴)·abs·why.
-// 읽히지 않거나 일반 파일이 아닌 경로는 그냥 건너뛴다. 같은 경로는 한 번만
+// 읽히지 않거나 일반 파일이 아닌 경로는 그냥 건너뛴다. 64KiB 넘는 파일·바이너리(NUL)·합계 256KiB를 넘기는 파일은 경로만 적는다
+// (막는 것은 비밀 꼴뿐). 같은 경로는 한 번만
 func lcPasteScan(body string) (paste, shown, abs, why string) {
 	home := strings.TrimRight(HOME, "/")
 	if home == "" {
@@ -311,16 +313,22 @@ func lcPasteScan(body string) (paste, shown, abs, why string) {
 				break
 			}
 			seen[p] = true
+			// 큰 파일·바이너리(설명으로 적은 Go 바이너리 경로 등)는 붙이지 않고 경로만 — 레인은 띄운다(2026-11-21 go-launchd-tcc가
+			// 5.5MB 바이너리 경로에 걸려 아예 안 뜸). 비밀 꼴만 띄우지 않는 까닭이다
+			pathOnly := "\n## (붙임) 지휘 기계 파일 — " + c + "\n(붙이지 않음: 큼/바이너리 — 경로만)\n"
 			if st.Size() > lcPasteFileMax {
-				return "", c, p, fmt.Sprintf("파일 상한 64KiB를 넘는다(%d바이트)", st.Size())
+				b.WriteString(pathOnly)
+				break
 			}
 			data, err := os.ReadFile(p)
 			if err != nil {
 				break // 읽히지 않으면 붙이지 않는다
 			}
-			if total += len(data); total > lcPasteAllMax {
-				return "", c, p, "붙임 합계 상한 256KiB를 넘는다"
+			if bytes.IndexByte(data, 0) >= 0 || total+len(data) > lcPasteAllMax {
+				b.WriteString(pathOnly)
+				break
 			}
+			total += len(data)
 			for _, s := range lcSecrets {
 				if s.re.Match(data) {
 					return "", c, p, "비밀 꼴(" + s.name + ")을 담았다"
@@ -469,7 +477,8 @@ func place(lane, p, brief, only, reply, owner, after string) {
 }
 
 // early_sec <선행 목록> <기본 가지>: 먼저 띄움 레인의 run 지시문 끝에 붙일 절(셸 판 $(early_sec …) — 끝 줄바꿈 없음). 선행마다 판정 줄이 따로다.
-// 기한은 고정 시각(지금 + 설정 early_wait시간)
+// 기한은 고정 시각(지금 + 설정 early_wait시간). 제목 판정은 grep -q 대신 끝까지 읽고 >/dev/null — 이력이 파이프 버퍼보다 길면
+// pipefail 셸에서 printf가 SIGPIPE로 끝나 들어간 커밋을 아직으로 봤다(go-followups)
 func earlySec(after, base string) string {
 	dl := time.Now().Unix() + int64(EWAIT)*3600
 	dls := time.Unix(dl, 0).Format("2006-01-02 15:04")
@@ -485,11 +494,11 @@ func earlySec(after, base string) string {
 			st, ok = since(a)
 		}
 		if ok {
-			w += " &&\n  { printf '%s\\n' \"$subjects\" | grep -Eq '" + re1 + a + re2 + "' || { o=$(git ls-remote origin 'refs/hc-landed/" + a +
+			w += " &&\n  { printf '%s\\n' \"$subjects\" | grep -E '" + re1 + a + re2 + "' >/dev/null || { o=$(git ls-remote origin 'refs/hc-landed/" + a +
 				"/*') && printf '%s\\n' \"$o\" | awk '{ s = $2; sub(/^refs\\/hc-landed\\/" + a + "\\//, \"\", s); if (s ~ /^[0-9]+$/ && s + 0 >= " + st +
 				") print $1 }' | ( while read -r s; do git merge-base --is-ancestor \"$s\" " + base + " && exit 0; done; exit 1 ); }; }"
 		} else {
-			w += " &&\n  printf '%s\\n' \"$subjects\" | grep -Eq '" + re1 + a + re2 + "'"
+			w += " &&\n  printf '%s\\n' \"$subjects\" | grep -E '" + re1 + a + re2 + "' >/dev/null"
 		}
 	}
 	now := time.Now().Format("2006-01-02 15:04")

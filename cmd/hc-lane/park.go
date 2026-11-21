@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 func lsVal(ls, ref string) (string, bool) {
@@ -37,7 +39,7 @@ func parkMain(args []string) int {
 	if ln == "" || !nameCharsOK(ln) {
 		die("park: 레인 이름을 모른다(HC_LANE 또는 레인 가지)")
 	}
-	switch code(exec.Command("git", "remote", "get-url", "origin").Run()) {
+	switch code(proc.Run(exec.Command("git", "remote", "get-url", "origin"))) {
 	case 0:
 	case 2:
 		errf("hc-lane park: 원격(origin)이 없어 주차하지 못한다 — 지시문의 기다림 블록으로\n")
@@ -84,7 +86,7 @@ func parkMain(args []string) int {
 	po := ""
 	if cur != sh || dl {
 		c := exec.Command("git", push...)
-		b, _ := c.CombinedOutput()
+		b, _ := proc.Combined(c) // 결과는 아래 ls-remote로 다시 본다
 		po = string(b)
 	}
 	rb, r := git("ls-remote", "origin", pr, pl)

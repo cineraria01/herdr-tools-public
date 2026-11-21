@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"herdr-tools/internal/proc"
 )
 
 // notYet: 「아직 셸」 — 포장(bin/hc-lane)이 셸 판으로 돈다
@@ -52,6 +54,7 @@ func pick(args []string) (s sub, rest []string, ok bool) {
 }
 
 func main() {
+	proc.Who = "hc-lane"
 	// 물려받은 fd(바깥 병합기 잠금 fd 18·19 등)를 자식에게 넘기지 않는다. Go가 여는 fd는 기본 O_CLOEXEC
 	for fd := 3; fd < 1024; fd++ {
 		syscall.CloseOnExec(fd)

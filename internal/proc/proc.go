@@ -29,19 +29,27 @@ func Code(err error) int {
 		}
 		return ee.ExitCode()
 	}
+	var te *TimeoutError
+	if errors.As(err, &te) {
+		return TimeoutCode // 「시간 넘김」 줄은 Run이 이미 적었다
+	}
 	fmt.Fprintf(os.Stderr, "%s: 명령을 띄우지 못했다: %v\n", Who, err)
 	return 127
 }
 
 var (
 	curMu    sync.Mutex
-	curPG    int  // 지금 기다리는 자식 무리(0 = 없음)
-	stopping bool // StopCurrent 뒤 — 새 자식을 띄우지 않는다
+	curPG    int              // 지금 기다리는 자식 무리(0 = 없음)
+	stopping bool             // StopCurrent 뒤 — 새 자식을 띄우지 않는다
+	bounded  = map[int]bool{} // Run(상한)이 따로 무리로 띄워 기다리는 자식 — 부른 쪽 무리를 꺼도 안 꺼지니 StopCurrent가 함께 끈다
 )
 
 // Wait: c를 새 무리로 띄워 끝날 때까지 기다리고 종료 코드를 돌려준다. record가 있으면 그 파일에 「pid<탭>시작 시각」을 적어 두고
 // 끝나면 지운다 — 이 실행이 죽어도 다음 실행이 그 자식이 아직 도는지 본다(ChildBusy). 기다리는 동안의 무리는 StopCurrent가 끈다
-func Wait(c *exec.Cmd, record string) int {
+func Wait(c *exec.Cmd, record string) int { return WaitMax(c, record, 0) }
+
+// WaitMax: Wait에 상한 max(0이면 없음) — 넘으면 「시간 넘김」 한 줄을 적고 그 무리째 TERM → 5초 → KILL(종료 코드는 신호의 것)
+func WaitMax(c *exec.Cmd, record string, max time.Duration) int {
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	curMu.Lock()
 	if stopping {
@@ -61,7 +69,17 @@ func Wait(c *exec.Cmd, record string) int {
 			fmt.Fprintf(os.Stderr, "%s: 경고 — 자식 기록을 쓰지 못했다: %v\n", Who, err)
 		}
 	}
+	var t *time.Timer
+	if max > 0 {
+		t = time.AfterFunc(max, func() {
+			fmt.Fprintf(os.Stderr, "%s: %s\n", Who, &TimeoutError{Head: head(c.Args), D: max})
+			StopGroup(pid, 5*time.Second)
+		})
+	}
 	rc := Code(c.Wait())
+	if t != nil {
+		t.Stop()
+	}
 	curMu.Lock()
 	curPG = 0
 	if stopping {
@@ -82,9 +100,15 @@ func Wait(c *exec.Cmd, record string) int {
 func StopCurrent(grace time.Duration) {
 	curMu.Lock()
 	stopping = true
-	pg := curPG
+	pgs := []int{}
+	if curPG != 0 {
+		pgs = append(pgs, curPG)
+	}
+	for pg := range bounded {
+		pgs = append(pgs, pg)
+	}
 	curMu.Unlock()
-	if pg != 0 {
+	for _, pg := range pgs {
 		StopGroup(pg, grace)
 	}
 }

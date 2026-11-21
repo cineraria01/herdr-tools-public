@@ -86,9 +86,15 @@ func TestAuditQueuedRejectsForeignVerdict(t *testing.T) {
 func TestAuditStallTick(t *testing.T) {
 	DATA = t.TempDir()
 	Q, AT, LOCAL, dry, EVBAD, CONN = DATA+"/queue.tsv", DATA+"/audit.tsv", "m", false, false, nil
-	confLines = []string{"done_stall 30"}
+	confLines = []string{"done_stall 30", "repo app m " + DATA}
+	TERMS, FETCHED, FETCHBAD = []Term{{M: "m", Addr: "m/inq", Name: "inq"}}, "", "" // 터미널 살아 있음(「끝남」 아님)
 	log := DATA + "/hc-lane.log"
 	if err := os.WriteFile(DATA+"/hc-lane", []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >>"+log+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 가짜 git: 원격 있음·기본 origin/main, 완료 sha는 이 클론에 있고 기본 브랜치에는 없음(merge-base 1)
+	gitf := "#!/bin/sh\ncase \" $* \" in *\" symbolic-ref \"*) echo origin/main;; *\" merge-base \"*) exit 1;; esac\nexit 0\n"
+	if err := os.WriteFile(DATA+"/git", []byte(gitf), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))

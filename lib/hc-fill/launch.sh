@@ -328,11 +328,12 @@ early_sec() {
   w="until ${fetch}subjects=\$(git log $2 --format=%s)"
   for a in $(printf %s "$1" | tr , ' '); do
     # after_ok와 같은 판정: 제목 머리, 또는 그 선행 줄을 넣은 뒤의 착지 표식 sha가 origin/<기본>의 조상(ls-remote·merge-base 오류면 아직)
+    # 제목은 grep -q 대신 끝까지 읽고 >/dev/null — 긴 이력이면 pipefail 셸에서 printf SIGPIPE로 들어간 커밋을 아직으로 봤다
     # 파이프 끝은 ( … ) 하위 셸 — { …; exit; }면 zsh(파이프 끝을 지금 셸에서 돈다)에서 그 exit가 기다림 셸째 끝낸다(2026-11-20)
     if [ -n "$fetch" ] && st_=$(since "$a"); then w="$w &&
-  { printf '%s\\n' \"\$subjects\" | grep -Eq '$re1$a$re2' || { o=\$(git ls-remote origin 'refs/hc-landed/$a/*') && printf '%s\\n' \"\$o\" | awk '{ s = \$2; sub(/^refs\\/hc-landed\\/$a\\//, \"\", s); if (s ~ /^[0-9]+\$/ && s + 0 >= $st_) print \$1 }' | ( while read -r s; do git merge-base --is-ancestor \"\$s\" $2 && exit 0; done; exit 1 ); }; }"
+  { printf '%s\\n' \"\$subjects\" | grep -E '$re1$a$re2' >/dev/null || { o=\$(git ls-remote origin 'refs/hc-landed/$a/*') && printf '%s\\n' \"\$o\" | awk '{ s = \$2; sub(/^refs\\/hc-landed\\/$a\\//, \"\", s); if (s ~ /^[0-9]+\$/ && s + 0 >= $st_) print \$1 }' | ( while read -r s; do git merge-base --is-ancestor \"\$s\" $2 && exit 0; done; exit 1 ); }; }"
     else w="$w &&
-  printf '%s\\n' \"\$subjects\" | grep -Eq '$re1$a$re2'"; fi
+  printf '%s\\n' \"\$subjects\" | grep -E '$re1$a$re2' >/dev/null"; fi
   done
   cat <<EOF
 

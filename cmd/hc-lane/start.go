@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 var (
@@ -42,7 +44,7 @@ func hcRead(a string) string {
 }
 
 func hcKeys(args ...string) bool {
-	return exec.Command("hc", append([]string{"keys"}, args...)...).Run() == nil
+	return proc.Run(exec.Command("hc", append([]string{"keys"}, args...)...)) == nil
 }
 
 func anyLine(re *regexp.Regexp, s string) bool {

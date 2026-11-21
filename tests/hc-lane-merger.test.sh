@@ -726,5 +726,15 @@ kill "$op" 2>/dev/null; wait "$op" 2>/dev/null
 t "격리: 바깥 잠금 fd 19를 쥔 채여도 병합기는 시험 HOME 아래 자기 잠금으로 큐를 처리(잠금에 안 막힘)" '[ $mrc = 0 ] && [ -z "$(qrefs)" ] && ! grep -Fq "아직 돈다" "$T/merr" && ls "$T"/.local/state/hc-lane/merger.*.lock >/dev/null 2>&1 || { echo "rc=$mrc"; cat "$T/merr"; false; }'
 t "격리: 시험은 T 밖 저장소를 못 찾는다(GIT_CEILING_DIRECTORIES), 물려받은 fd 19는 닫힘" '! git -C "$T" rev-parse --git-dir >/dev/null 2>&1 && ! { : >&19; } 2>/dev/null'
 
+# 제출 전 싼 사전 검사(go-followups — 병합기 15~25분 검증 뒤에야 줄 수 한도로 반송되던 것): 저장소의 .claude/herdr-precheck.sh가
+# 실패하면 큐에 넣지 않고 그 출력과 함께 종료 1, 통과하면 제출
+lane a l-pc pc.txt pc
+(cd "$W/a/proj" && printf 'echo precheck-ran; [ ! -e "$T/pcfail" ] || { echo precheck-no; exit 3; }\n' >.claude/herdr-precheck.sh &&
+  git add -- .claude/herdr-precheck.sh && git commit -qm pc -- .claude/herdr-precheck.sh)
+: >"$T/pcfail"; land a l-pc
+t "사전 검사: 실패면 제출 안 함(큐·lane 가지 없음), 출력과 까닭, 종료 1" '[ $rc = 1 ] && [ -z "$(qrefs)" ] && ! og rev-parse -q --verify refs/heads/lane/l-pc >/dev/null && printf "%s\n" "$out" "$(cat "$T/err")" | grep -Fxq precheck-no && grep -Fq "사전 검사" "$T/err" || { echo "rc=$rc"; echo "$out"; cat "$T/err"; false; }'
+rm -f "$T/pcfail"; land a l-pc
+t "사전 검사: 통과면 제출" '[ $rc = 0 ] && printf "%s" "$out" | grep -Fxq precheck-ran && qrefs | grep -Eq "^refs/merge-queue/[0-9]{10}-l-pc$" || { echo "rc=$rc"; echo "$out"; cat "$T/err"; false; }'
+
 echo "${n}개 중 실패 ${fails}개"
 [ $fails = 0 ]

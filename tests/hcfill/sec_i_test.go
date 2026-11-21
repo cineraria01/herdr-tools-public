@@ -43,7 +43,7 @@ func secI(k *K) {
 		k.run("run")
 		k.lj("box-1/st1:claude-code:st1:idle:/")
 		write(k.t, k.T+"/events", "2026-11-19T01:00:00Z\tm\tbox-1/st1\tst1\t완료\tfeed123\t끝\t1\n")
-		k.run("run")
+		k.runE([]string{"HC_FAKE_MB_RC=1"}, "run") // 완료 sha가 기본 브랜치에 없음(있으면 끝난 레인 — sec_j)
 		k.check("완료 뒤 멈춤: 감사·착지 없이 done_stall분 지나면 막힘 한 번(키 hf:<레인>:stall:<sha>)",
 			len(fgrepLines(strings.Join(fgrepLines(read(rep), "완료 뒤 멈춤"), "\n"), "--key hf:st1:stall:feed123")) > 0, read(rep))
 		appendFile(k.t, k.T+"/events", "2026-11-19T01:05:00Z\tm\tbox-1/st1\tst1\t착지\tfeed123\t착지\t1\n")

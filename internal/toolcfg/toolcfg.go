@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 const me = "herdr-tools-config"
@@ -157,7 +159,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		return 3
 	}
 	if len(files) == 0 {
-		if exec.Command("git", "rev-parse", "--git-dir").Run() != nil {
+		if proc.Run(exec.Command("git", "rev-parse", "--git-dir")) != nil {
 			return die2("lint: 파일을 주거나 git 저장소 안에서 부른다")
 		}
 		// 지금 읽은 패턴 파일 하나만 뺀다(패턴 글자가 자기에게 걸림). 실제 경로(링크 풂)로 견준다
@@ -169,7 +171,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		if h, err := filepath.EvalSymlinks(here); err == nil {
 			here = h
 		}
-		out, err := exec.Command("git", "ls-files", "-z").Output()
+		out, err := proc.Output(exec.Command("git", "ls-files", "-z"))
 		if err != nil {
 			return die2("lint: git ls-files 실패 — 추적 파일을 검사하지 못했다")
 		}

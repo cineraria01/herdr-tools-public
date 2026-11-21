@@ -1,5 +1,15 @@
 # hc-lane 함수: merger-result (bin/hc-lane가 읽는다. 함수는 bin/hc-lane 안 원래 정의 순서 그대로)
 
+# sprecheck: 제출 전 싼 사전 검사(go-followups, Go submit.go와 같게) — 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에.
+# 저장소에 .claude/herdr-precheck.sh가 있고 실패하면 큐에 넣지 않고 종료 1
+sprecheck() {
+  local rc
+  [ -f .claude/herdr-precheck.sh ] || return 0
+  lrun bash .claude/herdr-precheck.sh && return 0
+  rc=$?; lfail $rc
+  die "land(제출): 사전 검사(.claude/herdr-precheck.sh)가 실패해 큐에 넣지 않았다(종료 $rc) — 고쳐 커밋한 뒤 같은 줄을 다시"
+}
+
 # 제출 ID 표식은 필수다. 선택적인 작업 ID도 이름이 유효하지 않을 때만 건너뛴다.
 mmeta_refs() {
   [ -z "$mid_" ] || git check-ref-format "refs/hc-landed/$mid_" || return 1

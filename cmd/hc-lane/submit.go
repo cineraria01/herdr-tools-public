@@ -74,6 +74,8 @@ func mmeta(rec, sub string) bool {
 
 var sha40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+const precheck = ".claude/herdr-precheck.sh"
+
 // 제출 상태(셸 ln_ sd_ pending_)
 var sln, ssd, spending string
 
@@ -317,6 +319,13 @@ func submitCmd() {
 	if receiptMatches("refs/merge-done/"+sln, field2(rs, "refs/merge-done/"+sln)) {
 		fmt.Printf("hc-lane land: 이 커밋은 병합기가 이미 %s 에 넣었다(refs/merge-done/%s) — 제출할 것 없음\n", base, sln)
 		exit(0)
+	}
+	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
+	if isFile(precheck) {
+		if rc := lrun("bash", precheck); rc != 0 {
+			lfail(rc)
+			die("land(제출): 사전 검사(%s)가 실패해 큐에 넣지 않았다(종료 %d) — 고쳐 커밋한 뒤 같은 줄을 다시", precheck, rc)
+		}
 	}
 	// 같은 레인의 옛 표식·기록(다시 제출하면 새 것만 남는다)
 	oldRe := regexp.MustCompile(`^refs/merge-queue(-meta)?/`)

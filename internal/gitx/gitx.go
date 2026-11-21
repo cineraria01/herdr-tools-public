@@ -34,7 +34,7 @@ func (s State) String() string {
 func Run(dir string, stdout, stderr io.Writer, args ...string) int {
 	c := exec.Command("git", args...)
 	c.Dir, c.Stdout, c.Stderr = dir, stdout, stderr
-	return proc.Code(c.Run())
+	return proc.Code(proc.Run(c)) // 상한(proc.Limit) — 넘으면 TimeoutCode(모름)
 }
 
 // Out: $(git …) — 표준 출력(끝 줄바꿈 뺌)과 종료 코드. 종료 코드가 0이 아니면 출력은 빈 값(반쪽 출력을 믿지 않는다)

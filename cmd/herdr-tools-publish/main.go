@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/proc"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
 )
@@ -176,7 +177,7 @@ func main() {
 		if _, err := os.Stat(bdir + "/" + sha); err != nil {
 			c := exec.Command("git", "-C", repo, "cat-file", "blob", sha)
 			c.Stderr = os.Stderr
-			data, err := c.Output()
+			data, err := proc.Output(c)
 			if err != nil || os.WriteFile(bdir+"/"+sha, data, 0o600) != nil {
 				die("블롭을 꺼내지 못했다: %s", masked(p))
 			}
@@ -414,7 +415,7 @@ print("\n".join(out))`)
 	}
 	if c := exec.Command("git", "-c", "user.useConfigOnly=true", "--git-dir="+dir, "diff-tree", "-r", "--name-status", ptree, tree); true {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		c.Run()
+		proc.Run(c) // 보여 주기만 — 결과는 보지 않는다
 	}
 	if dry {
 		if bad {
@@ -471,7 +472,7 @@ func transfer(repo, dir, tree string, shas []string) bool {
 	}
 	c := exec.Command("git", "-c", "user.useConfigOnly=true", "--git-dir="+dir, "rev-list", "--objects", tree)
 	c.Stderr = os.Stderr
-	return c.Run() == nil
+	return proc.Run(c) == nil
 }
 
 var secretPats = []string{`-----BEGIN[A-Z0-9 ]*PRIVATE KEY`, `gh[pousr]_[A-Za-z0-9]{30,}`, `github_pat_[A-Za-z0-9_]{30,}`,

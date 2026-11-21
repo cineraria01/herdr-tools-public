@@ -1,5 +1,9 @@
 #!/bin/bash
 echo "$*" >>"$T_LOG/git.log"
+# GIT_HANG: 그 저장소(-C 값)의 remote 조회가 끝나지 않는다(커널 대기 흉내 — 바깥 명령 상한 시험). 손자 sleep pid는 hang.pid에
+if [ -n "${HC_FAKE_GIT_HANG-}" ] && [ "${2-}" = "$HC_FAKE_GIT_HANG" ] && [ "${3-}" = remote ]; then
+  sleep 30 & echo $! >>"$T_LOG/hang.pid"; sleep 30; exit 0
+fi
 if [ -n "${HC_REAL_REPO-}" ] && [ "${1-}" = -C ] && [ "${2-}" = "$HC_REAL_REPO" ]; then exec "$HC_REAL_GIT" "$@"; fi
 for a in "$@"; do case $a in
   fetch) [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)

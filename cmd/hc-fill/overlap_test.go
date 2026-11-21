@@ -131,15 +131,20 @@ func TestLcPaste(t *testing.T) {
 	if got, ok := lcPasteHome("~/doc.md", "-", "ln"); !ok || !strings.Contains(got, "API_KEY") {
 		t.Errorf("문서 속 이름만: %q %v", got, ok)
 	}
-	// 상한·비밀 꼴은 막힘(까닭과 경로)
-	for _, c := range []struct{ body, shown, why string }{
-		{"~/big.md 를 본다", "~/big.md", "파일 상한 64KiB"},
-		{"「~/sec.md」", "~/sec.md", "비밀 꼴(이름=값)"},
-		{"~/m/0.md ~/m/1.md ~/m/2.md ~/m/3.md ~/m/4.md", "~/m/4.md", "붙임 합계 상한 256KiB"},
-	} {
-		p, shown, abs, why := lcPasteScan(c.body)
-		if p != "" || shown != c.shown || !strings.HasPrefix(abs, HOME+"/") || !strings.Contains(why, c.why) {
-			t.Errorf("막힘 %q: shown %q abs %q why %q", c.body, shown, abs, why)
-		}
+	// 비밀 꼴은 막힘(까닭과 경로)
+	if p, shown, abs, why := lcPasteScan("「~/sec.md」"); p != "" || shown != "~/sec.md" || abs != HOME+"/sec.md" || !strings.Contains(why, "비밀 꼴(이름=값)") {
+		t.Errorf("막힘 비밀: shown %q abs %q why %q", shown, abs, why)
+	}
+	// 파일 상한·합계 상한·바이너리는 막지 않고 경로만(2026-11-21 go-followups-2 — 5.5MB 바이너리 경로에 레인이 아예 안 떴다)
+	only := func(c string) string {
+		return "\n## (붙임) 지휘 기계 파일 — " + c + "\n(붙이지 않음: 큼/바이너리 — 경로만)\n"
+	}
+	w("bin.dat", "a\x00b")
+	if got, ok := lcPasteHome("~/big.md 와 ~/bin.dat 를 본다", "-", "ln"); !ok || got != only("~/big.md")+only("~/bin.dat") {
+		t.Errorf("큼·바이너리: %q %v", got, ok)
+	}
+	got, ok = lcPasteHome("~/m/0.md ~/m/1.md ~/m/2.md ~/m/3.md ~/m/4.md", "-", "ln")
+	if !ok || strings.Count(got, "지휘 기계 파일 원문 — ") != 4 || !strings.HasSuffix(got, only("~/m/4.md")) {
+		t.Errorf("합계 상한: 넷은 원문, 다섯째는 경로만이어야 (ok %v, 원문 %d)", ok, strings.Count(got, "지휘 기계 파일 원문 — "))
 	}
 }

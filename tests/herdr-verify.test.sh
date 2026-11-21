@@ -132,6 +132,14 @@ t "HERDR_VERIFY_ALL=1: 무거운 시험까지 돌고 실패, 싼 검사는 한 �
 seq 10 >"$R/big"
 out=$(HC_LANE= bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
 t "한도 안: 싼 검사 통과 뒤 무거운 시험, line-budget은 한 번" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "통과 tests/x.test.sh" && [ "$(printf "%s\n" "$out" | grep -c "통과 tests/line-budget.test.sh")" = 1 ]'
+# 9. --cheap-only(제출 전 사전 검사 .claude/herdr-precheck.sh가 부른다, go-followups): 싼 검사만 돌고 무거운 시험은 안 부름
+cp "$src" "$R/.claude/herdr-verify.sh"; cp "${src%/*}/herdr-precheck.sh" "$R/.claude/herdr-precheck.sh"
+rm -f "$T/slow-ran"
+out=$(HC_LANE= bash "$R/.claude/herdr-precheck.sh" 2>&1); rc=$?
+t "사전 검사(--cheap-only): 싼 검사 통과, 무거운 시험 안 부름, 종료 0" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "통과 tests/line-budget.test.sh" && [ ! -e "$T/slow-ran" ] && ! printf "%s" "$out" | grep -q "tests/x.test.sh" || { printf "%s\n" "$out"; false; }'
+seq 601 >"$R/big"
+out=$(HC_LANE= bash "$R/.claude/herdr-precheck.sh" 2>&1); rc=$?
+t "사전 검사(--cheap-only): 줄 수 한도 넘김이면 종료 1" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "새 거대 파일 big 601줄" && [ ! -e "$T/slow-ran" ]'
 
 # 끝: 이 시험이 띄운 것 0
 t "이 시험의 고아 0" allgone

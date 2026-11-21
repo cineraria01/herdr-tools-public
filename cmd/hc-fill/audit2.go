@@ -510,6 +510,24 @@ func auditTick() {
 	}
 }
 
+// stallDone <대기열 줄> <완료 사건> <완료 sha>: 멈춤이 아니라 끝난 레인인가(2026-11-21 헛알림 — flaky-land 1420분·land-turn-short
+// 3999분 등 넷 다 터미널이 닫혔거나 착지할 것이 없었다). ① ls의 「끝남」(그 주소에 그 이름 터미널 없음) ② 커밋 없는 완료(사건 글
+// 「커밋 0」) ③ 완료 sha가 이 기계 클론의 기본 브랜치에 들어 있음(조사만 한 레인은 sha가 띄울 때 기준이라 여기 걸린다). ③을 모르면
+// (fetch·merge-base 실패) 알리지 않는다. 그 sha가 이 클론에 없으면(남의 기계에만 있는 커밋) 기본 브랜치에도 없다 — 알린다
+func stallDone(q Row, ev, sha string) bool {
+	if !lalive(q.F(8), q.F(1)) || strings.Contains(evF(ev, 7), "커밋 0") {
+		return true
+	}
+	if lcFetch(q.F(2), true) != 0 {
+		return true // 기본 브랜치를 모름
+	}
+	if _, rc := run("git", "-C", FR, "cat-file", "-e", sha+"^{commit}"); rc != 0 {
+		return false
+	}
+	_, rc := run("git", "-C", FR, "merge-base", "--is-ancestor", sha, FB)
+	return rc != 1
+}
+
 // stallTick(Go 판에서 더함 — 받은편지 레인이 「완료 — 감사 기다림」으로 9시간 멈춘 일 뒤): up 줄(감사 줄 빼고)의 그 실행 마지막
 // 사건이 「완료」이고 그 시각 뒤로 감사·착지·제출 없이 설정 done_stall분(기본 60, 0이면 끔) 지났으면 그 레인 주인 지휘에 한 번(키
 // hf:<레인>:stall:<완료 sha> — hc-lane이 한 번만 보낸다). 그 sha 차수가 끝 상태가 아니면 알리지 않는다. 끝난 차수(수거됨 등)가 있으면
@@ -557,7 +575,7 @@ func stallTick() {
 			}
 		}
 		mins := int(now.Sub(t0) / time.Minute)
-		if open || mins < lim {
+		if open || mins < lim || stallDone(q, l, s) {
 			continue
 		}
 		own := dash(q.F(12))

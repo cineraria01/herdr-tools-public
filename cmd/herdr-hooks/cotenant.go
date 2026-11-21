@@ -18,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 const us = "\x1f"
@@ -339,11 +341,15 @@ func (g *cg) gitRun(env []string, stdin string, args ...string) (string, int) {
 	if stdin != "" {
 		c.Stdin = strings.NewReader(stdin)
 	}
-	out, err := c.Output()
+	out, err := proc.Output(c) // 상한(proc.Limit) — 멈춘 git이 도구 호출을 붙잡지 않게
 	if err == nil {
 		return string(out), 0
 	}
 	var ee *exec.ExitError
+	var te *proc.TimeoutError
+	if errors.As(err, &te) {
+		return "", proc.TimeoutCode
+	}
 	if errors.As(err, &ee) {
 		return string(out), ee.ExitCode()
 	}

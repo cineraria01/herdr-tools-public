@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"herdr-tools/internal/proc"
 )
 
 // ---------- hc-lane-wait-guard ----------
@@ -394,7 +396,7 @@ func loopNoQuestion(_ []byte, _, stderr io.Writer) int {
 	}
 	c := exec.Command(hc, "get", id, "--json")
 	c.Stdin = nil
-	out, err := c.Output()
+	out, err := proc.Output(c)
 	if err != nil {
 		return 0
 	}

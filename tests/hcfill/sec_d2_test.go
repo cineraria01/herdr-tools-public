@@ -141,12 +141,12 @@ func secD2(k *K) {
 		hasF(rf, "# 지시문 e1") && hasF(rf, "### 착지 STEPS e1 slow") && hasE(rf, "^## 먼저 띄움") && hasF(rf, "선행 대기 초과") &&
 			hasF(rf, "git rebase origin/main") && hasF(rf, "선행 레인(pa, pc)"), read(rf))
 	joined := false
-	for _, l := range fgrepLines(read(rf), "grep -Eq") {
+	for _, l := range fgrepLines(read(rf), "| grep -E '") {
 		if regexp.MustCompile(`pa.*pc|pc.*pa`).MatchString(l) {
 			joined = true
 		}
 	}
-	k.check("먼저 띄움 절: 선행마다 판정 줄이 따로(두 선행을 한 줄로 이어 붙이지 않음)", countF(rf, "grep -Eq") == 2 && !joined, read(rf))
+	k.check("먼저 띄움 절: 선행마다 판정 줄이 따로(두 선행을 한 줄로 이어 붙이지 않음)", countF(rf, "| grep -E '") == 2 && !joined, read(rf))
 	// 기다림 블록의 조건을 그대로 돌려 본다: 가짜 git(fetch 성공, log는 $T/subjects)
 	writeX(k.t, k.T+"/eg/git", "#!/bin/sh\ncase $1 in fetch) exit 0 ;; log) cat \"$T_LOG/subjects\" ;; esac\n")
 	cond := dCond(rf)

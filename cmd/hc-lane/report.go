@@ -12,6 +12,7 @@ import (
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 )
 
 // reportCmd(common.go)는 이 명령을 따로 부른다(포장 → 이 Go 판) — 이 파일의 본체는 reportMain
@@ -21,7 +22,7 @@ func init() { register("report", reportMain, noHelp) }
 func reportPending(lane, sha string) int {
 	c := exec.Command("git", "rev-parse", "--git-common-dir")
 	c.Env = append(os.Environ(), "LC_ALL=C")
-	ob, err := c.CombinedOutput()
+	ob, err := proc.Combined(c)
 	if err != nil {
 		if strings.HasPrefix(string(ob), "fatal: not a git repository (or any ") {
 			return 1

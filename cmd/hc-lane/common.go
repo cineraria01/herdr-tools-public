@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 var (
@@ -58,6 +61,10 @@ func code(err error) int {
 		}
 		return 128 + 15
 	}
+	var te *proc.TimeoutError
+	if errors.As(err, &te) {
+		return proc.TimeoutCode // 상한에 걸림(proc.Limit) — 모름
+	}
 	return 127
 }
 
@@ -76,7 +83,7 @@ func runCmd(o cmdOpt, name string, args ...string) int {
 	if len(o.env) > 0 {
 		c.Env = append(os.Environ(), o.env...)
 	}
-	return code(c.Run())
+	return code(proc.Run(c)) // git·hc·ssh 등은 상한 안에서만(proc.Limit)
 }
 
 // trim: $(…)처럼 끝 줄바꿈을 모두 뺀다

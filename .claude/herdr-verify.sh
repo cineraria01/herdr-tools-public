@@ -1,5 +1,6 @@
 #!/bin/bash
 # herdr-tools 검증: 문법·개인 값·싼 검사(CHEAP) 먼저 — 실패면 바로 끝 — 그다음 tests/*.test.sh 전부(훅 시험은 Go — claude/hooks/tests/*_test.go, tests/hc-merger-go.test.sh의 go test ./...가 두 판으로). hc-lane land가 이것을 부른다.
+# --cheap-only: 문법·개인 값·싼 검사까지만(.claude/herdr-precheck.sh — 병합기 제출 직전).
 # 고아 검사: 시험마다 따로 프로세스 무리(pgid)로 돌린다. 시험이 끝난 뒤 그 무리에 남은 프로세스, 또는 검증 중 새로 생겨
 # 부모가 1이 된 프로세스 가운데 명령 줄이나 cwd에 이 폴더 경로가 든 것(과 그 자손)은 고아다: 목록(pid·cwd·명령)을 찍고
 # 끄고(TERM, 3초 뒤 KILL) 검증 실패. 단 cwd로만 걸리고 명령 줄에 /.claude/가 든 것(이 폴더에서 도는 Claude 세션의
@@ -107,6 +108,8 @@ sys.exit(1)
 PY
 }
 for t in $CHEAP; do run "$t"; done
+# --cheap-only: 싼 검사까지만(제출 전 사전 검사 .claude/herdr-precheck.sh — go-followups)
+if [ "${1-}" = --cheap-only ]; then rm -rf "$tmp"; exit $fail; fi
 if [ $fail != 0 ] && [ "${HERDR_VERIFY_ALL-}" != 1 ]; then
   echo "실패 싼 검사 — 무거운 시험을 건너뛰고 끝 (끝까지 돌리려면 HERDR_VERIFY_ALL=1)"
   rm -rf "$tmp"

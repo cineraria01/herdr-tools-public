@@ -23,6 +23,15 @@ go_run_root=$(cd "$go_run_root" && pwd)
 if [ -f "$go_run_root/../go.mod" ]; then go_run_root=$(cd "$go_run_root/.." && pwd); else go_run_root=$go_run_root/herdr-go; fi
 go_run_find=/usr/bin/find
 [ -x "$go_run_find" ] || go_run_find=find
+go_run_gos=${GO_RUN_GOS-/opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go}   # PATH 밖에서 찾아볼 go(시험은 비운다)
+
+# go_run_go: 쓸 go 경로를 찍는다(없으면 빈 줄)
+go_run_go() {
+  local a
+  command -v go 2>/dev/null && return 0
+  for a in $go_run_gos; do [ -x "$a" ] && { echo "$a"; return 0; }; done
+  return 0
+}
 
 # go_run_up <이름>: 대문자로, -는 _ — 결과는 go_run_up_r (포크 없이: bash 3.2에는 ${x^^}가 없다)
 go_run_up() {
@@ -102,8 +111,7 @@ go_run() {
     fi
     if [ -z "$fresh" ] && [ -d "$go_run_root/cmd/$tool" ] && { [ -n "$stale" ] || [ ! -x "$bin" ] || [ -n "$(go_run_newer "$bin")" ]; }; then
       [ "${GO_RUN_BUILD-}" != bg ] || stale=1
-      gob=$(command -v go 2>/dev/null) || gob=
-      for a in /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do [ -n "$gob" ] || [ ! -x "$a" ] || gob=$a; done
+      gob=$(go_run_go)
       if [ "${GO_RUN_BUILD-}" = bg ]; then
         lk=$bin.building
         # 잠금은 10분 넘으면 묵은 것(짓던 쪽이 죽음)
@@ -126,6 +134,18 @@ go_run() {
   fi
   [ "$impl" = auto ] || { echo "$tool: Go 판을 쓸 수 없다(${up}_IMPL=go): $bin" >&2; return 1; }
   [ "${GO_RUN_BUILD-}" = bg ] && return 0
+  # macOS가 아니고 go가 없으면(리눅스 서버 등 — 받은 바이너리는 darwin/arm64만) 셸 판이 정상 경로: 크게 경고하지 않고 처음 한 번만 한 줄(go-followups)
+  case ${GO_RUN_OS:-$OSTYPE} in
+    darwin*) ;;
+    *) if [ -z "$(go_run_go)" ]; then
+         note=${XDG_STATE_HOME:-$HOME/.local/state}/herdr-go/nogo-noted-$tool
+         if [ ! -e "$note" ]; then
+           /bin/mkdir -p "${note%/*}" 2>/dev/null && : >"$note" 2>/dev/null
+           echo "$tool: 이 기계에는 go가 없어 셸 판으로 돈다(정상 — 다음부터 말하지 않음. Go 판이 필요하면 go를 깐다)" >&2
+         fi
+         return 0
+       fi ;;
+  esac
   printf '%s\n' "$tool: !!!!!! 경고: Go 판을 쓸 수 없다($bin — go가 없거나 build 실패) — 셸 판으로 돈다 !!!!!!" \
     "$tool: 고치기: 그 기계에 go를 깔고(brew install go) 다시 부른다. 일부러 셸 판이면 ${up}_IMPL=bash" >&2
   return 0

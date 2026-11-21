@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 // shellWords: 설정 lane.run 틀을 셸 문법으로 나눈다(셸 판 eval "set -- $tpl" — 설정 파일은 믿는다)
@@ -108,7 +110,7 @@ func autoWatch() {
 		fmt.Printf("[dry-run] hc run --bg --no-notify --rm --name %s --label hc-lane-watch=1 --cwd %s %s watch --all --to %s\n", wn, q(home), q(selfPath), co)
 		return
 	}
-	if exec.Command("hc", "run", "--bg", "--json", "--no-notify", "--rm", "--name", wn, "--label", "hc-lane-watch=1", "--cwd", home, selfPath, "watch", "--all", "--to", co).Run() == nil {
+	if proc.Run(exec.Command("hc", "run", "--bg", "--json", "--no-notify", "--rm", "--name", wn, "--label", "hc-lane-watch=1", "--cwd", home, selfPath, "watch", "--all", "--to", co)) == nil {
 		fmt.Printf("hc-lane: 감시 %s 띄움(지휘 %s 에게 레인 사건을 hc send로 밀어 줌)\n", wn, co)
 	} else {
 		errf("hc-lane: 감시 %s 를 띄우지 못했다(이미 그 이름이 살아 있으면 괜찮다) — 지휘는 hc-lane wait --all로 볼 것\n", wn)

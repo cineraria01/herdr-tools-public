@@ -165,8 +165,12 @@ func (c Cmd) Run() (string, int) {
 	case errMerge:
 		x.Stderr = &out
 	}
-	err := x.Run()
+	err := proc.Run(x) // git·hc·hc-lane 등은 상한 안에서만 기다린다(proc.Limit) — 넘으면 「시간 넘김」 한 줄과 124(모름)
 	var ee *exec.ExitError
+	var te *proc.TimeoutError
+	if errors.As(err, &te) {
+		return "", proc.TimeoutCode // 반쪽 출력은 믿지 않는다
+	}
 	if err != nil && !errors.As(err, &ee) {
 		// 못 띄움(PATH에 없음 등) — 셸처럼 127, 이유는 표준 오류에
 		fmt.Fprintf(os.Stderr, "hc-fill: %s: %v\n", c.Name, err)

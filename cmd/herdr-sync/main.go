@@ -228,7 +228,7 @@ func before(s string) string { i := strings.IndexByte(s, ':'); return s[:i] }
 func after(s string) string  { i := strings.IndexByte(s, ':'); return s[i+1:] }
 
 func machinesFromHC() []string {
-	out, err := exec.Command("hc", "machine", "ls").Output()
+	out, err := proc.Output(exec.Command("hc", "machine", "ls"))
 	if err != nil {
 		return nil
 	}
@@ -253,12 +253,12 @@ func machinesFromHC() []string {
 func git(args ...string) (string, int) {
 	c := exec.Command("git", args...)
 	c.Stderr = os.Stderr
-	out, err := c.Output()
+	out, err := proc.Output(c)
 	return strings.TrimRight(string(out), "\n"), proc.Code(err)
 }
 
 func gitq(args ...string) (string, int) { // 표준 오류를 버린다
-	out, err := exec.Command("git", args...).Output()
+	out, err := proc.Output(exec.Command("git", args...))
 	return strings.TrimRight(string(out), "\n"), proc.Code(err)
 }
 
@@ -438,7 +438,7 @@ func parseList() {
 			}
 			c := exec.Command("git", "-C", l.d, "check-ignore", "-z", "--stdin")
 			c.Stdin, c.Stderr = &in, os.Stderr
-			out, err := c.Output()
+			out, err := proc.Output(c)
 			if rc := proc.Code(err); rc != 0 && rc != 1 {
 				die("git check-ignore 실패: %s", l.d)
 			}

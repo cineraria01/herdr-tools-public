@@ -40,7 +40,7 @@ func on(m string, input bool, args ...string) *exec.Cmd {
 	return c
 }
 
-func run(c *exec.Cmd) int { return proc.Code(c.Run()) }
+func run(c *exec.Cmd) int { return proc.Code(proc.Run(c)) } // git·hc·gh 등은 상한 안에서만(proc.Limit)
 
 // runIn: 표준 입력을 주고 돌린다. 표준 출력은 out(nil이면 버림)
 func runIn(c *exec.Cmd, in io.Reader, out io.Writer) int {
@@ -49,7 +49,7 @@ func runIn(c *exec.Cmd, in io.Reader, out io.Writer) int {
 }
 
 func output(c *exec.Cmd) (string, int) {
-	out, err := c.Output()
+	out, err := proc.Output(c)
 	return string(out), proc.Code(err)
 }
 

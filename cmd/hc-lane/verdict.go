@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 // 판정 파일 값(셸 vf va vr vs vv vp vb vo, 표시 vx·끝 vdn, 이 실행 vme)
@@ -32,7 +34,7 @@ func lpatch(a, b string) (string, bool) {
 	var o bytes.Buffer
 	c := exec.Command("git", "patch-id", "--stable")
 	c.Stdin, c.Stdout, c.Stderr = strings.NewReader(d+"\n"), &o, os.Stderr
-	if code(c.Run()) != 0 {
+	if code(proc.Run(c)) != 0 {
 		return "", false
 	}
 	p := trim(o.String())
