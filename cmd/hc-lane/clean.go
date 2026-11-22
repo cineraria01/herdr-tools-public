@@ -265,7 +265,7 @@ func cleanMain(args []string) int {
 	}
 	var lrr []string
 	looked := false
-	receipt, receiptInfo, doneRef, parkRef := "", "", "", ""
+	receipt, receiptInfo, doneRef, parkRef, sub := "", "", "", "", ""
 	for _, c := range targets {
 		lab := "워크트리 HEAD " + c[:min(12, len(c))]
 		if strings.HasPrefix(c, "refs/heads/") {
@@ -282,10 +282,18 @@ func cleanMain(args []string) int {
 				if !cleanOwner() {
 					stop("레인 소유 기록 조회 실패: " + branch)
 				}
-				doneRef, parkRef = "refs/merge-done/"+owner, "refs/park/"+owner
-				out, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", parkRef, doneRef, "refs/heads/lane/"+owner)
+				// 표식 이름: land·park가 가지 설정에 남긴 낸 이름(HC_LANE=<원래>로 낸 다시 맞춤·고침 레인), 없으면 레인 이름
+				sub = owner
+				switch v, r := xout("git", "-C", repo, "config", "--get", "branch."+branch+".hcLane"); {
+				case r == 0 && lnameOK(v):
+					sub = v
+				case r != 1:
+					stop("가지 설정 branch." + branch + ".hcLane 조회 실패(또는 꼴이 틀림): " + v)
+				}
+				doneRef, parkRef = "refs/merge-done/"+sub, "refs/park/"+sub
+				out, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", parkRef, doneRef, "refs/heads/lane/"+sub)
 				if r != 0 {
-					stop("git ls-remote 실패: " + lab + " · refs/merge-queue/*-" + owner)
+					stop("git ls-remote 실패: " + lab + " · refs/merge-queue/*-" + sub)
 				}
 				lrr = strings.Split(out, "\n")
 				for _, ln := range lrr {
@@ -304,7 +312,7 @@ func cleanMain(args []string) int {
 				if len(fs) != 2 || fs[0] != s {
 					continue
 				}
-				if m := cleanSubmitTell.FindStringSubmatch(fs[1]); m != nil && m[1] == owner && hit == "" {
+				if m := cleanSubmitTell.FindStringSubmatch(fs[1]); m != nil && m[1] == sub && hit == "" {
 					hit = fs[1]
 				}
 			}
@@ -320,8 +328,8 @@ func cleanMain(args []string) int {
 			}
 			// 옛 판 주차(원격 lane/<레인>): 이 레인의 마지막 주차·제출 사건이 같은 SHA의 「주차」일 때만 — 반송된 제출 가지와 가른다.
 			// --resume은 refs/park가 없으면 lane/<레인>을 받는다(gofix L07)
-			if contains(lrr, s+"\trefs/heads/lane/"+owner) && legacyParked(owner, s) {
-				fmt.Printf("%s주차됨: %s 은 원격 refs/heads/lane/%s(옛 판 주차)에 그대로 있다\n", P, lab, owner)
+			if contains(lrr, s+"\trefs/heads/lane/"+sub) && legacyParked(sub, s) {
+				fmt.Printf("%s주차됨: %s 은 원격 refs/heads/lane/%s(옛 판 주차)에 그대로 있다\n", P, lab, sub)
 				subm = true
 				continue
 			}
@@ -340,7 +348,7 @@ func cleanMain(args []string) int {
 						stop("완료 기록 조회 실패: " + receipt)
 					}
 				}
-				if strings.HasPrefix(receiptInfo, s+" merge-queue lane="+owner+" ") && strings.Contains(receiptInfo, " orig="+s+" ") {
+				if strings.HasPrefix(receiptInfo, s+" merge-queue lane="+sub+" ") && strings.Contains(receiptInfo, " orig="+s+" ") {
 					fmt.Printf("%s착지됨: %s 에 %s 의 원본이 있다\n", P, doneRef, lab)
 					subm = true
 					continue

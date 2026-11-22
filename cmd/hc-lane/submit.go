@@ -485,6 +485,7 @@ func submitCmd() {
 	for _, o := range olds {
 		args = append(args, ":"+o[0], "--force-with-lease="+o[0]+":"+o[1])
 	}
+	markLaneName(sln)
 	// fsync·rename·폴더 fsync — push 뒤 기계가 갑자기 꺼져도 접수 전 기록이 남게(gofix E06)
 	if os.MkdirAll(ssd+"/hc-submitting", 0o777) != nil || atomic.WriteFile(spending, []byte(qn+" "+mc+" "+sh+"\n"), 0o666) != nil {
 		die("land(제출): 접수 전 기록을 쓰지 못했다")

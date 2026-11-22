@@ -355,6 +355,18 @@ func lnameOK(s string) bool {
 	return s != "" && s[0] != '-' && laneChars(s) && len(s) <= 32
 }
 
+// markLaneName <낸 이름>: 지금 가지 이름과 다르면 가지 설정 branch.<가지>.hcLane에 남긴다 — 다시 맞춤·고침 레인(<원래>-reland 등)이
+// HC_LANE=<원래>로 내면 큐·착지·주차 표식은 <원래> 이름이라, clean이 이 이름으로 찾는다. 가지를 지우면 git이 그 설정도 지운다
+func markLaneName(n string) {
+	b, rc := gitOutQ("symbolic-ref", "-q", "--short", "HEAD")
+	if rc != 0 || b == "" || b == n {
+		return
+	}
+	if gitRunQ("config", "branch."+b+".hcLane", n) != 0 {
+		eprintf("hc-lane: 경고 — 가지 설정 branch.%s.hcLane 에 낸 이름 %s 를 남기지 못했다(clean이 이 표식을 못 알아볼 수 있다)\n", b, n)
+	}
+}
+
 // lmname: 이 레인 이름(HC_LANE, 없으면 가지 이름) — 표식·임대 ref에 쓸 수 있을 때만
 func lmname() (string, bool) {
 	n := os.Getenv("HC_LANE")

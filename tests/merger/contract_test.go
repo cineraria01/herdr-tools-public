@@ -328,6 +328,14 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	k.sh(m.proj("b"), `git checkout -q --detach`)
 	c = m.K.lane(T, nil, "clean", "--repo", m.proj("b"), "--branch", "l-ns")
 	k.check("clean: 제출 안 한 가지는 멈춤(그대로)", c.RC == 1 && k.gitOK(m.proj("b"), "show-ref", "-q", "--verify", "refs/heads/l-ns"), c.Out, c.Err)
+	// 이름을 바꿔 낸 제출(다시 맞춤·고침 레인이 HC_LANE=<원래>로): 큐 표식은 <원래> 이름이라도 land가 가지 설정에 남긴 낸 이름으로 찾는다
+	m.lane("b", "l-rn-fix", "rn.txt", "rn")
+	m.land("b", "l-rn")
+	k.sh(m.proj("b"), `git checkout -q --detach`)
+	c = m.K.lane(T, nil, "clean", "--repo", m.proj("b"), "--branch", "l-rn-fix")
+	k.check("clean: 이름을 바꿔 낸 제출도 제출됨으로 지움", m.rc == 0 && c.RC == 0 && !k.gitOK(m.proj("b"), "show-ref", "-q", "--verify", "refs/heads/l-rn-fix") &&
+		strings.Contains(c.Out+c.Err, "제출됨: 브랜치 l-rn-fix 은 큐 표식 refs/merge-queue/") && strings.Contains(c.Out+c.Err, "-l-rn "), m.dl(), c.Out, c.Err)
+	m.delRefs("l-rn", []string{"refs/merge-queue/", "refs/merge-queue-meta/"}, "refs/heads/lane/l-rn")
 
 	// 17. 재제출 경합: Go 병합기는 착지 직전 원격 refs/herdr/landing/<큐>를 올려 착지 중 재제출을 hc-lane land가 종료 2로 거절한다 —
 	//     옛 제출이 막힘 없이 들어가고 큐는 빈다

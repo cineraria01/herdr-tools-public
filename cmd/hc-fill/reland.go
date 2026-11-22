@@ -12,6 +12,8 @@ package main
 // (<저장소>.wt/<레인>)가 남았으면 다시 맞춤 대신 그 터미널에 hc send 한 줄, 주인 지휘에 「원래 레인에 보냄」(중간), 기록 결과 「보냄」
 // (다시맞춤 칸은 그 주소). 설정 reland_wait분(기본 30) 안에 그 레인이 다시 내면(제출·착지 사건, 병합기의 새 사건, 큐에 같은 레인)
 // 「다시 냄」, 아니면 그때 다시 맞춤을 넣는다. 기계가 연결 안 됨·작업 트리를 못 봄(모름)·닫힘이면 지금처럼 바로 다시 맞춤.
+// 낸 터미널은 반송된 제출 기록의 host=·term=으로 먼저 본다(2026-11-22 clean-renamed-submit — HC_LANE=<원래>로 낸 다시 맞춤·고침
+// 레인이 살아 있는데 원래 이름 터미널만 봐서 중복 레인을 띄웠다).
 
 import (
 	"fmt"
@@ -236,30 +238,78 @@ func relandPend(rf, n, files, base string, r Row, mx int, cnt map[string]int, pr
 	relandOne(rf, n, files, base, r, mx, cnt, false)
 }
 
-// relandLive <레인> <프로젝트>: 원래 레인 터미널 주소와 상태 — 살아 있음(연결된 기계에 그 주소·이름 터미널 + 작업 트리 남음)·닫힘·
-// 모름(기계 연결 안 됨·작업 트리를 못 봄). 실행 기록(OREC)에서 찾고, 기록이 없으면 터미널 표에서 같은 이름
-func relandLive(lane, p string) (string, string) {
-	var cs [][2]string
-	for _, o := range OREC {
-		if o.F(1) == lane && !strings.HasPrefix(o.F(4), "pending:") {
-			cs = append(cs, [2]string{o.F(3), o.F(4)})
+// relandSubmitter <프로젝트> <큐 이름>: 반송된 제출 기록(원격 refs/merge-failed-meta/<n>)의 host=·term=으로 낸 터미널 주소 —
+// 다시 맞춤·고침 레인이 HC_LANE=<원래>로 내면 사건의 레인 이름은 <원래>라, 낸 터미널은 이것으로만 안다. 못 읽으면 ""
+func relandSubmitter(p, n string) string {
+	r := repoOf(p, LOCAL)
+	if r == "" {
+		return ""
+	}
+	ref := "refs/merge-failed-meta/" + n
+	o, rc := run("git", "-C", r, "ls-remote", "origin", ref)
+	if rc != 0 || !relandLsHas(o, ref) {
+		return ""
+	}
+	sha, _, _ := strings.Cut(o, "\t")
+	if _, rc := run("git", "-C", r, "cat-file", "-e", sha+"^{commit}"); rc != 0 {
+		if _, rc := run("git", "-C", r, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "origin", ref); rc != 0 {
+			return ""
 		}
 	}
-	if len(cs) == 0 {
+	s, rc := run("git", "-C", r, "log", "-1", "--format=%s", sha)
+	if rc != 0 {
+		return ""
+	}
+	host, term := "", ""
+	for _, kv := range strings.Fields(s) {
+		if v, ok := strings.CutPrefix(kv, "host="); ok {
+			host = v
+		} else if v, ok := strings.CutPrefix(kv, "term="); ok {
+			term = v
+		}
+	}
+	switch {
+	case term == "" || term == "-":
+		return ""
+	case strings.Contains(term, "/") || host == "" || host == "-" || host == LOCAL:
+		return term
+	}
+	return host + "/" + term
+}
+
+// relandLive <레인> <프로젝트> <큐 이름>: 원래 레인 터미널 주소와 상태 — 살아 있음(연결된 기계에 그 주소·이름 터미널 + 작업 트리
+// 남음)·닫힘·모름(기계 연결 안 됨·작업 트리를 못 봄). 먼저 반송된 제출 기록의 낸 터미널(이름이 달라도 — 그 터미널 이름의 작업 트리),
+// 다음 실행 기록(OREC), 기록이 없으면 터미널 표에서 같은 이름
+func relandLive(lane, p, n string) (string, string) {
+	var cs [][3]string
+	if sa := relandSubmitter(p, n); sa != "" {
+		for _, t := range TERMS {
+			if t.Addr == sa && t.Name != "-" {
+				cs = append(cs, [3]string{t.M, t.Addr, t.Name})
+			}
+		}
+	}
+	sn := len(cs)
+	for _, o := range OREC {
+		if o.F(1) == lane && !strings.HasPrefix(o.F(4), "pending:") {
+			cs = append(cs, [3]string{o.F(3), o.F(4), lane})
+		}
+	}
+	if len(cs) == sn {
 		for _, t := range TERMS {
 			if t.Name == lane {
-				cs = append(cs, [2]string{t.M, t.Addr})
+				cs = append(cs, [3]string{t.M, t.Addr, lane})
 			}
 		}
 	}
 	unk := false
 	for _, c := range cs {
-		m, a := c[0], c[1]
+		m, a, ln := c[0], c[1], c[2]
 		if m != LOCAL && !connHas(m) {
 			unk = true
 			continue
 		}
-		if !lalive(a, lane) {
+		if !lalive(a, ln) {
 			continue
 		}
 		repo := repoOf(p, m)
@@ -267,7 +317,7 @@ func relandLive(lane, p string) (string, string) {
 			unk = true
 			continue
 		}
-		o, rc := onm(nil, m, `if [ -d "$d" ]; then echo 있음; else echo 없음; fi`, strings.TrimSuffix(repo, "/")+".wt/"+lane)
+		o, rc := onm(nil, m, `if [ -d "$d" ]; then echo 있음; else echo 없음; fi`, strings.TrimSuffix(repo, "/")+".wt/"+ln)
 		switch strings.TrimSpace(o) {
 		case "있음":
 			if rc == 0 {
@@ -334,7 +384,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 	}
 	rule := relandDocsRule(p)
 	if live {
-		switch a, st := relandLive(lane, p); st {
+		switch a, st := relandLive(lane, p, n); st {
 		case "살아 있음":
 			msg := fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 검증 뒤 hc-lane land main 다시", files, n)
 			if rule != "" { // hc send 글은 한 줄 — 규칙 줄마다 「 / 」

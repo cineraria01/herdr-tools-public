@@ -83,6 +83,7 @@ func parkMain(args []string) int {
 	if dl {
 		push = append(push, ":"+pl, "--force-with-lease="+pl+":"+lv)
 	}
+	markLaneName(ln)
 	po := ""
 	if cur != sh || dl {
 		c := exec.Command("git", push...)

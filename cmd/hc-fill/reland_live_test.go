@@ -162,6 +162,31 @@ func TestRelandLiveLane(t *testing.T) {
 	}
 }
 
+// 이름을 바꿔 낸 제출(<원래>-fix가 HC_LANE=<원래>로): 원래 이름 터미널은 닫혔어도, 반송된 제출 기록(refs/merge-failed-meta)의
+// host=·term=이 가리키는 낸 터미널이 살아 있고 그 작업 트리가 남았으면 다시 맞춤 대신 그쪽에 보낸다
+func TestRelandRenamedSubmit(t *testing.T) {
+	w, git := rlRepo(t)
+	git(w, "push", "-q", "origin", "HEAD:refs/merge-failed/100-l-orig")
+	git(w, "commit", "-q", "--allow-empty", "-m", "merge-queue lane=l-orig id=x orig=a fork=b base=main host=here term=t7 owner=t9 job=- created_ms=- priority=보통")
+	git(w, "push", "-q", "origin", "HEAD:refs/merge-failed-meta/100-l-orig")
+	if err := os.MkdirAll(w+".wt/l-orig-fix", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	OREC = []Row{{"l-orig", "app", "here", "here/t2", "2026-11-22T00:00:00Z", "-", ",-,", "-"}} // 원래 레인 터미널은 닫힘
+	TERMS = []Term{{"here", "t7", "claude", "l-orig-fix", "idle", "-"}}
+	EV = []string{rlEv("2026-11-22T00:01:00Z", "l-orig", "100-l-orig", "착지 실패(종료 3, 충돌 README.md)", "t9")}
+	relandTick()
+	if qrow("l-orig-reland") != nil {
+		t.Fatalf("낸 터미널이 살아 있으면 다시 맞춤 없음: %v", qRows())
+	}
+	if s, _ := readFile(DATA + "/sends"); !strings.Contains(s, "send|t7|병합기 반송(rebase 충돌 README.md, refs/merge-failed/100-l-orig)") {
+		t.Fatalf("낸 터미널에 보냄: %q", s)
+	}
+	if rl, _ := readFile(DATA + "/reland.tsv"); !strings.Contains(rl, "100-l-orig\tl-orig\tl-orig\t보냄\tt7\t") {
+		t.Fatalf("기록 보냄: %q", rl)
+	}
+}
+
 // lastF: reland.tsv에서 그 큐 이름 첫 줄의 시각(6칸 — 넣음·보냄 줄은 뒤에 주인·알림글이 붙는다)
 func lastF(text, n string) string {
 	for _, l := range lines(text) {
