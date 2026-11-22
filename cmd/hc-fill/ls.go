@@ -129,6 +129,8 @@ func lsLine(c ...string) string {
 	return b.String() + c[6]
 }
 
+func init() { register("ls", lsCmd) }
+
 // ls 명령. 셸 판과 다름: 「떠 있음」은 주소와 이름이 함께 맞을 때만(재사용된 주소의 남의 터미널은 「끝남」), 그 기계가 연결 안 됨이면
 // 「모름(연결 안 됨)」, hc machine ls가 실패해 연결을 모르면 목록에 없는 원격 레인은 「모름(연결 확인 못 함)」
 func lsCmd(args []string) {

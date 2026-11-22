@@ -1,0 +1,17 @@
+       hc-lane watch --to <지휘 주소> [--all | --on <기계>…] [--state <상태,…>] [--since <시각>] [--mine]
+  watch         늘 도는 감시: wait와 같은 판정·같은 커서(seen.<지휘 주소> — wait와 겹쳐 두 번 알리지 않음)로 새 사건이 생기면
+                지휘 터미널에 hc send <지휘> "hc-lane: <레인> <상태> <sha> <한 줄> (<터미널>) ‖ …" 한 번(보낸 뒤에만 커서에 적음,
+                실패면 다음 바퀴에 다시). 바퀴는 설정 lane.watch_tick초(기본 30). 같은 지휘로 하나만(뒤 것은 종료 75).
+                지휘가 질문·권한 창을 띄운 동안(hc get status blocked, status null이면 화면 맨 아래 덩어리 — 평소 입력 칸이 없고
+                마지막 가로줄 아래에 lane.watch_dialog 글자)은 보내지 않고 창이 닫힌 뒤 한 번에. 상태를 못 읽으면 보냄. status blocked는
+                lane.watch_hold_max분(기본 30, 0이면 막지 않음) 넘으면 보냄, 화면으로 잡은 창은 넘어도 안 보내고 watch.log에 한 줄.
+                못 읽은 기계는 「연결 안 됨 <기계>」 한 번 보내고 다음 바퀴에 다시 본다(sh를 띄울 수 없는 기계 — 예: Windows — 는
+                레인 기록이 없는 것으로 보고 건너뛴다). hc ls 실패는 시작·회복 때 한 번씩.
+                끝남(종료 0): 지휘 터미널이 3바퀴 이어 hc get에 없거나 끝남(연결 실패는 세지 않음), 또는 그 지휘의 살아 있는
+                레인(라벨 hc-lane=1, parent 모르면 그 지휘 것)도 hc-fill 대기열의 wait 요청도 새 사건도 없이
+                lane.watch_idle분(기본 60). 레인·감사를 띄울 때 hc-lane이 지휘(HC_LANE_COORD — hc-fill이 대기열 주인 지휘, 없으면
+                hc-lane coord로 넘김 —, 없으면 $HC_TERMINAL_ID)의 watch가 없으면 hc run --bg --no-notify --rm --name lane-watch-<지휘>
+                --label hc-lane-watch=1 로 저절로 띄운다(--all). 바퀴마다·보낼 때마다 자기 지휘 정보(coord.<주소>)와 맞춰 보고
+                다르면 안 보내고 끝냄. 사건은 레인 기록(lanes.tsv — HC_LANE_OWNER가 있으면 그 지휘, 없으면 띄운 지휘 터미널.
+                없으면 hc parent)의 지휘 watch만 보내고, 주인을 모르거나(-) 그 지휘가 사라진 레인의 사건은 살아 있는 모든 지휘
+                watch가 보낸다(넘겨받지 않음, 지휘마다 자기 커서로 한 번, sent에 안 적음)

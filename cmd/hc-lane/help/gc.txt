@@ -1,0 +1,10 @@
+       hc-lane gc [--on <기계>] [--dry-run] [--integ[=<접두>]] [--remote-branches] [--min-age <시간>] --repo <저장소 경로>
+  gc            끝난 레인 정리: 연결된 작업 폴더마다 HEAD가 origin/<기본>에 다 들어갔고(조상이거나 git cherry에 + 없음)
+                깨끗하고(추적 변경·untracked 없음, 무시된 보관물 .qa/ 없음) 그 폴더를 cwd로 쓰는 hc 터미널이 없고
+                마지막 git 활동이 --min-age보다 오래됐을 때만 teardown → worktree remove --force → branch -D.
+                작업 폴더 없이 남은 로컬 가지(기본·현재 HEAD·작업 폴더에 붙은 가지·설정 gc.keep_branches 무늬 빼고)도 같은 판정에
+                커밋·가지 reflog가 --min-age보다 오래됐으면 branch -D(「지움 가지 <가지> <sha>」, 되돌리기 git branch <가지> <sha>).
+                --integ: 원격 <접두>*(기본 refs/integ/) 가운데 커밋이 origin/<기본>에 다 들어갔고 --min-age보다 오래된 것만
+                지운다(값이 그대로일 때만). --remote-branches: 원격 refs/heads/*(기본 가지·gc.keep_branches 빼고)도 같은 꼴로.
+                안 들어간 가지는 지우지 않고 「남김 <가지> 안 들어감 <n>개 · 마지막 <날짜>」. --min-age 기본 24h(숫자에 s·m·h·d,
+                단위 없으면 시간). 메인 폴더·기본 가지·tags·claims는 안 건드린다. 마지막 줄 「지움 n · 남김 m」. 오류 종료 1

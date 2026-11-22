@@ -127,6 +127,59 @@ func TestReadmeSectionRefsSelf(t *testing.T) {
 	}
 }
 
+// readmeOutsideMax: README 「## 목차」 절 밖 줄(빈 줄 빼고, 제목 줄 포함) 상한 — 2026-11-22 docs-rule-guard 때의 줄 수(소개·도구 표·설치).
+// 목차 검사만으로는 목차 밖에 글이 다시 불어나는 것을 못 막았다(README가 다시 커지면 충돌 1위가 돌아온다). 올리는 것은 사람 결정이다 —
+// 레인은 글을 docs/<도구>/<기능>.md로 옮기고, 이 값을 올리지 않는다
+const readmeOutsideMax = 20
+
+// readmeOutsideLines: README에서 「## 목차」 절 밖의 빈 줄 아닌 줄 수
+func readmeOutsideLines(readme string) int {
+	n, in := 0, false
+	for _, l := range strings.Split(readme, "\n") {
+		if strings.HasPrefix(l, "## ") {
+			in = l == "## 목차"
+		}
+		if !in && strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// readmeOutsideProblem: 상한을 넘으면 문제 글, 아니면 ""
+func readmeOutsideProblem(root string, max int) string {
+	b, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		return "README.md를 못 읽음: " + err.Error()
+	}
+	if n := readmeOutsideLines(string(b)); n > max {
+		return fmt.Sprintf("README 목차 밖 줄 %d개 > 상한 %d — README에는 목차만 — 글은 docs/<도구>/<기능>.md로", n, max)
+	}
+	return ""
+}
+
+func TestReadmeOutsideCap(t *testing.T) {
+	if p := readmeOutsideProblem(clitest.Root(t), readmeOutsideMax); p != "" {
+		t.Error(p)
+	}
+}
+
+func TestReadmeOutsideCapSelf(t *testing.T) {
+	R := t.TempDir()
+	base := "# t\n\n소개\n\n## 설치\n\n- 하나\n\n## 목차\n\n설명 줄\n- [x](docs/a/x.md)\n"
+	if got := readmeOutsideLines(base); got != 4 {
+		t.Fatalf("목차 밖 줄 = %d, 바람 4", got)
+	}
+	clitest.Put(t, R+"/README.md", base)
+	if p := readmeOutsideProblem(R, 4); p != "" {
+		t.Errorf("상한 안인데 문제 %q", p)
+	}
+	clitest.Put(t, R+"/README.md", base+"\n## 새 절\n\n기능 설명 한 줄\n") // 목차 뒤 절도 밖이다
+	if p := readmeOutsideProblem(R, 4); !strings.Contains(p, "README에는 목차만 — 글은 docs/<도구>/<기능>.md로") || !strings.Contains(p, "6개") {
+		t.Errorf("상한 넘김인데 문제 %q", p)
+	}
+}
+
 func TestDocsIndex(t *testing.T) {
 	for _, p := range docsIndexProblems(clitest.Root(t)) {
 		t.Error(p)

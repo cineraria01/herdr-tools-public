@@ -332,10 +332,20 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		rec("다시 냄", "-")
 		return
 	}
+	rule := relandDocsRule(p)
 	if live {
 		switch a, st := relandLive(lane, p); st {
 		case "살아 있음":
 			msg := fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 검증 뒤 hc-lane land main 다시", files, n)
+			if rule != "" { // hc send 글은 한 줄 — 규칙 줄마다 「 / 」
+				var ls []string
+				for _, l := range lines(rule) {
+					if l = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "- ")); l != "" {
+						ls = append(ls, l)
+					}
+				}
+				msg += " — 이 저장소의 문서 규칙: " + strings.Join(ls, " / ")
+			}
 			if !auSend(a, msg) {
 				say("다시 맞춤 %s: 원래 레인(%s)에 hc send 실패 — 다시 맞춤으로", lane, a)
 				break
@@ -375,7 +385,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		say("다시 맞춤 보류 %s: %v", lane, err)
 		return
 	}
-	if err := os.WriteFile(tmp, []byte(relandBrief(name, lane, n, mach, files, lg, r.F(7))), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(relandBrief(name, lane, n, mach, files, lg, r.F(7), rule)), 0o644); err != nil {
 		say("다시 맞춤 보류 %s: 지시문을 못 씀: %v", lane, err)
 		return
 	}
@@ -437,8 +447,38 @@ func relandLsHas(o, ref string) bool {
 	return hit
 }
 
-// relandBrief: 다시 맞춤 레인 지시문(착지·정리 절차는 hc-fill이 run 지시문 끝에 붙인다)
-func relandBrief(name, lane, n, mach, files, lg, ev string) string {
+// relandDocsRuleFile: 저장소마다 둘 수 있는 문서 규칙(범용 — 글은 그 저장소가 정한다)
+const relandDocsRuleFile = ".claude/herdr-docs-rule.md"
+
+// relandDocsRule <프로젝트>: 대상 저장소 기본 가지의 문서 규칙 글(2026-11-22 docs-rule-guard — docs-split 뒤 README에서 부딪힌
+// 다시 맞춤 레인이 저장소 문서 규칙을 몰라 README에 글을 되돌려 넣을 수 있었다). 없으면(빈 파일도) ""; 저장소·기본 가지·파일을
+// 못 읽으면 경고 한 줄 뒤 "" — 규칙 없이 지금처럼 넣는다
+func relandDocsRule(p string) string {
+	repo := repoOf(p, LOCAL)
+	ref, ok := "", repo != ""
+	if ok {
+		ref, ok = projectRef(repo)
+	}
+	if ok {
+		o, rc := run("git", "-C", repo, "ls-tree", "--name-only", ref, "--", relandDocsRuleFile)
+		switch {
+		case rc == 0 && sub(o) == "":
+			return ""
+		case rc == 0 && sub(o) == relandDocsRuleFile:
+			if b, rc := run("git", "-C", repo, "show", ref+":"+relandDocsRuleFile); rc == 0 {
+				return strings.TrimSpace(b)
+			}
+		}
+	}
+	say("알림: 다시 맞춤 지시문에 문서 규칙을 못 붙임 — 프로젝트 %s 기본 가지의 %s 를 못 읽음", p, relandDocsRuleFile)
+	return ""
+}
+
+// relandBrief: 다시 맞춤 레인 지시문(착지·정리 절차는 hc-fill이 run 지시문 끝에 붙인다). rule이 있으면 「## 이 저장소의 문서 규칙」 절로
+func relandBrief(name, lane, n, mach, files, lg, ev, rule string) string {
+	if rule != "" {
+		rule = "\n## 이 저장소의 문서 규칙\n" + rule + "\n"
+	}
 	return fmt.Sprintf(`# 레인 %[1]s — %[2]s 병합기 rebase 충돌 반송 다시 맞춤 (hc-fill 자동, %[8]s)
 
 병합기(기계 %[4]s)가 %[2]s 의 제출을 rebase 충돌(착지 실패 종료 3)로 refs/merge-failed/%[3]s 에 돌려보냈다. 그 커밋을 지금 origin/main 위로 다시 맞춰 넣는다(같은 커밋이 이미 감사를 거쳤으니 자동 감사는 끔).
@@ -455,5 +495,5 @@ func relandBrief(name, lane, n, mach, files, lg, ev string) string {
 6. 또 rebase 충돌로 반송되면 hc-fill이 설정 횟수까지 다시 넣고, 넘으면 지휘에 막힘으로 넘긴다 — 이 레인은 따로 할 일 없다.
 
 보고는 한국어. 질문 창 금지(되돌릴 수 있는 판단은 추천안으로 정해 보고에 「가정/결정」). 멈출 때는 네가 띄운 정확한 pid로만.
-`, name, lane, n, mach, files, lg, ev, nowMin())
+`, name, lane, n, mach, files, lg, ev, nowMin()) + rule
 }

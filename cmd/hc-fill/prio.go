@@ -8,6 +8,52 @@ import (
 	"strings"
 )
 
+func init() { register("prio", prioCmd) }
+
+func prioCmd(args []string) {
+	if len(args) != 2 {
+		usage()
+	}
+	p, ok := pnorm(args[1])
+	if !ok {
+		die("우선순위는 긴급|높음|보통|낮음(urgent|high|normal|low): %s", args[1])
+	}
+	st, prj := "", ""
+	rc := withQ(func() {
+		rows := qRowsW() // 못 읽으면 「없다」가 아니라 종료 1(R-29)
+		for _, x := range rows {
+			if x.F(1) == args[0] {
+				st, prj = x.F(6), x.F(2)
+				break
+			}
+		}
+		if st == "" {
+			die("대기열에 없다: %s", args[0])
+		}
+		var out []Row
+		for _, x := range rows {
+			if x.F(1) == args[0] {
+				for i := x.NF() + 1; i < 13; i++ {
+					x = x.Set(i, "-")
+				}
+				x = x.Set(13, p)
+			}
+			out = append(out, x)
+		}
+		if writeAtomic(Q, rowsText(out)) != nil {
+			exit(1)
+		}
+	})
+	if rc != 0 {
+		exit(1)
+	}
+	say("우선 %s → %s", args[0], plabel(p))
+	// 떠 있는 레인: 이미 병합기 큐에 냈으면 그 큐 메타도(2026-11-22 fill-prio-pass — 지휘가 메타 제목을 손으로 고쳤다)
+	if st != "wait" && prioMeta(args[0], prj, plabel(p)) == 1 {
+		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 prio 하면 큐 메타를 고친다", args[0])
+	}
+}
+
 // prioMeta <레인> <프로젝트> <우선 라벨>: 0 바꿈(같은 값이면 그대로) · 1 큐에 낸 것이 없음 · 2 못 바꿈(경고만 — 그대로 둠)
 // ponytail: 병합기가 그 항목을 착지하는 바로 그 사이에 바꾸면 병합기 정리가 메타를 못 지운다(다음 바퀴 일지 판정) — 지휘가 손으로 하던 것과 같은 창
 func prioMeta(lane, prj, pl string) int {

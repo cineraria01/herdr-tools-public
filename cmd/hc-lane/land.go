@@ -11,7 +11,27 @@ import (
 	"strings"
 )
 
-func init() { register("land", landMain, can("land")) }
+func init() {
+	register("land", landMain, can("land"))
+	argSpecs["land"] = argSpec{
+		head: func(a []string) bool { return len(a) > 0 && a[0] != "" && !strings.HasPrefix(a[0], "-") }, // <기본 브랜치>
+		flags: map[string]ownFlag{
+			"--force-old": {},
+			"--verdict": {val: true, bad: func(v string) string {
+				if v == "" || strings.Trim(v, alnum+"_-") != "" {
+					return "--verdict 판정 ID 글자: " + v
+				}
+				return ""
+			}},
+		},
+		check: func(o *opts, rds bool) *parseErr {
+			if o.on+o.name+o.branch+o.repo != "" || !rds || len(o.rest) > 0 {
+				return die1("land는 레인 작업 폴더 안에서 인자 없이(또는 기본 브랜치 하나만) 부른다: hc-lane land [<기본 브랜치>]")
+			}
+			return nil
+		},
+	}
+}
 
 // 착지 상태(셸 판의 같은 이름 변수)
 var (
@@ -31,7 +51,7 @@ const lf = ".claude/herdr-land.sh"
 
 func landMain(a []string) int {
 	o := mustParse("land", a)
-	lbase, lvd, lforceOld = o.lbase, o.lvd, o.forceOld
+	lbase, lvd, lforceOld = o.head, o.own["--verdict"], o.own["--force-old"] != ""
 	return landCmd()
 }
 

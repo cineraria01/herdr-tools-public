@@ -1,0 +1,4 @@
+       hc-lane lease show|drop [--on <기계>] --repo <저장소 경로> --name <레인>
+  lease         레인 임대 refs/hc-lanes/<레인>(프로젝트 원격). 쓰기 레인은 hc run 직전에 없을 때만 만들어 잡고(이미 있으면 「이미 돎」
+                종료 10, 조회·push 실패도 안 띄움 — 종료 1), land 성공(main과 같은 원자 push)·clean에서 놓는다. 그 밖(레인이 죽음·
+                지휘가 hc-fill rm)으로 임대가 남아 다시 못 띄우면 이 drop으로 손으로 놓는다. show: 「값 제목」 또는 「-」

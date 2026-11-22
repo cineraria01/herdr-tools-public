@@ -296,6 +296,8 @@ func onlandOnce(name string, rs []Row) {
 	}
 }
 
+func init() { register("_onland", onlandMain) }
+
 // onlandMain: _onland <이름>
 func onlandMain(args []string) {
 	if len(args) != 1 || !okname(args[0]) {

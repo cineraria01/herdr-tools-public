@@ -195,6 +195,8 @@ func stLine(c ...string) string {
 	return strings.TrimRight(stPad(c[0], 24)+" "+stPad(c[1], 12)+" "+stPad(c[2], 8)+" "+stPad(c[3], 36)+" "+c[4], " ")
 }
 
+func init() { register("status", statusCmd) }
+
 // status [--owner <주인>|--mine]
 func statusCmd(args []string) {
 	owner := ""

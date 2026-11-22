@@ -1,0 +1,44 @@
+사용법: hc-lane [--on <기계>] [--read | --direct] [--branch <이름>] [--dry-run] [--print-steps] [--brief <지시문>]
+               --name <레인> --repo <저장소 경로> [-- <실행 명령…>]
+  기본          fetch → <저장소>.wt/<브랜치>에 origin/<기본> 기준 워크트리 → .claude/herdr-setup.sh(있으면) → hc run --bg
+                쓰기 레인은 hc run 직전에 레인 임대 refs/hc-lanes/<레인>을 없을 때만 잡는다(아래 lease): 이미 있으면 「이미 돎」 종료 10,
+                조회·push 실패면 종료 1 — 둘 다 띄우지 않고 방금 만든 워크트리를 되돌린다. 레인 환경 HC_LANE_LEASE = 그 임대 값
+                원격 origin이 없는 저장소는 fetch 없이 로컬 <기본>(main, 없으면 master) 기준
+                (모든 git fetch는 같은 클론의 참조 잠금 경합(cannot lock ref 등)이면 1·2·4초 쉬고 3번까지 다시)
+                메인 폴더 앞당김: fetch 뒤(--read도 fetch 뒤)와 land 착지 뒤, 메인 폴더가 기본 브랜치이고 추적 파일 변경·진행 중인
+                merge/rebase·skip-worktree 표시가 없고 메인 폴더를 cwd로 쓰는 working·blocked 터미널(자신 빼고)이 없으면
+                git merge --ff-only --no-overwrite-ignore origin/<기본>. 못 하면(추적 안 된·무시된 파일과 부딪혀 git이 거절 포함) 경고
+                한 줄 「메인 폴더 앞당김 건너뜀: <까닭>」 뒤 그대로 둔다(레인·착지는 그대로 진행. stash·reset 안 씀)
+  --read       워크트리 없이 --repo 폴더 그대로에서 띄운다(조사·감사처럼 커밋하지 않는 레인). 저장소 안 하위 폴더나
+                저장소가 아닌 폴더도 된다(맨 hc run 대신 쓰면 아래 시작 확인을 받는다)
+  쓰기 레인은 대기열로: 지휘 터미널($HC_TERMINAL_ID가 살아 있고 레인·감시 터미널이 아님)이 쓰기 레인을 HC_LANE_FILL=1(hc-fill) 없이
+                띄우면 아무것도 만들기 전에 「쓰기 레인은 hc-fill add로 대기열에 넣는다 …」와 종료 2. 레인 안(HC_LANE)·터미널 밖·
+                판정 못 함(hc get 실패)·--read·--print-steps·--dry-run은 막지 않는다
+  --direct      그래도 지금 이 자리에 띄운다(오류 출력 「대기열 밖에서 띄움(--direct)」, 레인 기록 lanes.tsv 넷째 칸 direct)
+  --branch      브랜치 이름(기본: 레인 이름). 워크트리 폴더 이름은 브랜치의 / 를 - 로 바꾼 것
+  --on          git·설정·실행을 그 기계에서(hc exec/run --on). --repo는 그 기계의 절대 경로(로컬 ~ 펼침 주의).
+                설정 단계는 그 기계에 zsh·~/.zshrc가 있으면 그걸 읽고 돈다(hc 코어 PATH에 bun 등이 없다)
+                띄운 레인은 맥 Herdr 창의 그 기계 공간(이름 = 기계)에 탭으로 보인다(hc run --label herdr.space=<id>, 창 없으면 알림만)
+  --dry-run     만들지도 띄우지도 않고 할 일과 착지 절차만 출력
+  --print-steps 레인 지시문에 붙일 착지·정리 절차만 출력(실행 명령 불필요)
+  --brief       지시문에 착지·정리 절차(--read는 판정 알림)를 붙인 실행용 사본을 대상 기계에 두고, 실행 명령의 {brief}
+                자리에 그 경로를 넣는다. 사본 자리: 설정 lane.brief_dir(그 기계 경로, ~ 는 그 기계 집)/<레인>-run.md,
+                없으면 지시문과 같은 폴더의 <이름>-run.md. -- 뒤 명령이 없으면 설정 lane.run 틀(셸 문법)
+  설정 lane.notify no면 hc run --no-notify(hc가 지휘 입력에 종료·막힘을 넣지 않음 — 지휘가 hc-lane wait를 늘 걸 때만)
+  HC_LANE_FILL=1(hc-fill)이면 hc run --no-parent(대기열 레인·감사 줄은 부른 터미널이 끝나도 함께 꺼지지 않게)
+  띄운 뒤       화면에 Claude 폴더 신뢰 질문(「❯ No, exit」·「Yes, I trust this folder」)이 보이면 그 터미널에만 신뢰를 고른다
+                (설정 lane.auto_trust off면 안 함). 글자가 다르면 건드리지 않고 「모름 — 시작 화면 확인」.
+                외부 가져오기 질문(「Allow external CLAUDE.md file imports?」)은 목록 경로가 모두 작업 폴더의 git 저장소
+                안일 때만 허용을 고른다(lane.auto_trust off면 안 함). 밖이 하나라도 있으면 「모름 — 외부 가져오기 질문(<경로>)」, 종료 5
+                --start-wait <초>(이 호출만) 또는 설정 lane.start_wait초(기본 60, 0이면 이 단계를 끔. status를 내지 않는
+                명령·CLI는 0으로) 안에 hc get status가 안 잡히면 화면 끝에서 막힘 낱말을 찾아
+                한 줄로 알리고 종료 5 시작 안 됨(원인 모름·신뢰 질문·끝남·hc run 출력에 주소 없음), 6 로그인·인증 막힘, 7 키체인 막힘(터미널은 남긴다)
+                status가 잡힌 뒤 설정 lane.first_turn_wait초(기본 60, 0이면 끔) 안에 turn > 0 또는 status working을
+                한 번도 못 보면 사건 막힘 「첫 턴 없음 <주소>」과 start noturn(종료 0). hc-fill에는 첫 status에서 start ok와
+                주소를 돌려주고 따로 감시한다(진단은 hc-lane/watch.log).
+레인 환경: HC_LANE LANE_REPO LANE_WORKTREE LANE_BRANCH LANE_BASE (--read는 HC_LANE LANE_REPO LANE_BASE), HC_LANE_OWNER
+(주인 지휘 — 레인 기록 셋째 칸, 레인 안에서 띄운 하위 레인도 물려받음. 늘 넣는다: 받은 HC_LANE_OWNER → 지휘 터미널에서 띄우면 그 지휘
+→ 모르면 *(주인 없음). report가 사건 11칸에 싣는다), HERDR_LAND_PRIORITY가 있으면 그것도(hc-fill이 넣는
+착지 줄 우선 — 이 레인을 기다리는 대기 줄 수). hc run 라벨 hc-lane=1
+준비·정리 훅: .claude/herdr-setup.sh(환경 LANE_*: LANE_REPO=메인 폴더, LANE_BASE=기본 브랜치), .claude/herdr-teardown.sh
+실행 명령은 env K=V 로 감싸므로 hc 템플릿 이름은 쓸 수 없다. 마지막 줄은 JSON 한 줄.

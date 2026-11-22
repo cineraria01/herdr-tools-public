@@ -14,6 +14,26 @@ import (
 	"herdr-tools/internal/proc"
 )
 
+func init() { register("_gc", gcMain) }
+
+// gcMain: run이 배경으로 띄운 정리(_gc <잠금 경로>). 잠금은 이 프로세스가 쥔다(끝나면 풀림)
+func gcMain(args []string) {
+	gcLock = DATA + "/gc.lock"
+	if len(args) > 0 {
+		gcLock = args[0]
+	}
+	f, busy, err := lockx.TryLock(gcLock)
+	if err != nil || busy {
+		fmt.Fprintf(os.Stderr, "lockf: %s: already locked\n", gcLock)
+		exit(75)
+	}
+	heldLocks = append(heldLocks, f)
+	dry = false
+	say("--- %s", stampLog())
+	gcAll()
+	exit(0)
+}
+
 // gc_tick: 설정 gc 분마다 한 번, 바퀴 밖 배경(<SELF> _gc <잠금>)으로. 잠금이 쥐여 있으면 앞 정리가 아직 도는 것
 func gcTick() {
 	g := conf("gc")

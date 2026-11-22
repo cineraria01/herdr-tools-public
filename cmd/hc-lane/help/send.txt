@@ -1,0 +1,4 @@
+       hc-lane send --all [--audits] [--from <지휘 주소>] [--] <글…>   (hc-lane broadcast <글…> = send --all)
+  send          이 지휘($HC_TERMINAL_ID 또는 --from)가 띄운 살아 있는 레인 전부(원격 포함 — 레인 기록 lanes.tsv의 마지막 지휘,
+                없으면 hc parent)에 hc send. 감사(레인 기록 read·이름 audit-*)는 --audits일 때만. 한 줄씩 「보냄|실패 <주소> <레인>」,
+                끝 줄 「보냄 n · 실패 m」. 종료 0 다 보냄(대상 없음 포함), 1 보내기·hc ls 실패, 2 인자(--all 없음 포함)

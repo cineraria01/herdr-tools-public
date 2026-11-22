@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+func init() { register("add", addCmd) }
+
 func addCmd(args []string) {
 	name, prj, brief, after, only, coord := "", "", "", "-", "-", ""
 	cx, prio, early, aud, ovk, thn, xo, onl, anyp := false, "normal", "-", "-", "-", "", "", "", false

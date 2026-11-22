@@ -143,12 +143,18 @@ func reportMain(a []string) int {
 	switch {
 	case sha == "" || sha == "-":
 		sha = "-"
+	case sha == "HEAD": // reportSHA가 푼다
 	case !onlyChars(sha, "0123456789ABCDEFabcdef"):
 		msg, sha = join(sha), "-"
 	case len(sha) >= 7 && len(sha) <= 40:
 		sha = strings.ToLower(sha)
 	default:
 		msg, sha = join(sha), "-"
+	}
+	// 완료·중간 sha와 HEAD는 이 작업 트리에서 전체 해시로(reportsha.go) — 못 풀면 사건을 쓰지 않는다
+	sha, ok := reportSHA(st, sha)
+	if !ok {
+		return 2
 	}
 	m := machineName()
 	tid := os.Getenv("HC_TERMINAL_ID")

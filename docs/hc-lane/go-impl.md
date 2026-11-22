@@ -3,7 +3,11 @@
 - **hc-lane 구현**(2026-11-21 사용자 「모두 고로 옮기고 싶어」, hc-lane-go-start): `cmd/hc-lane`(한 바이너리).
   하위 명령은 `cmd/hc-lane/<명령>.go`의 `init()`에서 `register`로 더한다: 레인 띄우기(`--read`·`--dry-run`·`--print-steps`·`--brief`·`--resume`, 시작 확인·첫 턴 감시·임대 잡기)·`clean`·`gc`·`park`, `land`·제출·`guard`·`lease`·`fetch`, `report`·`events`·`wait`·`watch`·`coord`·`send`·`broadcast`·`early-wait`·`verdict`, `merger`(곁 `hc-merger`로 넘김).
   대상 기계 쪽 판정(`--on`)은 `sh -c` 조각을 `hc exec`로 보낸다.
-  도움말 글은 `cmd/hc-lane/usage.txt`. 계약 시험 `tests/hclane/`.
+  첫 인자가 등록된 하위 명령 이름(`launch` 빼고)이면 그 명령, 아니면 레인 띄우기다(따로 두던 이름 목록은 없다).
+  한 명령만의 앞 자리 인자·옵션·검사는 그 명령 파일의 `init()`이 `argSpecs[<명령>]`에 넣는다(`args.go`에는 공용 옵션만 — 다른 명령의 옵션을 주면 「<옵션>는 <명령>에서만 쓴다」).
+  도움말 글은 명령마다 `cmd/hc-lane/help/<명령>.txt` 조각이고, 띄우기(`launch.txt`, 「사용법:」 머리) 먼저 나머지는 이름순으로 잇는다(2026-11-22 go-cmd-registry, 시험 `cmd/hc-lane/registry_test.go`).
+  새 하위 명령·옵션은 그 명령 파일과 `help/<명령>.txt`에서만 더하고, `main.go`·`args.go`는 고치지 않는다.
+  계약 시험 `tests/hclane/`.
   - **시간 상한·모름**(2026-11-21 gofix-lane — Go 전환 감사): hc-lane이 부르는 git·hc는 모두 `proc.Limit` 상한 안에서만 기다린다(띄우기·clean·gc·park 도우미와 wait·watch 바퀴의 `hc ls`·`hc machine ls`도 — `hc exec --on`은 90초).
     넘으면 결과는 「모름」: 상태를 바꾸지 않고, 지우기·키 보내기 판정은 멈추는 쪽, `land`는 그 뒤 실패를 1이 아니라 75(다시)로 끝낸다.
     작업 트리를 바꾸는 `rebase`·`merge --ff-only`만 상한 없이(같은 무리에서 — 중간에 끊으면 반쯤 바뀐 작업 트리가 남는다).

@@ -1,0 +1,34 @@
+       hc-lane land [<기본 브랜치>] [--verdict <판정 ID>]   (레인 작업 폴더 안에서)
+  --verdict     hc-fill 자동 감사가 승인한 변경만 착지: 그 판정(~/.local/share/hc-fill/verdicts/<레인>/<ID>.md)이 이 실행의 통과
+                판정이고 처음 부를 때 HEAD가 승인 커밋이어야 한다(아니면 종료 2). 시작 표시(<ID>.ack landing + 승인 변경 patch-id)를 남기고,
+                push 직전 <기준>..HEAD의 patch-id가 같을 때만 push한다(차이가 rebase뿐 — 다르면 종료 2, 새 커밋으로 report 완료).
+                push 응답만 잃었으면 다시 부를 때 끝을 마친다. 끝나면 <ID>.done. hc-fill이 취소한 판정(void)은 종료 2.
+                .claude/herdr-land.sh 위임 경로는 push 관문(hc-lane guard, patchid 판)이 push 범위를 대조한다(관문 없으면 거절)
+  land          착지: .claude/herdr-land.sh가 있으면 HERDR_LAND=1 HERDR_LAND_PRIORITY=<수, 없거나 숫자 아니면 0> bash .claude/herdr-land.sh <기본>. 없으면
+                fetch → rebase origin/<기본> → .claude/herdr-verify.sh(없으면 실패, push 안 함) →
+                HERDR_LAND=1 git push origin HEAD:<기본>(fast-forward만, 거절이면 fetch부터 HERDR_LAND_TRIES번, 기본 5)
+                origin이 없으면 fetch·push 대신 로컬 <기본> 기준으로 rebase하고, 메인 클론의 로컬 <기본>을 fast-forward로 올린다
+                (<기본>이 체크아웃된 폴더면 그 폴더에서 merge --ff-only, 아니면 update-ref. 앞서 나갔으면 처음부터 다시)
+                rebase가 내용 충돌로 멈췄는데 rerere가 기록한 풀이로 그 충돌 경로를 모두 풀었으면(미병합·rerere remaining 없음)
+                GIT_EDITOR=true git rebase --continue로 이어 간다. 일부만 풀렸거나 충돌이 아닌 중단(훅 등)이면 멈춘 그대로 종료 3
+                (쓰기 레인 작업 트리를 만들 때 공용 git 폴더에 rr-cache를 만든다 — 저장소 설정에는 안 써서 rerere.enabled를 정하지
+                않은 가지만 git 기본으로 켜지고 정해 둔 값·조건부 false는 그대로. 「Resolved」로 푼 경로는 land가 git add)
+                원격이 있으면 main push에 --atomic으로 착지 표식 refs/hc-landed/<레인>/<UTC 초>(= 착지한 커밋)와 이 레인 임대 지우기
+                (HC_LANE_LEASE 값 lease)를 함께 싣는다(herdr-land.sh에는 HERDR_LAND_PUSH_EXTRA로 넘김). 못 실었으면 착지 뒤 따로
+                herdr-land.sh에는 HERDR_LAND_HOOK_REV=<지금 도는 그 스크립트 판의 커밋>도 넘긴다(직접 착지 = HEAD(먼저 rebase했으면
+                그 뒤), 병합기 안 = 기본 브랜치 커밋 — 스크립트가 이 커밋 트리로 도구를 짓게). 호출자 값은 덮어쓰고 내장 길 검증엔 안 넘김
+                종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음, 75 바깥 명령 시간 넘김(모름 — 다시)
+                검증(herdr-land.sh면 그 전체) 출력은 화면 그대로 + ${XDG_STATE_HOME:-~/.local/state}/hc-lane/land-logs/<레인>-<시각>-<pid>.log
+                (14일 지난 것은 지움). 실패면 실패 줄(--- FAIL·FAIL <패키지>·panic·(fail)·✗·✖·not ok, 최대 40줄 — 이번에 생긴
+                .qa/<날짜>/herdr-verify-* 폴더의 *.log도 뒤짐)·그 폴더·「전체 로그 <경로>」를 오류 출력에, $HC_LANE이면 중간 사건에도 경로
+                병합기가 켜진 저장소(원격 참조 refs/herdr/merger/<병합기 기계>가 있음 — hc-fill 설정 「merger <프로젝트> <기계>」가
+                켜고 끔)에서는 착지 대신 제출: HEAD를 refs/heads/lane/<레인> + refs/merge-queue/<UTC초>-<레인> + 제출 기록에 한 번의
+                원자 push(같은 레인의 옛 표식은 지움, 기본 브랜치는 안 건드림), 접수가 확인되면 「중간 <sha> 제출 <ID> → <큐>」 사건과
+                끝 줄 「제출 …」, 종료 0(이미 들어간 커밋이면 할 것 없음 0). 켜졌는지(원격 설정·켬 표식) 못 읽으면 착지하지 않고 75.
+                HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 큐 표식(refs/merge-queue/*-<레인>)이 그 SHA인 가지를 「제출됨」으로 지운다.
+                제출 push 직전 저장소에 .claude/herdr-precheck.sh가 있으면 돌린다(싼 사전 검사 — 실패면 큐에 넣지 않고 그 출력과 함께 종료 1).
+                HERDR_LAND_PUSH_EXTRA="<git push 인자> …"(refspec — 왼쪽 HEAD = 기본 브랜치에 넣는 커밋 — 와 --force-with-lease=<참조>:<SHA>;
+                병합기는 「:<큐> --force-with-lease=<큐>:<SHA>」와 HEAD:refs/hc-landed/<제출 ID>)면 기본 브랜치와 한 번의 --atomic push로
+                싣고, lease 참조가 바뀌었으면(재제출) 기본 브랜치를 올리지 않고 종료 6. 병합기 안 착지(HERDR_MERGER=1)는 기본 브랜치에
+                .claude/herdr-land.sh가 있으면 그 기본 브랜치 판(제출 트리 속 판 아님)에 맡기고, 기본 브랜치에 없는 스크립트가 작업 트리에
+                있거나 rebase로 막 생겼으면 종료 7. 이 둘(과 HERDR_MERGER)은 검증 자식에 물려주지 않는다

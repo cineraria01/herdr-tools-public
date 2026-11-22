@@ -40,7 +40,7 @@ func printSteps(w io.Writer) {
 	fmt.Fprint(w, "- 커밋은 경로를 지정한다: git add -- <경로…> && git commit -m \"<메시지>\" -- <경로…> (add -A·commit -a·stash·reset --hard·강제 push 금지)\n")
 	rmRule(w)
 	fmt.Fprint(w, "- 알림: 중간·완료·착지·막힘 때 hc-lane report <상태> [<sha>] \"<한 줄>\"을 부른다(화면 줄과 보고 파일은 그대로 써도 됨). 지휘는 hc-lane wait로 이 사건만 기다린다\n")
-	fmt.Fprint(w, "  예: hc-lane report 완료 <sha8> \"<요약>\" · 아래 1이 착지하면 hc-lane report 착지 <sha8> · 막히면 hc-lane report 막힘 - \"<까닭>\"\n")
+	fmt.Fprint(w, "  예: hc-lane report 완료 HEAD \"<요약>\"(HEAD는 전체 해시로 풀림) ·아래 1이 착지하면 hc-lane report 착지 <sha8> · 막히면 hc-lane report 막힘 - \"<까닭>\"\n")
 	s(fmt.Sprintf("cd %s && hc-lane land %s", q(wt), base))
 	fmt.Fprint(w, "   # 이 한 줄을 그대로 돌린다. 나누거나 세미콜론으로 이어 쓰지 말 것. 앞 단계가 실패하면 push는 나가지 않는다\n")
 	fmt.Fprint(w, "   # 저장소에 .claude/herdr-land.sh가 있으면 그 스크립트가 fetch·rebase·검증·push를 하고, 없으면 hc-lane이 같은 순서로 하며 .claude/herdr-verify.sh가 없으면 push하지 않고 실패한다\n")

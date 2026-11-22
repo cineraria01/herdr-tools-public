@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+func init() {
+	register("edit", editCmd)
+	register("rm", rmCmd)
+}
+
 func editCmd(args []string) {
 	DRC = 2 // 검사에 걸리면 거절(종료 2), 아무것도 바꾸지 않음
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {

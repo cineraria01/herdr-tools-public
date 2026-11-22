@@ -104,7 +104,7 @@ func secE(k *K) {
 	k.run("run")
 	rf := k.DATA + "/runs/w1-run.md"
 	k.check("자동 감사: 쓰기 레인 run 지시문 끝에 「감사·착지 (hc-fill 자동)」 절(완료 보고 · hc-lane verdict <ID> · land --verdict), 감사 칸 auto",
-		k.where("w1") == "up slow slow/w1" && k.col15("w1") == "auto" && hasF(rf, "## 감사·착지 (hc-fill 자동)") && hasF(rf, "hc-lane report 완료 <sha>") && hasF(rf, "hc-lane verdict <ID>") && hasF(rf, "hc-lane land <기본> --verdict <ID>"), read(rf))
+		k.where("w1") == "up slow slow/w1" && k.col15("w1") == "auto" && hasF(rf, "## 감사·착지 (hc-fill 자동)") && hasF(rf, "hc-lane report 완료 HEAD") && hasF(rf, "hc-lane verdict <ID>") && hasF(rf, "hc-lane land <기본> --verdict <ID>"), read(rf))
 	k.check("자동 감사: 완료 사건 전에는 감사 줄 없음", len(k.ePre15()) == 0 && !nonEmpty(k.AT()))
 	k.lj("slow/w1:claude-code:w1:done:" + app("w1"))
 	k.ev("slow/w1", "w1", "완료", "abc1234", "끝")

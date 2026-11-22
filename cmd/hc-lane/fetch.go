@@ -8,7 +8,26 @@ import (
 	"strings"
 )
 
-func init() { register("fetch", fetchMain, can("fetch")) }
+func init() {
+	register("fetch", fetchMain, can("fetch"))
+	argSpecs["fetch"] = argSpec{
+		bare: true, // <참조…>
+		check: func(o *opts, rds bool) *parseErr {
+			if o.repo == "" {
+				return &parseErr{usage: true}
+			}
+			if o.name+o.branch != "" || !rds {
+				return die1("fetch에는 --on·--repo와 참조만 쓴다")
+			}
+			for _, r := range o.rest {
+				if strings.HasPrefix(r, "-") {
+					return die1("fetch 참조는 - 로 시작하지 않는다(git 옵션으로 읽힌다): %s", r)
+				}
+			}
+			return nil
+		},
+	}
+}
 
 func fetchMain(a []string) int {
 	o := mustParse("fetch", a)

@@ -1,0 +1,3 @@
+       hc-lane fetch [--on <기계>] --repo <저장소 경로> [<참조…>]
+  fetch         그 기계 저장소에서 git fetch origin [<참조…>]. --on이면 hc exec로, zsh·~/.zshrc가 있으면 그걸 읽은 셸에서
+                (맨 ssh·hc 코어 환경에는 git 자격 도우미 PATH가 없다). 종료 0 받음, 1 실패

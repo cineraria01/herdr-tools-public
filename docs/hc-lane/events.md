@@ -4,6 +4,10 @@
 그래서 레인이 상태를 사건 파일에 직접 적고, 지휘는 그 파일만 읽는다.
 
 - 레인: `hc-lane report <중간|완료|착지|막힘|판정|제출> [<sha>|-] [<한 줄>] [--to <지휘>,…]`. `--to`는 받을 지휘를 아홉째 칸에 적는다 — 그 지휘들의 watch만 보낸다(레인 주인 판정 대신. hc-fill 놀고 있음 알림이 쓴다).
+  sha 확인(2026-11-22 lane-report-sha — 짧은 해시 오타가 그대로 받아져 자동 감사가 몇 분 뒤 막혔다): 완료·중간의 sha는 git 작업 트리 안에서 `git rev-parse --verify <sha>^{commit}`으로 풀어 전체 해시로 적는다.
+  못 풀면(없음·여럿에 걸림) 사건을 쓰지 않고 「<sha>는 이 작업 트리에 없다 — HEAD는 <전체>」와 종료 2, 작업 트리 밖(도구가 `--name`으로 적는 사건)은 옛 꼴 그대로다.
+  sha 자리에 `HEAD`를 주면 어느 상태든 이 작업 트리의 HEAD 전체 해시로 적고(밖이면 종료 2), 완료 sha가 HEAD가 아니면 경고 한 줄만 낸다(막지 않음 — 「그 뒤 커밋 n개」).
+  hc-fill 「감사·착지」 부록과 `--print-steps`의 완료 보고 줄은 `hc-lane report 완료 HEAD …` 꼴이다.
   그 기계 `${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv`에 한 줄을 더한다(지우지 않음).
   칸: 시각(UTC `2026-11-16T02:00:00Z`)·기계(`HC_LANE_MACHINE`, 없으면 hostname)·터미널(`$HC_TERMINAL_ID`)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·그때의 hc turn(`hc get`, 터미널 밖이면 `-`. 옛 7칸 줄도 읽는다).
   레인 이름은 `--name` → `$HC_LANE` → hc 터미널 이름(`hc get`) → 작업 트리 가지(기본 가지면 `-` — 작업 트리를 지운 뒤 메인 폴더에서 report해도 `main`이 레인이 되지 않게).

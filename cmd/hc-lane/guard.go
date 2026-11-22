@@ -10,13 +10,30 @@ import (
 	"strings"
 )
 
-func init() { register("guard", guardMain, can("guard")) }
+func init() {
+	register("guard", guardMain, can("guard"))
+	argSpecs["guard"] = argSpec{
+		head: func(a []string) bool { return len(a) > 0 }, // install|status|remove
+		check: func(o *opts, rds bool) *parseErr {
+			if o.head != "install" && o.head != "status" && o.head != "remove" {
+				return &parseErr{usage: true}
+			}
+			if o.repo == "" {
+				return &parseErr{usage: true}
+			}
+			if o.on+o.name != "" || !rds || len(o.rest) > 0 {
+				return die1("guard에는 --repo(와 --branch <기본 브랜치>)만 쓴다. 다른 기계는 hc exec --on <기계> -- hc-lane guard …")
+			}
+			return nil
+		},
+	}
+}
 
 const gmark = "# hc-lane guard v1"
 
 func guardMain(a []string) int {
 	o := mustParse("guard", a)
-	return guardCmd(o.act, o.branch)
+	return guardCmd(o.head, o.branch)
 }
 
 func guardCmd(act, branch string) int {

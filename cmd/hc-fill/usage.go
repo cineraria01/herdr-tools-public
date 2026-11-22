@@ -1,90 +1,29 @@
 package main
 
-// usageText: 셸 판 usage 그대로(lib/hc-fill/common.sh)
-const usageText = `사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
+// 사용법 글 = 머리(명령 줄 요약) + 하위 명령마다의 조각 help/<명령>.txt(이름순) + 꼬리(설정·대기열·종료).
+// 새 하위 명령은 그 명령 파일의 register와 help/<명령>.txt(첫 줄에 「        hc-fill <명령> …」 요약 줄)만 더한다 — 이 파일은 고치지 않는다
+// (2026-11-22 go-cmd-registry).
+
+import (
+	"embed"
+
+	"herdr-tools/internal/helptext"
+)
+
+//go:embed help/*.txt
+var helpFS embed.FS
+
+var usageText = usageHead + helptext.Join(helpFS, "help", "") + usageTail
+
+const usageHead = `사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
                [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo] [--on-land <이름>]   (우선은 영어 urgent|high|normal|low도 받음, 기본 보통)
         hc-fill add --name <이름> --project <프로젝트> --brief <지시문 경로> --then <대기 중인 선행>
         hc-fill status [--owner <지휘 주소> | --mine]   (Go 판만 — 레인마다 한 줄: 단계·기계·넣은 뒤·예상)
         hc-fill edit <레인> [--after <레인>[,…]|-] [--after-any-project] [--priority <우선순위>] [--only <기계>[,…]|-] [--brief <지시문 경로>]
         hc-fill ls | rm <레인> [--force] | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
-  add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
-         지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
-         주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
-         (HC_LANE_OWNER)으로 넘겨 그 레인의 사건(hc-lane report·멈춤)은 그 지휘 watch에게만 간다. 지휘 터미널이 아니면(레인 안·
-         터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
-         넣은 뒤 같은 프로젝트의 대기·작업 중인 줄(모든 주인, 완료·제출·착지한 줄 빼고)과 예약(「파일:」·「쓰기:」)이 겹치거나 제목 낱말이
-         겹치면 「알림: 비슷한 레인 …」 — 가장 비슷한 3개 + 「외 N」(막지 않음, 설정 dup_warn)
-         --no-early: 선행 착지 전 「먼저 띄움」을 끈다(선행의 산출물 없이는 준비조차 못 하는 레인)
-         --no-audit: 자동 감사(설정 audit)를 붙이지 않는다(지시문이 자기 감사를 정한 레인)
-         --overlap-ok: 이 줄은 겹침(설정 overlap)을 보지 않는다
-         --solo: 단독 — 같은 프로젝트에 다른 쓰기 소유 레인이 있으면 기다리고, 떠 있는 동안 그 프로젝트의 다른 쓰기 줄을 띄우지 않는다
-         (파일을 가로지르는 이름 바꾸기·sweep 레인). 설정 overlap과 상관없이. --overlap-ok와 함께 못 씀
-         --on-land <이름>: 이 레인이 착지하면(접수 뒤 origin/<기본>에 든 제목 머리 <레인>: 커밋이나 착지 표식 refs/hc-landed/<레인>/<초>)
-         이 기계에서 설정 「on-land <이름> <프로젝트> <명령…>」의 명령을 한 번 돌린다(그 프로젝트 local repo 폴더에서 sh -c, 환경
-         HC_ONLAND_NAME·HC_ONLAND_LANES·HC_ONLAND_SHA, 상한 1시간, 로그 ~/.local/share/hc-fill/onland/<이름>-<시각>.log). 메인 폴더 맞추기는
-         명령 몫. 같은 이름은 하나씩 — 도는 동안 착지한 것들은 끝난 뒤 한 번으로 합쳐 다시. 결과는 주인 지휘에 hc-lane report
-         --name on-land-<이름>(성공 중간 · 실패 막힘, 로그 경로). 14일 안에 착지하지 않으면 버린다
-         --then <선행>: 같은 일의 다음 단계는 새 줄 없이 대기(wait) 중인 선행 줄 지시문 끝에 「## 이어서: <이름>」 절로 붙인다
-         (넘길 때마다 맥락이 새고 숨은 결정이 부딪힌다 — 한 레인이 이어서). 그 절의 커밋 제목 머리는 <이름>: 이라 --after <이름>도 풀린다.
-         선행이 없음·떠 있음·받은편지·감사 줄·다른 프로젝트, --after·--only·--priority·--no-early·--no-audit·--coord·--overlap-ok·--solo와 함께면 거절(종료 2).
-         도는 run이 끝나기를 기다렸다가(run.lock) 붙인다. 겹치는 파일 때문에 순서만 필요한 일은 그대로 --after
-         --after에 대기 중인 같은 프로젝트 레인을 주면 넣기는 그대로 하고 --then을 알리는 한 줄
-         --after에 다른 프로젝트 레인(그 대기열에 있거나 그 main에 착지)을 주면 거절(종료 2 — 착지를 이 프로젝트 main에서만 찾아 영원히
-         「아직」). --after-any-project면 <이름>@<프로젝트>로 적고 그 프로젝트 main에서 찾는다. 어디에도 없는 이름은 알림만
-  edit   대기열 줄의 선행·우선·기계·지시문 칸만 바꾼다(주차·떠 있음·시도 기록·주인·줄 ID 그대로 — rm 뒤 add는 주차한 준비 커밋을 버린다).
-         -는 비우기. --brief는 대기 줄만(새 사본, 「## 이어서:」가 붙은 지시문은 거절), --priority는 prio와 같다. 없는 레인·잘못된 값은 종료 2
-  rm     주차 중인 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 지우지 않는다(종료 2)
-  prio   레인의 우선순위를 바꾼다. 띄울 때 레인 환경 HC_LANE_PRIORITY(병합기 제출 우선)로 넘어가고, 떠 있는 레인이 이미 병합기 큐에
-         냈으면 큐 메타(refs/merge-queue-meta/<항목>) 제목의 priority=도 lease로 바꾼다(못 바꾸면 경고만)
-  ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과/지적 — 수거 기다림·감사 통과 받음·감사 지적 n번째·지휘로 넘김·
-         겹침 대기(<앞 레인>: <키>|단독)·겹침 봄 끔·단독)
-  run    한 바퀴: (설정 inbox 줄이 있으면) 그 기계 받은편지를 걷어 대기열에 넣고, 끝난 받은편지 레인의 결과를 되돌려 쓴 뒤,
-         대기 레인을 우선순위 높은 것부터(긴급>높음>보통>낮음, 같으면 그 줄을 --after로 기다리는 줄이 많은 것 — 감사 줄은 그 레인 몫 —,
-         그다음 넣은 차례) 보며(기다리는 줄 수는 레인 환경 HERDR_LAND_PRIORITY로 — 착지 스크립트가 착지 줄 차례에 쓴다), --after 레인이 모두 local 저장소 origin/<기본> 커밋 제목 머리에
-         들어갔으면(안 풀린 것은 건너뛰고 다음 것을 본다) 설정의 machine 차례에서 처음 자리가 남는 기계에 띄운다. 띄운 뒤 HC_FILL_WAIT초(기본 60) 안에
-         hc get status가 안 잡히면 그 기계를 그 레인에서 빼고 다음 기계로 간다(그 터미널은 끄지 않고 ls 비고에 남긴다).
-         남긴 터미널이 나중에 살아나면 「중복 위험」을 찍고 그 레인은 더 띄우지 않는다.
-         자리: working·blocked는 늘 셈. done·idle은 작업 트리(<저장소>.wt/…)가 남은 쓰기 레인만 세되, 레인 이름이 그 프로젝트
-         origin/<기본> 커밋 제목 머리에 있으면(착지함) 또는 설정 hold분(기본 60, 0이면 끔) 넘게 쉬었으면 안 센다(셈 all 기계는 다 셈)
-         먼저 띄움: 그러고도 자리가 남으면 --after에만 묶인 대기 레인(--no-early 빼고, 선행 가운데 대기열에서 아직 안 뜬 레인이
-         있는 것도 빼고 — 그 선행이 자리를 먼저)을 같은 차례로 띄운다 — run 지시문 끝에
-         「먼저 띄움」 절(준비만 → hc-lane park로 가지를 원격 lane/<레인>에 두고 끝냄 — 원격 없는 저장소만 판정 줄로 기다림, 상한
-         설정 early_wait시간)을 붙이고. 「주차」를 적은 줄은 대기(parked)로 되돌려, 선행이 들어가면 hc-lane --resume으로 그 가지에서
-         「이어 가기」 절을 붙여 다시 띄운다
-         ls에 「먼저 띄움(선행 …)」. 살아 있는 먼저 띄움 레인 수 상한은 설정 early(빈 값이면 남은 자리 전부, 0이면 끔).
-         기다림 블록의 기한 뒤에는 hc-lane early-wait가 선행 상태(hc-fill이 바퀴마다 그 레인 기계 ~/.local/share/hc-fill/after.tsv에 씀)를 보고
-         선행이 살아 진행 중이면 계속 기다린다(막힘·끝남·사라짐·모름이면 멈춤)
-         기계 능력: 지시문 「필요: <능력>, …」 줄이 있으면 설정 machine-has <기계> <능력,…>에 다 있는 기계에만. 하나도 없으면 대기로 두고
-         주인 지휘에 막힘 한 번(ls 「필요 …」). 빈 지시문: 부록 절(착지·정리 등) 앞에 본문 줄이 없으면 add·받은편지 거절, run은 안 띄움
-         놀고 있음: 바퀴 끝에도 자리가 남은 기계가 설정 idle분(기본 10, 0이면 끔) 넘게 이어지면 hc-lane report --name hc-fill-idle
-         「<기계> 자리 n개 m분째 빔 — 대기열에 띄울 것 없음」 사건을 대기 줄 주인 지휘들(살아 있는 것, 주인 없는 줄이 있거나
-         대기 줄이 없으면 모든 지휘)의 watch에 보낸다. 대기열에 띄울 것 없음은 설정 idle_empty분이 있을 때만(빼거나 0이면 안 보냄),
-         그 간격에 한 번 빈 기계를 묶어서, 기계마다 비기 시작한 뒤 한 번만(자리가 하나라도 찼다가 다시 비면 또 한 번). 먼저 띄움 상한 사유면 계속 비는 동안 처음 알림 포함 30분 간격으로 세 번, 그 뒤 2시간마다. 사유가 바뀌면 바로 다시.
-         먼저 띄움 상한에 걸려 남긴 자리면 사유를 「먼저 띄움 상한(early n)에 걸려 남김」으로
-         자동 감사(설정 audit = 감사 지시문 틀): 쓰기 레인(받은편지·--no-audit 줄 빼고) run 지시문 끝에 「감사·착지 (hc-fill 자동)」 절.
-         레인이 hc-lane report 완료 <sha>를 하면 그 실행(<터미널>@<created_ms>)의 그 커밋(40자)에 묶인 감사 차수(ID a…)를 열어 그 기계에
-         긴급 감사 줄 audit-<차수 ID>(hc-lane --read, 작업 트리에서)를 넣는다. 판정(6칸 40자 sha, 「감사 완료 <차수 ID> 높음 n·중간 n·낮음 n」)은
-         부모 실행이 그대로이고 그 실행의 최신 완료가 같은 커밋일 때만 받아 레인 기계 verdicts/<레인>/<차수 ID>.md에 두고 hc send로 깨운다
-         (레인이 hc-lane verdict <ID>로 수거 — 높음·중간 0이면 통과, 아니면 지적, 지적은 audit_max번까지, 기본 2). 깨움은 설정 wake_every분
-         (기본 10)마다, ack_max분(기본 30, 연결된 동안만 셈) 넘게 수거가 없으면 지휘에 한 번. 부모가 끝났거나 새 커밋을 보고했으면 그 판정은
-         쓰지 않는다(새 커밋은 새 차수). 감사 터미널은 끄지 않는다 — 차수가 끝나면 정리할 주소를 지휘에 한 번.
-         상한·판정 못 읽음·판정 없음 세 바퀴·부모 끝남·감사 줄 rm은 그 레인 주인 지휘에 hc-lane report 막힘(--key hf:<차수 ID>:<까닭>, 한 번)
-         겹침(설정 overlap, 기본 block): 대기 줄을 띄우기 전에 같은 프로젝트의 쓰기 소유 레인과 견준다. 쓰기 소유 = 실행 기록
-         (~/.local/share/hc-fill/own.tsv): 쓰기 터미널 주소를 받은 때(상태 안 잡힘 포함) 적고, 그 기계가 연결된 채 그 주소에 그 이름
-         터미널이 없거나(병합기 큐에 있으면 유지) 그 터미널이 시작 뒤 착지를 적으면 지운다 — 기계가 연결 안 됨이면 유지, hold·rm·sent와 따로.
-         예약 = 지시문 「파일:」·「쓰기:」 줄 항목의 첫 경로(새 파일도)·FR ID, 언급 = 본문의 저장소 경로·FR ID. warn: 띄우고 「겹침 경고」
-         (overlap-warn.log) · block: 예약끼리 겹치면 「겹침 대기」로 남기고 다음 줄(언급은 경고) · off. 선행 예약은 후속을 막고, 후속(그 선행을
-         --after 사슬·--then으로 건너서라도 기다림) 예약은 선행을 안 막음. 감사 줄·--overlap-ok 줄은 안 봄. 설정 overlap_ignore <프로젝트> <glob>… 은 뺀다.
-         검사와 띄우기는 바퀴마다 뜬 지시문 사본 하나로 하고, 그 사이 대기열 줄이 바뀌면 다음 바퀴에
-         자동 다시 맞춤(Go 판, 설정 reland_max 기본 2·0이면 끔): 병합기가 rebase 충돌(착지 실패 종료 3)로 반송하면 <레인>-reland
-         (같은 프로젝트·주인, 우선 높음, 자동 감사 끔 — refs/merge-failed/<이름>을 origin/main으로 rebase·검증·다시 제출)를 넣고
-         주인 지휘에 「자동 다시 맞춤 넣음」 한 줄. 같은 레인이 reland_max번 넘게 반송되면 지휘에 막힘만(기록 reland.tsv).
-         원래 레인 터미널이 살아 있고(실행 기록의 그 주소·이름, 연결된 기계) 작업 트리가 남았으면 다시 맞춤 대신 그 터미널에
-         hc send(rebase해 풀고 다시 land)·주인 지휘에 「원래 레인에 보냄」, 설정 reland_wait분(기본 30) 안에 다시 안 내면 그때 다시 맞춤.
-         기계 연결 안 됨·작업 트리 모름·닫힘이면 바로 다시 맞춤. 그 레인의 새 제출이 병합기에 있으면(지금 착지 중 — 원격
-         refs/herdr/landing/<큐>, hc-lane land와 같은 판정 — 이거나 큐에 섬) 보내지도 넣지도 않는다
-  watch  run을 --every초마다(한 번에 하나만, 이미 돌면 종료 75)
-설정: ${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv (칸 설명은 저장소 config.example/hc-fill.tsv)
+`
+
+const usageTail = `설정: ${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv (칸 설명은 저장소 config.example/hc-fill.tsv)
 대기열: ~/.local/share/hc-fill/queue.tsv, run 지시문: 그 기계 ~/.local/share/hc-fill/runs/<레인>-run.md
 종료: 0 정상, 1 오류, 2 잘못 부름, 75 다른 run·watch가 돌고 있음
 `

@@ -15,14 +15,28 @@ import (
 	"strings"
 )
 
-func init() { register("lease", leaseMain, can("lease")) }
+func init() {
+	register("lease", leaseMain, can("lease"))
+	argSpecs["lease"] = argSpec{
+		head: func(a []string) bool { return len(a) > 0 }, // show|drop
+		check: func(o *opts, rds bool) *parseErr {
+			if o.head != "show" && o.head != "drop" {
+				return &parseErr{usage: true}
+			}
+			if o.repo == "" || o.name == "" || o.branch != "" || !rds || len(o.rest) > 0 {
+				return die1("lease show|drop에는 --on·--repo·--name만 쓴다")
+			}
+			return nil
+		},
+	}
+}
 
 var leaseBranch string // --branch(take의 임대 주인 표식 이름)
 
 func leaseMain(a []string) int {
 	o := mustParse("lease", a)
 	leaseBranch = o.branch
-	return leaseCmd(o.act, o.name)
+	return leaseCmd(o.head, o.name)
 }
 
 func leaseCmd(act, name string) int {

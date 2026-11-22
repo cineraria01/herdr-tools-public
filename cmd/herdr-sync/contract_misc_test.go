@@ -99,7 +99,8 @@ func (s *sx) exampleList() {
 	text := ct.Read(list)
 	cmds, _ := filepath.Glob(s.here + "/cmd/*")
 	for _, f := range cmds {
-		if b := filepath.Base(f); ct.IsDir(f) {
+		// 점 폴더(세션 훅이 남긴 무시 폴더 .omc 등 — Go Glob의 *는 점 이름도 맞춘다)는 도구가 아니다(go-cmd-registry에서 발견해 함께 고침)
+		if b := filepath.Base(f); ct.IsDir(f) && !strings.HasPrefix(b, ".") {
 			s.ok("config.example/sync.list: cmd/"+b+" 바이너리 줄", regexp.MustCompile(`(?m)\s\.local/bin/`+regexp.QuoteMeta(b)+`\s+tools:cmd/`+regexp.QuoteMeta(b)+`\s`).MatchString(text))
 		}
 	}
