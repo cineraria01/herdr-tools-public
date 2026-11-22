@@ -1,7 +1,8 @@
 package main
 
-// 릴리스 받기 조각(install)과 소스 판(srcDigest) 단위 시험 — 2026-11-21 gofix-ops(감사 A03·T02·A04·O-03).
-// install 조각을 임시 HOME에서 sh로 직접 돌린다(실제 기계·네트워크 없음, 받기는 file://).
+// 바이너리 깔기 조각(installSh)·릴리스 올리기(upload)·소스 판(srcDigest) 단위 시험 — 2026-11-22 go-shell-remove
+// (옛 install 조각 시험 gofix-ops A03·T02·A04·O-03을 새 꼴로, 재감사 R-01·R-10·R-11·R-40).
+// installSh를 임시 HOME에서 sh로 직접 돌린다(실제 기계·네트워크 없음, 받기는 file://).
 
 import (
 	"crypto/sha256"
@@ -13,19 +14,21 @@ import (
 	"testing"
 )
 
-// instEnv: 받는 자리(go.mod·cmd 소스·옛 바이너리 demo·옛 demo.src)와 새 산출물. 돌려주는 것: HOME, .bin, 새 산출물 경로, 그 sha256.
-// 그 자리의 소스 판은 srcOf(home) — install은 보낸 판이 그 기계 소스 판과 같을 때만 바꿔 넣는다
-func instEnv(t *testing.T) (home, bin, art, sum string) {
+const oldBody = "#!/bin/sh\necho OLD\n"
+
+// instEnv: 받는 자리(~/.local/bin/demo 옛 본체, ~/.local/lib/herdr-go 작은 Go 모듈 — cmd/demo는 새긴 커밋을 찍는다)와 새 산출물.
+// 돌려주는 것: HOME, 새 산출물 경로(file:// 주소로), 그 sha256, 그 기계 소스 판
+func instEnv(t *testing.T) (home, art, sum, src string) {
 	t.Helper()
 	home = t.TempDir()
-	bin = home + "/.local/lib/herdr-go/.bin"
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	os.MkdirAll(home+"/.local/lib/herdr-go/cmd/demo", 0o755)
-	for p, c := range map[string]string{home + "/.local/lib/herdr-go/go.mod": "module herdr-tools\n",
-		home + "/.local/lib/herdr-go/cmd/demo/main.go": "package main\n",
-		bin + "/demo": "#!/bin/sh\necho OLD\n", bin + "/demo.src": "old\n"} {
+	g := home + "/.local/lib/herdr-go"
+	for p, c := range map[string]string{
+		g + "/go.mod":                      "module herdr-tools\n\ngo 1.21\n",
+		g + "/cmd/demo/main.go":            "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\n\t\"herdr-tools/internal/version\"\n)\n\nfunc main() {\n\tif len(os.Args) > 1 {\n\t\tfmt.Println(\"demo\")\n\t\treturn\n\t}\n\tfmt.Println(\"built\", version.Commit)\n}\n",
+		g + "/internal/version/version.go": "package version\n\nvar Commit string\n",
+		home + "/.local/bin/demo":          oldBody,
+	} {
+		os.MkdirAll(filepath.Dir(p), 0o755)
 		if err := os.WriteFile(p, []byte(c), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -36,32 +39,29 @@ func instEnv(t *testing.T) (home, bin, art, sum string) {
 		t.Fatal(err)
 	}
 	h := sha256.Sum256(nb)
-	return home, bin, art, hex.EncodeToString(h[:])
-}
-
-// runInstall: install 조각을 돌린다. failSuffix가 있으면 PATH 앞 가짜 mv가 그 꼴로 끝나는 대상으로 옮기기만 실패시킨다
-func runInstall(t *testing.T, home, failSuffix string, args ...string) string {
-	t.Helper()
-	fb := t.TempDir()
-	if failSuffix != "" {
-		mv := "#!/bin/sh\nfor a; do last=$a; done\ncase $last in *" + failSuffix + ") echo 'mv: 막음' >&2; exit 1 ;; esac\nexec /bin/mv \"$@\"\n"
-		if err := os.WriteFile(fb+"/mv", []byte(mv), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	c := exec.Command("sh", append([]string{"-c", install, "_"}, args...)...)
-	c.Env = append(os.Environ(), "HOME="+home, "PATH="+fb+":"+os.Getenv("PATH"))
-	out, _ := c.Output() // 표준 출력(W·S·E 줄)만 — curl·mv 오류 글은 표준 오류
-	return string(out)
-}
-
-func srcOf(t *testing.T, home string) string {
-	t.Helper()
-	s, err := srcDigest(home + "/.local/lib/herdr-go")
+	s, err := srcDigest(g)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return home, art, hex.EncodeToString(h[:]), s
+}
+
+// runSh: installSh를 돌린다. fake: PATH 앞에 둘 가짜 명령(이름 → 본문). 표준 출력(S·W·B·E·D 줄)만 돌려준다
+func runSh(t *testing.T, home string, fake map[string]string, args ...string) string {
+	t.Helper()
+	fb := t.TempDir()
+	for n, b := range fake {
+		if err := os.WriteFile(fb+"/"+n, []byte(b), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := exec.Command("sh", append([]string{"-c", installSh, "_"}, args...)...)
+	c.Env = append(os.Environ(), "HOME="+home, "PATH="+fb+":"+os.Getenv("PATH"))
+	if gc := os.Getenv("GOCACHE"); gc != "" {
+		c.Env = append(c.Env, "GOCACHE="+gc)
+	}
+	out, _ := c.Output()
+	return string(out)
 }
 
 func readOr(p string) string {
@@ -72,97 +72,144 @@ func readOr(p string) string {
 	return string(b)
 }
 
-// 받기가 어느 단계에서 실패하든 옛 실행판(바이너리 바이트와 .src)이 그대로 남아야 한다 —
-// 「새 바이너리 + .src 없음」이면 go-run이 그것을 그 기계 빌드로 보고 소스와 다른 판을 돌린다(감사 A03, 시험 T02)
-func TestInstallKeepsOldOnFailure(t *testing.T) {
-	for _, tc := range []struct{ name, fail, sum, url string }{
-		{"받기 실패", "", "", "file:///없는/곳/demo"},
-		{"해시 다름", "", strings.Repeat("0", 64), ""},
-		{"바이너리 바꿔 넣기 실패", "/demo", "", ""},
-		{"소스 판 바꿔 넣기 실패", "/demo.src", "", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home, bin, art, sum := instEnv(t)
-			url := "file://" + art
-			if tc.url != "" {
-				url = tc.url
-			}
-			if tc.sum != "" {
-				sum = tc.sum
-			}
-			out := runInstall(t, home, tc.fail, url, sum, "demo", srcOf(t, home))
-			if !strings.HasPrefix(out, "E\tdemo\t") {
-				t.Errorf("E 줄이 아니다: %q", out)
-			}
-			if got := readOr(bin + "/demo"); got != "#!/bin/sh\necho OLD\n" {
-				t.Errorf("옛 바이너리가 바뀌었다: %q", got)
-			}
-			if got := readOr(bin + "/demo.src"); got != "old\n" {
-				t.Errorf("옛 소스 판이 바뀌었다: %q", got)
-			}
-			if m, _ := filepath.Glob(bin + "/.demo*"); len(m) != 0 {
-				t.Errorf("임시 파일이 남았다: %v", m)
-			}
-		})
-	}
-	t.Run("성공", func(t *testing.T) {
-		home, bin, art, sum := instEnv(t)
-		src := srcOf(t, home)
-		if out := runInstall(t, home, "", "file://"+art, sum, "demo", src); out != "W\tdemo\n" {
-			t.Errorf("출력 %q", out)
-		}
-		if readOr(bin+"/demo") != "#!/bin/sh\necho NEW\n" || readOr(bin+"/demo.src") != src+"\n" {
-			t.Errorf("새 판으로 바뀌지 않았다")
-		}
-		if m, _ := filepath.Glob(bin + "/.demo*"); len(m) != 0 {
-			t.Errorf("임시 파일이 남았다: %v", m)
-		}
-		if out := runInstall(t, home, "", "file://"+art, sum, "demo", src); out != "S\tdemo\n" {
-			t.Errorf("다시 부름: %q", out)
-		}
-	})
+// leftovers: ~/.local/bin에 남은 임시 파일(.demo.new.* 등)
+func leftovers(home string) []string {
+	m, _ := filepath.Glob(home + "/.local/bin/.*")
+	return m
 }
 
-// 받는 기계의 소스 판이 보낸 판과 다르면 바꿔 넣지 않는다 — 받아도 go-run이 쓰지 않고 그 기계에 맞던 바이너리만 잃는다(감사 C02).
-// Go 소스가 없는 기계도 도구마다 K 한 줄(빈 성공이 아니게 — C03)
-func TestInstallSourceMismatch(t *testing.T) {
-	home, bin, art, sum := instEnv(t)
-	if out := runInstall(t, home, "", "file://"+art, sum, "demo", "1.2"); !strings.HasPrefix(out, "K\tdemo\t") {
-		t.Errorf("출력 %q", out)
+func uname(m string) string {
+	return "#!/bin/sh\ncase $1 in -m) echo " + m + " ;; *) echo Darwin ;; esac\n"
+}
+
+// 받기: 해시가 맞으면 본체 하나를 mv 한 번으로, 기록을 남기고, 다음 실행은 S. --check는 아무것도 쓰지 않는다
+func TestInstallShDownload(t *testing.T) {
+	home, art, sum, src := instEnv(t)
+	arm := map[string]string{"uname": uname("arm64")}
+	if out := runSh(t, home, arm, "check", "c0", src, "arm64", "demo", "-", "-"); out != "D\tdemo\t판이 다르거나 모름\n" {
+		t.Fatalf("깔기 전 --check: %q", out)
 	}
-	if readOr(bin+"/demo") != "#!/bin/sh\necho OLD\n" || readOr(bin+"/demo.src") != "old\n" {
-		t.Errorf("소스 판이 다른데 바꿔 넣었다")
+	if readOr(home+"/.local/bin/demo") != oldBody || readOr(home+"/.local/state/herdr-sync/bin.tsv") != "<없음>" {
+		t.Fatal("--check가 썼다")
 	}
-	empty := t.TempDir()
-	if out := runInstall(t, empty, "", "file://"+art, sum, "demo", "1.2", "file://"+art, sum, "two", "1.2"); out != "K\tdemo\t그 기계에 Go 소스가 없다\nK\ttwo\t그 기계에 Go 소스가 없다\n" {
-		t.Errorf("소스 없음: %q", out)
+	if out := runSh(t, home, arm, "set", "c0", src, "arm64", "demo", "file://"+art, sum); out != "W\tdemo\n" {
+		t.Fatalf("받기: %q", out)
+	}
+	if readOr(home+"/.local/bin/demo") != "#!/bin/sh\necho NEW\n" || readOr(home+"/.local/state/herdr-sync/bin.tsv") != "demo\t"+sum+"\t"+src+"\n" {
+		t.Fatalf("본체·기록: %q %q", readOr(home+"/.local/bin/demo"), readOr(home+"/.local/state/herdr-sync/bin.tsv"))
+	}
+	if st, _ := os.Stat(home + "/.local/bin/demo"); st.Mode()&0o111 == 0 {
+		t.Error("실행 권한 없음")
+	}
+	if out := runSh(t, home, arm, "set", "c0", src, "arm64", "demo", "file://"+art, sum); out != "S\tdemo\n" {
+		t.Errorf("다시: %q", out)
+	}
+	if out := runSh(t, home, arm, "check", "c0", src, "arm64", "demo", "-", "-"); out != "S\tdemo\n" {
+		t.Errorf("깐 뒤 --check(기록으로 알아봄): %q", out)
+	}
+	if l := leftovers(home); len(l) != 0 {
+		t.Errorf("임시 파일이 남음: %v", l)
+	}
+	// 소스 판이 바뀌면(새 커밋) 기록과 어긋나 다시 깐다
+	if out := runSh(t, home, arm, "check", "c0", src+"x", "arm64", "demo", "-", "-"); !strings.HasPrefix(out, "D\tdemo\t") {
+		t.Errorf("소스 판이 다른 --check: %q", out)
 	}
 }
 
-// 보낸 도구마다 정확히 한 줄 — 빠짐·겹침·모르는 도구는 경고(감사 C03)
+// R-01·R-11: 바꿔 넣기가 안 되면 옛 본체 그대로·임시 파일 없음(되돌릴 백업도 지울 백업도 없다 — 본체 하나가 한 세대).
+// 기록 쓰기만 실패하면 본체는 새 것이고 다음 실행이 알아본다. 기록이 본체와 어긋나면(쓰다 죽음) 판 모름으로 보고 다시 깐다
+func TestInstallShOneGeneration(t *testing.T) {
+	home, art, sum, src := instEnv(t)
+	failTo := func(suffix string) map[string]string {
+		return map[string]string{"uname": uname("arm64"),
+			"mv": "#!/bin/sh\nfor a; do last=$a; done\ncase $last in *" + suffix + ") echo 'mv: 막음' >&2; exit 1 ;; esac\nexec /bin/mv \"$@\"\n"}
+	}
+	if out := runSh(t, home, failTo("/.local/bin/demo"), "set", "c0", src, "arm64", "demo", "file://"+art, sum); out != "E\tdemo\t바꿔 넣지 못했다 — 옛 본체 그대로\n" {
+		t.Fatalf("mv 실패: %q", out)
+	}
+	if readOr(home+"/.local/bin/demo") != oldBody || len(leftovers(home)) != 0 || readOr(home+"/.local/state/herdr-sync/bin.tsv") != "<없음>" {
+		t.Fatalf("mv 실패 뒤: 본체 %q 남은 것 %v 기록 %q", readOr(home+"/.local/bin/demo"), leftovers(home), readOr(home+"/.local/state/herdr-sync/bin.tsv"))
+	}
+	out := runSh(t, home, failTo("/bin.tsv"), "set", "c0", src, "arm64", "demo", "file://"+art, sum)
+	if out != "W\tdemo\t기록을 쓰지 못했다\n" || readOr(home+"/.local/bin/demo") != "#!/bin/sh\necho NEW\n" {
+		t.Fatalf("기록 실패: %q %q", out, readOr(home+"/.local/bin/demo"))
+	}
+	if out := runSh(t, home, map[string]string{"uname": uname("arm64")}, "set", "c0", src, "arm64", "demo", "file://"+art, sum); out != "S\tdemo\n" ||
+		readOr(home+"/.local/state/herdr-sync/bin.tsv") != "demo\t"+sum+"\t"+src+"\n" {
+		t.Fatalf("다음 실행이 기록을 채움: %q %q", out, readOr(home+"/.local/state/herdr-sync/bin.tsv"))
+	}
+	// 어긋난 기록(본체 sha가 다름): S가 아니다
+	os.WriteFile(home+"/.local/bin/demo", []byte(oldBody), 0o755)
+	if out := runSh(t, home, nil, "check", "c0", src, "arm64", "demo", "-", "-"); !strings.HasPrefix(out, "D\tdemo\t") {
+		t.Errorf("본체가 기록과 다른데 --check: %q", out)
+	}
+}
+
+// 받기가 안 되면(해시 다름·다른 CPU·릴리스 없음) 그 기계 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다 — 판 모를 바이너리를 깔지 않는다(R-40)
+func TestInstallShBuildFallback(t *testing.T) {
+	if goBin() == "" {
+		t.Skip("go가 없다")
+	}
+	home, art, _, src := instEnv(t)
+	arm := map[string]string{"uname": uname("arm64")}
+	if out := runSh(t, home, arm, "set", "c0", src+"x", "arm64", "demo", "file://"+art, "bad"); out != "E\tdemo\t받은 것의 해시가 다르다 · 그 기계 Go 소스 판이 범용 저장소와 다르다\n" {
+		t.Fatalf("해시 다름·소스 다름: %q", out)
+	}
+	if readOr(home+"/.local/bin/demo") != oldBody || len(leftovers(home)) != 0 {
+		t.Fatalf("못 깖 뒤: %q %v", readOr(home+"/.local/bin/demo"), leftovers(home))
+	}
+	if out := runSh(t, home, map[string]string{"uname": uname("aarch64")}, "set", "c0", src+"x", "x86_64", "demo", "file://"+art, "bad"); !strings.HasPrefix(out, "E\tdemo\tCPU가 aarch64 · ") {
+		t.Errorf("다른 CPU: %q", out)
+	}
+	out := runSh(t, home, arm, "set", "0123456789ab", src, "arm64", "demo", "-", "-")
+	if out != "B\tdemo\t릴리스 없음\n" {
+		t.Fatalf("짓기: %q", out)
+	}
+	if got, err := exec.Command(home + "/.local/bin/demo").Output(); err != nil || string(got) != "built 0123456789ab\n" {
+		t.Errorf("지은 본체가 커밋을 새기지 않음: %q %v", got, err)
+	}
+	if out := runSh(t, home, arm, "check", "0123456789ab", src, "arm64", "demo", "-", "-"); out != "S\tdemo\n" {
+		t.Errorf("지은 것도 기록으로 알아봄: %q", out)
+	}
+	if l := leftovers(home); len(l) != 0 {
+		t.Errorf("임시 파일이 남음: %v", l)
+	}
+}
+
+// installSh의 그 기계 소스 판(cur)은 srcDigest와 같아야 한다 — 숨김 파일은 빼고, 임베드 글은 넣는다
+func TestInstallShSourceDigest(t *testing.T) {
+	if goBin() == "" {
+		t.Skip("go가 없다")
+	}
+	home, _, _, _ := instEnv(t)
+	g := home + "/.local/lib/herdr-go"
+	os.WriteFile(g+"/cmd/demo/agent.sh", []byte("echo a\n"), 0o644)
+	os.MkdirAll(g+"/.bin", 0o755)
+	os.WriteFile(g+"/.bin/junk", []byte("x"), 0o644)
+	src, _ := srcDigest(g)
+	if out := runSh(t, home, map[string]string{"uname": uname("arm64")}, "set", "c0", src, "arm64", "demo", "-", "-"); out != "B\tdemo\t릴리스 없음\n" {
+		t.Errorf("srcDigest와 다른 판으로 본다: %q", out)
+	}
+}
+
+// 보낸 도구마다 정확히 한 줄 — 빠짐·겹침·모르는 도구·모르는 꼴은 못 깖(감사 C03)
 func TestInstallReport(t *testing.T) {
-	warns := func(out string) (n int) {
-		for _, p := range installReport("w1", "bin-x", []string{"a", "b"}, out) {
-			if p.warn {
+	bad := func(out string) (n int) {
+		for _, p := range installReport("w1", []string{"a", "b"}, out) {
+			if p.bad {
 				n++
 			}
 		}
 		return
 	}
-	if n := warns("W\ta\nS\tb\n"); n != 0 {
-		t.Errorf("정상인데 경고 %d", n)
-	}
-	if n := warns("S\ta\n"); n != 1 {
-		t.Errorf("b 응답 없음: 경고 %d", n)
-	}
-	if n := warns("S\ta\nS\ta\nS\tb\n"); n != 1 {
-		t.Errorf("a 두 번: 경고 %d", n)
-	}
-	if n := warns("S\ta\nS\tb\nW\tc\n"); n != 1 {
-		t.Errorf("모르는 도구: 경고 %d", n)
-	}
-	if n := warns("K\ta\t그 기계 소스 판이 다르다\nS\tb\n"); n != 0 {
-		t.Errorf("K는 건너뜀(경고 아님): %d", n)
+	for out, want := range map[string]int{
+		"W\ta\nS\tb\n": 0, "B\ta\t릴리스 없음\nS\tb\n": 0, "W\ta\t기록을 쓰지 못했다\nS\tb\n": 0,
+		"S\ta\n": 1, "S\ta\nS\ta\nS\tb\n": 1, "S\ta\nS\tb\nW\tc\n": 1, "E\ta\t받지 못했다\nS\tb\n": 1,
+		"K\ta\t옛 꼴\nS\tb\n": 1, "B\ta\nS\tb\n": 1, "D\ta\t없음\nS\tb\n": 1, // D는 --check에서만
+	} {
+		if n := bad(out); n != want {
+			t.Errorf("%q: 못 깖 %d, 바람 %d", out, n, want)
+		}
 	}
 }
 
@@ -251,8 +298,7 @@ func TestUploadNeverClobbers(t *testing.T) {
 	}
 }
 
-// go:embed 입력(agent.sh 등 .go가 아닌 파일)만 바뀌어도 소스 판이 바뀌어야 받은 옛 바이너리를 버린다(감사 A04·O-03).
-// lib/go-run.sh go_run_src도 같은 규칙이어야 한다(TestSrcDigestMatchesGoRun — gofix-core가 go-run.sh를 고친다)
+// go:embed 입력(agent.sh 등 .go가 아닌 파일)만 바뀌어도 소스 판이 바뀌어야 옛 기록을 버리고 다시 깐다(감사 A04·O-03)
 func TestSrcDigestCountsEmbed(t *testing.T) {
 	d := t.TempDir()
 	for p, c := range map[string]string{"go.mod": "module x\n", "cmd/a/main.go": "package main\n", "cmd/a/agent.sh": "echo a\n"} {

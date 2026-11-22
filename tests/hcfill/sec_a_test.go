@@ -70,16 +70,18 @@ func secA(k *K) {
 	k.check("설정 없음: 종료 1, 설정 경로와 예시 안내", k.rc == 1 && in(k.out, k.T+"/conf/hc-fill.tsv") && in(k.out, "config.example"))
 	k.cpConf()
 
-	// 설치하는 시험과 격리 도우미가 같은 폴더에 있어야 한다.
+	// 배포 목록은 hc-fill을 Go 바이너리 줄(tools:cmd/hc-fill)로 깐다 — 셸 판 포장(tools:bin/hc-fill)·셸 시험 격리 도우미(isolate.sh)는 걷혔다
 	if sl := repo + "/config.example/sync.list"; exists(sl) {
-		f := false
+		bin, old := false, false
 		for _, x := range lines(read(sl)) {
 			w := strings.Fields(x)
-			if len(w) >= 4 && w[1] == ".local/bin/tests/isolate.sh" && w[2] == "tools:tests/isolate.sh" && (w[3] == "macos" || w[3] == "all") {
-				f = true
+			if len(w) >= 4 && w[1] == ".local/bin/hc-fill" {
+				bin = bin || w[2] == "tools:cmd/hc-fill"
+				old = old || w[2] == "tools:bin/hc-fill"
 			}
+			old = old || (len(w) >= 3 && w[2] == "tools:tests/isolate.sh")
 		}
-		k.check("배포 목록에 공통 시험 격리 도우미가 있음", f)
+		k.check("배포 목록: hc-fill은 바이너리 줄, 셸 판 줄 없음", bin && !old)
 	}
 
 	// 1. add · ls · rm

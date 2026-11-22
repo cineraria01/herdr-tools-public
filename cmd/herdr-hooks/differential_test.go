@@ -1,11 +1,13 @@
 package main
 
-// 두 판 대조: 셸 판 훅 파일에서 perl·awk 프로그램을 그대로 뽑아 돌리고, 같은 입력에 Go 판이 같은 답을 내는지 본다.
+// 기준 대조: 셸 판(2026-11-22에 지움)의 perl·awk가 낸 답을 기록한 골든(testdata/shell-golden.jsonl — TestGoldenShell)과,
+// 지금도 있는 perl·bash의 원래 의미(heredoc 치환·read 칸 나누기)와 견준다.
 // 입력 = 정해진 씨앗으로 만든 조각 섞음(diffCorpusN개) + 시험 파일의 명령들 + (있으면) HERDR_HOOKS_CORPUS 파일(NUL로 가른 실제 명령).
-// perl·awk가 없으면 건너뛴다.
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -100,77 +102,88 @@ func diffErr(t *testing.T, kind, s, detail string, outs ...any) {
 	t.Errorf("%s %s: %s"+strings.Repeat(" %q", len(outs)), append([]any{kind, label, detail}, outs...)...)
 }
 
-// perlBody: 셸 판 훅의 `"$PERL" -e '…'` 본문
-func perlBody(t *testing.T, hook string) string {
-	b, err := os.ReadFile(filepath.Join("..", "..", "claude", "hooks", hook+".sh"))
+// goldenCase: 셸 판(지운 claude/hooks/*.sh — 2026-11-22 go-shell-remove)의 perl·awk 프로그램이 그 입력에 낸 실제 답.
+// 셸 판을 지우기 전에 한 번 기록했다(testdata/shell-golden.jsonl — 한 줄에 한 사례). Tok은 앞 2500개만(awk가 명령마다 한 번이라 느렸다).
+// in·tok은 바이트를 21바이트(base64 28자)씩 나눈 base64 조각 배열 — 한 덩이 base64는 공개 내보내기의 「긴 토큰」 비밀 꼴 검사에 걸린다
+type goldenCase struct {
+	In     b64Chunks `json:"in"`
+	Kill   string    `json:"kill"`
+	Edit   string    `json:"edit"`
+	Tok    b64Chunks `json:"tok,omitempty"`
+	HasTok bool      `json:"has_tok,omitempty"`
+}
+
+// b64Chunks: base64 조각 배열을 이어 푼 바이트
+type b64Chunks []byte
+
+func (c *b64Chunks) UnmarshalJSON(b []byte) error {
+	var parts []string
+	if err := json.Unmarshal(b, &parts); err != nil {
+		return err
+	}
+	var out []byte
+	for _, p := range parts {
+		d, err := base64.StdEncoding.DecodeString(p)
+		if err != nil {
+			return fmt.Errorf("골든 조각 %q: %w", p, err)
+		}
+		out = append(out, d...)
+	}
+	*c = out
+	return nil
+}
+
+func loadGolden(t *testing.T) []goldenCase {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "shell-golden.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`(?s)"\$PERL" -e '\n(.*?)\n'\n`).FindStringSubmatch(string(b))
-	if m == nil {
-		t.Fatalf("%s: perl 본문을 못 찾음", hook)
+	var g []goldenCase
+	for i, l := range bytes.Split(bytes.TrimRight(b, "\n"), []byte("\n")) {
+		var c goldenCase
+		if err := json.Unmarshal(l, &c); err != nil {
+			t.Fatalf("골든 %d번 줄: %v", i+1, err)
+		}
+		g = append(g, c)
 	}
-	return m[1]
+	if len(g) < diffCorpusN {
+		t.Fatalf("골든 %d개 — %d개 이상이어야", len(g), diffCorpusN)
+	}
+	return g
 }
 
-// perlRun: 본문의 exit N을 die로 바꿔 입력마다 돌린 종료 코드
-func perlRun(t *testing.T, body string, in []string) []string {
-	perl, err := exec.LookPath("perl")
-	if err != nil {
-		t.Skip("perl 없음")
-	}
-	body = regexp.MustCompile(`\bexit (\d)`).ReplaceAllString(body, `die "RC $1\n"`)
-	prog := "local $/ = \"\\0\"; while (my $rec = <STDIN>) { chomp $rec; $ENV{CMD} = $rec; my $rc = 0; eval {\n" + body +
-		"\n}; if ($@ =~ /^RC (\\d+)/) { $rc = $1 } elsif ($@) { $rc = \"ERR $@\" } print \"$rc\\n\"; }"
-	c := exec.Command(perl, "-e", prog)
-	var stdin bytes.Buffer
-	for _, s := range in {
-		stdin.WriteString(s + "\x00")
-	}
-	c.Stdin = &stdin
-	out, err := c.Output()
-	if err != nil {
-		t.Fatalf("perl: %v", err)
-	}
-	return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-}
-
-func TestDiffKillGuard(t *testing.T) {
-	in := corpus(t)
-	want := perlRun(t, perlBody(t, "kill-by-lookup-guard"), in)
-	bad := 0
-	for i, s := range in {
-		got := "0"
+// TestGoldenShell: kill-by-lookup-guard·lane-no-shell-edit 판정과 cotenant-guard 낱말 가르기가 셸 판 골든과 같다
+func TestGoldenShell(t *testing.T) {
+	bad, toks := 0, 0
+	for _, c := range loadGolden(t) {
+		s := string(c.In)
+		kill := "0"
 		if killVerdict(s) {
-			got = "2"
+			kill = "2"
 		}
-		if got != want[i] {
+		if kill != c.Kill {
 			bad++
-			if bad <= 15 {
-				diffErr(t, "kill", s, "go "+got+", perl "+want[i])
+			diffErr(t, "kill", s, "go "+kill+", 셸 "+c.Kill)
+		}
+		if e := strconv.Itoa(shellEditVerdict(s)); e != c.Edit {
+			bad++
+			diffErr(t, "edit", s, "go "+e+", 셸 "+c.Edit)
+		}
+		if c.HasTok {
+			toks++
+			if got := strings.Join(cgAnalyze(s, "/w/d", "/h"), "\n"); got != string(c.Tok) {
+				bad++
+				diffErr(t, "tok", s, "go·셸 awk", got, string(c.Tok))
 			}
 		}
-	}
-	t.Logf("kill-by-lookup-guard %d개 대조(perl이 막음 %d), 다름 %d", len(in), strings.Count(strings.Join(want, "\n")+"\n", "2\n"), bad)
-}
-
-func TestDiffShellEdit(t *testing.T) {
-	in := corpus(t)
-	want := perlRun(t, perlBody(t, "lane-no-shell-edit"), in)
-	bad := 0
-	for i, s := range in {
-		if got := strconv.Itoa(shellEditVerdict(s)); got != want[i] {
-			bad++
-			if bad <= 15 {
-				diffErr(t, "edit", s, "go "+got+", perl "+want[i])
-			}
+		if bad > 30 {
+			t.Fatal("다름이 너무 많다")
 		}
 	}
-	dist := map[string]int{}
-	for _, w := range want {
-		dist[w]++
+	if toks < 2000 {
+		t.Errorf("낱말 가르기 골든 %d개 — 2000개 이상이어야", toks)
 	}
-	t.Logf("lane-no-shell-edit %d개 대조(perl 종료 코드 분포 %v), 다름 %d", len(in), dist, bad)
 }
 
 // TestDiffHeredoc: perl 원문 치환 하나만
@@ -200,47 +213,6 @@ func TestDiffHeredoc(t *testing.T) {
 			}
 		}
 	}
-}
-
-// TestDiffTokenizer: 셸 판 AWK 프로그램(LC_ALL=C /usr/bin/awk)과 낱말 가르기 결과 줄이 같은가
-func TestDiffTokenizer(t *testing.T) {
-	awk := "/usr/bin/awk"
-	if _, err := os.Stat(awk); err != nil {
-		t.Skip("awk 없음")
-	}
-	b, err := os.ReadFile(filepath.Join("..", "..", "claude", "hooks", "cotenant-guard.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := regexp.MustCompile(`(?s)\nAWK='\n(.*?)\n}'\n`).FindStringSubmatch(string(b))
-	if m == nil {
-		t.Fatal("AWK 프로그램을 못 찾음")
-	}
-	prog := m[1] + "\n}"
-	in := corpus(t)
-	if os.Getenv("HERDR_HOOKS_CORPUS") == "" && len(in) > 2500 { // 명령 하나에 awk 한 번 — 보통 돌림은 앞쪽(시험 명령 + 섞음 일부)만
-		in = in[:2500]
-	}
-	bad := 0
-	for _, s := range in {
-		c := exec.Command(awk, prog)
-		c.Env = []string{"LC_ALL=C", "CG_CWD=/w/d", "HOME=/h"}
-		c.Stdin = strings.NewReader(strings.ReplaceAll(s, "\x00", "") + "\n")
-		out, err := c.Output()
-		if err != nil {
-			label, _ := show(s)
-			t.Fatalf("awk %s: %v", label, err)
-		}
-		want := strings.TrimRight(string(out), "\n")
-		got := strings.Join(cgAnalyze(s, "/w/d", "/h"), "\n")
-		if got != want {
-			bad++
-			if bad <= 10 {
-				diffErr(t, "tok", s, "go·awk", got, want)
-			}
-		}
-	}
-	t.Logf("낱말 가르기 %d개 대조, 다름 %d", len(in), bad)
 }
 
 // TestBashRead: bash `IFS=$'\037' read -r` 칸 나누기를 /bin/bash와 견준다

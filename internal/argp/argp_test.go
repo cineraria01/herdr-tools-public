@@ -34,6 +34,9 @@ func TestParse(t *testing.T) {
 		{[]string{"--drop"}, 2, "usage: t\nt: error: argument --drop: expected at least one argument\n"},
 		{[]string{"--watch=1"}, 2, "usage: t\nt: error: argument --watch: ignored explicit argument '1'\n"},
 		{[]string{"--bogus"}, 2, "usage: t\nt: error: unrecognized arguments: --bogus\n"},
+		// B32: 위치 인자를 받지 않으니 `--` 단독도 남는 인자(파이썬 판 argparse와 같음 — ovis-split --self-test --)
+		{[]string{"--watch", "--"}, 2, "usage: t\nt: error: unrecognized arguments: --\n"},
+		{[]string{"--", "x"}, 2, "usage: t\nt: error: unrecognized arguments: -- x\n"},
 	}
 	for _, c := range cases {
 		_, ok, code, _, e := run(c.args...)

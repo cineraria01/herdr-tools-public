@@ -548,11 +548,17 @@ func macrow() {
 	if len(RAH) > 0 {
 		p = append(p, fmt.Sprintf("저장소보다 새로움 %d개 (%s) — 커밋 안 됨?", len(RAH), few(RAH)))
 	}
-	for _, x := range rdiff {
-		if x == "지움" {
-			p = append(p, "다름 (지움)")
-			break
+	var d []string
+	for _, w := range []string{"지움", "바이너리"} {
+		for _, x := range rdiff {
+			if x == w {
+				d = append(d, w)
+				break
+			}
 		}
+	}
+	if len(d) > 0 {
+		p = append(p, "다름 ("+strings.Join(d, "·")+")")
 	}
 	if rconf > 0 {
 		p = append(p, fmt.Sprintf("충돌 %d건", rconf))

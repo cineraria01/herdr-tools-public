@@ -54,23 +54,22 @@ elif a[0] == "do":
     json.dump(st, open(p, "w"))
 `
 
-func TestHerdrBalance(t *testing.T) { eachImpl(t, "herdr-balance", testHerdrBalance) }
+func TestHerdrBalance(t *testing.T) { run1(t, testHerdrBalance) }
 
 func testHerdrBalance(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/home", T+"/conf", T+"/py", T+"/fake")
-	os.Symlink(filepath.Join(repo, "bin", "herdr-tools-config"), T+"/bin/herdr-tools-config")
+	HB := tool(t, "herdr-balance")
+	HTC := filepath.Join(filepath.Dir(HB), "herdr-tools-config")
+	os.Symlink(HTC, T+"/bin/herdr-tools-config")
 	PY, err := exec.LookPath("python3")
 	if err != nil {
 		t.Fatal("python3 없음")
 	}
-	os.Symlink(PY, T+"/py/python3") // 셸 판이 부를 python3(PATH를 좁혀도 — 도우미를 찾는 길은 그대로 시험)
-	HB := filepath.Join(repo, "bin", "herdr-balance")
-	iv := implVar("herdr-balance")
-	impl := e[iv]
-	// hbEnv: env -i 꼴 — 바깥 환경 없이 HOME·PATH·설정·가짜 상태와 판 스위치만
+	os.Symlink(PY, T+"/py/python3") // 가짜 herdr-app(시험 대역)이 부를 python3
+	// hbEnv: env -i 꼴 — 바깥 환경 없이 HOME·PATH·설정·가짜 상태만
 	hbEnv := func(path, conf string, kv ...string) Env {
 		return Env{"HOME": T + "/home", "PATH": path, "HERDR_TOOLS_CONFIG": conf, "FAKE_HA_STATE": T + "/state.json",
-			"FAKE_HA_LOG": T + "/ha.log", iv: impl}.With(kv...)
+			"FAKE_HA_LOG": T + "/ha.log"}.With(kv...)
 	}
 	var errOut string
 	hb := func(path, conf string, kv []string, args ...string) (string, int) {
@@ -102,7 +101,7 @@ func testHerdrBalance(t *testing.T, T string, e Env) {
 	eq("도우미가 PATH·~/.local/bin에 없음: 빈 목록", remote("/usr/bin:/bin", ex), "")
 	eq("도우미 없음: 경고 한 줄", strconv.Itoa(grepc(errOut, "herdr-tools-config 못 부름")), "1")
 	mkdirs(t, T+"/home/.local/bin")
-	os.Symlink(filepath.Join(repo, "bin", "herdr-tools-config"), T+"/home/.local/bin/herdr-tools-config")
+	os.Symlink(HTC, T+"/home/.local/bin/herdr-tools-config")
 	eq("PATH에 없어도 ~/.local/bin의 도우미(launchd)", remote("/usr/bin:/bin", ex), "worker-a/|worker-b/")
 
 	script(t, T+"/fake/herdr-app", T, fakeHerdrApp)
@@ -219,6 +218,6 @@ herdr-balance: error: --main 또는 --watch가 필요`)
 			wrc = ee.ExitCode()
 		}
 	}
-	// 두 판 같게 143(go-final-audit B11 — 셸 판은 TERM으로 죽고, Go 판은 128+신호로 끝난다)
+	// 143(go-final-audit B11 — 128+신호로 끝난다)
 	eq("watch: TERM 종료 코드 143", strconv.Itoa(wrc), "143")
 }

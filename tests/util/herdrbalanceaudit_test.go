@@ -15,24 +15,22 @@ import (
 	"time"
 )
 
-func TestHerdrBalanceAudit(t *testing.T) { eachImpl(t, "herdr-balance", testHerdrBalanceAudit) }
+func TestHerdrBalanceAudit(t *testing.T) { run1(t, testHerdrBalanceAudit) }
 
 func testHerdrBalanceAudit(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/home", T+"/py", T+"/fake")
-	os.Symlink(filepath.Join(repo, "bin", "herdr-tools-config"), T+"/bin/herdr-tools-config")
-	PY, err := exec.LookPath("python3")
+	HB := tool(t, "herdr-balance")
+	os.Symlink(filepath.Join(filepath.Dir(HB), "herdr-tools-config"), T+"/bin/herdr-tools-config")
+	PY, err := exec.LookPath("python3") // 가짜 herdr-app(시험 대역)이 파이썬이다
 	if err != nil {
 		t.Fatal("python3 없음")
 	}
 	os.Symlink(PY, T+"/py/python3")
-	HB := filepath.Join(repo, "bin", "herdr-balance")
-	iv := implVar("herdr-balance")
-	impl := e[iv]
 	ex := filepath.Join(repo, "config.example")
 	P := T + "/fake:" + T + "/py:" + T + "/bin:/usr/bin:/bin"
 	env := func(kv ...string) Env {
 		return Env{"HOME": T + "/home", "PATH": P, "HERDR_TOOLS_CONFIG": ex, "FAKE_HA_STATE": T + "/state.json",
-			"FAKE_HA_LOG": T + "/ha.log", iv: impl}.With(kv...)
+			"FAKE_HA_LOG": T + "/ha.log"}.With(kv...)
 	}
 	// 가짜 herdr-app 앞에 ls 조작 포장: FAKE_LS_EMPTY_AT=n이면 n번째 ls부터 {}(부분 목록), FAKE_LS_SLEEP=s면 ls가 s초 멈춤
 	script(t, T+"/fake/herdr-app.py", T, fakeHerdrApp)
@@ -60,12 +58,7 @@ exec "@T@/fake/herdr-app.py" "$@"
 	TAB1 := T + "/home/.local/state/herdr-balance/tab1.json"
 	two := `{"terminal": "t0", "pane": "p0", "name": "lead", "app": "claude"}, {"terminal": "t1", "pane": "p1", "name": "lane-a", "app": "claude"}`
 
-	// [B01] 이미 깔린 launchd가 「python3 …/herdr-balance」로 부른다(셸 판 시절 진입점) — 그래도 같은 결과로 돌아야 한다
-	o1, _, rc1 := run2(T, env(), HB, "--print-remote")
-	o2, se2, rc2 := run2(T, env(), PY, HB, "--print-remote")
-	if rc1 != rc2 || o1 != o2 {
-		t.Errorf("FAIL - [B01] python3로 불러도 같음: %d %q / %d %q %s", rc1, o1, rc2, o2, se2)
-	}
+	// [B01](옛 launchd가 「python3 …/herdr-balance」로 부름)은 파이썬 포장과 함께 걷혔다 — 진입점은 바이너리 그 자체(plist가 바로 부른다)
 
 	// [B12] 맞춤 중 목록이 부분({} — spaces 없음)이면 worker 없음으로 읽고 성공·상태 저장하지 않는다
 	state(two)
@@ -75,7 +68,7 @@ exec "@T@/fake/herdr-app.py" "$@"
 	}
 	os.RemoveAll(T + "/home/.local/state")
 
-	// [B11] --watch가 herdr-app ls에 멈춰 있어도 TERM이면 곧 끝나고, 종료 코드는 셸 판과 같은 143
+	// [B11] --watch가 herdr-app ls에 멈춰 있어도 TERM이면 곧 끝나고, 종료 코드는 143(옛 셸 판이 신호로 죽을 때와 같은 값)
 	state(two)
 	w := exec.Command(HB, "--watch")
 	w.Dir, w.Env = T, env("FAKE_LS_SLEEP=20").list()
@@ -118,8 +111,7 @@ exec "@T@/fake/herdr-app.py" "$@"
 		t.Errorf("FAIL - [B11] ls에 멈춘 watch: TERM 5초 안 143 (끝남=%v rc=%d)", ended, wrc)
 	}
 
-	// [B11] worker를 떼는 중(park)에 TERM: 종료 코드는 두 판 143. Go 판은 그 맞춤을 마치고 끝난다(worker가 떼인 채 남지 않게 —
-	// 셸 판은 바로 죽어 떼인 채 남는다: 알려진 차이, 셸 판은 곧 걷는다)
+	// [B11] worker를 떼는 중(park)에 TERM: 종료 코드 143, 그 맞춤을 마치고 끝난다(worker가 떼인 채 남지 않게)
 	state(two)
 	os.Remove(T + "/park.started")
 	os.Remove(T + "/park.done")
@@ -141,20 +133,19 @@ exec "@T@/fake/herdr-app.py" "$@"
 		mrc = exitCode(err)
 	case <-time.After(30 * time.Second):
 	}
-	for i := 0; i < 50 && !exists(T+"/park.done"); i++ { // 셸 판이 죽어도 띄운 park는 마저 돈다 — 그 뒤에 본다
+	for i := 0; i < 50 && !exists(T+"/park.done"); i++ { // 띄운 park가 끝난 뒤에 본다
 		time.Sleep(100 * time.Millisecond)
 	}
 	parked := strings.Contains(read(T+"/state.json"), `"parked": {"t1"`)
-	if mrc != 143 || (impl == "go" && parked) {
-		t.Errorf("FAIL - [B11] park 중 TERM: 143·(Go 판) 다시 붙임 (rc=%d 떼인 채=%v)", mrc, parked)
+	if mrc != 143 || parked {
+		t.Errorf("FAIL - [B11] park 중 TERM: 143·다시 붙임 (rc=%d 떼인 채=%v)", mrc, parked)
 	}
 
-	// [M2] --watch 두 판 공통 잠금: 다른 판이 돌고 있으면 한 줄 찍고 75. 쥔 쪽은 INT면 130
+	// [M2] --watch 잠금: 다른 --watch가 돌고 있으면 한 줄 찍고 75. 쥔 쪽은 INT면 130
 	state(two)
 	os.Remove(TAB1)
-	other := map[string]string{"go": "bash", "bash": "go"}[impl]
 	h := exec.Command(HB, "--watch")
-	h.Dir, h.Env = T, env(iv+"="+other).list()
+	h.Dir, h.Env = T, env().list()
 	if err := h.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +162,7 @@ exec "@T@/fake/herdr-app.py" "$@"
 	r.Dir, r.Env, r.Stderr, r.WaitDelay = T, env().list(), &rse, 5*time.Second
 	lrc := exitCode(r.Run())
 	if lse := rse.String(); lrc != 75 || grepc(lse, "이미 돈다") != 1 {
-		t.Errorf("FAIL - [M2] %s 판이 돌 때 %s 판 --watch: 75·한 줄 (rc=%d %q)", other, impl, lrc, lse)
+		t.Errorf("FAIL - [M2] --watch가 돌 때 또 --watch: 75·한 줄 (rc=%d %q)", lrc, lse)
 	}
 	h.Process.Signal(syscall.SIGINT)
 	hrc := -1
@@ -181,7 +172,7 @@ exec "@T@/fake/herdr-app.py" "$@"
 	case <-time.After(10 * time.Second):
 	}
 	if hrc != 130 {
-		t.Errorf("FAIL - [B11] %s 판 watch INT 종료 코드 130 (rc=%d)", other, hrc)
+		t.Errorf("FAIL - [B11] watch INT 종료 코드 130 (rc=%d)", hrc)
 	}
 }
 

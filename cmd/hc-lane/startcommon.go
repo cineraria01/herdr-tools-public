@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,27 +25,11 @@ var (
 	top, wt, rx, undo                                 string
 	norepo                                            bool
 	selfTerm                                          string // 부른 터미널($HC_TERMINAL_ID — clean이 자기 자신을 뺀다)
-	selfPath                                          string // 셸 판 bin/hc-lane 절대 경로(셸 판 self — 감시·사건을 부른다)
+	selfPath                                          string // 이 바이너리 절대 경로(감시·사건을 부른다)
 )
 
-// startSetup: 셸 판 self = $(cd "$(dirname "$0")" && pwd -P)/${0##*/}
-func startSetup() {
-	sh := os.Getenv("HC_LANE_SH")
-	if sh == "" {
-		sh, _ = exec.LookPath("hc-lane")
-	}
-	if sh != "" {
-		if d, err := filepath.EvalSymlinks(filepath.Dir(sh)); err == nil {
-			if a, err := filepath.Abs(d); err == nil {
-				sh = a + "/" + filepath.Base(sh)
-			}
-		}
-	}
-	if sh == "" {
-		sh = "hc-lane"
-	}
-	selfPath = sh
-}
+// startSetup: selfPath = 이 바이너리(링크를 따른 실제 경로)
+func startSetup() { selfPath = selfExe() }
 
 func errf(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }
 

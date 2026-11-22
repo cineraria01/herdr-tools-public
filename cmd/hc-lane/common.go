@@ -322,17 +322,9 @@ func evdir() string {
 	return s + "/hc-lane"
 }
 
-// selfSh: 셸 포장 bin/hc-lane 경로(포장이 HC_LANE_SH로 넘김) — 아직 셸 판인 하위 명령(report 등)을 부를 때
-func selfSh() string {
-	if s := os.Getenv("HC_LANE_SH"); s != "" {
-		return s
-	}
-	return "hc-lane"
-}
-
-// reportCmd: (report_cmd …) — hc-lane report를 부른다. 표준 출력은 out(nil이면 버림), 오류 출력은 errw
+// reportCmd: (report_cmd …) — 이 바이너리의 report를 부른다. 표준 출력은 out(nil이면 버림), 오류 출력은 errw
 func reportCmd(out, errw io.Writer, args ...string) int {
-	return runCmd(cmdOpt{stdout: out, stderr: errw}, selfSh(), append([]string{"report"}, args...)...)
+	return runCmd(cmdOpt{stdout: out, stderr: errw}, selfExe(), append([]string{"report"}, args...)...)
 }
 
 // trTo: tr -c '<글자들>' -  (바이트마다)

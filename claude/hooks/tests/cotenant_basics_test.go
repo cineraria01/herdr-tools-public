@@ -41,13 +41,10 @@ func cotenantBasics(c *cg) (A, B, C int) {
 // TestCotenantCommands: 명령 분석만 보는 단언 — 등록부·동거 에이전트 없이 저장소 하나로 따로 돈다(아스트라 M07: 시나리오 한가운데 있어
 // -run으로 이것만 골라도 앞 준비(에이전트 등록·ps)가 다 돌고, 준비가 깨지면 하나도 못 돌았다)
 func TestCotenantCommands(t *testing.T) {
-	hook := hookPath(t, "cotenant-guard")
-	forImpls(t, "cotenant-guard", func(t *testing.T, impl []string) {
-		c := newCG(t, hook, impl)
-		c.R = c.T + "/r"
-		c.mkrepo(c.R)
-		cotenantCommands(c, c.R)
-	})
+	c := newCG(t)
+	c.R = c.T + "/r"
+	c.mkrepo(c.R)
+	cotenantCommands(c, c.R)
 }
 
 // cotenantCommands: 임대·동거와 상관없는 명령 분석 단언(세션 sa, 저장소 R)
@@ -271,9 +268,7 @@ func cotenantBasicsB(c *cg, R string, a int) (A, B, C int) {
 			wg.Add(1)
 			go func(i int, s string) {
 				defer wg.Done()
-				cmd := exec.Command("bash", c.hook)
-				cmd.Stdin = strings.NewReader(string(c.hookIn(s, "Write", fmt.Sprintf("%s/new%d.txt", R, k), "", "")))
-				cmd.Env, cmd.Dir = c.env(c.stdPath()), T
+				cmd := hookExec(c.hook, c.hookIn(s, "Write", fmt.Sprintf("%s/new%d.txt", R, k), "", ""), c.env(c.stdPath()), T)
 				r := 0
 				if err := cmd.Run(); err != nil {
 					r = -100

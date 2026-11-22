@@ -1,7 +1,7 @@
 // herdr-settings-merge: 이 기계 ~/.claude/settings.json의 정한 키만 맥 값으로 맞춘다. 키마다 3-way(CONTRACT.md 「설정」).
-// Go 판(2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go). 표준 입력·인자·출력·종료 코드·base 꼴은 셸 판 bin/herdr-settings-merge와 같다
-// (base·refs의 cksum은 `jq -cS` 한 줄과 같은 바이트로 계산 — internal/ojson). 되돌리기 HERDR_SETTINGS_MERGE_IMPL=bash.
-// keys.json 자리는 HERDR_KEYS(포장 bin/herdr-settings-merge가 곁의 ../settings/keys.json을 넣어 준다), 없으면 ~/.local/share/herdr-sync/keys.json.
+// (2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go, 셸 판은 2026-11-22 걷음). 표준 입력·인자·출력·종료 코드·base 꼴은 옛 셸 판 그대로다
+// (base·refs의 cksum은 `jq -cS` 한 줄과 같은 바이트로 계산 — internal/ojson).
+// keys.json 자리는 HERDR_KEYS, 없으면 ~/.local/share/herdr-sync/keys.json(herdr-sync가 sync.list 「설정」 줄로 까는 자리).
 package main
 
 import (

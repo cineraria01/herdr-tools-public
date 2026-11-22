@@ -1,10 +1,7 @@
 // Package util_test: util-go 레인이 옮긴 작은 도구(hc-sweep·herdr-balance·ovis-split·worker-mac-check·worker-mac-setup)의 계약 시험.
-// 옛 tests/<도구>.test.sh를 그대로 옮겼다(2026-11-21 go-tests-util) — 임시 HOME·가짜 hc·가짜 원격을 만들고 bin/<도구>를 밖에서 exec해
-// 출력·종료 코드·상태 파일을 본다. 단언 이름은 셸 시험의 것 그대로다.
-//
-// 판 고르기: <도구>_IMPL(대문자·-는 _) 또는 HERDR_IMPL이 있으면 그 판, 없으면 Go 판(cmd/<도구>)이 있는 도구는 go,
-// 없으면 bash. 셸 판은 tests/util-bash.test.sh가 HERDR_IMPL=bash로 돌린다. 예: HC_SWEEP_IMPL=bash go test ./tests/util/
-// 실행: go test ./tests/util/ (저장소 루트에서. tests/hc-merger-go.test.sh의 go test ./...에도 든다)
+// 옛 tests/<도구>.test.sh를 그대로 옮겼다(2026-11-21 go-tests-util) — 임시 HOME·가짜 hc·가짜 원격을 만들고 그 도구의 Go 바이너리
+// (clitest.Bin)를 밖에서 exec해 출력·종료 코드·상태 파일을 본다. 단언 이름은 셸 시험의 것 그대로다. 판은 Go 하나다(2026-11-22 go-shell-remove).
+// 실행: go test ./tests/util/ (저장소 루트에서)
 package util_test
 
 import (
@@ -22,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-tools/internal/clitest"
 	"herdr-tools/internal/proc"
 )
 
@@ -36,34 +34,17 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func implVar(tool string) string {
-	return strings.ToUpper(strings.ReplaceAll(tool, "-", "_")) + "_IMPL"
+// run1: 새 임시 폴더·격리 환경으로 f를 돌린다.
+func run1(t *testing.T, f func(t *testing.T, T string, e Env)) {
+	T := tmpdir(t)
+	f(t, T, isolated(T))
 }
 
-// impls: 돌릴 판 목록(위 「판 고르기」).
-func impls(tool string) []string {
-	if v := os.Getenv(implVar(tool)); v != "" {
-		return []string{v}
-	}
-	if v := os.Getenv("HERDR_IMPL"); v != "" {
-		return []string{v}
-	}
-	if fi, err := os.Stat(filepath.Join(repo, "cmd", tool)); err == nil && fi.IsDir() {
-		return []string{"go"}
-	}
-	return []string{"bash"}
-}
-
-// eachImpl: 판마다 하위 시험으로 f를 돌린다. f가 받은 env에는 그 판의 스위치가 들어 있다.
-func eachImpl(t *testing.T, tool string, f func(t *testing.T, T string, e Env)) {
-	for _, impl := range impls(tool) {
-		t.Run(impl, func(t *testing.T) {
-			T := tmpdir(t)
-			e := isolated(T)
-			e[implVar(tool)] = impl
-			f(t, T, e)
-		})
-	}
+// tool: 시험할 그 도구의 Go 바이너리(이 시험 프로세스에서 cmd/<name>을 지은 것). 곁에서 찾는 도구(hc-lane·herdr-tools-config 등)도
+// 같은 폴더에 지어 운영(~/.local/bin)과 같은 꼴로 둔다
+func tool(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(clitest.BinDir(t, "hc-lane", "hc-merger", "herdr-tools-config", name), name)
 }
 
 // Env: 자식 환경. isolated가 바깥 환경을 복사해 시험 격리(tests/isolate.sh와 같은 것)를 한다.
@@ -73,7 +54,7 @@ var isolateDrop = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CO
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
 	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
 	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HC_TERMINAL_ID", "HERDR_IMPL"}
+	"HC_TERMINAL_ID"}
 
 func isolated(T string) Env {
 	e := Env{}

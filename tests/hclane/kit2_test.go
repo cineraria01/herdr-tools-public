@@ -25,10 +25,10 @@ var secs []sec
 // reg: 절 하나를 셸 시험 차례(order)로 등록한다. 절끼리 export·설정을 물려받으니 한 판 안에서는 같은 K로 차례로 돈다.
 func reg(order int, name string, f func(*K)) { secs = append(secs, sec{order, name, f}) }
 
-// TestHcLane: 판마다 절을 차례로 하위 시험으로(go test -run 'TestHcLane/go/s20' 꼴로 골라 돌 수 있다 — 앞 절 상태가 필요한 절은 함께).
+// TestHcLane: 절을 차례로 하위 시험으로(go test -run 'TestHcLane/s20' 꼴로 골라 돌 수 있다 — 앞 절 상태가 필요한 절은 함께).
 func TestHcLane(t *testing.T) {
 	sort.SliceStable(secs, func(i, j int) bool { return secs[i].order < secs[j].order })
-	eachImpl(t, func(k *K) {
+	withK(t, func(k *K) {
 		for _, s := range secs {
 			k.t.Run(s.name, func(t *testing.T) {
 				pt := k.t

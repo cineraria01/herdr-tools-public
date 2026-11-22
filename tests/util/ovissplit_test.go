@@ -5,9 +5,6 @@ package util_test
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -37,24 +34,19 @@ case "$*" in
 esac
 `
 
-func TestOvisSplit(t *testing.T) { eachImpl(t, "ovis-split", testOvisSplit) }
+func TestOvisSplit(t *testing.T) { run1(t, testOvisSplit) }
 
 func testOvisSplit(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/home")
-	PY, err := exec.LookPath("python3")
-	if err != nil {
-		t.Fatal("python3 없음")
-	}
-	os.Symlink(PY, T+"/bin/python3")
 	script(t, T+"/bin/hc", T, fakeOvisHc)
-	iv := implVar("ovis-split")
+	OS := tool(t, "ovis-split")
 	LOG := T + "/hc.log"
 	var errOut string
 	// osp: env -i 꼴. FAKE_MAIN 기본 bare
 	osp := func(kv []string, args ...string) (string, int) {
 		write(t, LOG, "")
-		env := Env{"HOME": T + "/home", "PATH": T + "/bin:/usr/bin:/bin", "FAKE_HC_LOG": LOG, "FAKE_MAIN": "bare", iv: e[iv]}.With(kv...)
-		out, se, rc := run2(T, env, filepath.Join(repo, "bin", "ovis-split"), args...)
+		env := Env{"HOME": T + "/home", "PATH": T + "/bin:/usr/bin:/bin", "FAKE_HC_LOG": LOG, "FAKE_MAIN": "bare"}.With(kv...)
+		out, se, rc := run2(T, env, OS, args...)
 		errOut = se
 		return out, rc
 	}

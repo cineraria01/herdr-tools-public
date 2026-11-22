@@ -1,7 +1,0 @@
-#!/bin/bash
-# ovis-split: Go 판(cmd/ovis-split) 포장 (2026-11-21 사용자 「모두 고로 옮기고 싶어」) — 되돌리기 OVIS_SPLIT_IMPL=bash(또는 HERDR_IMPL=bash)면 셸 판 lib/ovis-split/ovis-split.py
-s=$0; while [ -L "$s" ]; do l=$(readlink "$s"); case $l in /*) s=$l ;; *) s=$(dirname "$s")/$l ;; esac; done
-d=$(cd "$(dirname "$s")" && pwd) || exit 1
-if . "$d/../lib/go-run.sh" 2>/dev/null; then go_run ovis-split "$@" || exit
-else echo "ovis-split: !!!!!! 경고: 공통 실행기를 못 읽었다($d/../lib/go-run.sh) — 셸 판으로 돈다 !!!!!!" >&2; fi
-exec python3 "$d/../lib/ovis-split/ovis-split.py" "$@"

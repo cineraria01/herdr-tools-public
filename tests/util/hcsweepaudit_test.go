@@ -1,7 +1,7 @@
 package util_test
 
 // 2026-11-21 Go 전환 전체 감사(go-final-audit base — 아스트라 6.2 max·Fable 5.2 xhigh) 가운데 hc-sweep 지적의 계약 시험.
-// 이름 앞 [ID]는 보고서 지적 ID. 셸 판(lib/hc-sweep/*.py)도 같은 결함인 것은 Go 판만 본다(셸 판은 곧 걷는다 — 「알려진 차이」).
+// 이름 앞 [ID]는 보고서 지적 ID.
 
 import (
 	"fmt"
@@ -14,11 +14,10 @@ import (
 	"herdr-tools/internal/lockx"
 )
 
-func TestHcSweepAudit(t *testing.T) { eachImpl(t, "hc-sweep", testHcSweepAudit) }
+func TestHcSweepAudit(t *testing.T) { run1(t, testHcSweepAudit) }
 
 func testHcSweepAudit(t *testing.T, T string, e Env) {
-	SWEEP := filepath.Join(repo, "bin", "hc-sweep")
-	goImpl := e[implVar("hc-sweep")] != "bash"
+	SWEEP := tool(t, "hc-sweep")
 	var out string
 	var rc int
 	c := checker{t: t, out: &out, rc: &rc}
@@ -85,7 +84,7 @@ esac
 	// [B02] 위치 인자 하나가 뒤의 --dry-run을 무력화했다(Go 판 flag가 첫 위치 인자에서 멈춤) — 쓸기 전에 사용 오류 2
 	IX := T + "/cache/codebase-memory-mcp"
 	mkdirs(t, IX)
-	bash(t, T, e, `exec python3 -c "$@"`, mkdbPy, IX+"/gone.db", T+"/repo.wt/없음")
+	bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/gone.db", mkdbSQL(false, "2026-11-12T07:51:04Z", T+"/repo.wt/없음"))
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
 	os.Chtimes(IX+"/gone.db", old, old)
 	ls()
@@ -100,8 +99,8 @@ esac
 	write(t, T+"/get-t1.1.json", term("t1", "plain", false, "idle", old7h, old7h, T+"/gone-t1"))
 	write(t, T+"/get-t1.json", term("t1", "other", false, "working", ms(time.Minute), ms(time.Minute), T+"/gone-t1"))
 	sweep("--min-age", "0")
-	c.ok("[B04] 재사용된 주소(이름·생성 시각·상태가 바뀜)는 kill 안 함", !goImpl || !exists(T+"/killed-t1"))
-	c.ok("[B04] 재사용이면 정리됨·closed.log도 안 씀", !goImpl || !strings.Contains(read(T+"/home/.claude-tasks/closed.log"), "\tt1\tplain\tR3\t"))
+	c.ok("[B04] 재사용된 주소(이름·생성 시각·상태가 바뀜)는 kill 안 함", !exists(T+"/killed-t1"))
+	c.ok("[B04] 재사용이면 정리됨·closed.log도 안 씀", !strings.Contains(read(T+"/home/.claude-tasks/closed.log"), "\tt1\tplain\tR3\t"))
 
 	// [B05] kill 뒤 hc get이 not_found가 아닌 실패(일시 단절 75)면 「닫힘」으로 읽지 않는다(그래야 hc-lane clean으로 안 간다).
 	// not_found(rc 3)면 감싸는 실행기가 지운 것이라 닫힘
@@ -110,7 +109,7 @@ esac
 	write(t, T+"/get-t2.json", term("t2", "plain2", false, "idle", old7h, old7h, T+"/gone-t2"))
 	write(t, T+"/after-kill", "75\n{\"error\":{\"kind\":\"io\",\"message\":\"connection reset\"}}\n")
 	sweep("--min-age", "0")
-	c.ok("[B05] kill 뒤 get 일시 실패: 닫힘 아님(모름)", exists(T+"/killed-t2") && (!goImpl || !has("닫힘")))
+	c.ok("[B05] kill 뒤 get 일시 실패: 닫힘 아님(모름)", exists(T+"/killed-t2") && (!has("닫힘")))
 	reset()
 	ls("t2")
 	write(t, T+"/get-t2.json", term("t2", "plain2", false, "idle", old7h, old7h, T+"/gone-t2"))
@@ -127,7 +126,7 @@ esac
 	os.Chmod(KEEP, 0)
 	sweep("--dry-run", "--min-age", "0")
 	os.Chmod(KEEP, 0o644)
-	c.ok("[E12] keep을 못 읽으면 닫을 것 없음", !goImpl || !has("닫을 것: R3 t3"))
+	c.ok("[E12] keep을 못 읽으면 닫을 것 없음", !has("닫을 것: R3 t3"))
 	os.Remove(KEEP)
 
 	idle31 := ms(31 * time.Minute)
@@ -137,7 +136,7 @@ esac
 	write(t, T+"/get-t4.json", term("t4", "lane-e08", true, "idle", ms(2*time.Hour), idle31, T+"/gone-t4"))
 	write(t, T+"/read.txt", "")
 	sweep("--dry-run", "--min-age", "0")
-	c.ok("[E08] 빈 화면이면 R2 아님", !goImpl || (!has("닫을 것: R2 t4") && has("남김: t4")))
+	c.ok("[E08] 빈 화면이면 R2 아님", (!has("닫을 것: R2 t4") && has("남김: t4")))
 
 	// [E07] 작업 폴더가 있는데 git cherry가 다른 까닭(문구에 No such file or directory)으로 실패하면 착지 전 커밋 모름 — 닫지 않음
 	reset()
@@ -147,7 +146,7 @@ esac
 	write(t, T+"/exec-rc", "128")
 	write(t, T+"/exec-err", "fatal: unable to read .git/objects/info/alternates: No such file or directory\n")
 	sweep("--dry-run", "--min-age", "0")
-	c.ok("[E07] 폴더가 있고 cherry 실패면 R2 아님", !goImpl || (!has("닫을 것: R2 t5") && has("남김: t5")))
+	c.ok("[E07] 폴더가 있고 cherry 실패면 R2 아님", (!has("닫을 것: R2 t5") && has("남김: t5")))
 
 	// [B03] 같은 이름의 옛 레인 사건(다른 실행 키)·이 터미널보다 먼저 생긴 원격 표식은 새 레인의 착지 증거가 아니다
 	reset()
@@ -165,7 +164,7 @@ git -C "$R" push -q origin "HEAD:refs/hc-landed/land-x/1600000000" && git -C "$R
 	ls("t81")
 	write(t, T+"/get-t81.json", term("t81", "land-x", true, "done", 1700000000000, idle31, R+".wt/land-x"))
 	sweep("--dry-run", "--min-age", "0")
-	c.ok("[B03] 옛 실행의 착지 사건·옛 원격 표식은 증거 아님", !goImpl ||
+	c.ok("[B03] 옛 실행의 착지 사건·옛 원격 표식은 증거 아님",
 		(has("남김: t81 land-x — 작업 트리 남음 — 착지 증거 없음") && !has("hc-lane clean land-x")))
 	// 이 실행 키의 사건이면 증거(교착 풀기는 그대로)
 	write(t, EVT, "2026-11-21T10:00:00Z\tm\tt81\tland-x\t제출\tabc1234\t-\t3\t-\tt81@1700000000000\n")

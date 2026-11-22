@@ -1,8 +1,7 @@
 package main
 
 // herdr-tools-publish 계약 시험(옛 tests/herdr-tools-publish.test.sh, 2026-11-21 go-tests-ops): 임시 비공개 저장소(와 bare origin),
-// 임시 공개 bare 저장소, 가짜 설정 폴더를 두고 bin/herdr-tools-publish를 밖에서 부른다. 네트워크·실제 저장소는 쓰지 않는다.
-// 판: HERDR_TOOLS_PUBLISH_IMPL, 없으면 HERDR_IMPL, 없으면 go. 다른 사본은 HERDR_TOOLS_PUBLISH=<경로>(곁에 herdr-tools-config가 있어야 한다)
+// 임시 공개 bare 저장소, 가짜 설정 폴더를 두고 herdr-tools-publish Go 바이너리(clitest.Bin)를 밖에서 부른다. 네트워크·실제 저장소는 쓰지 않는다.
 
 import (
 	"bytes"
@@ -45,7 +44,7 @@ type pubFix struct {
 func (f *pubFix) run(args ...string) { f.runEnv(f.unAuthor, args...) }
 
 func (f *pubFix) runEnv(env []string, args ...string) {
-	f.r = ct.Cmd{Env: env, Combined: true}.Run("bash", append([]string{f.pub}, args...)...)
+	f.r = ct.Cmd{Env: env, Combined: true}.Run(f.pub, args...)
 }
 
 func (f *pubFix) has(s string) bool { return strings.Contains(f.r.Out, s) }
@@ -91,10 +90,9 @@ func (f *pubFix) setConf(key, line string) {
 }
 
 func TestContract(t *testing.T) {
-	pub := ct.Tool(t, "herdr-tools-publish", "HERDR_TOOLS_PUBLISH")
+	pub := ct.Bin(t, "herdr-tools-publish")
 	T := ct.TempDir(t)
 	ct.Isolate(t, T)
-	t.Setenv("HERDR_TOOLS_PUBLISH_IMPL", ct.Impl("HERDR_TOOLS_PUBLISH_IMPL"))
 	for k, v := range map[string]string{"HOME": T + "/home", "HERDR_TOOLS_REPO": T + "/priv", "HERDR_TOOLS_CONFIG": T + "/conf",
 		"GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "priv", "GIT_AUTHOR_EMAIL": "priv-author@private.example",
 		"GIT_COMMITTER_NAME": "priv", "GIT_COMMITTER_EMAIL": "priv-author@private.example",
@@ -134,14 +132,15 @@ func TestContract(t *testing.T) {
 	f.run()
 	c.Ok("publish.repo 없음: 종료 2, 공개 쪽 그대로", f.r.RC == 2 && f.has("publish.repo") && f.pmain() == "")
 	os.Rename(T+"/conf/config.keep", T+"/conf/config")
-	b, _ := os.ReadFile(pub)
-	put(T+"/lone/herdr-tools-publish", string(b))
-	f.r = ct.Cmd{Combined: true}.Run("bash", T+"/lone/herdr-tools-publish")
-	// 셸 판은 곁에 검사 도구가 있어야 한다. Go 판은 검사가 바이너리 안에 있고, 홀로 둔 사본은 공통 실행기가 없어 Go 판을 못 쓴다(못박았으면 종료 1)
-	c.Ok("곁에 검사 도구(herdr-tools-config)·공통 실행기 없음: 종료 1, push 없음", f.r.RC == 1 && (f.has("herdr-tools-config") || f.has("공통 실행기 없음")) && f.pmain() == "")
 	os.Rename(T+"/conf/private-patterns.txt", T+"/pp.keep")
 	f.run()
 	c.Ok("개인 패턴 파일 없음: 검사 못 함 → 종료 1, push 없음", f.r.RC == 1 && f.has("검사 못 함") && f.pmain() == "")
+	// 검사는 바이너리 안에 있다(곁의 herdr-tools-config에 기대지 않는다) — 홀로 둔 사본도 같은 검사로 막는다
+	b, _ := os.ReadFile(pub)
+	put(T+"/lone/herdr-tools-publish", string(b))
+	ct.Chmod(t, T+"/lone/herdr-tools-publish", 0o755)
+	f.r = ct.Cmd{Combined: true, Env: f.unAuthor}.Run(T + "/lone/herdr-tools-publish")
+	c.Ok("홀로 둔 바이너리(곁에 도구 없음): 개인 패턴 파일 없음 → 종료 1, push 없음", f.r.RC == 1 && f.has("검사 못 함") && f.pmain() == "")
 	put(T+"/conf/private-patterns.txt", "# 주석만\n")
 	f.run()
 	c.Ok("패턴 줄 없음: 종료 1, push 없음", f.r.RC == 1 && f.has("검사 못 함") && f.pmain() == "")
@@ -277,7 +276,7 @@ func secretsContract(f *pubFix, h string) {
 	c.Ok("export-subst: 비공개 메일·제목이 들어가지 않고 블롭 그대로", f.r.RC == 0 && f.pubGit("show", "main:ver.txt").Out == "v $Format:%ae %s$" && !regexp.MustCompile("private-subject|priv-author").MatchString(f.pubGit("log", "-p", "main").Out) && f.pubTree() == f.privTree())
 	put(T+"/priv/docs/more.md", "more\n")
 	f.commit("more")
-	f.r = ct.Cmd{Combined: true, Env: []string{"GIT_AUTHOR_EMAIL=secret-word@x", "GIT_COMMITTER_EMAIL=secret-word@x"}}.Run("bash", f.pub)
+	f.r = ct.Cmd{Combined: true, Env: []string{"GIT_AUTHOR_EMAIL=secret-word@x", "GIT_COMMITTER_EMAIL=secret-word@x"}}.Run(f.pub)
 	c.Ok("환경의 GIT_AUTHOR_*·GIT_COMMITTER_*는 안 씀(publish.author만)", f.r.RC == 0 && f.pubGit("log", "-1", "--format=%ae %ce", "main").Out == "bot@public.example bot@public.example")
 	put(T+"/priv/docs/more.md", "more2\n")
 	f.commit("more")

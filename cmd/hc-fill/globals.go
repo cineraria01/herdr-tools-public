@@ -16,7 +16,7 @@ var (
 	POLL   = 5    // HC_FILL_POLL
 	LOCAL  string // 설정 local
 	AGENT  string // 설정 agent(기본 claude-code)
-	SELF   string // 이 도구를 다시 부를 경로(HC_FILL_SELF — bin/hc-fill 포장, 없으면 이 바이너리)
+	SELF   string // 이 도구를 다시 부를 경로(이 바이너리 — HC_FILL_SELF가 있으면 그것)
 	HOME   string
 	dry    bool   // run --dry-run
 	P      string // dry-run이면 "[dry-run] "

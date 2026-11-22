@@ -2,9 +2,9 @@ package main
 
 // herdr-sync 계약 시험(옛 tests/herdr-sync.test.sh, 2026-11-21 go-tests-ops): 임시 HOME 셋(맥, 워커 맥 w1, 리눅스 lx — lx는 uname이
 // Linux이고 원격 조각을 dash로 돌린다), 가짜 hc(PATH 앞, machine ls·exec [-i] --on만), 임시 저장소 둘(범용 repo·개인 conf)과 그 bare
-// origin을 두고 bin/herdr-sync를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 한 흐름이라 단계 순서대로 상태를 이어 쓴다.
-// 판: HERDR_SYNC_IMPL, 없으면 HERDR_IMPL, 없으면 go. 다른 사본은 HERDR_SYNC=<경로>
-// (진짜 herdr-settings-merge·herdr-tools-config를 범용 저장소에 넣어 쓴다 — HERDR_SETTINGS_MERGE·HERDR_TOOLS_CONFIG_BIN=<경로>)
+// origin을 두고 herdr-sync 바이너리(clitest.Bin)를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 한 흐름이라 단계 순서대로 상태를 이어 쓴다.
+// 다른 사본은 HERDR_SYNC=<경로>(시험 전용). 진짜 herdr-settings-merge·herdr-tools-config를 범용 저장소에 넣어 쓴다(HERDR_SETTINGS_MERGE·HERDR_TOOLS_CONFIG_BIN=<경로>).
+// 가짜 저장소의 tools:bin/<이름> 줄은 일반 파일 맞추기의 보기다(그 저장소엔 cmd/가 없다) — 바이너리 줄은 16(release)
 
 import (
 	"encoding/json"
@@ -21,13 +21,13 @@ import (
 
 // sx: 시험 하나의 자리와 도우미(셸 시험의 전역 변수·함수)
 type sx struct {
-	t                *testing.T
-	c                *ct.C
-	r                ct.Res
-	here, sync, impl string
-	T, MAC, W1, LX   string
-	A, C, W1A        string // 나무 단계(15)의 맥 .agents/skills·.claude/skills, w1 .agents/skills
-	sigRC            int    // signalMid로 끈 실행의 종료 코드
+	t              *testing.T
+	c              *ct.C
+	r              ct.Res
+	here, sync     string
+	T, MAC, W1, LX string
+	A, C, W1A      string // 나무 단계(15)의 맥 .agents/skills·.claude/skills, w1 .agents/skills
+	sigRC          int    // signalMid로 끈 실행의 종료 코드
 }
 
 // fakeHC: 가짜 hc — machine ls와 exec [-i] --on만. 입력·출력은 진짜 hc처럼 8MB까지
@@ -213,7 +213,7 @@ func copyExec(t *testing.T, src, dst string) {
 }
 
 func TestContract(t *testing.T) {
-	s := &sx{t: t, here: ct.Repo(t), sync: ct.Tool(t, "herdr-sync", "HERDR_SYNC"), impl: ct.Impl("HERDR_SYNC_IMPL")}
+	s := &sx{t: t, here: ct.Repo(t), sync: ct.Tool(t, "herdr-sync", "HERDR_SYNC")}
 	merge := ct.Tool(t, "herdr-settings-merge", "HERDR_SETTINGS_MERGE")   // 진짜 herdr-settings-merge를 기계에 깔아 쓴다
 	cfgtool := ct.Tool(t, "herdr-tools-config", "HERDR_TOOLS_CONFIG_BIN") // 개인 값 검사·prebuild 읽기에 진짜 도우미를 쓴다
 	T := ct.TempDir(t)
@@ -232,7 +232,7 @@ func TestContract(t *testing.T) {
 	s.putx(T+"/bin/hc", fakeHC)
 	s.putx(s.LX+"/.fakebin/uname", "#!/bin/sh\necho Linux\n")
 	os.Symlink("/bin/dash", s.LX+"/.fakebin/sh")
-	for k, v := range map[string]string{"HERDR_SYNC_IMPL": s.impl, "TMPDIR": T + "/tmp", "PATH": T + "/bin:" + os.Getenv("PATH"),
+	for k, v := range map[string]string{"TMPDIR": T + "/tmp", "PATH": T + "/bin:" + os.Getenv("PATH"),
 		"HCT": T, "HC_FAKE_MACHINES": `{"name":"w1"},{"name":"lx"}`, "HERDR_TOOLS_REPO": T + "/repo", "HERDR_TOOLS_CONFIG": T + "/conf",
 		"HOME": s.MAC, "HERDR_SYNC_SYSAPPS": T + "/nosys", // 이 기계의 /Applications/Herdr.app 유무가 시험에 끼지 않게
 		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_NOSYSTEM": "1"} {
@@ -264,7 +264,7 @@ Codex공통 .codex/AGENTS.md#codex-shared  codex/AGENTS.shared.md     all
 	copyExec(t, merge, T+"/repo/bin/herdr-settings-merge")
 	copyExec(t, cfgtool, T+"/repo/bin/herdr-tools-config")
 	// 가짜 공개 내보내기: 부른 것을 적는다(PUB_FAKE_RC로 실패시킴). 성공이면 「검사한」 커밋(origin/main, PUB_FAKE_CHECKED로 바꿈)을 결과 파일에
-	s.put(T+"/repo/bin/herdr-tools-publish", "#!/bin/sh\necho \"$HERDR_TOOLS_REPO $HERDR_TOOLS_CONFIG $*\" >> \"$HCT/published\"\n"+
+	s.putx(T+"/bin/herdr-tools-publish", "#!/bin/sh\necho \"$HERDR_TOOLS_REPO $HERDR_TOOLS_CONFIG $*\" >> \"$HCT/published\"\n"+
 		"[ \"${PUB_FAKE_RC:-0}\" = 0 ] || exit $PUB_FAKE_RC\n"+
 		"[ -z \"${HERDR_TOOLS_PUBLISH_RESULT-}\" ] || echo \"${PUB_FAKE_CHECKED:-$(git -C \"$HERDR_TOOLS_REPO\" rev-parse origin/main)}\" > \"$HERDR_TOOLS_PUBLISH_RESULT\"\n")
 	s.put(T+"/conf/settings/keys.json", `{"values":[".language",".model",".effortLevel",".nope"],"hooks":{"PreToolUse":["cotenant-guard.sh"]},"refs":[".permissions"],"exceptions":{"lx":[".effortLevel"]}}`+"\n")
@@ -312,8 +312,6 @@ open(p, "w").write(a + "<!-- codex-shared:start -->\ncodex built\n<!-- codex-sha
 	s.trees()       // 15(나무)
 	s.lockAndRest() // 13·14·15(공개)·16
 	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(T+"/tmp"))
-	if s.impl == "go" {
-		s.failures() // 17(실패 주입 — SIGKILL한 실행은 임시 폴더를 남기니 위 확인 뒤에)
-	}
+	s.failures() // 17(실패 주입 — SIGKILL한 실행은 임시 폴더를 남기니 위 확인 뒤에)
 	s.c.Done()
 }

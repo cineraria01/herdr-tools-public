@@ -24,17 +24,16 @@ func s17Old(k *K) {
 	k.land("c-old")
 	k.run("clean", "--repo", k.R, "--branch", "c-old")
 	k.check("clean: 옛 이름 wt-teardown.sh는 부르지 않음", k.rc == 0 && k.gone("c-old") && !exists(k.T+"/old-td") && k.last(`"teardown":"none"`))
-	// 포장만이 아니라 실제로 도는 두 판 본문(lib/hc-lane/*.sh·cmd/hc-lane/*.go)도 본다(gofix L16)
-	srcs, _ := filepath.Glob(filepath.Join(repo, "lib", "hc-lane", "*.sh"))
+	// 실제로 도는 본문(cmd/hc-lane/*.go)을 본다(gofix L16)
 	gos, _ := filepath.Glob(filepath.Join(repo, "cmd", "hc-lane", "*.go"))
-	body := read(k.LANE)
-	for _, f := range append(srcs, gos...) {
+	body := ""
+	for _, f := range gos {
 		if !strings.HasSuffix(f, "_test.go") {
 			body += read(f)
 		}
 	}
-	k.check("hc-lane 본문(포장·셸 판·Go 판)에 옛 이름 갈래(.claude/wt-*·WT_*·wt-land/verify/setup/teardown) 없음",
-		len(srcs) > 0 && len(gos) > 0 && !grep(body, `\.claude/wt-|WT_[A-Z]|wt-(land|verify|setup|teardown)`))
+	k.check("hc-lane 본문(cmd/hc-lane)에 옛 이름 갈래(.claude/wt-*·WT_*·wt-land/verify/setup/teardown) 없음",
+		len(gos) > 0 && !grep(body, `\.claude/wt-|WT_[A-Z]|wt-(land|verify|setup|teardown)`))
 }
 
 // s17lc: 메인 폴더에 커밋(셸 lc). s17ltop: 로컬 그 가지 끝 커밋 제목(셸 ltop).

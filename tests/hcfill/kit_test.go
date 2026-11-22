@@ -1,12 +1,11 @@
 // Package hcfill_test: hc-fill 계약 시험(옛 tests/hc-fill.test.sh를 그대로 옮김, 2026-11-21 go-tests-fill).
 // 임시 HOME·가짜 hc·hc-lane·git·herdr-balance(testdata/, PATH 앞)와 저장소 예시 설정(config.example/hc-fill.tsv)을 두고
-// bin/hc-fill을 밖에서 exec해 출력·종료 코드·상태 파일을 본다. 실제 레인·기계·네트워크는 쓰지 않는다.
-// 단언 이름·차례는 셸 시험의 것 그대로다(절마다 파일 하나 — reg로 차례를 적는다).
+// hc-fill Go 바이너리(clitest.Bin)를 밖에서 exec해 출력·종료 코드·상태 파일을 본다. 실제 레인·기계·네트워크는 쓰지 않는다.
+// 단언 이름·차례는 셸 시험의 것 그대로다(절마다 파일 하나 — reg로 차례를 적는다). 판은 Go 하나다(2026-11-22 go-shell-remove).
 //
-// 판 고르기: HC_FILL_IMPL(없으면 HERDR_IMPL)이 있으면 그 판, 없으면 Go 판. 셸 판은 tests/hc-fill-bash.test.sh가
-// HC_FILL_IMPL=bash로 부른다. 다른 사본은 HC_FILL=<경로>, 설정은 HC_FILL_EXAMPLE·HC_FILL_AUDIT_EXAMPLE.
+// 설정은 HC_FILL_EXAMPLE·HC_FILL_AUDIT_EXAMPLE(없으면 저장소 config.example).
 // 일부 절만: HCFILL_SEC=<이름,…>(reg 이름 — 절은 차례대로 상태를 이어 쓰니 앞 절 없이 돌리면 그 절 안에서만 맞는다).
-// 실행: go test ./tests/hcfill/   ·   HC_FILL_IMPL=bash go test ./tests/hcfill/
+// 실행: go test ./tests/hcfill/
 package hcfill_test
 
 import (
@@ -22,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/clitest"
 )
 
 var repo string // 저장소 루트
@@ -46,16 +47,6 @@ var sections []section
 // reg: 절을 차례 order로 등록한다(파일마다 init에서).
 func reg(order int, name string, f func(k *K)) { sections = append(sections, section{order, name, f}) }
 
-func impl() string {
-	if v := os.Getenv("HC_FILL_IMPL"); v != "" {
-		return v
-	}
-	if v := os.Getenv("HERDR_IMPL"); v != "" {
-		return v
-	}
-	return "go"
-}
-
 func TestHcFill(t *testing.T) {
 	sort.SliceStable(sections, func(i, j int) bool { return sections[i].order < sections[j].order })
 	only := map[string]bool{}
@@ -71,16 +62,15 @@ func TestHcFill(t *testing.T) {
 		}
 		s.f(k)
 	}
-	t.Logf("# %d/%d 통과 (판 %s)", k.n-k.fails, k.n, k.impl)
+	t.Logf("# %d/%d 통과", k.n-k.fails, k.n)
 }
 
 // K: 시험 하나의 상태(셸 시험의 전역 변수들).
 type K struct {
 	t             *testing.T
-	impl          string
 	T, HOME       string // 임시 폴더 · 가짜 HOME
 	FILL, EX, EXA string // 시험할 hc-fill · 예시 설정 · 감사 예시 틀
-	HL, REALGIT   string // 진짜 hc-lane(HC_LANE_BIN) · 진짜 git
+	HL, REALGIT   string // 진짜 hc-lane(Go 바이너리) · 진짜 git
 	DATA, Q, GCL  string // $HOME/.local/share/hc-fill · 대기열 · gc.log
 	HELD, LT, W   string // held.tsv · hc-lane 레인 기록 · 작업 트리 시험 폴더
 	env           map[string]string
@@ -96,7 +86,7 @@ var isolateDrop = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CO
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
 	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
 	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HERDR_IMPL", "HC_FILL_INNER", "HC_FILL_SELF", "HC_FILL_BIN", "HC_TERMINAL_ID"}
+	"HC_FILL_INNER", "HC_FILL_SELF", "HC_TERMINAL_ID"}
 
 func newK(t *testing.T) *K {
 	T, err := os.MkdirTemp("", "hc-fill-test.")
@@ -106,11 +96,11 @@ func newK(t *testing.T) *K {
 	if T, err = filepath.EvalSymlinks(T); err != nil {
 		t.Fatal(err)
 	}
-	k := &K{t: t, impl: impl(), T: T, HOME: T + "/home", env: map[string]string{}, V: map[string]string{}}
-	k.FILL = envOr("HC_FILL", repo+"/bin/hc-fill")
+	k := &K{t: t, T: T, HOME: T + "/home", env: map[string]string{}, V: map[string]string{}}
+	bd := clitest.BinDir(t, "hc-fill", "hc-lane", "hc-merger", "herdr-tools-config")
+	k.FILL, k.HL = bd+"/hc-fill", bd+"/hc-lane"
 	k.EX = envOr("HC_FILL_EXAMPLE", repo+"/config.example/hc-fill.tsv")
 	k.EXA = envOr("HC_FILL_AUDIT_EXAMPLE", repo+"/config.example/hc-fill-audit.md")
-	k.HL = envOr("HC_LANE_BIN", filepath.Dir(k.FILL)+"/hc-lane")
 	if k.REALGIT, err = exec.LookPath("git"); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +116,7 @@ func newK(t *testing.T) *K {
 	k.unset(isolateDrop...)
 	k.set("GIT_CEILING_DIRECTORIES="+T+":"+filepath.Dir(T), "HC_REAL_GIT="+k.REALGIT,
 		"PATH="+T+"/bin:"+os.Getenv("PATH"), "HOME="+k.HOME, "T_LOG="+T, "HERDR_TOOLS_CONFIG="+T+"/conf",
-		"HC_FILL_WAIT=0", "HC_FILL_POLL=0", "HC_FAKE_COORD=t8kk", "HC_FILL_IMPL="+k.impl,
+		"HC_FILL_WAIT=0", "HC_FILL_POLL=0", "HC_FAKE_COORD=t8kk",
 		"HERDR_PROC_DIR="+T+"/proc", // 고아 무리 기록(internal/proc)도 시험 폴더에 — 사용자 캐시를 쓰거나 남의 기록을 거두지 않게
 		// macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")

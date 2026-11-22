@@ -25,28 +25,23 @@ func bash(t *testing.T, dir string, e Env, src string, args ...string) string {
 	return out
 }
 
-const mkdbPy = `import sqlite3, sys
-con = sqlite3.connect(sys.argv[1])
-con.execute("CREATE TABLE projects(name TEXT PRIMARY KEY, indexed_at TEXT, root_path TEXT)")
-for i, r in enumerate(sys.argv[2:]):
-    con.execute("INSERT INTO projects VALUES (?, '2026-11-12T07:51:04Z', ?)", ("p%d" % i, r))
-con.commit()
-con.close()
-`
+// mkdbSQL: 색인 DB(codebase-memory 꼴 projects 표) 준비 SQL — sqlite3 명령에 넘긴다(hc-sweep도 sqlite3로 읽는다). wal이면 WAL 모드
+func mkdbSQL(wal bool, at string, roots ...string) string {
+	var b strings.Builder
+	if wal {
+		b.WriteString("PRAGMA journal_mode=WAL;\n")
+	}
+	b.WriteString("CREATE TABLE projects(name TEXT PRIMARY KEY, indexed_at TEXT, root_path TEXT);\n")
+	for i, r := range roots {
+		fmt.Fprintf(&b, "INSERT INTO projects VALUES ('p%d', '%s', '%s');\n", i, at, strings.ReplaceAll(r, "'", "''"))
+	}
+	return b.String()
+}
 
-const walDBPy = `import sqlite3, sys
-con = sqlite3.connect(sys.argv[1])
-con.execute("PRAGMA journal_mode=WAL")
-con.execute("CREATE TABLE projects(name TEXT PRIMARY KEY, indexed_at TEXT, root_path TEXT)")
-con.execute("INSERT INTO projects VALUES ('p0', '2026', ?)", (sys.argv[2],))
-con.commit()
-con.close()
-`
-
-func TestHcSweep(t *testing.T) { eachImpl(t, "hc-sweep", testHcSweep) }
+func TestHcSweep(t *testing.T) { run1(t, testHcSweep) }
 
 func testHcSweep(t *testing.T, T string, e Env) {
-	SWEEP := filepath.Join(repo, "bin", "hc-sweep")
+	SWEEP := tool(t, "hc-sweep")
 	P := T + "/pids"
 	mkdirs(t, P, T+"/bin", T+"/home", T+"/cfg", T+"/tmp") // tmp: 디스크 쓸기가 진짜 임시 폴더를 쓸지 않게
 	var out string
@@ -96,7 +91,7 @@ exit 1
 	IX := T + "/cache/codebase-memory-mcp"
 	mkdirs(t, IX+"/logs", T+"/repo-live")
 	mkdb := func(n string, roots ...string) {
-		bash(t, T, e, `exec python3 -c "$@"`, append([]string{mkdbPy, IX + "/" + n + ".db"}, roots...)...)
+		bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/"+n+".db", mkdbSQL(false, "2026-11-12T07:51:04Z", roots...))
 	}
 	mkdb("live", T+"/repo-live")
 	mkdb("gone", T+"/repo.wt/audit-x")
@@ -108,7 +103,7 @@ exit 1
 		t.Fatal(err)
 	}
 	mkdb("vlink", T+"/usblink/repo") // 링크를 거쳐 /Volumes(빠진 디스크) — 남김
-	bash(t, T, e, `exec python3 -c "$@"`, walDBPy, IX+"/walgone.db", T+"/repo.wt/audit-w")
+	bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/walgone.db", mkdbSQL(true, "2026", T+"/repo.wt/audit-w"))
 	mkdb("bad", T+"/repo.wt/audit-bad")
 	mkdirs(t, IX+"/bad.db-shm") // 곁 파일을 못 지움(폴더 — 롤백 방식이라 SQLite는 안 봄) — 이 DB만 실패하고 나머지는 계속
 	mkdb("recent", T+"/repo.wt/new")
@@ -280,14 +275,10 @@ exit 1
 	c.ok("작업 트리 있고 쓰는 터미널 없음 e: 끔", gone(pid("e")))
 	c.ok("남김: cwd로만 a, 링크 경로 터미널 b, 본 저장소 h, 자손 터미널 k, 밖 o, 공백 경로 keep s", allalive("a", "b", "h", "k", "o", "s"))
 	log = read(LOG)
-	// [E05] Go 판은 명령 줄(인자 — 자격증명이 섞일 수 있다)을 남기지 않고 실행 파일만. 셸 판은 명령 앞 80자(알려진 차이)
-	tail := "/bin/bash /"
-	if e[implVar("hc-sweep")] != "bash" {
-		tail = "/bin/bash$"
-	}
-	c.ok("기록: pid·나이·실행 파일(셸 판은 명령 앞부분)",
-		grep(log, fmt.Sprintf("(?m)pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 %s", pid("e"), q(E), tail)) &&
-			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pid("c"))) && (tail == "/bin/bash /" || !strings.Contains(log, E+"/bin/idle")))
+	// [E05] 명령 줄(인자 — 자격증명이 섞일 수 있다)을 남기지 않고 실행 파일만
+	c.ok("기록: pid·나이·실행 파일",
+		grep(log, fmt.Sprintf("(?m)pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 /bin/bash$", pid("e"), q(E))) &&
+			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pid("c"))) && !strings.Contains(log, E+"/bin/idle"))
 
 	os.RemoveAll(H)
 	sweep("--min-age", "0")

@@ -8,12 +8,13 @@
 # - 구역: <파일>#body는 「<!-- User customizations -->」 줄 아래, <파일>#codex-shared는 codex-shared 표식 사이다.
 # - <경로>@은 심볼릭 링크다. 저장소 경로 자리에 링크가 가리킬 곳(~ 아래 상대 경로)을 적는다.
 # - 대상: all(모든 기계) · macos(uname이 Darwin인 기계) · local(맥만) · 기계 이름을 쉼표로 (예: box-1,box-2).
-# - 묶음 지움: 그 기계에 있으면 백업 폴더로 옮긴다. 저장소 경로는 -.
-# - Go 판 도구(cmd/<이름>)는 소스로 깐다: Go 줄 넷(go.mod·cmd/**·internal/**·lib/go-run.sh)을 한 번에, 대상은 Go 판을 쓰는 도구 bin 줄을 덮게(sync-lint가 본다 —
-#   herdr-settings-merge가 all이라 Go 줄도 all). 바이너리는 herdr-sync가 맥에서 지어 publish.repo 릴리스로 올리고 기계는 받아 쓴다(리눅스는
-#   x86_64만, 리눅스로 가는 bin 줄 — all이거나 리눅스 기계 이름 — 의 도구만 linux/amd64로 짓는다).
-#   받은 것이 없거나 판이 다르면 그 기계에서 짓고(go가 있을 때), 그것도 안 되면 셸 판으로 돈다.
-# - 설정 조각(settings.json의 정한 키)은 개인 저장소 settings/keys.json이 정한다(예: config.example/settings/keys.json).
+# - 묶음 지움: 그 기계에 있으면 백업 폴더로 옮긴다(그 기계 바이너리를 다 깐 뒤에만). 저장소 경로는 -.
+# - 바이너리 줄: 「.local/bin/<도구>  tools:cmd/<도구>」 — 도구는 Go 바이너리 하나다(2026-11-22 셸 판 걷음). herdr-sync가 맥에서 지어
+#   publish.repo 릴리스로 올리고 기계는 sha256을 확인해 받아 ~/.local/bin/<도구>에 원자 교체로 깐다(리눅스는 x86_64만 — 리눅스로 가는
+#   바이너리 줄의 도구만 linux/amd64로 짓는다). 못 받으면 그 기계의 Go 소스(아래 Go 줄 셋)로 짓고, 그것도 안 되면 그 기계를 「다름 (바이너리)」로
+#   크게 알리고 그 기계의 설정·지움을 미룬다. Go 줄 셋의 대상은 바이너리 줄을 덮게, 곁 도구(cmd/<곁>/OWNER — hc-merger는 hc-lane이 부른다)도
+#   같은 대상에(sync-lint가 본다). 셸 판 줄(tools:bin/…·tools:lib/…)은 sync-lint가 막는다.
+# - 설정 조각(settings.json의 정한 키 — 훅 명령 포함)은 개인 저장소 settings/keys.json이 정한다(예: config.example/settings/keys.json).
 지침본문     .claude/CLAUDE.md#body                           claude/CLAUDE.body.md                           all
 주제지침     .claude/docs/*.md                                claude/docs/                                    all
 Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.shared.md                          all
@@ -21,44 +22,42 @@ Codex공통    .codex/AGENTS.md#codex-shared                    codex/AGENTS.sha
 스킬         .claude/skills/my-skill@                         .agents/skills/my-skill                         macos
 스킬나무     .agents/skills/**                                skills/agents/                                  macos
 제외         .agents/skills/app-managed                       -                                               -
-훅           .claude/hooks/cotenant-guard.sh                  tools:claude/hooks/cotenant-guard.sh            macos
-훅           .claude/hooks/loop-no-question.sh                tools:claude/hooks/loop-no-question.sh          macos
-훅           .claude/hooks/hc-lane-wait-guard.sh              tools:claude/hooks/hc-lane-wait-guard.sh        macos
-훅           .claude/hooks/kill-by-lookup-guard.sh            tools:claude/hooks/kill-by-lookup-guard.sh      macos
-훅           .claude/hooks/lane-no-shell-edit.sh              tools:claude/hooks/lane-no-shell-edit.sh        macos
-도구         .local/bin/hc-lane                               tools:bin/hc-lane                               macos
-도구         .local/lib/hc-lane/**                            tools:lib/hc-lane/                              macos
 Go           .local/lib/herdr-go/go.mod                       tools:go.mod                                    all
 Go           .local/lib/herdr-go/cmd/**                       tools:cmd/                                      all
 Go           .local/lib/herdr-go/internal/**                  tools:internal/                                 all
-Go           .local/lib/go-run.sh                             tools:lib/go-run.sh                             all
-도구         .local/bin/tests/hc-merger-go.test.sh            tools:tests/hc-merger-go.test.sh                macos
-도구         .local/bin/hc-sweep                              tools:bin/hc-sweep                              macos
-도구         .local/lib/hc-sweep/**                           tools:lib/hc-sweep/                             macos
-도구         .local/bin/ovis-split                            tools:bin/ovis-split                            macos
-도구         .local/bin/hc-launchd-guard                      tools:bin/hc-launchd-guard                      macos
-도구         .local/bin/tests/hc-launchd-guard.test.sh        tools:tests/hc-launchd-guard.test.sh            macos
-도구         .local/lib/ovis-split/**                         tools:lib/ovis-split/                           macos
-도구         .local/bin/tests/isolate.sh                      tools:tests/isolate.sh                          macos
-도구         .local/bin/tests/hc-lane-go.test.sh              tools:tests/hc-lane-go.test.sh                  macos
-도구         .local/bin/tests/hc-lane-bash.test.sh            tools:tests/hc-lane-bash.test.sh                macos
-도구         .local/bin/tests/hc-lane-merger.test.sh          tools:tests/hc-lane-merger.test.sh              macos
-도구         .local/bin/herdr-settings-merge                  tools:bin/herdr-settings-merge                  all
-도구         .local/bin/tests/ops-go-bash.test.sh             tools:tests/ops-go-bash.test.sh                 macos
+도구         .local/bin/herdr-hooks                           tools:cmd/herdr-hooks                           macos
+도구         .local/bin/hc-lane                               tools:cmd/hc-lane                               macos
+도구         .local/bin/hc-merger                             tools:cmd/hc-merger                             macos
+도구         .local/bin/hc-sweep                              tools:cmd/hc-sweep                              macos
+도구         .local/bin/ovis-split                            tools:cmd/ovis-split                            macos
+도구         .local/bin/hc-launchd-guard                      tools:cmd/hc-launchd-guard                      macos
+도구         .local/bin/herdr-settings-merge                  tools:cmd/herdr-settings-merge                  all
 설정         .local/share/herdr-sync/keys.json                settings/keys.json                              all
 패턴         .local/share/herdr-tools/private-patterns.txt    private-patterns.txt                            macos
-맥도구       .local/bin/herdr-sync                            tools:bin/herdr-sync                            local
-맥도구       .local/bin/hc-core-relaunch                      tools:bin/hc-core-relaunch                      local
-맥도구       .local/bin/herdr-balance                         tools:bin/herdr-balance                         local
-맥도구       .local/lib/herdr-balance/**                      tools:lib/herdr-balance/                        local
-맥도구       .local/bin/worker-mac-check                      tools:bin/worker-mac-check                      local
-맥도구       .local/lib/worker-mac-check/**                   tools:lib/worker-mac-check/                     local
-맥도구       .local/bin/worker-mac-setup                      tools:bin/worker-mac-setup                      local
-맥도구       .local/lib/worker-mac-setup/**                   tools:lib/worker-mac-setup/                     local
-맥도구       .local/bin/hc-fill                               tools:bin/hc-fill                               local
-맥도구       .local/lib/hc-fill/**                            tools:lib/hc-fill/                              local
+맥도구       .local/bin/herdr-sync                            tools:cmd/herdr-sync                            local
+맥도구       .local/bin/hc-core-relaunch                      tools:cmd/hc-core-relaunch                      local
+맥도구       .local/bin/herdr-balance                         tools:cmd/herdr-balance                         local
+맥도구       .local/bin/worker-mac-check                      tools:cmd/worker-mac-check                      local
+맥도구       .local/bin/worker-mac-setup                      tools:cmd/worker-mac-setup                      local
+맥도구       .local/bin/hc-fill                               tools:cmd/hc-fill                               local
 맥도구       .local/share/hc-fill/hc-fill.example.tsv         tools:config.example/hc-fill.tsv                local
 맥도구       .local/share/hc-fill/hc-fill-audit.example.md    tools:config.example/hc-fill-audit.md           local
-맥도구       .local/bin/herdr-tools-config                    tools:bin/herdr-tools-config                    local
-맥도구       .local/bin/herdr-tools-publish                   tools:bin/herdr-tools-publish                   local
+맥도구       .local/bin/herdr-tools-config                    tools:cmd/herdr-tools-config                    local
+맥도구       .local/bin/herdr-tools-publish                   tools:cmd/herdr-tools-publish                   local
 지움         .local/bin/old-tool                              -                                               local
+# 셸 판이 남긴 것(2026-11-22 걷음) — 바이너리를 다 깐 기계에서만 백업 폴더로 옮긴다
+지움         .local/lib/go-run.sh                             -                                               all
+지움         .local/lib/herdr-go/.bin                         -                                               all
+지움         .local/lib/hc-lane                               -                                               macos
+지움         .local/lib/hc-sweep                              -                                               macos
+지움         .local/lib/ovis-split                            -                                               macos
+지움         .local/lib/hc-fill                               -                                               local
+지움         .local/lib/herdr-balance                         -                                               local
+지움         .local/lib/worker-mac-check                      -                                               local
+지움         .local/lib/worker-mac-setup                      -                                               local
+지움         .local/bin/tests                                 -                                               macos
+지움         .claude/hooks/cotenant-guard.sh                  -                                               macos
+지움         .claude/hooks/loop-no-question.sh                -                                               macos
+지움         .claude/hooks/hc-lane-wait-guard.sh              -                                               macos
+지움         .claude/hooks/kill-by-lookup-guard.sh            -                                               macos
+지움         .claude/hooks/lane-no-shell-edit.sh              -                                               macos

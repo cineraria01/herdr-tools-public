@@ -1,8 +1,8 @@
-// Package tests: claude/hooks/*.sh 훅의 계약 시험(셸 시험 claude/hooks/tests/*.test.sh를 옮긴 것).
-// 훅을 settings.json과 같은 꼴(훅 파일이 없으면 0, 있으면 /bin/bash <훅>)로 밖에서 부르고, PreToolUse JSON을 stdin으로 넣어
-// 종료 코드·stderr를 본다. 훅 자리는 HOOK(한 훅만 도는 시험에서 그 훅 대신, 예 HOOK=/nonexistent = 훅 없을 때), 없으면 이 폴더의 ../<훅>.sh.
-// 두 판 대조: HERDR_HOOKS_IMPL(없으면 HERDR_IMPL)이 밖에서 정해졌으면 그 판 하나만, 아니면 go·bash 두 판을 모두 돈다.
-// 실행: go test ./claude/hooks/tests/   (한 판만: HERDR_HOOKS_IMPL=bash go test ./claude/hooks/tests/ -run CotenantGuard)
+// Package tests: Claude Code PreToolUse 훅(herdr-hooks <훅>)의 계약 시험(옛 셸 시험 claude/hooks/tests/*.test.sh를 옮긴 것).
+// 훅은 settings.json에 넣는 명령 줄 그대로(hookCmds — /bin/sh -c) 밖에서 부르고, PreToolUse JSON을 stdin으로 넣어 종료 코드·stderr를 본다.
+// 명령 줄은 $HOME/.local/bin/herdr-hooks를 부르므로, 시험은 HOME마다 그 자리에 시험 빌드(-tags hookstest — 시험 손잡이
+// HERDR_HOOKS_TEST_*가 먹는 빌드)를 걸어 둔다. 셸 판·두 판 대조는 2026-11-22 걷었다(go-shell-remove) — 판은 Go 하나다.
+// 실행: go test ./claude/hooks/tests/
 package tests
 
 import (
@@ -18,32 +18,16 @@ import (
 	"testing"
 )
 
-// hookPath: HOOK이 있으면 그것, 없으면 이 시험 폴더 곁의 훅.
-func hookPath(t *testing.T, name string) string {
-	t.Helper()
-	if h := os.Getenv("HOOK"); h != "" {
-		return h
-	}
-	p, err := filepath.Abs(filepath.Join("..", name+".sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-// impls: 판 목록. 훅 다섯은 한 바이너리 herdr-hooks라 스위치도 하나 — HERDR_HOOKS_IMPL(없으면 HERDR_IMPL, lib/go-run.sh와 같은 차례).
-// 밖에서 정했으면 그 판 하나만, 아니면 go 하나 — 셸 판 갈래는 HERDR_TEST_BASH=1일 때만 두 판을(2026-11-22 verify-parallel:
-// 셸 판은 곧 걷는다, 지휘 t1cj). 셸 판을 지우는 날 이 스위치도 지운다.
-func impls() []string {
-	for _, k := range []string{"HERDR_HOOKS_IMPL", "HERDR_IMPL"} {
-		if v := os.Getenv(k); v != "" {
-			return []string{v}
-		}
-	}
-	if os.Getenv("HERDR_TEST_BASH") == "1" {
-		return []string{"go", "bash"}
-	}
-	return []string{"go"}
+// hookCmds: settings.json PreToolUse 훅 항목의 command — 개인 settings에 이 글자 그대로 넣는다(herdr-sync가 판별 글자 = 훅 이름으로 짝짓는다).
+// 바이너리 ~/.local/bin/herdr-hooks(herdr-sync가 원자 교체로 까는 Go 바이너리 그 자체)를 바로 exec한다 — 버전 확인·짓기·셸 판 없음(R-M02).
+// 바이너리가 없거나 실행할 수 없으면: 안전 장치 cotenant-guard는 막고(2, 까닭 한 줄), 편의 막·알림 넷은 통과(0) — 옛 포장과 같은 쪽(R-H07).
+// 실행 파일은 이 고정 자리 하나 — 환경 변수로 바꿔 끼우지 못한다(R-L01·R-41).
+var hookCmds = map[string]string{
+	"cotenant-guard":       `[ -x "$HOME/.local/bin/herdr-hooks" ] || { echo 'cotenant-guard: ~/.local/bin/herdr-hooks가 없어 판정하지 못해 막았다 — herdr-sync로 깔아라' >&2; exit 2; }; exec "$HOME/.local/bin/herdr-hooks" cotenant-guard`,
+	"loop-no-question":     `[ -x "$HOME/.local/bin/herdr-hooks" ] || exit 0; exec "$HOME/.local/bin/herdr-hooks" loop-no-question`,
+	"hc-lane-wait-guard":   `[ -x "$HOME/.local/bin/herdr-hooks" ] || exit 0; exec "$HOME/.local/bin/herdr-hooks" hc-lane-wait-guard`,
+	"kill-by-lookup-guard": `[ -x "$HOME/.local/bin/herdr-hooks" ] || exit 0; exec "$HOME/.local/bin/herdr-hooks" kill-by-lookup-guard`,
+	"lane-no-shell-edit":   `[ -x "$HOME/.local/bin/herdr-hooks" ] || exit 0; exec "$HOME/.local/bin/herdr-hooks" lane-no-shell-edit`,
 }
 
 var (
@@ -51,20 +35,18 @@ var (
 	hooksBin     string
 	hooksBinErr  error
 	hooksBinDir  string
+	homeOnce     sync.Once
+	homeDefault  string
 )
 
-// buildHooks: 이 시험만의 herdr-hooks를 -tags hookstest로 한 번 짓는다(시험 손잡이 HERDR_HOOKS_TEST_*가 먹는 빌드 —
-// 옛 hooks-impl.sh와 같다). 밖에서 HERDR_HOOKS_BIN을 주면 그것을 쓴다.
+// buildHooks: 이 시험만의 herdr-hooks를 -tags hookstest로 한 번 짓는다(시험 손잡이 HERDR_HOOKS_TEST_*가 먹는 빌드).
+// clitest.Bin은 태그 없이 짓는다 — 운영 빌드는 그쪽(settings_cmd_test.go)
 func buildHooks(t *testing.T) string {
 	t.Helper()
 	hooksBinOnce.Do(func() {
-		if b := os.Getenv("HERDR_HOOKS_BIN"); b != "" {
-			hooksBin = b
-			return
-		}
 		goBin, err := exec.LookPath("go")
 		if err != nil {
-			hooksBinErr = fmt.Errorf("go가 없다(brew install go) — HERDR_HOOKS_IMPL=bash로 셸 판만 볼 수 있다: %w", err)
+			hooksBinErr = fmt.Errorf("go가 없다(brew install go): %w", err)
 			return
 		}
 		root, err := filepath.Abs(filepath.Join("..", "..", ".."))
@@ -79,7 +61,7 @@ func buildHooks(t *testing.T) string {
 		hooksBin = filepath.Join(hooksBinDir, "herdr-hooks")
 		cmd := exec.Command(goBin, "build", "-tags", "hookstest", "-trimpath", "-buildvcs=false", "-o", hooksBin, "./cmd/herdr-hooks")
 		cmd.Dir = root
-		cmd.Env = envWith(nil, "GOTOOLCHAIN=local", "CGO_ENABLED=0")
+		cmd.Env = envWith(nil, "GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH=")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			hooksBinErr = fmt.Errorf("herdr-hooks 짓기 실패(%s): %w\n%s", root, err, out)
 		}
@@ -92,34 +74,66 @@ func buildHooks(t *testing.T) string {
 
 func TestMain(m *testing.M) {
 	rc := m.Run()
-	if hooksBinDir != "" {
-		os.RemoveAll(hooksBinDir) //nolint:errcheck // 임시 폴더
+	for _, d := range []string{hooksBinDir, homeDefault} {
+		if d != "" {
+			os.RemoveAll(d) //nolint:errcheck // 임시 폴더
+		}
 	}
 	os.Exit(rc)
 }
 
-// forImpls: 판마다 f를 부분 시험으로 돈다. implEnv = HERDR_HOOKS_IMPL=<판>, Go 판이면 HERDR_HOOKS_BIN=<시험 빌드>도 —
-// IMPL=go인데 바이너리를 못 쓰면 훅이 종료 1이라 셸 판으로 슬쩍 넘어가지 않는다. name은 읽는 사람용(어느 훅인지).
-func forImpls(t *testing.T, name string, f func(t *testing.T, implEnv []string)) {
-	for _, impl := range impls() {
-		t.Run(impl, func(t *testing.T) {
-			env := []string{"HERDR_HOOKS_IMPL=" + impl}
-			if impl == "go" || impl == "auto" {
-				env = append(env, "HERDR_HOOKS_BIN="+buildHooks(t))
-			}
-			f(t, env)
-		})
+// putBin: home/.local/bin/herdr-hooks에 bin을 건다(이미 있으면 그대로)
+func putBin(t *testing.T, home, bin string) {
+	t.Helper()
+	p := filepath.Join(home, ".local", "bin", "herdr-hooks")
+	if _, err := os.Lstat(p); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bin, p); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// isGo: 그 판이 Go 판인가 — 셸 판을 sed로 고치던 시험은 Go 판에서 시험 손잡이(HERDR_HOOKS_TEST_*)로.
-func isGo(implEnv []string) bool {
-	for _, kv := range implEnv {
-		if strings.HasPrefix(kv, "HERDR_HOOKS_BIN=") {
-			return true
+// withHome: env의 HOME에 시험 빌드를 건다. HOME이 없거나 이 시험을 돌리는 사람의 진짜 HOME이면 시험 전용 HOME으로 바꾼다
+// (진짜 ~/.local/bin/herdr-hooks를 부르지 않게)
+func withHome(t *testing.T, env []string) []string {
+	t.Helper()
+	home, at := "", -1
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "HOME=") {
+			home, at = kv[5:], i
 		}
 	}
-	return false
+	if home == "" || home == os.Getenv("HOME") {
+		homeOnce.Do(func() {
+			d, err := os.MkdirTemp("", "herdr-hooks-home.")
+			if err == nil {
+				homeDefault = d
+			}
+		})
+		if homeDefault == "" {
+			t.Fatal("시험 HOME을 만들지 못했다")
+		}
+		home = homeDefault
+		if at >= 0 {
+			env = append(append([]string{}, env[:at]...), env[at+1:]...)
+		}
+		env = append(env, "HOME="+home)
+	}
+	putBin(t, home, buildHooks(t))
+	return env
+}
+
+// hookExec: settings.json의 명령 줄(hookCmds[name])을 /bin/sh -c로 — Claude Code가 훅을 부르는 꼴
+func hookExec(name string, stdin []byte, env []string, dir string) *exec.Cmd {
+	cmd := exec.Command("/bin/sh", "-c", hookCmds[name])
+	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.Env = env
+	cmd.Dir = dir
+	return cmd
 }
 
 // toolInput: jq -cn으로 만들던 PreToolUse 입력. HTML 이스케이프 없이(jq와 같은 바이트).
@@ -138,10 +152,11 @@ func bashInput(c string) []byte {
 	return toolInput(map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": c}})
 }
 
-// envWith: 바깥 환경에서 unset 이름을 빼고 set(K=V)을 덮는다. 판 스위치 HERDR_IMPL과 시험 손잡이 HERDR_HOOKS_TEST_*는
-// 늘 뺀다(옛 hooks-impl.sh의 unset) — 판은 forImpls가 HERDR_HOOKS_IMPL로 정한다.
+// envWith: 바깥 환경에서 unset 이름을 빼고 set(K=V)을 덮는다. 옛 판 스위치(HERDR_IMPL·HERDR_HOOKS_IMPL·HERDR_HOOKS_BIN)와
+// 시험 손잡이 HERDR_HOOKS_TEST_*는 늘 뺀다 — 바깥에 남은 값이 판정에 섞이지 않게.
 func envWith(unset []string, set ...string) []string {
-	drop := map[string]bool{"HERDR_IMPL": true, "HERDR_HOOKS_TEST_GIT": true, "HERDR_HOOKS_TEST_NOW_OFFSET": true, "HERDR_HOOKS_TEST_SECONDS": true}
+	drop := map[string]bool{"HERDR_IMPL": true, "HERDR_HOOKS_IMPL": true, "HERDR_HOOKS_BIN": true,
+		"HERDR_HOOKS_TEST_GIT": true, "HERDR_HOOKS_TEST_NOW_OFFSET": true, "HERDR_HOOKS_TEST_SECONDS": true}
 	for _, k := range unset {
 		drop[k] = true
 	}
@@ -157,18 +172,9 @@ func envWith(unset []string, set ...string) []string {
 	return append(env, set...)
 }
 
-// runHook: settings.json의 포장 그대로 — 훅 파일을 못 읽으면 0, 아니면 /bin/bash <훅>. 종료 코드·stdout·stderr를 돌려준다.
-func runHook(t *testing.T, hook string, stdin []byte, env []string, dir string) (rc int, stdout, stderr string) {
+// runOut: 끝난 명령의 종료 코드(못 띄우면 t.Fatal)
+func runOut(t *testing.T, cmd *exec.Cmd) (rc int, stdout, stderr string) {
 	t.Helper()
-	if f, err := os.Open(hook); err != nil {
-		return 0, "", ""
-	} else {
-		f.Close()
-	}
-	cmd := exec.Command("/bin/bash", hook)
-	cmd.Stdin = bytes.NewReader(stdin)
-	cmd.Env = env
-	cmd.Dir = dir
 	var o, e bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &o, &e
 	err := cmd.Run()
@@ -181,6 +187,12 @@ func runHook(t *testing.T, hook string, stdin []byte, env []string, dir string) 
 		t.Fatalf("훅 실행 실패: %v", err)
 	}
 	return rc, o.String(), e.String()
+}
+
+// runHook: 훅 name을 settings.json 명령 줄 그대로 부른다(HOME에 시험 빌드를 걸고). 종료 코드·stdout·stderr를 돌려준다.
+func runHook(t *testing.T, name string, stdin []byte, env []string, dir string) (rc int, stdout, stderr string) {
+	t.Helper()
+	return runOut(t, hookExec(name, stdin, withHome(t, env), dir))
 }
 
 // blockCase: 이름·기대 종료 코드·명령. 막는 판(rc≠0)이면 stderr에 msg가 들어야 한다.

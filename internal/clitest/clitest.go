@@ -1,9 +1,7 @@
 // Package clitest: 명령을 밖에서 부르는 계약 시험 도우미 — tests/*.test.sh를 Go 시험으로 옮긴 것(2026-11-21 go-tests).
-// 시험은 임시 HOME·가짜 원격·가짜 hc를 만들고 bin/<도구>(얇은 포장)를 exec해 출력·종료 코드·상태를 본다. 셸 시험의 단언 하나가
-// Ok 한 번이고, 이름은 셸 시험 그대로다(go test -v에 「ok N - 이름」, 실패는 「FAIL N - 이름」).
-//
-// 판(go·bash): Impl(<도구>_IMPL)이 고른다 — <도구>_IMPL, 없으면 HERDR_IMPL, 없으면 go(빌드가 깨져도 셸 판으로 조용히 통과하지 않게).
-// 셸 판으로 한 번 더: HERDR_IMPL=bash go test ./cmd/<도구> (tests/ops-go-bash.test.sh).
+// 시험은 임시 HOME·가짜 원격·가짜 hc를 만들고 그 도구의 Go 바이너리(Bin — 시험 프로세스마다 cmd/<도구>를 한 번 지음)를 exec해
+// 출력·종료 코드·상태를 본다. 셸 시험의 단언 하나가 Ok 한 번이고, 이름은 셸 시험 그대로다(go test -v에 「ok N - 이름」, 실패는 「FAIL N - 이름」).
+// 셸 판은 2026-11-22 걷었다(go-shell-remove) — 판은 Go 하나다.
 package clitest
 
 import (
@@ -18,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -72,11 +71,11 @@ func Root(t *testing.T) string {
 	}
 }
 
-// Repo: 범용 저장소 루트. 계약 시험은 저장소 꼴(bin/·config.example/)에서만 돈다 — 깔린 곳(~/.local/lib/herdr-go)은 건너뛴다
+// Repo: 범용 저장소 루트. 계약 시험은 저장소 꼴(cmd/·config.example/)에서만 돈다 — 깔린 곳(~/.local/lib/herdr-go)은 건너뛴다
 func Repo(t *testing.T) string {
 	t.Helper()
 	r := Root(t)
-	for _, p := range []string{"bin", "config.example"} {
+	for _, p := range []string{"cmd", "config.example"} {
 		if st, err := os.Stat(filepath.Join(r, p)); err != nil || !st.IsDir() {
 			t.Skipf("저장소 밖(%s 없음 — 깔린 곳): 계약 시험은 범용 저장소에서 돈다", p)
 		}
@@ -84,37 +83,70 @@ func Repo(t *testing.T) string {
 	return r
 }
 
-// Tool: 부를 도구 — 환경 override(예 HERDR_SYNC)가 있으면 그것, 없으면 저장소 bin/<이름>
+// Tool: 부를 도구 — 시험 전용 환경 override(예 HERDR_SYNC)가 있으면 그것, 없으면 Bin(name)
 func Tool(t *testing.T, name, override string) string {
 	t.Helper()
 	if v := os.Getenv(override); override != "" && v != "" {
 		return v
 	}
-	p := filepath.Join(Repo(t), "bin", name)
-	if _, err := os.Stat(p); err != nil {
-		t.Fatalf("%s 없음 (%s=<경로>)", p, override)
+	return Bin(t, name)
+}
+
+var (
+	binMu   sync.Mutex
+	binDir  string
+	binErr  = map[string]error{}
+	binDone = map[string]bool{}
+)
+
+// Bin: cmd/<name>을 이 시험 프로세스에서 한 번 지은 바이너리 경로. 모든 도구를 한 폴더에 지어, 곁 도구(hc-lane → hc-merger·
+// herdr-tools-config 등)를 바이너리 곁에서 찾는 길이 운영(~/.local/bin)과 같다. 폴더는 시험 프로세스 뒤에도 남는다(빌드 캐시가 다시 빠르게 짓는다)
+func Bin(t *testing.T, name string) string {
+	t.Helper()
+	binMu.Lock()
+	defer binMu.Unlock()
+	if binDir == "" {
+		d, err := os.MkdirTemp("", "herdr-test-bin.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		binDir = d
+	}
+	p := filepath.Join(binDir, name)
+	if !binDone[name] {
+		binDone[name] = true
+		c := exec.Command("go", "build", "-o", p, "./cmd/"+name)
+		c.Dir = Root(t)
+		c.Env = append(os.Environ(), "CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH=")
+		if out, err := c.CombinedOutput(); err != nil {
+			binErr[name] = fmt.Errorf("go build ./cmd/%s: %v\n%s", name, err, out)
+		}
+	}
+	if err := binErr[name]; err != nil {
+		t.Fatal(err)
 	}
 	return p
 }
 
-// Impl: 판 — <도구>_IMPL, 없으면 HERDR_IMPL, 없으면 go
-func Impl(env string) string {
-	if v := os.Getenv(env); v != "" {
-		return v
+// BinDir: 그 도구들을 모두 지은 폴더(PATH 앞에 둔다)
+func BinDir(t *testing.T, names ...string) string {
+	t.Helper()
+	if len(names) == 0 {
+		t.Fatal("BinDir: 도구가 없다")
 	}
-	if v := os.Getenv("HERDR_IMPL"); v != "" {
-		return v
+	var p string
+	for _, n := range names {
+		p = Bin(t, n)
 	}
-	return "go"
+	return filepath.Dir(p)
 }
 
-// isolateVars: tests/isolate.sh(lib/hc-lane/test-isolate.sh)가 지우는 바깥 git·XDG·레인 환경
+// isolateVars: 시험이 지우는 바깥 git·XDG·레인 환경(옛 tests/isolate.sh와 같은 목록)
 var isolateVars = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
-	"XDG_DATA_HOME", "HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY",
-	"HC_LANE_MERGER_BIN"}
+	"XDG_DATA_HOME", "HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY"}
 
-// Isolate: tests/isolate.sh와 같게 — 바깥 병합기·후보 잠금(fd 19·18)이 자식에 물리지 않게, 바깥 git·XDG·레인 환경을 지우고,
+// Isolate: 바깥 병합기·후보 잠금(fd 19·18)이 자식에 물리지 않게, 바깥 git·XDG·레인 환경을 지우고,
 // git이 T 위로 저장소를 찾아 올라가지 못하게 한다. 환경은 t.Setenv라 시험이 끝나면 되돌아간다
 func Isolate(t *testing.T, T string) {
 	t.Helper()

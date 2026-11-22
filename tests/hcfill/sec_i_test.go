@@ -32,8 +32,8 @@ func secI(k *K) {
 	k.run("run")
 	k.check("설정 inbox_audit on: 받은편지 줄에도 감사 칸 auto", k.col15("inq-b") == "auto")
 
-	// 완료 뒤 멈춤(Go 판 — 셸 판에는 없다): 완료 뒤 감사도 착지·제출도 없이 설정 done_stall분이 지나면 주인 지휘에 막힘 한 번
-	if k.impl != "bash" {
+	// 완료 뒤 멈춤: 완료 뒤 감사도 착지·제출도 없이 설정 done_stall분이 지나면 주인 지휘에 막힘 한 번
+	{
 		rep := k.T + "/report.log"
 		k.fresh()
 		rm(k.T + "/events")
@@ -79,7 +79,7 @@ func secI(k *K) {
 // secILock: 11. 잠금 — watch는 한 번에 하나, run도 겹치지 않음. 사용법·newid.
 func secILock(k *K) {
 	k.fresh()
-	self := k.T + "/hc-fill" // $T 안 링크로 띄워 명령 줄에 $T가 들어간다(셸 판 leftw가 그것으로 고른다)
+	self := k.T + "/hc-fill" // $T 안 링크로 띄워 명령 줄에 $T가 들어간다(leftw가 그것으로도 고른다)
 	if err := os.Symlink(k.FILL, self); err != nil {
 		k.t.Fatal(err)
 	}
@@ -100,12 +100,8 @@ func secILock(k *K) {
 	time.Sleep(300 * time.Millisecond)
 	k.out, k.rc = k.exe(k.T, nil, self, "watch", "--every", "1")
 	k.check("watch: 이미 돌고 있으면 종료 75", k.rc == 75 && grep(k.out, `이미`))
-	want := 1
-	if k.impl == "bash" {
-		want = 2
-	}
 	running, rok := k.leftwOK()
-	k.check("watch: 띄운 뒤 lockf 안쪽까지 둘 이상 돈다(남은 watch 검사가 제 구실을 하는지 — Go 판은 잠금을 쥔 한 프로세스)", rok && len(running) >= want)
+	k.check("watch: 띄운 뒤 잠금을 쥔 한 프로세스가 돈다(남은 watch 검사가 제 구실을 하는지)", rok && len(running) >= 1)
 	killtree(bg.Process.Pid)
 	bg.Wait()
 	k.bg = nil
@@ -127,11 +123,5 @@ func secILock(k *K) {
 	k.check("watch를 멈춘 뒤 ls 정상", k.rc == 0)
 	k.run("nope")
 	k.check("모르는 명령은 종료 2, 사용법은 README와 같은 말(그 레인에서 빼고)", k.rc == 2 && grep(k.out, `그 기계를 그 레인에서 빼고`))
-
-	// SIGPIPE를 무시한 채 물려받은 셸에서도 newid가 끝난다 — 끝없는 /dev/urandom을 tr로 읽으면 head가 끝나도 tr이 안 죽어 run이 멈췄다
-	// (제 프로세스 그룹에서 돌리고 10초가 넘으면 그룹째 멈춘다 — 남은 tr이 시험을 붙잡거나 고아로 남지 않게)
-	common := k.FILL[:strings.LastIndex(k.FILL, "/")] + "/../lib/hc-fill/common.sh"
-	k.out, k.rc = k.exe(k.T, nil, "perl", "-e", `$SIG{PIPE}="IGNORE"; setpgrp(0, 0); my $p = fork; if (!$p) { exec "bash", "-c", q{eval "$(grep -E "^(b36|newid)\(\)" "$1")"; newid a}, "-", $ARGV[0] }
-  $SIG{ALRM} = sub { $SIG{TERM} = "IGNORE"; kill "TERM", -$$; exit 124 }; alarm 10; waitpid($p, 0); exit($? >> 8)`, common)
-	k.check("newid: SIGPIPE를 무시해도 10초 안에 끝나고 a<시각>-<6글자>", k.rc == 0 && grep(k.out, `^a[0-9a-z]+-[0-9a-z]{6}$`))
+	// newid 꼴(a<시각>-<6글자>)은 cmd/hc-fill 단위 시험이 본다 — 셸 판 newid(tr·/dev/urandom SIGPIPE 멈춤)는 걷혔다
 }

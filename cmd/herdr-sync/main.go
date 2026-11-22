@@ -34,7 +34,7 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
   herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다)
   herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
 
-경로는 sync.list의 맥 경로(~ 아래, 나무 줄은 그 안 파일 하나)나 설정 키(.model, hook:PreToolUse:cotenant-guard.sh 꼴), *는 그 기계의 충돌 전부, <폴더>/**는 그 나무의 충돌 전부다.
+경로는 sync.list의 맥 경로(~ 아래, 나무 줄은 그 안 파일 하나)나 설정 키(.model, hook:PreToolUse:cotenant-guard 꼴), *는 그 기계의 충돌 전부, <폴더>/**는 그 나무의 충돌 전부다.
 저장소와의 충돌은 기계 자리에 repo를 쓴다: --take repo:<경로>는 맥 값을, --pull repo:<경로>는 저장소 값을 남긴다.
 범용 저장소는 HERDR_TOOLS_REPO (기본 ~/Documents/app/herdr-tools), 개인 저장소는 HERDR_TOOLS_CONFIG (기본 ~/.config/herdr-tools).
 sh를 못 띄우는 기계(Windows 등)와 uname이 Darwin·Linux가 아닌 기계는 「건너뜀」 한 줄만 찍고 아무것도 쓰지 않는다(--take·--pull도, 종료 코드에 안 넣음).
@@ -178,7 +178,7 @@ func main() {
 	}
 	ready(REPO)
 	ready(CONF)
-	// lib/<도구>/가 있는 도구에 bin 줄만 있으면 맞추기 전에 멈춘다(bin만 깔리면 그 도구가 멈춤, --check도)
+	// 걷힌 셸 판 줄·틀린 바이너리 줄·딸린 줄(Go 소스·곁 도구) 빠짐이면 맞추기 전에 멈춘다(--check도)
 	if toolcfg.SyncLint(REPO, CONF+"/sync.list", os.Stdout, os.Stderr) != 0 {
 		exit(2)
 	}
@@ -345,6 +345,15 @@ func parseList() {
 		}
 		if b == "제외" {
 			EXK = append(EXK, strings.TrimSuffix(k, "/"))
+			continue
+		}
+		// 바이너리 줄(tools:cmd/<도구>): 파일로 맞추지 않고 그 도구의 Go 바이너리를 ~/.local/bin/<도구>에 깐다(release.go)
+		if x := toolcfg.BinLine(k, r); x != "" {
+			if k != ".local/bin/"+x || !isDir(REPO+"/cmd/"+x) {
+				fmt.Fprintf(os.Stderr, "herdr-sync: sync.list %d번 줄 바이너리 줄은 「.local/bin/%s tools:cmd/%s」 꼴이고 범용 저장소에 cmd/%s가 있어야 한다: %s %s\n", n+1, x, x, x, k, r)
+				exit(2)
+			}
+			BINS = append(BINS, binUnit{x, t})
 			continue
 		}
 		d := CONF

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"herdr-tools/internal/cksum"
@@ -112,12 +113,6 @@ func sin() (string, bool) {
 	return sinCache, true
 }
 
-// goRunWarn: 공통 실행기의 「Go 판을 쓸 수 없다」 경고 줄(그 기계에 go가 없음) — 도구 문제 판정에서 뺀다
-func goRunWarn(l string) bool {
-	return strings.Contains(l, "경고: Go 판을 쓸 수 없다") || strings.Contains(l, "고치기: 그 기계에 go를") ||
-		strings.Contains(l, "이 기계에는 go가 없어 셸 판으로 돈다") // 리눅스 서버 첫 실행 한 번짜리 안내(O-13)
-}
-
 // settings: 대상 기계의 herdr-settings-merge에 넘기고 판정 줄을 옮긴다. 충돌 수를 더하고 다름 묶음(설정·도구문제:설정)을 돌려준다
 func settings(m string, conf *int) string {
 	if !isFile(KEYS) {
@@ -172,12 +167,7 @@ func settings(m string, conf *int) string {
 	if check && wrote {
 		sdiff = "설정"
 	}
-	realErr := false
-	for _, l := range splitLines(serr.String()) {
-		if !goRunWarn(l) {
-			realErr = true
-		}
-	}
+	realErr := strings.TrimSpace(serr.String()) != ""
 	bad := false
 	switch r {
 	case 0:
@@ -203,6 +193,9 @@ func settings(m string, conf *int) string {
 
 func syncMachines(machines []string, mq *qres) {
 	MS, MRM := mq.C, mq.RM
+	// 1. 기계마다 조회(쓰기 전) — 릴리스가 리눅스 기계에 갈 도구를 알게(machOS)
+	qs := map[string]*qres{}
+	var live []string
 	for _, m := range machines {
 		q, ok := query(m)
 		if !ok {
@@ -220,6 +213,15 @@ func syncMachines(machines []string, mq *qres) {
 			continue
 		}
 		machOS[m] = q.O
+		qs[m] = q
+		live = append(live, m)
+	}
+	// 2. 공개 내보내기·릴리스(맥에서 짓고 올림), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
+	rel := binsPrepare(func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) })
+	mbd, macBins := installBins("맥", "Darwin", rel)
+	rdiff = append(rdiff, mbd...)
+	for _, m := range live {
+		q := qs[m]
 		var diffs, bp, wm, cf, wk []string
 		var wi, links []int
 		conf := 0
@@ -390,6 +392,13 @@ func syncMachines(machines []string, mq *qres) {
 			warn("%s base를 쓰지 못했다", m)
 			diffs = append(diffs, "base") // 다음 실행이 다시 적는다 — 그때까지 같음이 아니다(B09)
 		}
+		// 바이너리(파일·Go 소스를 맞춘 뒤 — 그 기계에서 지을 때 그 소스를 쓴다) → 설정 → 지움. 바이너리를 다 못 깔면 설정·지움을 미룬다
+		bd, binOK := installBins(m, q.O, rel)
+		diffs = append(diffs, bd...)
+		if !binOK && !check {
+			row(m, diffs, conf)
+			continue
+		}
 		diffs = append(diffs, settings(m, &conf))
 		for j, k := range RMK {
 			if !targets(RMT[j], m, q.O) || !q.RM[k] {
@@ -408,9 +417,9 @@ func syncMachines(machines []string, mq *qres) {
 		}
 		row(m, diffs, conf)
 	}
-	// 맥에서 지울 것 (지움 줄은 대상이 무엇이든 맥을 포함한다)
+	// 맥에서 지울 것 (지움 줄은 대상이 무엇이든 맥을 포함한다). 맥 바이너리를 다 못 깔았으면 미룬다
 	for _, k := range RMK {
-		if !MRM[k] {
+		if !MRM[k] || (!macBins && !check) {
 			continue
 		}
 		switch {
@@ -432,36 +441,37 @@ func syncMachines(machines []string, mq *qres) {
 		row("맥", rdiff, rconf)
 	}
 	fmt.Print(rows + saved)
-	if !check {
-		publish(machines)
-	}
 }
 
-// publish: 다 맞춘 뒤, 설정 publish.repo가 있으면 범용 저장소를 공개 저장소로 내보낸다(herdr-tools-publish, 기록 없이·검사 뒤).
-// 내보내기가 되면 Go 판 도구 바이너리를 그 공개 저장소 릴리스로 올리고 기계마다 받게 한다(release.go).
-// 기계 맞추기와 별개라, 실패해도 크게 경고만 하고 종료 코드는 바꾸지 않는다
-func publish(machines []string) {
-	pubwarn := func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) }
+// publish: 설정 publish.repo가 있으면 범용 저장소(저장소 맞추기는 끝남)를 공개 저장소로 내보낸다(herdr-tools-publish, 기록 없이·검사 뒤).
+// 돌려주는 것: 게시기가 검사·내보낸 커밋(성공 때만)과 publish.repo — 릴리스는 그 커밋으로 짓는다(release.go).
+// 기계 맞추기와 별개라, 실패해도 크게 경고만 하고 종료 코드는 바꾸지 않는다.
+// 게시기는 이 바이너리 곁(~/.local/bin)의 herdr-tools-publish, 없으면 PATH
+func publish(pubwarn func(string)) (checked, pub string) {
 	pub, err := toolcfg.Lookup(CONF, "publish.repo", "", os.Stderr)
 	if err != nil {
 		pubwarn(fmt.Sprintf("개인 설정을 읽지 못해 공개 저장소 내보내기를 건너뜀 (%s/config)", CONF))
-		return
+		return "", ""
 	}
 	if pub == "" {
-		return
+		return "", ""
 	}
-	// 게시기는 검사·내보낸 비공개 커밋을 이 파일에 적는다(성공 때만) — 릴리스는 그 커밋으로 짓는다(gofix-ops A02)
+	tool := "herdr-tools-publish"
+	if self, err := os.Executable(); err == nil {
+		if p := filepath.Join(filepath.Dir(self), tool); isFile(p) {
+			tool = p
+		}
+	}
 	res := TMP + "/published"
-	c := exec.Command("bash", REPO+"/bin/herdr-tools-publish")
+	c := exec.Command(tool)
 	c.Env = append(os.Environ(), "HERDR_TOOLS_CONFIG="+CONF, "HERDR_TOOLS_REPO="+REPO, "HERDR_TOOLS_PUBLISH_RESULT="+res)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	if run(c) != 0 {
-		pubwarn("공개 저장소 내보내기 실패 (맞추기는 끝났다) — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시")
-		return
+		pubwarn("공개 저장소 내보내기 실패 — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시. 바이너리는 기계마다 짓는다")
+		return "", pub
 	}
-	checked := ""
 	if b, err := os.ReadFile(res); err == nil {
 		checked = strings.TrimSpace(string(b))
 	}
-	release(pub, checked, machines, pubwarn)
+	return checked, pub
 }

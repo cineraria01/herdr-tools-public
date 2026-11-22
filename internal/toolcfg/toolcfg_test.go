@@ -6,8 +6,58 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// CompileERE: 셸 판 LC_ALL=C grep -E(대소문자 무시면 -i)와 같은 판정 — publish.secrets처럼 ERE 한 줄을 받는 곳이 쓴다.
+// grep이 있으면 같은 사례를 셸로도 돌려 기대값을 맞춘다
+func TestCompileERELikeShell(t *testing.T) {
+	cases := []struct {
+		pat, line string
+		icase     bool
+		want      bool
+	}{
+		{`customtok-[A-Z]{3}`, "customtok-ABC", false, true},
+		{`customtok-[A-Z]{3}`, "customtok-abc", false, false}, // -i 없으면 대소문자를 가린다
+		{`customtok-[A-Z]{3}`, "customtok-abc", true, true},
+		{`a.b`, "a\xc3\xa9b", false, false}, // 「.」은 바이트 하나(é는 두 바이트)
+		{`a..b`, "a\xc3\xa9b", false, true},
+		{`[\d]`, "7", false, false}, // 괄호 식 안 역슬래시는 글자 그대로(\ 또는 d)
+		{`[\d]`, `x\y`, false, true},
+		{`\<tok`, "a tok", false, true},
+		{`\<tok`, "atok", false, false},
+		{`[[:<:]]tok`, "a tok", false, true},
+		{"x\xc3\xa9", "X\xc3\xa9", true, true},
+		{"\xc3\xa9", "\xc3\x89", true, false}, // 대소문자 무시는 ASCII만(C 로캘)
+	}
+	grep, _ := exec.LookPath("grep")
+	for _, c := range cases {
+		re, err := CompileERE(c.pat, c.icase)
+		if err != nil {
+			t.Fatalf("%q: %v", c.pat, err)
+		}
+		if got := re.Match([]byte(c.line)); got != c.want {
+			t.Errorf("%q ~ %q (icase %v): %v, 셸 판은 %v", c.pat, c.line, c.icase, got, c.want)
+		}
+		if grep == "" {
+			continue
+		}
+		flags := "-qE"
+		if c.icase {
+			flags = "-qEi"
+		}
+		g := exec.Command(grep, flags, "-e", c.pat)
+		g.Env = append(os.Environ(), "LC_ALL=C")
+		g.Stdin = strings.NewReader(c.line + "\n")
+		if sh := g.Run() == nil; sh != c.want {
+			t.Errorf("시험 기대값이 셸 grep과 다름: %q ~ %q (icase %v): grep %v", c.pat, c.line, c.icase, sh)
+		}
+	}
+	if _, err := CompileERE(`(a)\1`, false); err == nil {
+		t.Error("Go가 못 읽는 꼴(역참조)은 오류여야 — 조용히 통과하지 않게")
+	}
+}
 
 func TestGet(t *testing.T) {
 	d := t.TempDir()
@@ -28,8 +78,8 @@ func TestGet(t *testing.T) {
 	}
 }
 
-// B14·M5: 셸 판(LC_ALL=C grep -E -i, 바이트 단위)과 같게 건다. want는 bin/herdr-tools-config를 HERDR_TOOLS_CONFIG_IMPL=bash로 부른 실제 종료 코드.
-// 저장소 안이면(bin/herdr-tools-config가 있으면) 셸 판을 그 자리에서 함께 불러 견준다
+// B14·M5: 옛 셸 판(LC_ALL=C grep -E -i, 바이트 단위)과 같게 건다. want는 옛 bin/herdr-tools-config를 HERDR_TOOLS_CONFIG_IMPL=bash로
+// 부른 실제 종료 코드를 기록한 골든이다(셸 판은 2026-11-22 go-shell-remove로 걷었다 — 이제 기록과만 견준다)
 func TestLintBytesLikeShell(t *testing.T) {
 	cases := []struct {
 		pat, line string
@@ -41,39 +91,13 @@ func TestLintBytesLikeShell(t *testing.T) {
 		{`[\.]x`, `\x`, 1}, {`a\.b`, "axb", 0}, {`\\<x`, `\<x`, 1}, {`\<tok`, "한tok", 1}, {`tok\>`, "tok한", 1},
 		{`[^a]b`, "\xffb", 1},
 	}
-	shell := ""
-	if wd, err := os.Getwd(); err == nil {
-		if p := filepath.Join(wd, "../../bin/herdr-tools-config"); isFile(p) {
-			shell = p
-		}
-	}
-	if shell == "" {
-		t.Log("bin/herdr-tools-config 없음(깔린 곳) — 기록한 셸 판 결과와만 견준다")
-	}
 	for _, c := range cases {
 		d, base := t.TempDir(), t.TempDir()
 		os.WriteFile(d+"/private-patterns.txt", []byte(c.pat+"\n"), 0o644)
 		os.WriteFile(base+"/f.txt", []byte(c.line+"\n"), 0o644)
 		var out, errb bytes.Buffer
 		if rc := LintAt(base, d, false, []string{"f.txt"}, &out, &errb); rc != c.want {
-			t.Errorf("패턴 %q 줄 %q: Go %d, 셸 %d (%s)", c.pat, c.line, rc, c.want, errb.String())
-		}
-		if shell == "" {
-			continue
-		}
-		cmd := exec.Command("bash", shell, "lint", "f.txt")
-		cmd.Dir = base
-		cmd.Env = append(os.Environ(), "HERDR_TOOLS_CONFIG="+d, "HERDR_TOOLS_CONFIG_IMPL=bash")
-		err := cmd.Run()
-		rc := 0
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			rc = ee.ExitCode()
-		} else if err != nil {
-			t.Fatal(err)
-		}
-		if rc != c.want {
-			t.Errorf("셸 판이 기록과 다르다: 패턴 %q 줄 %q: %d, 기록 %d", c.pat, c.line, rc, c.want)
+			t.Errorf("패턴 %q 줄 %q: Go %d, 기록한 셸 판 %d (%s)", c.pat, c.line, rc, c.want, errb.String())
 		}
 	}
 }

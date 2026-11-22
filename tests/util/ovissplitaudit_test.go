@@ -5,9 +5,6 @@ package util_test
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 )
 
@@ -28,22 +25,17 @@ case "$*" in
 esac
 `
 
-func TestOvisSplitAudit(t *testing.T) { eachImpl(t, "ovis-split", testOvisSplitAudit) }
+func TestOvisSplitAudit(t *testing.T) { run1(t, testOvisSplitAudit) }
 
 func testOvisSplitAudit(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/home")
-	PY, err := exec.LookPath("python3")
-	if err != nil {
-		t.Fatal("python3 없음")
-	}
-	os.Symlink(PY, T+"/bin/python3")
 	script(t, T+"/bin/hc", T, fakeOvisAuditHc)
-	iv := implVar("ovis-split")
+	OS := tool(t, "ovis-split")
 	LOG := T + "/hc.log"
 	osp := func(kv ...string) (string, int) {
 		write(t, LOG, "")
-		env := Env{"HOME": T + "/home", "PATH": T + "/bin:/usr/bin:/bin", "FAKE_HC_LOG": LOG, iv: e[iv]}.With(kv...)
-		out, se, rc := run2(T, env, filepath.Join(repo, "bin", "ovis-split"), "--main", "t9", "--add", "t2")
+		env := Env{"HOME": T + "/home", "PATH": T + "/bin:/usr/bin:/bin", "FAKE_HC_LOG": LOG}.With(kv...)
+		out, se, rc := run2(T, env, OS, "--main", "t9", "--add", "t2")
 		return out + se, rc
 	}
 	out, rc := osp("FAKE_MAIN=bare")

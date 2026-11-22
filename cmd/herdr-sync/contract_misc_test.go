@@ -1,6 +1,6 @@
 package main
 
-// herdr-sync 계약 시험 13·14·15·16: 잠금, lib 줄 없음, config.example/sync.list 꼴, 공개 내보내기, 릴리스(Go 판만)
+// herdr-sync 계약 시험 13·14·15·16: 잠금, 걷힌 셸 판 줄, config.example/sync.list 꼴, 공개 내보내기, 바이너리 줄·릴리스
 
 import (
 	"crypto/sha256"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ct "herdr-tools/internal/clitest"
+	"herdr-tools/internal/toolcfg"
 )
 
 func (s *sx) lockAndRest() {
@@ -32,25 +33,24 @@ func (s *sx) lockAndRest() {
 	hold.Wait()
 	s.ok("잠금: 다른 herdr-sync가 돌면 바로 끝", s.r.RC == 75 && s.contains("다른 herdr-sync"))
 
-	// 13-1. 범용 저장소에 lib/<도구>/가 생겼는데 개인 sync.list에 bin 줄만 있으면(2026-11-20 herdr-tools-split) 아무 데도 쓰지 않고 멈춘다.
-	// bin만 깔리면 모든 기계의 그 도구가 「함수 파일을 못 읽었다」로 멈추기 때문. --check도 같은 판정
-	s.put(T+"/repo/lib/hc-lane/a.sh", "a=1\n")
-	s.git(T+"/repo", "add", "lib")
-	s.git(T+"/repo", "commit", "-qm", "lib")
-	s.gitLand(T+"/repo", "push", "-q", "origin", "main")
-	s.put(T+"/repo/bin/hc-lane", "#!/bin/sh\necho lib-lane\n")
-	s.git(T+"/repo", "commit", "-qam", "lib-lane")
-	s.gitLand(T+"/repo", "push", "-q", "origin", "main")
-	before := s.snap()
-	s.run("--check")
-	s.ok("lib 줄 없음 --check: 멈추고 고칠 줄을 찍는다", s.r.RC == 2 && s.has("도구  .local/lib/hc-lane/**  tools:lib/hc-lane/  macos"))
-	s.run()
-	s.ok("lib 줄 없음: 아무 기계에도 쓰지 않고 멈춘다 (새 bin도 안 깖)", s.r.RC == 2 && s.snap() == before && !strings.Contains(ct.Read(W1+"/.local/bin/hc-lane"), "lib-lane") && s.has("도구  .local/lib/hc-lane/**  tools:lib/hc-lane/  macos"))
-	ct.Append(s.t, T+"/conf/sync.list", "도구     .local/lib/hc-lane/**       tools:lib/hc-lane/             macos\n")
-	s.git(T+"/conf", "commit", "-qam", "lib")
+	// 13-1. 걷힌 셸 판 줄(2026-11-22 go-shell-remove): 범용 저장소에 없는 tools:lib/…·tools:bin/…·.sh 줄이 개인 sync.list에 남으면
+	// 아무 데도 쓰지 않고 멈춘다 — 두면 맥에 남은 옛 파일을 저장소로 다시 모은다(맥이 정본). --check도 같은 판정
+	s.put(M+"/.local/lib/gone/a.sh", "a=1\n")
+	ct.Append(s.t, T+"/conf/sync.list", "도구     .local/lib/gone/**          tools:lib/gone/                macos\n")
+	s.git(T+"/conf", "commit", "-qam", "gone")
 	s.gitLand(T+"/conf", "push", "-q", "origin", "main")
+	before, h0 := s.snap(), s.heads()
+	s.run("--check")
+	s.ok("걷힌 셸 판 줄 --check: 멈추고 그 줄을 찍는다", s.r.RC == 2 && s.contains("셸 판이 걷혔다") && s.contains("tools:lib/gone/"))
 	s.run()
-	s.ok("lib 줄을 더하면: bin과 lib를 함께 깐다", s.r.RC == 0 && s.is(W1+"/.local/lib/hc-lane/a.sh", "a=1\n") && s.is(W1+"/.local/bin/hc-lane", "#!/bin/sh\necho lib-lane\n"))
+	s.ok("걷힌 셸 판 줄: 아무 데도 쓰지 않고(저장소로 모으지도 않고) 멈춘다", s.r.RC == 2 && s.snap() == before && s.heads() == h0 && !ct.Exists(T+"/repo/lib/gone"))
+	s.editLines(T+"/conf/sync.list", func(l string) (string, bool) { return l, !strings.Contains(l, "tools:lib/gone/") })
+	s.git(T+"/conf", "commit", "-qam", "gone 줄 지움")
+	s.gitLand(T+"/conf", "push", "-q", "origin", "main")
+	os.RemoveAll(M + "/.local/lib/gone")
+	s.run()
+	s.ok("걷힌 줄을 지우면 다시 맞춘다", s.r.RC == 0)
+	_ = W1
 
 	s.exampleList()
 
@@ -64,11 +64,9 @@ func (s *sx) lockAndRest() {
 	s.run()
 	s.ok("publish.repo 있음: 맞춘 뒤 내보내기를 부른다", s.r.RC == 0 && strings.TrimRight(ct.Read(T+"/published"), "\n") == T+"/repo "+T+"/conf ")
 	s.runEnv([]string{"PUB_FAKE_RC=1"})
-	s.ok("내보내기 실패: 크게 경고, 맞추기 종료 코드는 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 공개 저장소 내보내기 실패 (맞추기는 끝났다) — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시 !!!"))
+	s.ok("내보내기 실패: 크게 경고, 맞추기 종료 코드는 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 공개 저장소 내보내기 실패 — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시. 바이너리는 기계마다 짓는다 !!!"))
 
-	if s.impl == "go" {
-		s.release()
-	}
+	s.release()
 }
 
 // 14. 범용 저장소의 config.example/sync.list: 꼴이 맞고, tools: 경로가 모두 있고, bin/*을 모두 깐다
@@ -96,60 +94,26 @@ func (s *sx) exampleList() {
 			s.ok("config.example/sync.list: tools:"+p+" 있음", ct.Exists(s.here+"/"+p))
 		}
 	}
+	// 도구는 바이너리 줄로 모두 깐다(2026-11-22 go-shell-remove): cmd/<도구>마다 「.local/bin/<도구> tools:cmd/<도구>」 줄
 	text := ct.Read(list)
-	bins, _ := filepath.Glob(s.here + "/bin/*")
-	for _, f := range bins {
-		b := filepath.Base(f)
-		s.ok("config.example/sync.list: bin/"+b, strings.Contains(text, " tools:bin/"+b+" "))
-	}
-	// col: 셋째 칸이 <값>인 줄의 넷째 칸들(awk가 찍는 꼴 — 줄바꿈으로 이음)
-	col := func(match func([]string) bool) string {
-		var out []string
-		for _, f := range rows {
-			if len(f) >= 4 && match(f) {
-				out = append(out, f[3])
-			}
-		}
-		return strings.Join(out, "\n")
-	}
-	// Go 판 도구(go.mod·cmd/<이름>)는 소스로 깐다: Go 줄 넷이 한 번에, 대상이 같게(2026-11-21 go-foundation)
-	if ct.Exists(s.here + "/go.mod") {
-		var g []string
-		for _, f := range rows {
-			if len(f) >= 4 && (f[2] == "tools:go.mod" || f[2] == "tools:cmd/" || f[2] == "tools:internal/" || f[2] == "tools:lib/go-run.sh") {
-				g = append(g, f[2]+" "+f[3])
-			}
-		}
-		sort.Strings(g)
-		s.ok("config.example/sync.list: Go 소스 나무 줄 넷, 대상이 같음", strings.Join(g, ",") == "tools:cmd/ all,tools:go.mod all,tools:internal/ all,tools:lib/go-run.sh all")
-	}
-	// lib/<도구>/(본체가 source하는 함수 파일)는 나무 줄로, 대상은 그 도구 줄과 같게(빠지면 그 기계의 도구가 종료 1)
-	// 도구가 함께 쓰는 lib(bin 없음, lib/<이름>/OWNER에 쓰는 도구 이름)는 그 도구 줄과 견준다. 점 파일만 남은 폴더는 lib가 아니다
-	libs, _ := filepath.Glob(s.here + "/lib/*")
-	for _, d := range libs {
-		if !ct.IsDir(d) || !hasVisible(d) {
-			continue
-		}
-		b := filepath.Base(d)
-		o := b
-		if ct.Exists(d + "/OWNER") {
-			o = ct.Lines(ct.Read(d + "/OWNER"))[0]
-		}
-		binT := col(func(f []string) bool { return f[2] == "tools:bin/"+o })
-		libT := col(func(f []string) bool { return f[2] == "tools:lib/"+b+"/" && strings.HasSuffix(f[1], "/**") })
-		s.ok("config.example/sync.list: lib/"+b+"/ 나무 줄, 대상은 bin/"+o+"와 같음", binT != "" && libT == binT)
-	}
-}
-
-// hasVisible: [ -n "$(ls d)" ] — 점으로 시작하지 않는 것이 있는지
-func hasVisible(d string) bool {
-	es, _ := os.ReadDir(d)
-	for _, e := range es {
-		if !strings.HasPrefix(e.Name(), ".") {
-			return true
+	cmds, _ := filepath.Glob(s.here + "/cmd/*")
+	for _, f := range cmds {
+		if b := filepath.Base(f); ct.IsDir(f) {
+			s.ok("config.example/sync.list: cmd/"+b+" 바이너리 줄", regexp.MustCompile(`(?m)\s\.local/bin/`+regexp.QuoteMeta(b)+`\s+tools:cmd/`+regexp.QuoteMeta(b)+`\s`).MatchString(text))
 		}
 	}
-	return false
+	s.ok("config.example/sync.list: 셸 판 줄(tools:bin/·tools:lib/)이 없다", !regexp.MustCompile(`\stools:(bin|lib)/`).MatchString(text))
+	// Go 소스 나무 줄 셋(그 기계에서 지을 때), 대상 all
+	var g []string
+	for _, f := range rows {
+		if len(f) >= 4 && (f[2] == "tools:go.mod" || f[2] == "tools:cmd/" || f[2] == "tools:internal/") {
+			g = append(g, f[2]+" "+f[3])
+		}
+	}
+	sort.Strings(g)
+	s.ok("config.example/sync.list: Go 소스 나무 줄 셋, 대상 all", strings.Join(g, ",") == "tools:cmd/ all,tools:go.mod all,tools:internal/ all")
+	var o, e strings.Builder
+	s.ok("config.example/sync.list: sync-lint 통과(곁 도구·소스 줄)", toolcfg.SyncLint(s.here, list, &o, &e) == 0)
 }
 
 // fakeGH: 가짜 gh — 릴리스를 $HCT/rel/<태그>/에 둔다
@@ -169,8 +133,9 @@ case $op in
 esac
 `
 
-// 16. 릴리스(Go 판만, 2026-11-21 사용자 「github 에다가 빌드 한것도 처리해서 … 각 컴퓨터에서는 받아서」): 내보내기가 되면 맥에서 cmd/*를 지어
-// publish.repo 릴리스 bin-<커밋 12자>에 올리고(가짜 gh — $T/rel/<태그>/), macOS 기계는 맥이 넘긴 sha256이 맞을 때만 받는다(file:// 주소)
+// 16. 바이너리 줄·릴리스(2026-11-21 사용자 「github 에다가 빌드 한것도 처리해서 … 각 컴퓨터에서는 받아서」, 2026-11-22 go-shell-remove):
+// 내보내기가 되면 맥에서 바이너리 줄의 도구를 지어 publish.repo 릴리스 bin-<커밋 12자>에 올리고(가짜 gh — $T/rel/<태그>/), 기계는
+// 맥이 넘긴 sha256이 맞을 때만 받아(file:// 주소) ~/.local/bin/<도구>에 깐다. 못 받으면 그 기계 소스로 짓고, 그것도 안 되면 크게 다름
 func (s *sx) release() {
 	T, M, W1, LX := s.T, s.MAC, s.W1, s.LX
 	s.putx(T+"/bin/gh", fakeGH)
@@ -194,18 +159,15 @@ func (s *sx) release() {
 		}
 		return l, true
 	})
+	// 바이너리 줄 하나(macos)와 Go 소스 나무 줄 셋(all — 그 기계에서 지을 때)
+	ct.Append(s.t, T+"/conf/sync.list", "도구 .local/bin/hello tools:cmd/hello macos\nGo .local/lib/herdr-go/go.mod tools:go.mod all\n"+
+		"Go .local/lib/herdr-go/cmd/** tools:cmd/ all\nGo .local/lib/herdr-go/internal/** tools:internal/ all\n")
 	s.git(T+"/conf", "commit", "-qam", "rel")
 	s.gitLand(T+"/conf", "push", "-q", "origin", "main")
-	for _, h := range []string{M, W1, LX} { // Go 소스를 깐 기계(받는 자리 — 소스 판이 범용 저장소와 같아야 받는다)
-		s.put(h+"/.local/lib/herdr-go/go.mod", gomod)
-		s.put(h+"/.local/lib/herdr-go/cmd/hello/main.go", hello)
-		s.put(h+"/.local/lib/herdr-go/internal/version/version.go", ver)
-	}
 	s.run()
 	tag := "bin-" + ct.Git(T+"/repo", "rev-parse", "HEAD")[:12]
-	src := ct.Cmd{}.Run("bash", "-c", `. "$1"; go_run_root=$2; go_run_src`, "_", s.here+"/lib/go-run.sh", T+"/repo").Out
 	rel := T + "/rel/" + tag
-	s.ok("릴리스: 맥에서 지어 올림(바이너리 + SHA256SUMS)", s.r.RC == 0 && s.has("릴리스 올림 "+tag) && ct.IsExec(rel+"/hello") && regexp.MustCompile(`(?m)  hello$`).MatchString(ct.Read(rel+"/SHA256SUMS")))
+	s.ok("릴리스: 맥에서 지어 올림(바이너리 줄의 도구 + SHA256SUMS)", s.r.RC == 0 && s.has("릴리스 올림 "+tag) && ct.IsExec(rel+"/hello") && regexp.MustCompile(`(?m)  hello$`).MatchString(ct.Read(rel+"/SHA256SUMS")))
 	hb, _ := os.ReadFile(rel + "/hello")
 	sum := sha256.Sum256(hb)
 	var first []string
@@ -213,23 +175,41 @@ func (s *sx) release() {
 		first = append(first, strings.SplitN(l, " ", 2)[0])
 	}
 	s.ok("릴리스: 커밋을 바이너리에 새김(빌드 입력은 범용 저장소)", ct.Cmd{}.Run(rel+"/hello").Out == "hello "+tag[4:] && hex.EncodeToString(sum[:]) == strings.Join(first, "\n"))
-	wb := W1 + "/.local/lib/herdr-go/.bin"
-	s.ok("받기: macOS 기계·맥은 해시가 맞으면 받고 소스 판을 곁에", s.has("w1 받음 hello ("+tag+")") && ct.Cmd{}.Run(wb+"/hello").Out == "hello "+tag[4:] && strings.TrimRight(ct.Read(wb+"/hello.src"), "\n") == src && ct.IsExec(M+"/.local/lib/herdr-go/.bin/hello"))
+	wb := W1 + "/.local/bin/hello"
+	s.ok("깔기: macOS 기계·맥은 해시가 맞으면 ~/.local/bin/<도구>에 받고 기록", s.has("w1 받음 hello") && s.has("맥 받음 hello") && ct.Cmd{}.Run(wb).Out == "hello "+tag[4:] && ct.IsExec(M+"/.local/bin/hello") &&
+		strings.HasPrefix(ct.Read(W1+"/.local/state/herdr-sync/bin.tsv"), "hello\t"+hex.EncodeToString(sum[:])+"\t"))
+	s.ok("깔기: 옛 자리(.local/lib/herdr-go/.bin)는 쓰지 않는다", !ct.Exists(W1+"/.local/lib/herdr-go/.bin/hello"))
 	s.ok("릴리스: 로그에 publish.repo 주소 원문이 없다", !s.contains("github.com/test/pub"))
-	s.ok("받기: 리눅스로 가는 bin/ 줄이 없는 도구는 linux/amd64로 짓지도 받지도 않는다(go-linux-dist)", !ct.Exists(rel+"/hello-linux-amd64") && !ct.Exists(LX+"/.local/lib/herdr-go/.bin/hello"))
+	s.ok("깔기: 리눅스로 가는 바이너리 줄이 없는 도구는 linux/amd64로 짓지도 깔지도 않는다(go-linux-dist)", !ct.Exists(rel+"/hello-linux-amd64") && !ct.Exists(LX+"/.local/bin/hello"))
 	s.put(T+"/gh.calls", "")
 	s.run()
 	calls := ct.Read(T + "/gh.calls")
-	s.ok("릴리스: 같은 커밋·같은 해시는 다시 안 올림, 이미 받은 기계는 다시 안 받음", s.r.RC == 0 && s.has("릴리스 같음 "+tag) && !regexp.MustCompile(`(?m)^release (create|upload)`).MatchString(calls) && !s.contains(" 받음 hello"))
+	s.ok("릴리스: 같은 커밋·같은 해시는 다시 안 올림, 이미 깐 기계는 다시 안 받음", s.r.RC == 0 && s.has("릴리스 같음 "+tag) && !regexp.MustCompile(`(?m)^release (create|upload)`).MatchString(calls) && !s.contains(" 받음 hello"))
+	s.run("--check")
+	s.ok("깔기 --check: 깐 판은 같음", !s.contains("다름:바이너리"))
+	// 받은 것의 해시가 다르면 쓰지 않고, 그 기계 소스 판이 같으니 그 기계에서 짓는다(같은 커밋을 새김)
 	ct.Append(s.t, rel+"/hello", "x")
-	os.Remove(wb + "/hello")
-	os.Remove(wb + "/hello.src")
-	s.run()
-	s.ok("받기: 받은 것의 해시가 다르면 쓰지 않고 크게 경고, 맞추기 종료 코드는 그대로", s.r.RC == 0 && !ct.Exists(wb+"/hello") && s.contains("!!! herdr-sync: w1 hello 바이너리를 받지 않음: 해시가 다르다"))
-	s.ok("받기: 실패한 받기는 임시 파일을 남기지 않음", !ct.FindName(wb, ".hello.*"))
+	os.Remove(wb)
+	os.Remove(W1 + "/.local/state/herdr-sync/bin.tsv")
+	s.run("w1")
+	s.ok("깔기: 받은 것의 해시가 다르면 그 기계에서 짓는다", s.r.RC == 0 && s.has("w1 지음 hello (릴리스를 못 받아 그 기계에서 — 받은 것의 해시가 다르다)") && ct.Cmd{}.Run(wb).Out == "hello "+tag[4:])
+	s.ok("깔기: 실패한 받기·짓기는 임시 파일을 남기지 않음", !ct.FindName(W1+"/.local/bin", ".hello.*"))
+	// 그 기계 소스가 따로 바뀌어(충돌) 짓지도 못하면: 크게 다름(바이너리), 그 기계의 설정·지움을 미룬다 — 옛 포장으로 떨어지지 않는다
+	s.put(W1+"/.local/lib/herdr-go/cmd/hello/main.go", hello+"// w1에서 고침\n")
+	os.Remove(wb)
+	s.put(W1+"/.local/bin/claude-md-sync", "old\n") // 지움 줄(local)은 w1에 안 가지만 설정·지움 미룸 표시만 본다
+	s.run("w1")
+	s.ok("깔기: 받기·짓기 모두 안 되면 크게 다름(바이너리)·종료 1·설정·지움 미룸", s.r.RC == 1 && s.contains("!!! herdr-sync: w1 hello 바이너리를 깔지 못했다: 받은 것의 해시가 다르다 · 그 기계 Go 소스 판이 범용 저장소와 다르다 !!!") &&
+		s.contains("w1 바이너리를 다 깔지 못했다 — 그 기계의 설정·지움은 미룬다") && s.rx(`^w1: 다름 \(바이너리\)`) && !ct.Exists(wb))
+	s.run("--take", "w1:.local/lib/herdr-go/cmd/hello/main.go", "w1")
+	s.ok("깔기: 소스 충돌을 풀면 다음 실행이 짓는다", s.r.RC == 0 && s.has("w1 지음 hello (릴리스를 못 받아 그 기계에서 — 받은 것의 해시가 다르다)") && ct.Cmd{}.Run(wb).Out == "hello "+tag[4:])
+	os.Remove(wb)
+	s.run("--check", "w1")
+	s.ok("깔기 --check: 없으면 다름(바이너리)·종료 1, 쓰지 않음", s.r.RC == 1 && s.has("w1 다름:바이너리 hello (없음)") && !ct.Exists(wb))
 	os.RemoveAll(rel)
 	s.runEnv([]string{"GH_FAKE_FAIL=1"})
-	s.ok("릴리스: 올리기 실패는 크게 경고, 받지 않음, 종료 코드 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 릴리스 만들기 실패 "+tag+" (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 빌드한다 !!!") && !ct.Exists(wb+"/hello"))
+	s.ok("릴리스: 올리기 실패는 크게 경고, 기계는 각자 짓는다, 종료 코드 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 릴리스 만들기 실패 "+tag+" (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다 !!!") &&
+		s.has("w1 지음 hello (릴리스를 못 받아 그 기계에서 — 릴리스 없음)") && ct.Cmd{}.Run(wb).Out == "hello "+tag[4:])
 	// 게시기가 검사한 커밋이 HEAD와 트리가 다르면(그사이 origin/main이 앞섬) 짓지도 올리지도 않는다(감사 A02·O-02)
 	s.put(T+"/gh.calls", "")
 	s.runEnv([]string{"PUB_FAKE_CHECKED=" + ct.Git(T+"/repo", "rev-parse", "HEAD~1")})

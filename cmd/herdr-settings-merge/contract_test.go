@@ -1,15 +1,13 @@
 package main
 
 // herdr-settings-merge 계약 시험(옛 tests/herdr-settings-merge.test.sh, 2026-11-21 go-tests-ops): 임시 HOME마다 settings.json·base를
-// 두고 bin/herdr-settings-merge를 sh로 한 번, dash가 있으면 dash로 한 번 더 밖에서 부른다. 실제 ~/.claude·hc·네트워크는 쓰지 않는다.
-// 판: HERDR_SETTINGS_MERGE_IMPL, 없으면 HERDR_IMPL, 없으면 go. 다른 사본은 HERDR_SETTINGS_MERGE=<경로>
+// 두고 herdr-settings-merge Go 바이너리(clitest.Bin)를 밖에서 부른다. 실제 ~/.claude·hc·네트워크는 쓰지 않는다.
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,13 +76,12 @@ func load(p string) (any, bool) {
 }
 
 func TestContract(t *testing.T) {
-	merge := ct.Tool(t, "herdr-settings-merge", "HERDR_SETTINGS_MERGE")
+	merge := ct.Bin(t, "herdr-settings-merge")
 	keys := filepath.Join(ct.Repo(t), "config.example/settings/keys.json") // 가짜 예시 목록(진짜는 개인 설정)
 	T := ct.TempDir(t)
-	t.Setenv("HERDR_SETTINGS_MERGE_IMPL", ct.Impl("HERDR_SETTINGS_MERGE_IMPL"))
 
 	var r ct.Res
-	var H, sh string
+	var H string
 	c := &ct.C{T: t, Detail: func() string { return fmt.Sprintf("  out: %s\n  err: %s", r.Out, r.Err) }}
 	homes := 0
 	// fresh <settings JSON> [base JSON]: 새 임시 HOME
@@ -98,7 +95,7 @@ func TestContract(t *testing.T) {
 	}
 	// runM <기계> <입력 JSON> [인자…]
 	runM := func(m, in string, args ...string) {
-		r = ct.Cmd{Stdin: in, Env: []string{"HOME=" + H, "HERDR_MACHINE=" + m, "HERDR_KEYS=" + keys}}.Run(sh, append([]string{merge}, args...)...)
+		r = ct.Cmd{Stdin: in, Env: []string{"HOME=" + H, "HERDR_MACHINE=" + m, "HERDR_KEYS=" + keys}}.Run(merge, args...)
 	}
 	run := func(in string, args ...string) { runM("w1", in, args...) }
 	settings := func() any { v, _ := load(H + "/.claude/settings.json"); return v }
@@ -137,7 +134,6 @@ func TestContract(t *testing.T) {
 	moshi := `{"matcher":"Bash","hooks":[{"type":"command","command":"moshi-hook.sh"}]}`
 
 	suite := func() {
-		t.Logf("# SH=%s", sh)
 		// 같음: base가 없어도 같으면 같음, base를 남긴다
 		fresh(`{"language":"한국어","theme":"dark"}`)
 		run(`{"values":{".language":"한국어"}}`)
@@ -195,28 +191,28 @@ func TestContract(t *testing.T) {
 		fresh(`{"hooks":{"PreToolUse":[` + moshi + `],"Stop":[` + moshi + `]}}`)
 		hin := `{"values":{},"hooks":[{"event":"PreToolUse","matcher":"Edit|Bash","command":` + js(guard) + `,"timeout":5,"onFailure":"block"}]}`
 		run(hin)
-		c.Ok("훅 더하기: 씀 줄, 종료 0", r.RC == 0 && r.Out == "씀 hook:PreToolUse:cotenant-guard.sh")
+		c.Ok("훅 더하기: 씀 줄, 종료 0", r.RC == 0 && r.Out == "씀 hook:PreToolUse:cotenant-guard")
 		exp := canon(`{"matcher":"Edit|Bash","hooks":[{"type":"command","command":` + js(guard) + `,"timeout":5,"onFailure":"block"}]}`)
 		c.Ok("훅 더하기: 끝에 붙고 필드 그대로", S("hooks", "PreToolUse", 1) == exp)
 		c.Ok("훅 더하기: 다른 훅 항목은 그대로", S("hooks", "PreToolUse", 0) == canon(moshi) && S("hooks", "Stop") == canon("["+moshi+"]"))
 		run(hin)
 		n, _ := at(settings(), "hooks", "PreToolUse").([]any)
-		c.Ok("훅: 다시 돌리면 같음, 하나만 있음", r.RC == 0 && r.Out == "같음 hook:PreToolUse:cotenant-guard.sh" && len(n) == 2)
+		c.Ok("훅: 다시 돌리면 같음, 하나만 있음", r.RC == 0 && r.Out == "같음 hook:PreToolUse:cotenant-guard" && len(n) == 2)
 		// 훅 3-way: 옛 command가 base와 같으면 그 항목만 바꾸고, 같은 묶음의 다른 훅은 남긴다
 		old := `{"matcher":"Edit","hook":{"command":"old cotenant-guard.sh","type":"command"}}`
-		fresh(`{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"old cotenant-guard.sh"},{"type":"command","command":"moshi-hook.sh"}]}]}}`, `{"hook:PreToolUse:cotenant-guard.sh":"`+ckj(old)+`"}`)
+		fresh(`{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"old cotenant-guard.sh"},{"type":"command","command":"moshi-hook.sh"}]}]}}`, `{"hook:PreToolUse:cotenant-guard":"`+ckj(old)+`"}`)
 		run(hin)
-		c.Ok("훅 바꾸기: 씀, 같은 묶음의 다른 훅은 남김, 옛 항목은 없음", r.RC == 0 && r.Out == "씀 hook:PreToolUse:cotenant-guard.sh" && commands() == canon(`["moshi-hook.sh",`+js(guard)+`]`))
+		c.Ok("훅 바꾸기: 씀, 같은 묶음의 다른 훅은 남김, 옛 항목은 없음", r.RC == 0 && r.Out == "씀 hook:PreToolUse:cotenant-guard" && commands() == canon(`["moshi-hook.sh",`+js(guard)+`]`))
 		fresh(`{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"mine cotenant-guard.sh"}]}]}}`)
 		run(hin)
-		c.Ok("훅: 처음이면서 다르면 충돌, 쓰지 않음", r.RC == 1 && r.Out == "충돌 hook:PreToolUse:cotenant-guard.sh" && nobak())
+		c.Ok("훅: 처음이면서 다르면 충돌, 쓰지 않음", r.RC == 1 && r.Out == "충돌 hook:PreToolUse:cotenant-guard" && nobak())
 		run(`{"values":{},"hooks":[{"event":"PreToolUse","matcher":"Bash","command":"other.sh"}]}`)
 		c.Ok("훅: 맞출 목록에 없는 훅을 주면 종료 2", r.RC == 2 && r.Out == "" && nobak())
 
 		// 대상에서 지운 훅은 base가 있어도 다시 더한다. 훅 command 안의 맥 HOME도 바꾼다
-		fresh(`{"hooks":{"PreToolUse":[]}}`, `{"hook:PreToolUse:loop-no-question.sh":"`+ckj(`{"matcher":"x"}`)+`"}`)
+		fresh(`{"hooks":{"PreToolUse":[]}}`, `{"hook:PreToolUse:loop-no-question":"`+ckj(`{"matcher":"x"}`)+`"}`)
 		run(`{"home":"/Users/mac","values":{},"hooks":[{"event":"PreToolUse","matcher":"Ask","command":"/Users/mac/.claude/hooks/loop-no-question.sh"}]}`)
-		c.Ok("훅: 지운 훅을 다시 더하고 HOME을 바꿈", r.RC == 0 && r.Out == "씀 hook:PreToolUse:loop-no-question.sh" && S("hooks", "PreToolUse", 0, "hooks", 0, "command") == js(H+"/.claude/hooks/loop-no-question.sh"))
+		c.Ok("훅: 지운 훅을 다시 더하고 HOME을 바꿈", r.RC == 0 && r.Out == "씀 hook:PreToolUse:loop-no-question" && S("hooks", "PreToolUse", 0, "hooks", 0, "command") == js(H+"/.claude/hooks/loop-no-question.sh"))
 
 		// 목록 밖 키·참고·이벤트는 받지 않는다(종료 2, 쓰지 않음)
 		fresh(`{"hooks":{"Stop":[]},"permissions":{"allow":["x"]}}`)
@@ -268,7 +264,7 @@ func TestContract(t *testing.T) {
 		fresh(`{"model":"old"}`, `{".model":"`+ckj(`"old"`)+`"}`)
 		baseBefore, _ := os.ReadFile(H + "/.local/state/herdr-sync/settings-base.json")
 		run(`{"values":{".model":"new",".language":"x"},"hooks":[{"event":"PreToolUse","matcher":"B","command":"loop-no-question.sh"}]}`, "--check", "--take", "*")
-		c.Ok("--check: 씀을 보이고 종료 1", r.RC == 1 && has("씀 .model") && has("씀 .language") && has("씀 hook:PreToolUse:loop-no-question.sh"))
+		c.Ok("--check: 씀을 보이고 종료 1", r.RC == 1 && has("씀 .model") && has("씀 .language") && has("씀 hook:PreToolUse:loop-no-question"))
 		baseAfter, err := os.ReadFile(H + "/.local/state/herdr-sync/settings-base.json")
 		c.Ok("--check: settings·base·백업 모두 그대로", S("model") == `"old"` && err == nil && bytes.Equal(baseBefore, baseAfter) && nobak())
 		fresh(`{"model":"x"}`)
@@ -298,13 +294,6 @@ func TestContract(t *testing.T) {
 		c.Ok("잘못 부름: HERDR_MACHINE 없음", r.RC == 2)
 	}
 
-	sh = "sh"
 	suite()
-	if _, err := exec.LookPath("dash"); err == nil {
-		sh = "dash"
-		suite()
-	} else {
-		t.Log("# dash 없음, 건너뜀")
-	}
 	c.Done()
 }

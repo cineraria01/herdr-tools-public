@@ -1,7 +1,7 @@
 package hclane_test
 
 // gofix-lane T1(감사 Fable T1): hc-lane 길의 시간 상한·신호 계약 — 상한이 걸린 결과는 「모름」(상태를 안 바꾸고 다시), 신호로 끄면
-// 상한 때문에 따로 무리가 된 자식(git push 등)도 함께 끝난다. 두 판이 같아야 하는 것은 check, 셸 판도 같은 결함이면 goOnly
+// 상한 때문에 따로 무리가 된 자식(git push 등)도 함께 끝난다.
 
 import (
 	"os"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestGofixLimits(t *testing.T) {
-	eachImpl(t, func(k *K) {
+	withK(t, func(k *K) {
 		for _, c := range []struct {
 			name string
 			f    func(*K)
@@ -77,15 +77,11 @@ func gfGcStuckGit(k *K) {
 	p := k.gfBin(map[string]string{"git": `for a; do [ "$a" = symbolic-ref ] && exec sleep 40; done; exec ` + sq(k.gfRealGit()) + ` "$@"`})
 	t0 := time.Now()
 	k.runE([]string{p, "HERDR_TIMEOUT_GIT=1"}, "gc", "--repo", k.R, "--min-age", "0")
-	k.goOnly("M3 gc: 멈춘 git은 상한 안에서 끊고 종료 1, 안 지움", time.Since(t0) < 20*time.Second && k.rc == 1 && k.gitOK(k.R, "rev-parse", "-q", "--verify", "refs/heads/old1"))
+	k.check("M3 gc: 멈춘 git은 상한 안에서 끊고 종료 1, 안 지움", time.Since(t0) < 20*time.Second && k.rc == 1 && k.gitOK(k.R, "rev-parse", "-q", "--verify", "refs/heads/old1"))
 }
 
 // M4: wait 바퀴의 hc ls가 멈추면 상한(HERDR_TIMEOUT_REMOTE) 안에서 끝난다(--timeout 0은 한 바퀴)
 func gfWaitStuckHc(k *K) {
-	if k.env["HC_LANE_IMPL"] != "go" { // 셸 판은 hc ls에 상한이 없다 — 30초를 다 기다리니 돌리지 않는다(알려진 차이)
-		k.t.Logf("알려진 차이(셸 판 안 고침) M4: 셸 판 wait의 hc ls에는 상한이 없다")
-		return
-	}
 	p := k.gfBin(map[string]string{"hc": `case $1 in ls) exec sleep 30 ;; get) echo '{"address":"t4m","name":"boss","pid":4242,"state":"live"}'; exit 0 ;; esac; exit 3`})
 	t0 := time.Now()
 	k.runE([]string{p, "HERDR_TIMEOUT_REMOTE=1", "HC_TERMINAL_ID=t4m", "XDG_STATE_HOME=" + filepath.Join(k.T, "wst-m4")}, "wait", "--timeout", "0")
@@ -101,7 +97,7 @@ func gfLandTimeout75(k *K) {
 	before := k.git(k.D+"/origin.git", "rev-parse", "main")
 	p := k.gfBin(map[string]string{"git": `for a; do [ "$a" = fetch ] && exec sleep 40; done; exec ` + sq(k.gfRealGit()) + ` "$@"`})
 	k.lndE([]string{p, "HC_LANE=gfm0l", "HERDR_TIMEOUT_REMOTE=1", "HC_LANE_FETCH_WAITS=-"}, k.wt, "main")
-	k.goOnly("M01 land: fetch 시간 넘김은 종료 75, origin/main 그대로", k.rc == 75 && k.git(k.D+"/origin.git", "rev-parse", "main") == before)
+	k.check("M01 land: fetch 시간 넘김은 종료 75, origin/main 그대로", k.rc == 75 && k.git(k.D+"/origin.git", "rev-parse", "main") == before)
 }
 
 func atoiT(s string) int {

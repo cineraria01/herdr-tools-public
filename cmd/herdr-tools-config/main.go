@@ -1,5 +1,5 @@
 // herdr-tools-config: 개인 설정 폴더 읽기·개인 값 검사(Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go).
-// 명령·인자·출력·종료 코드는 셸 판 bin/herdr-tools-config와 같다. 되돌리기 HERDR_TOOLS_CONFIG_IMPL=bash(또는 HERDR_IMPL=bash).
+// 명령·인자·출력·종료 코드는 옛 셸 판 그대로다(셸 판은 2026-11-22 go-shell-remove로 걷었다).
 package main
 
 import (
@@ -18,10 +18,10 @@ const usage = `herdr-tools-config: 개인 설정 폴더($HERDR_TOOLS_CONFIG, 기
   lint [--strict] [<파일>…]  개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
                        패턴 파일이 없으면 경고 뒤 건너뜀(종료 0), --strict면 패턴 파일·패턴 줄이 없을 때 종료 3
                        이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
-  sync-lint <범용 저장소> [<sync.list>]  <범용 저장소>/lib/<도구>/가 있는데 sync.list에 tools:bin/<도구> 줄만 있고 같은 대상(또는 all)의
-                       tools:lib/<도구>/ 나무 줄이 없으면 더할 줄을 찍고 종료 1 (bin만 깔리면 그 도구가 「함수 파일을 못 읽었다」로 멈춘다).
-                       도구가 함께 쓰는 lib(lib/<이름>/OWNER에 그 도구 이름)도, Go 판 도구(cmd/<이름>, OWNER — 예: hc-merger → hc-lane)의
-                       Go 소스 나무 줄(go.mod·cmd/**·internal/**·lib/go-run.sh)도 같이 본다
+  sync-lint <범용 저장소> [<sync.list>]  바이너리 줄(<뿌리>bin/<도구>  tools:cmd/<도구>)마다 그 대상(또는 덮는 all·macos)의 Go 소스 나무 줄
+                       (go.mod·cmd/**·internal/**)과 곁 도구(cmd/<곁>/OWNER에 그 도구 이름 — 예: hc-merger → hc-lane) 바이너리 줄이 없으면
+                       더할 줄을 찍고 종료 1. 걷힌 셸 판 줄(저장소에 없는 tools:bin/<도구>·tools:lib/…·*.sh·*.py)이 남아도 종료 1
+                       (지울 줄은 오류 출력, 바꿀 바이너리 줄은 표준 출력). 줄 끝 CR·끝 줄바꿈 없음도 종료 1, sync.list 없음은 종료 2
 `
 
 const me = "herdr-tools-config"
@@ -73,8 +73,8 @@ func main() {
 	}
 }
 
-// listForm: sync.list의 줄 끝 CR·끝 줄바꿈 없음을 줄 번호로 알린다(있으면 참). herdr-sync 셸 판은 CR 줄을 어느 기계에도 못 맞추고
-// 줄바꿈 없는 마지막 줄을 버린다(Go 판은 읽는다) — 두 판이 갈리지 않게 막는다. 못 읽으면 거짓(SyncLint가 종료 2)
+// listForm: sync.list의 줄 끝 CR·끝 줄바꿈 없음을 줄 번호로 알린다(있으면 참). 옛 herdr-sync 셸 판은 CR 줄을 어느 기계에도 못 맞추고
+// 줄바꿈 없는 마지막 줄을 버렸다 — 그런 목록이 다시 생기지 않게 막는다. 못 읽으면 거짓(SyncLint가 종료 2)
 func listForm(list string) bool {
 	data, err := os.ReadFile(list)
 	if err != nil || len(data) == 0 {

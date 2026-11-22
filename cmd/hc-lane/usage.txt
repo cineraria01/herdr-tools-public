@@ -209,5 +209,3 @@
                 못 읽은 기계의 레인은 그 바퀴에 blocked·error만 그대로, 쉼·끝남은 「연결 안 됨 <기계> <날짜>」(하루 한 번). 원격은 바퀴마다 기계당 한 번(쉬는 레인 확인만 그 터미널에 hc get·read)
 준비·정리 훅: .claude/herdr-setup.sh(환경 LANE_*: LANE_REPO=메인 폴더, LANE_BASE=기본 브랜치), .claude/herdr-teardown.sh
 실행 명령은 env K=V 로 감싸므로 hc 템플릿 이름은 쓸 수 없다. 마지막 줄은 JSON 한 줄.
-Go 판(cmd/hc-lane): 옮긴 명령은 Go 판으로 돈다(아직 셸 판인 명령은 셸 판 — 계약은 같다). HC_LANE_IMPL=bash(또는 HERDR_IMPL=bash)면
-늘 셸 판, =go면 Go 판을 못 쓸 때 종료 1. Go 바이너리를 직접 줄 때 HC_LANE_GO_BIN

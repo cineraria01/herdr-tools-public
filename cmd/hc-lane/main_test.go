@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -73,22 +75,15 @@ func TestCrossBuild(t *testing.T) {
 	}
 }
 
-// 도움말 글이 셸 판 usage(lib/hc-lane/common.sh의 heredoc)와 같은지 — 한쪽만 고치면 여기서 진다
-func TestUsageMatchesShell(t *testing.T) {
-	b, err := os.ReadFile("../../lib/hc-lane/common.sh")
-	if err != nil {
-		t.Fatalf("셸 판 읽기: %v", err)
+// 사용법 글에 셸 판·되돌리기 스위치 글이 남지 않는다(2026-11-22 go-shell-remove — 판은 Go 하나)
+func TestUsageNoShell(t *testing.T) {
+	if !strings.HasPrefix(usageText, "사용법: hc-lane ") {
+		t.Fatal("usage.txt 첫 줄이 「사용법: hc-lane」가 아니다")
 	}
-	_, after, ok := strings.Cut(string(b), "  cat >&2 <<'EOF'\n")
-	if !ok {
-		t.Fatal("셸 판 usage heredoc을 못 찾음")
-	}
-	body, _, ok := strings.Cut(after, "\nEOF\n")
-	if !ok {
-		t.Fatal("셸 판 usage 끝을 못 찾음")
-	}
-	if body+"\n" != usageText {
-		t.Fatal("cmd/hc-lane/usage.txt가 셸 판 usage와 다르다 — awk로 다시 뽑는다(README 「hc-lane Go 판」)")
+	for _, w := range []string{"셸 판", "HC_LANE_IMPL", "HERDR_IMPL", "HC_LANE_GO_BIN", "HC_LANE_SH"} {
+		if strings.Contains(usageText, w) {
+			t.Errorf("usage.txt에 %q가 남았다", w)
+		}
 	}
 }
 
@@ -102,9 +97,10 @@ func TestPick(t *testing.T) {
 		{[]string{"clean", "--repo", "/r"}, true, 2},
 		{[]string{"gc"}, true, 0},
 		{[]string{"park", "한 줄"}, true, 1},
-		// 기대값은 등록표에서 꺼내지 않고 적는다(gofix L16 — 등록이 빠지면 여기서 진다). merger는 셸 판(병합기는 cmd/hc-merger)
+		// 기대값은 등록표에서 꺼내지 않고 적는다(gofix L16 — 등록이 빠지면 여기서 진다). merger는 곁의 hc-merger로 넘긴다
 		{[]string{"report", "완료"}, true, 1},
-		{[]string{"merger", "--once"}, false, 1},
+		{[]string{"merger", "--once"}, true, 1},
+		{[]string{"merger", "-h"}, false, 1},
 	}
 	for _, c := range cases {
 		_, rest, ok := pick(c.args)
@@ -114,27 +110,75 @@ func TestPick(t *testing.T) {
 	}
 }
 
-// goHas: Go 판이 맡는 하위 명령(셸 판 첫 인자 분기 가운데 merger만 빼고 전부) — 실제 바이너리의 __has로 본다(gofix L16)
-var goHas = [][]string{{"verdict", "x"}, {"early-wait", "a"}, {"report", "완료"}, {"send", "--all", "x"}, {"broadcast", "x"},
-	{"events"}, {"wait"}, {"watch"}, {"coord", "--check", "t1"}, {"clean", "--repo", "/r"}, {"fetch", "--repo", "/r"}, {"gc"},
-	{"land"}, {"guard", "status", "--repo", "/r"}, {"lease", "show", "--repo", "/r", "--name", "x"}, {"park"}, {"--name", "x", "--repo", "/r", "--", "true"}}
-
-func TestBinaryHas(t *testing.T) {
+// buildLane: 이 꾸러미를 dir/hc-lane으로 짓는다
+func buildLane(t *testing.T, dir string) string {
+	t.Helper()
 	gob, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatalf("go를 못 찾음: %v", err)
 	}
-	bin := t.TempDir() + "/hc-lane"
+	bin := dir + "/hc-lane"
 	if out, err := exec.Command(gob, "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("빌드: %v %s", err, out)
 	}
-	for _, a := range goHas {
-		if err := exec.Command(bin, append([]string{"__has"}, a...)...).Run(); err != nil {
-			t.Errorf("Go 판 __has %q: %v (맡아야 한다)", a, err)
+	return bin
+}
+
+// 도움말·모르는 인자는 사용법 글(오류 출력)과 종료 2 — 옛 Go 판은 120(「셸 판으로」)을 냈다(go-shell-remove)
+func TestBinaryUsage(t *testing.T) {
+	bin := buildLane(t, t.TempDir())
+	for _, a := range [][]string{{"-h"}, {"--help"}, {"report", "-h"}, {"send", "--help"}, {"merger", "-h"}, {"clean", "-h"},
+		{"land", "-h"}, {"guard", "-h"}, {"lease", "-h"}, {"fetch", "-h"}, {"coord", "-h"}, {"watch", "-h"}} {
+		c := exec.Command(bin, a...)
+		var e strings.Builder
+		c.Stderr = &e
+		err := c.Run()
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 2 || !strings.HasPrefix(e.String(), "사용법: hc-lane ") {
+			t.Errorf("%q: 종료 2·사용법이어야 — %v, 오류 출력 %.60q", a, err, e.String())
 		}
 	}
-	if err := exec.Command(bin, "__has", "merger", "--once").Run(); err == nil {
-		t.Error("Go 판 __has merger: 셸 판이어야 하는데 0")
+}
+
+// merger: 바이너리 곁의 hc-merger로 넘긴다 — 인자 그대로, HC_LANE_SELF = 이 hc-lane 실제 경로, 잠금 fd 19는 물려주지 않는다.
+// 바꿔 끼우기 환경(HC_LANE_MERGER_BIN·HC_MERGER_BIN)은 받지 않는다. 옛 Go 판은 merger를 셸 판으로 넘겼다(120)
+func TestMergerExec(t *testing.T) {
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := buildLane(t, d)
+	out := d + "/out"
+	fake := "#!/bin/sh\n{ printf 'self=%s\\n' \"$HC_LANE_SELF\"; printf 'arg=%s\\n' \"$@\"; if (: <&19) 2>/dev/null; then echo fd19=열림; else echo fd19=닫힘; fi; } >\"$OUT\"\nexit 7\n"
+	if err := os.WriteFile(d+"/hc-merger", []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := d + "/other"
+	os.WriteFile(other, []byte("#!/bin/sh\necho 바꿔끼움 >\"$OUT\"\n"), 0o755)
+	link := t.TempDir() + "/hc-lane" // 링크로 불려도 실제 파일 곁을 본다
+	if err := os.Symlink(bin, link); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("sh", "-c", `exec "$0" merger --repo "/공백 있는/r" --once 19<"$0"`, link)
+	c.Env = append(os.Environ(), "OUT="+out, "PATH=/usr/bin:/bin", "HC_LANE_MERGER_BIN="+other, "HC_MERGER_BIN="+other)
+	err = c.Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 7 {
+		t.Fatalf("hc-merger의 종료 코드(7)가 그대로여야: %v", err)
+	}
+	want := "self=" + bin + "\narg=--repo\narg=/공백 있는/r\narg=--once\nfd19=닫힘\n"
+	if b, _ := os.ReadFile(out); string(b) != want {
+		t.Fatalf("넘김이 다르다:\n%s\n바람:\n%s", b, want)
+	}
+	// 곁에도 PATH에도 없으면 종료 1과 한 줄
+	os.Remove(d + "/hc-merger")
+	c = exec.Command(bin, "merger", "--once")
+	c.Env = append(os.Environ(), "PATH=/usr/bin:/bin")
+	var e strings.Builder
+	c.Stderr = &e
+	err = c.Run()
+	if !errors.As(err, &ee) || ee.ExitCode() != 1 || !strings.Contains(e.String(), "hc-merger를 찾지 못했다") {
+		t.Fatalf("없으면 종료 1: %v %q", err, e.String())
 	}
 }
 

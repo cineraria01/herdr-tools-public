@@ -112,8 +112,8 @@ func (p *Parser) Parse(args []string) (r Result, ok bool) {
 	var extra []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if a == "--" {
-			extra = append(extra, args[i+1:]...)
+		if a == "--" { // 위치 인자를 받지 않으니 `--`도 남는 인자(파이썬 판 argparse 3.15: 「unrecognized arguments: -- …」, B32)
+			extra = append(extra, args[i:]...)
 			break
 		}
 		if a == "-h" {

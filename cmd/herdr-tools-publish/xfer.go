@@ -50,20 +50,26 @@ func transfer(repo, dir, tree string, shas []string) bool {
 		return false
 	}
 	unpack.Stdin = pipe
-	if pack.Start() != nil {
+	// proc.Start: 두 무리를 proc에 올린다 — 이 프로세스가 신호를 받거나 SIGKILL로 죽어도 남지 않게(Run의 무리와 같음)
+	relP, err := proc.Start(pack)
+	if err != nil {
 		return false
 	}
-	if unpack.Start() != nil {
+	relU, err := proc.Start(unpack)
+	if err != nil {
 		pipe.Close()
 		proc.StopGroup(pack.Process.Pid, proc.Grace)
 		pack.Wait()
+		relP()
 		return false
 	}
 	pipe.Close() // 부모 쪽 끝 — unpack이 먼저 죽으면 pack의 쓰기가 막히지 않고 실패하게
 	fin := make(chan bool, 1)
 	go func() {
 		uerr := unpack.Wait()
+		relU()
 		perr := pack.Wait()
+		relP()
 		fin <- uerr == nil && perr == nil
 	}()
 	var limit <-chan time.Time

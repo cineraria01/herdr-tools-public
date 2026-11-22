@@ -205,6 +205,69 @@ func Run(c *exec.Cmd) error {
 	if c.WaitDelay == 0 {
 		c.WaitDelay = Grace
 	}
+	if err := launch(c, grouped); err != nil {
+		return err
+	}
+	pid := c.Process.Pid
+	done := make(chan error, 1)
+	go func() { done <- c.Wait() }()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case err := <-done:
+		if errors.Is(err, exec.ErrWaitDelay) {
+			e := &TimeoutError{Head: head(c.Args), D: d, Pipe: true}
+			fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
+			if grouped {
+				stopOwned(pid, startOf(pid), Grace) // 관을 쥔 손자가 그 무리에 있으면 함께
+			}
+			finish(pid)
+			return e
+		}
+		if grouped {
+			settle(pid)
+		}
+		finish(pid)
+		return err
+	case <-t.C:
+	}
+	e := &TimeoutError{Head: head(c.Args), D: d}
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
+	if grouped {
+		stopOwned(pid, startOf(pid), Grace)
+	} else if err := c.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		fmt.Fprintf(os.Stderr, "%s: %d 를 끄지 못했다: %v\n", Who, pid, err)
+	}
+	// ponytail: 신호도 안 먹는 커널 대기(D 상태)면 거두지 못한다 — WaitDelay·몇 초만 더 기다리고 놓아 둔다(그 고루틴은 그 프로세스와 함께 남고,
+	// 출력 버퍼는 c.Wait가 돌아오기 전까지 그 고루틴이 쓸 수 있으니 부른 쪽은 시간 넘김 때 버퍼를 읽지 않는다 — Output·Combined)
+	select {
+	case <-done:
+	case <-time.After(2*Grace + 3*time.Second):
+	}
+	finish(pid)
+	return e
+}
+
+// Start: 부른 쪽이 직접 기다릴 자식(파이프로 이은 명령처럼 Run이 못 기다리는 것)을 띄우고 Run의 무리처럼 올린다 — Group을 먼저 부르면
+// 이 프로세스가 TERM·INT·HUP을 받을 때 그 무리를 거두고(StopCurrent) 부모가 SIGKILL로 죽으면 다음 실행이 거둔다(고아 기록).
+// 부른 쪽은 c.Wait 뒤 release를 꼭 부른다(무리에 남은 배경 프로세스를 거두고 기록을 지움). 멈추는 중이면 Start·release는
+// 돌아오지 않는다(Run과 같음 — 신호로 끈 자식의 결과를 부른 쪽이 읽지 않게). 상한은 부른 쪽이 건다
+func Start(c *exec.Cmd) (release func(), err error) {
+	grouped := isGrouped(c)
+	if err := launch(c, grouped); err != nil {
+		return nil, err
+	}
+	pid := c.Process.Pid
+	return func() {
+		if grouped {
+			settle(pid)
+		}
+		finish(pid)
+	}, nil
+}
+
+// launch: c를 띄우고 무리면 bounded·고아 기록에 올린다(멈추는 중이면 띄우지 않고 돌아오지 않는다)
+func launch(c *exec.Cmd, grouped bool) error {
 	if grouped {
 		prepare() // 첫 무리 — 앞 실행의 고아 무리를 거두고, 신호를 받으면 무리째 거두게
 	}
@@ -231,54 +294,27 @@ func Run(c *exec.Cmd) error {
 		curMu.Unlock()
 		record(pid, st)
 	}
-	finish := func() {
-		curMu.Lock()
-		delete(bounded, pid)
-		stop := stopping
-		curMu.Unlock()
-		if stop {
-			park() // 신호로 끈 자식의 결과를 부른 쪽이 읽지 않게 — 신호 처리 쪽이 무리를 다 거두고 끝낸다
-		}
-	}
-	done := make(chan error, 1)
-	go func() { done <- c.Wait() }()
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case err := <-done:
-		if errors.Is(err, exec.ErrWaitDelay) {
-			e := &TimeoutError{Head: head(c.Args), D: d, Pipe: true}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
-			if grouped {
-				stopOwned(pid, startOf(pid), Grace) // 관을 쥔 손자가 그 무리에 있으면 함께
-			}
-			finish()
-			return e
-		}
-		if grouped && groupGone(pid) {
-			unrecord(pid)
-		} else if grouped {
-			stopOwned(pid, startOf(pid), Grace) // 우두머리는 끝났는데 무리에 남은 배경 프로세스
-		}
-		finish()
-		return err
-	case <-t.C:
-	}
-	e := &TimeoutError{Head: head(c.Args), D: d}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
-	if grouped {
+	return nil
+}
+
+// settle: 우두머리가 끝난 무리 — 다 끝났으면 기록만 지우고, 남은 배경 프로세스가 있으면 거둔다
+func settle(pid int) {
+	if groupGone(pid) {
+		unrecord(pid)
+	} else {
 		stopOwned(pid, startOf(pid), Grace)
-	} else if err := c.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		fmt.Fprintf(os.Stderr, "%s: %d 를 끄지 못했다: %v\n", Who, pid, err)
 	}
-	// ponytail: 신호도 안 먹는 커널 대기(D 상태)면 거두지 못한다 — WaitDelay·몇 초만 더 기다리고 놓아 둔다(그 고루틴은 그 프로세스와 함께 남고,
-	// 출력 버퍼는 c.Wait가 돌아오기 전까지 그 고루틴이 쓸 수 있으니 부른 쪽은 시간 넘김 때 버퍼를 읽지 않는다 — Output·Combined)
-	select {
-	case <-done:
-	case <-time.After(2*Grace + 3*time.Second):
+}
+
+// finish: bounded에서 내린다. 멈추는 중이면 돌아오지 않는다(신호 처리 쪽이 무리를 다 거두고 끝낸다)
+func finish(pid int) {
+	curMu.Lock()
+	delete(bounded, pid)
+	stop := stopping
+	curMu.Unlock()
+	if stop {
+		park()
 	}
-	finish()
-	return e
 }
 
 func startOf(pid int) string {

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -22,7 +21,7 @@ func cotenantFix12(c *cg, A, B, C int) {
 		if tool == "Write" {
 			ti = obj("file_path", p, "content", content)
 		}
-		c.exec1("bash", c.hook, obj("session_id", s, "cwd", R, "tool_name", tool, "tool_input", ti), c.env(c.stdPath()))
+		c.exec1(obj("session_id", s, "cwd", R, "tool_name", tool, "tool_input", ti), c.env(c.stdPath()))
 	}
 	R3 := T + "/r3"
 	c.mkrepo(R3)
@@ -83,27 +82,13 @@ func cotenantFix12(c *cg, A, B, C int) {
 	}
 	os.Remove(T + "/hc.json") //nolint:errcheck // rm -f
 
-	// 등록 명령은 저장소에 적힌 꼴(훅 헤더의 「The entry runs」 줄)에서 읽는다 — 시험하는 사람의 실제 설정에 기대지 않는다(아스트라 E13).
-	// 이 기계 설정에 등록이 있으면 그것도 같은 꼴인지 따로 본다(없으면 건너뜀)
-	src, err := os.ReadFile(c.hook)
-	c.fatal(err)
-	cmdline := ""
-	if m := regexp.MustCompile(`(?m)^#\s+(/bin/bash -c '\[ -r .*cotenant-guard\.sh"')\s*$`).FindStringSubmatch(string(src)); m != nil {
-		cmdline = m[1]
-	}
-	safeForm := func(s string) bool {
-		ri := strings.Index(s, "[ -r ") // case $CMDLINE in *'[ -r '*'|| exit 0'*)
-		return ri >= 0 && strings.Contains(s[ri:], "|| exit 0")
-	}
-	c.checkOK("M3 훅 헤더의 등록 명령은 훅 파일이 없을 때만 허용하는 꼴", safeForm(cmdline), 0)
-	if real := settingsHookCommand(os.Getenv("HOME")+"/.claude/settings.json", "cotenant-guard"); real != "" {
-		c.checkOK("M3 이 기계 설정 등록 명령도 같은 꼴", safeForm(real), 0)
-	}
-	c.fatal(os.MkdirAll(T+"/h2/.claude/hooks", 0o755))
-	m3 := func() int {
-		cmd := exec.Command("/bin/sh", "-c", cmdline)
-		cmd.Stdin = strings.NewReader("{}")
-		cmd.Env = envWith(nil, "HOME="+T+"/h2")
+	// 등록 명령(hookCmds — settings.json에 그대로)은 바이너리의 판정을 그대로 넘긴다: 2는 2, 내부 오류 1은 1(onFailure: block으로 막힘).
+	// 바이너리가 없을 때는 막는다(R-H07 — settings_cmd_test.go TestHookCmdNoBinary)
+	m3 := func(body string) int {
+		h := T + "/h2"
+		c.write(h+"/.local/bin/herdr-hooks", body)
+		c.fatal(os.Chmod(h+"/.local/bin/herdr-hooks", 0o755))
+		cmd := hookExec("cotenant-guard", []byte("{}"), envWith(nil, "HOME="+h), T)
 		if err := cmd.Run(); err != nil {
 			if ee, ok := err.(*exec.ExitError); ok {
 				return ee.ExitCode()
@@ -112,21 +97,17 @@ func cotenantFix12(c *cg, A, B, C int) {
 		}
 		return 0
 	}
-	c.RC, c.OUT, c.ERR = m3(), "", ""
-	c.check("M3 훅 파일이 없으면 허용", 0)
-	c.write(T+"/h2/.claude/hooks/cotenant-guard.sh", "#!/bin/bash\nexit 2\n")
-	c.RC = m3()
-	c.check("M3 훅 파일이 있으면 그 판정(2)", 2)
-	c.write(T+"/h2/.claude/hooks/cotenant-guard.sh", "#!/bin/bash\nexit 1\n")
-	c.RC = m3()
-	c.check("M3 훅 내부 오류는 그대로 0이 아님(차단)", 1)
+	c.RC, c.OUT, c.ERR = m3("#!/bin/sh\nexit 2\n"), "", ""
+	c.check("M3 바이너리의 판정(2)을 그대로", 2)
+	c.RC = m3("#!/bin/sh\nexit 1\n")
+	c.check("M3 바이너리 내부 오류는 그대로 0이 아님(차단)", 1)
 
 	c.fatal(os.MkdirAll(T+"/badbin", 0o755))
 	for _, b := range []string{"stat", "md5", "jq", "awk", "date", "ps", "touch", "mkdir", "rmdir", "mv", "rm"} {
 		c.fatal(os.WriteFile(T+"/badbin/"+b, []byte("#!/bin/sh\necho broken\nexit 1\n"), 0o755))
 	}
 	c.run("s3a", "Edit", R3+"/g.txt", "", R3)
-	c.exec1("bash", c.hook, obj("session_id", "s3b", "cwd", R3, "tool_name", "Edit", "tool_input", obj("file_path", R3+"/g.txt")),
+	c.exec1(obj("session_id", "s3b", "cwd", R3, "tool_name", "Edit", "tool_input", obj("file_path", R3+"/g.txt")),
 		c.env(T+"/badbin:"+c.stdPath()))
 	c.check("L3 PATH 앞의 가짜 stat·md5·jq·awk·date·ps 등을 쓰지 않음", 2, "10분 안")
 
@@ -137,11 +118,11 @@ ld=$(git -C "$R" rev-parse --absolute-git-dir)/agent-leases/$(/sbin/md5 -q -s h.
 printf 'old-session\037%s\037%s\037\037me\0372026-01-01 00:00:00\037h.txt\n' $$ "$st" > "$ld/owner"
 echo z >> "$R/h.txt"
 printf '{"session_id":"unregistered","cwd":"%s","tool_name":"Edit","tool_input":{"file_path":"%s/h.txt"}}' "$R" "$R" |
-  env -u CLAUDE_CONFIG_DIR -u HC_TERMINAL_ID HOME="$H" PATH="$T/bin:$PATH" /bin/bash "$HOOK"
+  env -u CLAUDE_CONFIG_DIR -u HC_TERMINAL_ID HOME="$H" PATH="$T/bin:$PATH" /bin/sh -c "$HOOK"
 `)
 	{
-		cmd := exec.Command("bash", T+"/self.sh", H, c.hook, R3, T)
-		cmd.Env, cmd.Dir = envWith(nil, c.impl...), T
+		cmd := exec.Command("bash", T+"/self.sh", H, hookCmds[c.hook], R3, T)
+		cmd.Env, cmd.Dir = envWith(nil), T
 		o, err := cmd.CombinedOutput()
 		c.RC, c.OUT, c.ERR = 0, strings.TrimRight(string(o), "\n"), ""
 		if ee, ok := err.(*exec.ExitError); ok {

@@ -5,7 +5,6 @@ package tests
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -80,21 +79,11 @@ func cotenantFix34(c *cg) {
 
 	c.run("s5a", "Edit", R5+"/e.txt", "", R5)
 	c.appendf(R5+"/e.txt", "y\n")
-	c.exec1("/bin/bash", c.hook, obj("session_id", "s5b", "cwd", R5, "tool_name", "Edit", "tool_input", obj("file_path", R5+"/e.txt")), c.env(T+"/bin"))
+	c.exec1(obj("session_id", "s5b", "cwd", R5, "tool_name", "Edit", "tool_input", obj("file_path", R5+"/e.txt")), c.env(T+"/bin"))
 	c.check("S7 PATH에 git이 없어도 같은 판정(남의 미커밋 파일 차단)", 2, "agent-a5")
 	c.fatal(os.WriteFile(T+"/badgit", []byte("#!/bin/sh\necho broken >&2\nexit 1\n"), 0o755))
-	// 셸 판은 훅 파일을 sed로 고친 사본, Go 판은 시험 빌드의 손잡이(사본은 go-run.sh를 못 찾아 셸 판으로 돌았을 것)
-	src, err := os.ReadFile(c.hook)
-	c.fatal(err)
-	goImpl := isGo(c.impl)
-	badgitHook := c.hook
-	if goImpl {
-		c.hookEnv = []string{"HERDR_HOOKS_TEST_GIT=" + T + "/badgit"}
-	} else {
-		badgitHook = T + "/hook-badgit.sh"
-		c.write(badgitHook, regexp.MustCompile(`(?m)^GIT=.*$`).ReplaceAllLiteralString(string(src), "GIT="+T+"/badgit"))
-	}
-	c.exec1("/bin/bash", badgitHook, obj("session_id", "sx", "cwd", R2, "tool_name", "Edit", "tool_input", obj("file_path", R2+"/a.txt")), c.env(c.stdPath()))
+	c.hookEnv = []string{"HERDR_HOOKS_TEST_GIT=" + T + "/badgit"} // 시험 빌드의 손잡이
+	c.exec1(obj("session_id", "sx", "cwd", R2, "tool_name", "Edit", "tool_input", obj("file_path", R2+"/a.txt")), c.env(c.stdPath()))
 	c.hookEnv = nil
 	c.check("S7 git을 실행하지 못하면(종료 128 밖) 허용하지 않고 막음", 2, "git을 실행하지 못했다")
 	c.run("s5b", "Edit", R5+"/e.txt", "", R5)
@@ -163,21 +152,10 @@ func cotenantFix34(c *cg) {
 	c.checkOK("S2 최근에 쓴 산 임대 3000개는 정리하지 않음", c.lsCount(L6D, "v") == 3000, 0)
 
 	// ---------- 수정 4차 (재확인 1: R1 steal 표식만 남은 claim, R2 정리자 시간 상한) ----------
-	c.fatal(os.WriteFile(T+"/date61", []byte("#!/bin/sh\n# the hook's clock 61 s on: a claim re-armed just now has gone stale again\n[ \"$1\" = +%s ] && { echo $(( $(/bin/date +%s) + 61 )); exit 0; }\nexec /bin/date \"$@\"\n"), 0o755))
-	if !goImpl {
-		c.write(T+"/hook-61.sh", sedLines(string(src), "DATE=/bin/date", "DATE="+T+"/date61"))
-	}
 	hook61 := func(s, tool, arg string, rest ...string) {
-		if goImpl {
-			c.hookEnv = []string{"HERDR_HOOKS_TEST_NOW_OFFSET=61"}
-			c.run(s, tool, arg, rest...)
-			c.hookEnv = nil
-			return
-		}
-		h := c.hook
-		c.hook = T + "/hook-61.sh"
+		c.hookEnv = []string{"HERDR_HOOKS_TEST_NOW_OFFSET=61"}
 		c.run(s, tool, arg, rest...)
-		c.hook = h
+		c.hookEnv = nil
 	}
 	d = c.rec(L5D, "r1.txt", 99996, deadST, false)
 	cl = d + "/claim-99996-20260101000000"
@@ -277,17 +255,10 @@ func cotenantFix34(c *cg) {
 	}
 	c.checkOK(fmt.Sprintf("R2 다음 판정이 이어서 정리(남은 %d → %d, 판정 %d번)", n1, n2, i), n2 < n1, 0)
 	os.Remove(L7D + "/.idle") //nolint:errcheck // written by a scanner that has read some leases
-	if goImpl {               // a verdict that reaches the scan already past the limit
-		c.hookEnv = []string{"HERDR_HOOKS_TEST_SECONDS=5"}
-		c.run("s7b", "Bash", "git add h.txt", "", R7)
-		c.hookEnv = nil
-	} else {
-		c.write(T+"/hook-late.sh", regexp.MustCompile(`(?m)^SECONDS=0`).ReplaceAllLiteralString(string(src), "SECONDS=5"))
-		h := c.hook
-		c.hook = T + "/hook-late.sh"
-		c.run("s7b", "Bash", "git add h.txt", "", R7)
-		c.hook = h
-	}
+	// a verdict that reaches the scan already past the limit
+	c.hookEnv = []string{"HERDR_HOOKS_TEST_SECONDS=5"}
+	c.run("s7b", "Bash", "git add h.txt", "", R7)
+	c.hookEnv = nil
 	c.check("R2 늦게 시작해 하나도 못 읽은 정리 판정도 남의 미커밋 파일 git add 차단", 2, "agent-a7")
 	c.checkOK("R2 시간 상한이 지난 정리 판정은 임대를 읽지 않음", exists(L7D+"/.idle"), 1)
 	c.checkOK("R2 그때도 정리 잠금을 남기지 않음", exists(L7D+"/.cleaning"), 1)

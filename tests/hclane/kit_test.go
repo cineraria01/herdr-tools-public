@@ -1,10 +1,9 @@
 // Package hclane_test: hc-lane의 계약 시험(tests/hc-lane.test.sh를 옮긴 것). 임시 HOME·가짜 원격(bare origin)·가짜 hc를 만들고
-// bin/hc-lane을 밖에서 exec해 출력·종료 코드·상태(작업 트리·가지·원격 참조·사건 파일)를 본다. 단언 이름·차례는 셸 시험 그대로다.
+// hc-lane Go 바이너리(clitest.Bin — 곁에 hc-merger·herdr-tools-config도 지음)를 밖에서 exec해 출력·종료 코드·상태(작업 트리·가지·
+// 원격 참조·사건 파일)를 본다. 단언 이름·차례는 옛 셸 시험 그대로다. 판은 Go 하나다(2026-11-22 go-shell-remove).
 //
 // 가짜 hc·ps·herdr-app은 testdata/의 셸 스크립트(셸 시험 here-doc 그대로) — 시험 대상이 아니라 시험 대역이라 바이트를 맞췄다.
-// 시험할 사본: HC_LANE_BIN(없으면 저장소 bin/hc-lane).
-// 판 고르기: HC_LANE_IMPL, 없으면 HERDR_IMPL, 없으면 go. 셸 판으로 한 번 더: HC_LANE_IMPL=bash go test ./tests/hclane/
-// (tests/hc-lane-bash.test.sh). 실행: go test ./tests/hclane/ (저장소 루트에서, tests/hc-lane-go.test.sh)
+// 실행: go test ./tests/hclane/ (저장소 루트에서)
 package hclane_test
 
 import (
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/clitest"
 )
 
 var repo string // 저장소 루트
@@ -29,17 +30,13 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func impls() []string {
-	if v := os.Getenv("HC_LANE_IMPL"); v != "" {
-		return []string{v}
-	}
-	if v := os.Getenv("HERDR_IMPL"); v != "" {
-		return []string{v}
-	}
-	return []string{"go"} // 빌드가 깨져도 셸 판으로 조용히 통과하지 않게(clitest.Impl과 같게)
+// laneBin: 시험할 hc-lane — 이 시험 프로세스에서 지은 Go 바이너리. 곁 도구(병합기 hc-merger·설정 herdr-tools-config)도 같은 폴더에
+func laneBin(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(clitest.BinDir(t, "hc-lane", "hc-merger", "herdr-tools-config"), "hc-lane")
 }
 
-// K: 한 판의 시험 상태. 셸 시험의 전역 변수(T·W·D·R·B·out·rc·HCLOG)와 export한 환경.
+// K: 시험 상태. 셸 시험의 전역 변수(T·W·D·R·B·out·rc·HCLOG)와 export한 환경.
 type K struct {
 	t     *testing.T
 	T, W  string
@@ -62,16 +59,11 @@ var dropEnv = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON
 	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
 	"HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE", "HC_LANE_MACHINE", "HC_LANE_COORD", "HC_LANE_FILL", "HC_LANE_JOB"}
 
-// eachImpl: 판마다 새 K로 f를 하위 시험으로 돈다.
-func eachImpl(t *testing.T, f func(k *K)) {
-	for _, impl := range impls() {
-		t.Run(impl, func(t *testing.T) {
-			k := newK(t)
-			k.env["HC_LANE_IMPL"] = impl
-			f(k)
-			t.Logf("%d개 중 실패 %d개", k.n, k.fails)
-		})
-	}
+// withK: 새 K로 f를 돈다.
+func withK(t *testing.T, f func(k *K)) {
+	k := newK(t)
+	f(k)
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
 }
 
 func newK(t *testing.T) *K {
@@ -80,10 +72,7 @@ func newK(t *testing.T) *K {
 		t.Fatal(err)
 	}
 	k := &K{t: t, T: T, W: filepath.Join(T, "공백 있는 폴더"), HCLOG: filepath.Join(T, "hc.log"), env: map[string]string{}}
-	k.LANE = os.Getenv("HC_LANE_BIN")
-	if k.LANE == "" {
-		k.LANE = filepath.Join(repo, "bin", "hc-lane")
-	}
+	k.LANE = laneBin(t)
 	for _, kv := range os.Environ() {
 		key, v, _ := strings.Cut(kv, "=")
 		k.env[key] = v
@@ -91,9 +80,6 @@ func newK(t *testing.T) *K {
 	for _, key := range dropEnv {
 		delete(k.env, key)
 	}
-	// 터미널 문맥 고정(gofix L17): 바깥이 TERM=dumb(launchd·비대화)이면 보조 도구(herdr-tools-config 등)의 go_run이 launchd 문맥으로
-	// 읽어 셸 판으로 돌고 첫 공지 한 줄을 더한다 — 시험 결과가 바깥 터미널에 따라 바뀌지 않게
-	k.env["TERM"] = "xterm-256color"
 	bin := filepath.Join(T, "bin")
 	mkdirs(t, bin, k.W)
 	for _, f := range []string{"hc", "ps", "herdr-app"} {

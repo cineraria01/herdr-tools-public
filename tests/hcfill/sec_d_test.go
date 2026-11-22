@@ -238,11 +238,7 @@ func secD(k *K) {
 	k.run("prio", "od1", "긴급")
 	k.check("prio: 11칸 옛 줄은 주인 칸을 -로 채우고 열셋째 칸에", k.rc == 0 && k.dTail3("od1") == "13 - urgent", read(k.Q))
 	k.run("prio", "oh", "low")
-	if k.impl == "bash" { // 셸 판은 떠 있는 레인을 거절 — 알려진 차이(셸 판은 곧 걷는다)
-		k.check("prio: 떠 있는(대기 아닌) 레인은 거절(셸 판)", k.rc == 1 && k.dPrioOf("oh") == "high")
-	} else {
-		k.check("prio: 떠 있는 레인도 바꾼다(큐 메타는 낸 것이 있을 때만 — fill-prio-pass)", k.rc == 0 && k.dPrioOf("oh") == "low", k.out)
-	}
+	k.check("prio: 떠 있는 레인도 바꾼다(큐 메타는 낸 것이 있을 때만 — fill-prio-pass)", k.rc == 0 && k.dPrioOf("oh") == "low", k.out)
 	k.run("prio", "nope", "high")
 	k.check("prio: 없는 레인은 종료 1", k.rc == 1)
 	k.run("prio", "od1", "아주")

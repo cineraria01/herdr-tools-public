@@ -10,9 +10,6 @@ package hcfill_test
 func init() { reg(97, "q", secQ) }
 
 func secQ(k *K) {
-	if k.impl == "bash" {
-		return
-	}
 	RL := k.T + "/report.log"
 	nrl := func() int { return countE(RL, ".") }
 

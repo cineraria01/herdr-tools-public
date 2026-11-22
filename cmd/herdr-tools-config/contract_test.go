@@ -1,8 +1,7 @@
 package main
 
 // herdr-tools-config 계약 시험(옛 tests/herdr-tools-config.test.sh, 2026-11-21 go-tests-ops): 임시 HOME·가짜 설정 폴더로
-// bin/herdr-tools-config를 밖에서 불러 get·file·lint·sync-lint를 본다. 실제 ~/.config·네트워크는 쓰지 않는다.
-// 판: HERDR_TOOLS_CONFIG_IMPL, 없으면 HERDR_IMPL, 없으면 go. 다른 사본은 HERDR_TOOLS_CONFIG_BIN=<경로>
+// herdr-tools-config Go 바이너리(clitest.Bin)를 밖에서 불러 get·file·lint·sync-lint를 본다. 실제 ~/.config·네트워크는 쓰지 않는다.
 
 import (
 	"fmt"
@@ -15,11 +14,10 @@ import (
 )
 
 func TestContract(t *testing.T) {
-	tool := ct.Tool(t, "herdr-tools-config", "HERDR_TOOLS_CONFIG_BIN")
+	tool := ct.Bin(t, "herdr-tools-config")
 	ex := filepath.Join(ct.Repo(t), "config.example")
 	T := ct.TempDir(t)
 	ct.Isolate(t, T)
-	t.Setenv("HERDR_TOOLS_CONFIG_IMPL", ct.Impl("HERDR_TOOLS_CONFIG_IMPL"))
 	for k, v := range map[string]string{"HOME": T + "/home", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
 		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_NOSYSTEM": "1"} {
 		t.Setenv(k, v)
@@ -37,11 +35,11 @@ func TestContract(t *testing.T) {
 		if cfg != "-" {
 			env = []string{"HERDR_TOOLS_CONFIG=" + cfg}
 		}
-		r = ct.Cmd{Env: env}.Run("bash", append([]string{tool}, args...)...)
+		r = ct.Cmd{Env: env}.Run(tool, args...)
 	}
-	// runIn <폴더> <설정 폴더> <인자…>: (cd 폴더 && HERDR_TOOLS_CONFIG=… bash TOOL …)
+	// runIn <폴더> <설정 폴더> <인자…>: (cd 폴더 && HERDR_TOOLS_CONFIG=… TOOL …)
 	runIn := func(dir, cfg string, args ...string) {
-		r = ct.Cmd{Dir: dir, Env: []string{"HERDR_TOOLS_CONFIG=" + cfg}}.Run("bash", append([]string{tool}, args...)...)
+		r = ct.Cmd{Dir: dir, Env: []string{"HERDR_TOOLS_CONFIG=" + cfg}}.Run(tool, args...)
 	}
 	err1 := func() bool { return ct.NewlineCount(r.Err) == 1 }
 	errHas := func(s string) bool { return strings.Contains(r.Err, s) }
@@ -228,66 +226,49 @@ func lintContract(t *testing.T, c *ct.C, r *ct.Res, T, tool string, runIn func(s
 	// 추적 목록 조회가 실패하면 공개용 개인 값 검사는 완료되지 않았다.
 	put(T+"/list-failure/git", "#!/bin/sh\n[ \"$1\" != ls-files ] || exit 128\nexec /usr/bin/git \"$@\"\n")
 	ct.Chmod(t, T+"/list-failure/git", 0o755)
-	*r = ct.Cmd{Dir: R, Env: []string{"PATH=" + T + "/list-failure:" + os.Getenv("PATH"), "HERDR_TOOLS_CONFIG=" + T + "/c1"}}.Run("bash", tool, "lint", "--strict")
+	*r = ct.Cmd{Dir: R, Env: []string{"PATH=" + T + "/list-failure:" + os.Getenv("PATH"), "HERDR_TOOLS_CONFIG=" + T + "/c1"}}.Run(tool, "lint", "--strict")
 	c.Ok("lint: git ls-files가 실패하면 검사 오류", r.RC == 2)
 }
 
 func syncLintContract(t *testing.T, c *ct.C, r *ct.Res, T string, run func(string, ...string), ex string) {
 	put := func(p, s string) { ct.Put(t, p, s) }
 	app := func(p, s string) { ct.Append(t, p, s) }
-	// sync-lint: lib/<도구>/가 있는 도구에 bin 줄만 있으면 더할 줄을 찍고 종료 1. 대상이 같거나 all인 lib 나무 줄이면 통과
-	os.MkdirAll(T+"/sr/lib/tool-a", 0o755)
-	os.MkdirAll(T+"/sr/lib/tool-b", 0o755)
-	put(T+"/sl", "# 시험\n도구 .local/bin/tool-a tools:bin/tool-a macos\n도구 .local/bin/tool-b tools:bin/tool-b local\n도구 .local/bin/tool-c tools:bin/tool-c all\n")
-	run("-", "sync-lint", T+"/sr", T+"/sl")
-	c.Ok("sync-lint: lib 줄 없음 — 도구마다 더할 줄, 종료 1 (lib 폴더 없는 도구는 안 봄)", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  macos\n도구  .local/lib/tool-b/**  tools:lib/tool-b/  local" && strings.Contains(r.Err, "lib 나무 줄이 없다"))
-	app(T+"/sl", "도구 .local/lib/tool-a/** tools:lib/tool-a/ macos\n도구 .local/lib/tool-b/** tools:lib/tool-b all\n")
-	run("-", "sync-lint", T+"/sr", T+"/sl")
-	c.Ok("sync-lint: 같은 대상·all lib 줄이 있으면 통과", r.RC == 0 && r.Out == "")
-	put(T+"/wrong-dir", strings.ReplaceAll(ct.Read(T+"/sl"), ".local/lib/tool-a/**", "elsewhere/lib/tool-a/**"))
-	run("-", "sync-lint", T+"/sr", T+"/wrong-dir")
-	c.Ok("sync-lint: 대상 기계가 같아도 로더가 못 찾는 설치 경로는 거절", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  macos")
-	app(T+"/sl", "도구 .local/bin/tool-a tools:bin/tool-a box-1\n")
-	run("-", "sync-lint", T+"/sr", T+"/sl")
-	c.Ok("sync-lint: 다른 대상의 bin 줄은 그 대상 lib 줄이 따로 있어야", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1")
-	run("-", "sync-lint", T+"/sr", T+"/none")
+	// sync-lint(2026-11-22 go-shell-remove — 판단 규칙의 단위 시험은 internal/toolcfg/synclint_test.go): 바이너리 줄(tools:cmd/<도구>)마다
+	// 그 대상을 덮는 Go 소스 나무 줄 셋과 곁 도구(cmd/<곁>/OWNER = 이 도구) 바이너리 줄을 요구하고, 걷힌 셸 판 줄은 멈춘다
+	for _, d := range []string{"cmd/hc-lane", "cmd/hc-merger", "cmd/tool-g", "internal/x"} {
+		os.MkdirAll(T+"/sg/"+d, 0o755)
+	}
+	put(T+"/sg/go.mod", "module x\n")
+	put(T+"/sg/cmd/hc-merger/OWNER", "hc-lane\n")
+	put(T+"/sg.list", "도구 .local/bin/hc-lane tools:cmd/hc-lane macos\n도구 .local/bin/tool-g tools:cmd/tool-g local\n")
+	run("-", "sync-lint", T+"/sg", T+"/sg.list")
+	c.Ok("sync-lint: 딸린 줄 없음 — 바이너리 줄마다 소스 나무 셋 + 곁 도구, 종료 1", r.RC == 1 && ct.CountNonEmpty(r.Out) == 7 &&
+		ct.HasLine(r.Out, "도구  .local/lib/herdr-go/cmd/**  tools:cmd/  macos") && ct.HasLine(r.Out, "도구  .local/lib/herdr-go/go.mod  tools:go.mod  local") &&
+		ct.HasLine(r.Out, "도구  .local/bin/hc-merger  tools:cmd/hc-merger  macos") && strings.Contains(r.Err, "딸린 줄이 없다"))
+	app(T+"/sg.list", "Go .local/lib/herdr-go/go.mod tools:go.mod macos\nGo .local/lib/herdr-go/cmd/** tools:cmd/ macos\nGo .local/lib/herdr-go/internal/** tools:internal/ macos\n도구 .local/bin/hc-merger tools:cmd/hc-merger macos\n")
+	run("-", "sync-lint", T+"/sg", T+"/sg.list")
+	c.Ok("sync-lint: macos 소스 줄은 macos·local 바이너리를 덮는다", r.RC == 0 && r.Out == "")
+	app(T+"/sg.list", "도구 .local/bin/tool-g tools:cmd/tool-g box-1\n")
+	run("-", "sync-lint", T+"/sg", T+"/sg.list")
+	c.Ok("sync-lint: 덮지 않는 대상의 바이너리 줄은 소스 줄이 따로", r.RC == 1 && ct.CountNonEmpty(r.Out) == 3 && ct.HasLine(r.Out, "도구  .local/lib/herdr-go/go.mod  tools:go.mod  box-1"))
+	put(T+"/stale.list", ct.Read(T+"/sg.list")+"도구 .local/bin/tool-g tools:bin/tool-g macos\nGo .local/lib/go-run.sh tools:lib/go-run.sh all\n")
+	run("-", "sync-lint", T+"/sg", T+"/stale.list")
+	c.Ok("sync-lint: 걷힌 셸 판 줄(tools:bin/·tools:lib/)은 지울 줄과 바꿀 바이너리 줄, 종료 1", r.RC == 1 &&
+		strings.Contains(r.Err, "셸 판이 걷혔다") && strings.Contains(r.Err, "tools:bin/tool-g") && strings.Contains(r.Err, "tools:lib/go-run.sh") &&
+		ct.HasLine(r.Out, "도구  .local/bin/tool-g  tools:cmd/tool-g  macos"))
+	run("-", "sync-lint", T+"/sg", T+"/none")
 	c.Ok("sync-lint: sync.list 없음은 종료 2", r.RC == 2)
 	// 빈 <sync.list> 인자는 기본 경로(셸 판 ${2:-…}, 감사 L01)
 	os.MkdirAll(T+"/c4", 0o755)
-	put(T+"/c4/sync.list", ct.Read(T+"/sl"))
-	run(T+"/c4", "sync-lint", T+"/sr", "")
-	c.Ok("sync-lint: 빈 sync.list 인자는 설정 폴더의 sync.list", r.RC == 1 && r.Out == "도구  .local/lib/tool-a/**  tools:lib/tool-a/  box-1")
-	// 줄 끝 CR·끝 줄바꿈 없음은 오류(herdr-sync 셸 판이 그 줄을 못 맞추거나 버린다 — 감사 O-10), 두 판 같은 출력
+	put(T+"/c4/sync.list", ct.Read(T+"/sg.list"))
+	run(T+"/c4", "sync-lint", T+"/sg", "")
+	c.Ok("sync-lint: 빈 sync.list 인자는 설정 폴더의 sync.list", r.RC == 1 && ct.HasLine(r.Out, "도구  .local/lib/herdr-go/go.mod  tools:go.mod  box-1"))
+	// 줄 끝 CR·끝 줄바꿈 없음은 오류(옛 herdr-sync 셸 판이 그 줄을 못 맞추거나 버렸다 — 감사 O-10)
 	nl := T + "/nl.list"
 	put(nl, "# 시험\n도구 .local/bin/tool-c tools:bin/tool-c all\r\n도구 .local/bin/tool-d tools:bin/tool-d all")
-	run("-", "sync-lint", T+"/sr", nl)
+	run("-", "sync-lint", T+"/sg", nl)
 	c.Ok("sync-lint: 줄 끝 CR·끝 줄바꿈 없음은 줄 번호와 종료 1", r.RC == 1 && r.Out == "" &&
 		r.Err == "herdr-tools-config: "+nl+":2: 줄 끝 CR — 줄바꿈은 LF만\nherdr-tools-config: "+nl+":3: 끝 줄바꿈 없음 — 마지막 줄 뒤에 줄바꿈을 붙인다\n")
-	// 함께 쓰는 lib(lib/<이름>/OWNER = 쓰는 도구): hc-lane bin 줄은 hc-merger 나무 줄도 같은 대상으로 요구한다(2026-11-21 merger-go)
-	os.MkdirAll(T+"/sd/lib/hc-lane", 0o755)
-	put(T+"/sd/lib/hc-merger/OWNER", "hc-lane\n")
-	put(T+"/sd.list", "도구 .local/bin/hc-lane tools:bin/hc-lane macos\n도구 .local/lib/hc-lane/** tools:lib/hc-lane/ macos\n")
-	run("-", "sync-lint", T+"/sd", T+"/sd.list")
-	c.Ok("sync-lint: hc-lane에 hc-merger lib 줄이 없으면 더할 줄", r.RC == 1 && r.Out == "도구  .local/lib/hc-merger/**  tools:lib/hc-merger/  macos")
-	app(T+"/sd.list", "도구 .local/lib/hc-merger/** tools:lib/hc-merger/ macos\n")
-	run("-", "sync-lint", T+"/sd", T+"/sd.list")
-	c.Ok("sync-lint: hc-merger lib 줄이 있으면 통과", r.RC == 0 && r.Out == "")
-	// Go 판 도구(cmd/<이름>, OWNER = 그 bin 도구): 그 bin 줄에 Go 소스 나무 줄 넷을 덮는 대상으로 요구한다(2026-11-21 go-foundation)
-	os.MkdirAll(T+"/sg/cmd/tool-g", 0o755)
-	put(T+"/sg/go.mod", "")
-	put(T+"/sg/cmd/hc-merger/OWNER", "hc-lane\n")
-	put(T+"/sg.list", "도구 .local/bin/hc-lane tools:bin/hc-lane macos\n도구 .local/bin/tool-g tools:bin/tool-g local\n")
-	run("-", "sync-lint", T+"/sg", T+"/sg.list")
-	c.Ok("sync-lint: Go 줄 없음 — bin 줄마다 넷, 종료 1", r.RC == 1 && ct.CountNonEmpty(r.Out) == 8 && ct.HasLine(r.Out, "도구  .local/lib/herdr-go/cmd/**  tools:cmd/  macos") && ct.HasLine(r.Out, "도구  .local/lib/go-run.sh  tools:lib/go-run.sh  local") && strings.Contains(r.Err, "Go 소스 나무 줄이 없다"))
-	app(T+"/sg.list", "Go .local/lib/herdr-go/go.mod tools:go.mod macos\nGo .local/lib/herdr-go/cmd/** tools:cmd/ macos\nGo .local/lib/herdr-go/internal/** tools:internal/ macos\nGo .local/lib/go-run.sh tools:lib/go-run.sh macos\n")
-	run("-", "sync-lint", T+"/sg", T+"/sg.list")
-	c.Ok("sync-lint: macos Go 줄은 macos·local bin을 덮는다", r.RC == 0 && r.Out == "")
-	app(T+"/sg.list", "도구 .local/bin/tool-g tools:bin/tool-g box-1\n")
-	run("-", "sync-lint", T+"/sg", T+"/sg.list")
-	c.Ok("sync-lint: 덮지 않는 대상의 bin 줄은 Go 줄이 따로", r.RC == 1 && ct.CountNonEmpty(r.Out) == 4 && ct.HasLine(r.Out, "도구  .local/lib/herdr-go/go.mod  tools:go.mod  box-1"))
-	os.Remove(T + "/sg/go.mod")
-	run("-", "sync-lint", T+"/sg", T+"/sg.list")
-	c.Ok("sync-lint: go.mod 없는 저장소는 Go 줄을 안 봄", r.RC == 0)
 	run("-", "sync-lint", filepath.Dir(ex), ex+"/sync.list")
 	c.Ok("sync-lint: config.example/sync.list 통과", r.RC == 0 && r.Out == "")
 }

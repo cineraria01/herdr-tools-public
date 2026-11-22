@@ -2,7 +2,6 @@ package util_test
 
 // 옛 tests/worker-mesh.test.sh: worker-mac-setup mesh(워커끼리 ssh·hc 연결) 시험. 가짜 ssh·ssh-keyscan·tailscale·hc,
 // 기계마다 임시 HOME($T/h/<기계>). ssh-keygen은 진짜를 쓴다(임시 키). 실제 기계·네트워크는 쓰지 않는다.
-// 다른 사본은 WORKER_MAC_BIN=<bin 폴더>.
 
 import (
 	"crypto/sha256"
@@ -15,10 +14,10 @@ import (
 	"testing"
 )
 
-func TestWorkerMesh(t *testing.T) { eachImpl(t, "worker-mac-setup", testWorkerMesh) }
+func TestWorkerMesh(t *testing.T) { run1(t, testWorkerMesh) }
 
 func testWorkerMesh(t *testing.T, T string, e Env) {
-	BIN := workerMacBin()
+	BIN := workerMacBin(t)
 	TLOG, HOME := T+"/log", T+"/mac"
 	mkdirs(t, T+"/bin", TLOG, HOME+"/.ssh", T+"/ip", T+"/conf")
 	os.Symlink(BIN+"/herdr-tools-config", T+"/bin/herdr-tools-config")
@@ -124,7 +123,7 @@ cat "$T/hk/$2" >>"$HOME/.ssh/known_hosts"`, name, ip4, ip6)
 	mesh("--check")
 	c.ok("mesh --check: 아무것도 없으면 종료 1, 바꾸지 않음", rc == 1 && !exists(T+"/h/wa/.ssh/id_ed25519") && !exists(T+"/h/wb/.ssh/authorized_keys") && has("wa → wb"))
 
-	// [B15] --dry-run은 두 판 다 읽기만(--check와 같음) — 셸 판이 키·설정을 실제로 바꾸고 hc에 등록했다
+	// [B15] --dry-run은 읽기만(--check와 같음) — 옛 셸 판이 키·설정을 실제로 바꾸고 hc에 등록했다
 	mesh("--dry-run")
 	c.ok("[B15] mesh --dry-run: 바꾸지 않음·등록 0", rc == 1 && !exists(T+"/h/wa/.ssh/id_ed25519") && !exists(T+"/h/wb/.ssh/authorized_keys") && addLog() == "")
 

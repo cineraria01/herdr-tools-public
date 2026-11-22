@@ -25,7 +25,7 @@ func aclOf(p string) string {
 }
 
 func TestMetadataKept(t *testing.T) {
-	e := newMerge(t, "")
+	e := newMerge(t)
 	ct.Put(t, e.S(), `{"model":"old"}`+"\n")
 	if out, err := exec.Command("/usr/bin/xattr", "-w", "com.example.herdr-test", "t1", e.S()).CombinedOutput(); err != nil {
 		t.Fatalf("xattr -w: %v %s", err, out)

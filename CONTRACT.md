@@ -4,7 +4,7 @@
 1. **명령 하나**: 맥에서 고치고 `herdr-sync`를 돌리면 모든 기계가 맞는다. `herdr-sync --check`는 고치지 않고 모든 기계를 한 표로 보인다. 다름이나 충돌이 하나라도 있으면 종료 1이다. 표의 첫 줄은 맥 ↔ 두 저장소의 방향(`맥: 저장소가 새로움 n개 (…) — herdr-sync로 깐다` · `맥: 저장소보다 새로움 n개 (…) — 커밋 안 됨?` · `맥: 저장소와 같음`)이고, 둘 다 다름이다(종료 1). 기계 줄은 맥 실제 파일과 견주므로, 맥이 저장소보다 뒤면 기계 줄마다 끝에 `(맥 판 기준 — 저장소 새 판은 아직)`을 붙인다.
    - 맞추는 기계는 sh가 있고 uname이 Darwin·Linux인 곳뿐이다. sh를 못 띄우는 기계(hc 오류 `spawn_failed`·`cannot start `, Windows 등)와 그 밖의 OS(`MINGW64_NT-…`·`MSYS_NT-…` 등)는 `<기계>: 건너뜀 (…)` 한 줄이고, 쓰기·지움·링크·base·설정을 하나도 하지 않으며(`--take`·`--pull`도) 종료 코드에 넣지 않는다.
 2. **정본은 맥의 실제 파일**이고, 두 저장소는 그 기록이다.
-   - 범용 저장소(이 저장소, `HERDR_TOOLS_REPO`): 도구·훅·시험·`config.example/`. 개인 값이 0줄이다.
+   - 범용 저장소(이 저장소, `HERDR_TOOLS_REPO`): 도구(`cmd/<도구>` — Go 바이너리 하나씩, 훅도 `herdr-hooks`)·시험·`config.example/`. 개인 값이 0줄이다.
    - 개인 저장소(`HERDR_TOOLS_CONFIG`, 기본 `~/.config/herdr-tools`, 비공개): `sync.list`·`settings/keys.json`·`config`·`hc-fill.tsv`·`private-patterns.txt`·지침 본문·개인 도구.
    - 어느 저장소든 레인이 고쳐 착지하면, 다음 `herdr-sync`가 그것을 맥에 깔고 기계에 맞춘다.
    - 공개 저장소(설정 `publish.repo`)는 범용 저장소 `origin/main` 트리만 기록 없이 받는다(`herdr-tools-publish`, herdr-sync가 맞춘 뒤 부름). 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나 블롭 내용(이진 포함, 블롭마다)·경로·링크 대상·공개 커밋 작성자에 개인 값·비밀 꼴이 걸리거나 검사를 못 하면 내보내지 않는다. 공개 트리 sha는 비공개 트리 sha와 같다(attributes를 거치지 않음).
@@ -27,10 +27,11 @@
 |---|---|
 | 묶음 | 표의 이름(아무 글자). `지움`이면 지울 것, `제외`면 나무 줄이 걷지 않을 곳 |
 | 맥 경로 | `~` 아래 상대 경로. 이름 자리의 `*`는 맥과 저장소에 있는 파일 모두(한 층). `<폴더>/**`는 나무 줄: 그 폴더 아래 모든 층의 파일. `<파일>#body`는 `<!-- User customizations -->` 줄 아래 구역, `<파일>#codex-shared`는 `<!-- codex-shared:start -->`·`<!-- codex-shared:end -->` 사이 구역, `<경로>@`는 심볼릭 링크 |
-| 저장소 경로 | `tools:<경로>`는 범용 저장소 안, 그 밖은 개인 저장소 안. 나무 줄은 폴더. 링크 줄은 링크가 가리킬 곳(`~` 아래). 지움·제외 줄은 `-` |
+| 저장소 경로 | `tools:<경로>`는 범용 저장소 안, 그 밖은 개인 저장소 안. 나무 줄은 폴더. 링크 줄은 링크가 가리킬 곳(`~` 아래). `tools:cmd/<도구>`는 바이너리 줄(맥 경로 `<뿌리>bin/<도구>`). 지움·제외 줄은 `-` |
 | 대상 | `all` · `macos`(uname Darwin) · `local`(맥만) · 기계 이름을 쉼표로. 옛 이름 `all9`·`mac7`·`mac-only`는 종료 2. 제외 줄은 `-` |
 
-- 지움 줄은 그 기계(대상이 무엇이든 맥 포함)에 있으면 백업 폴더로 옮긴다.
+- 바이너리 줄은 그 도구의 Go 바이너리를 대상 기계 `~/.local/bin/<도구>`에 원자 교체(같은 폴더 임시 → `mv` 한 번)로 깐다: 맥에서 지어 `publish.repo` 릴리스 `bin-<커밋 12자>`에 올린 것을 sha256 확인해 받고, 못 받으면 그 기계 `~/.local/lib/herdr-go`의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다. 둘 다 안 되면 그 기계는 `다름 (바이너리)`이고 그 기계의 설정·지움을 미룬다. 바이너리 줄에는 대상을 덮는 Go 소스 나무 줄 셋(`go.mod`·`cmd/**`·`internal/**`)과 곁 도구(`cmd/<곁>/OWNER`) 바이너리 줄이 따른다. 걷힌 셸 판 줄(`tools:bin/<도구>`·`tools:lib/…`·`*.sh`·`*.py`)은 `sync-lint`가 막는다(종료 2).
+- 지움 줄은 그 기계(대상이 무엇이든 맥 포함)에 있으면 백업 폴더로 옮긴다(그 기계 바이너리를 다 깐 뒤에만).
 - 링크 줄은 가리킬 곳이 그 기계에 없고 이번 실행에서 그 아래에 쓸 파일도 없으면 만들지 않고 `건너뜀 <기계> <경로> (가리킬 곳 없음)`을 찍는다(다름으로 세지 않음). 링크는 파일을 다 쓴 뒤에 만든다.
 
 ### 나무 줄 (`<폴더>/**`)
@@ -77,7 +78,7 @@
   - `exceptions`: 기계 이름마다 그 기계 값을 그대로 둘 키.
 - 문자열 값 안의 맥 `$HOME`은 대상 기계의 `$HOME`으로 바꿔 넣는다.
 - 키마다 3-way다. base는 대상 기계의 `~/.local/state/herdr-sync/settings-base.json`이다.
-- 쓰기 전에 `settings.json`을 백업하고, jq로 고친 결과가 올바른 JSON일 때만 바꿔 넣는다.
+- 쓰기 전에 `settings.json`을 백업하고, 고친 결과가 올바른 JSON일 때만 바꿔 넣는다.
 - 입출력 약속:
   - 표준 입력: `{"values":{"<키>":<값>,…},"hooks":[{"event":"PreToolUse","matcher":"…","command":"…"},…]}`
   - 인자: `[--check] [--take <키|*>]`, 환경 `HERDR_MACHINE`(예외 판정)
@@ -85,8 +86,8 @@
   - 종료 코드: 0은 문제 없음, 1은 `--check`에서 다름이 있거나 충돌이 있음, 2는 잘못 부름. 다른 출력은 표준 오류로 낸다.
 
 ## 시험·착지
-- 시험은 네트워크와 실제 기계 없이 돈다. 임시 HOME·임시 저장소와 가짜 `hc`·`ssh`·`git`(PATH 앞), 설정은 `config.example`.
-- 검증은 `bash .claude/herdr-verify.sh`(문법 검사 + 개인 값 검사 + `tests/*.test.sh`), 착지는 `hc-lane land main`이다.
+- 시험은 모두 Go(`go test -race ./...`)이고 네트워크와 실제 기계 없이 돈다. 임시 HOME·임시 저장소와 가짜 `hc`·`ssh`·`git`(PATH 앞), 설정은 `config.example`. 계약 시험은 시험 프로세스에서 지은 바이너리(`internal/clitest`)를 부른다. 셸 시험(`*.test.sh`)은 두지 않는다.
+- 검증은 `bash .claude/herdr-verify.sh`(저장소 간 계약이라 셸 몇 줄로 남김 — 본문은 Go `tests/repo/verify`: `go vet` + `tests/repo` 싼 검사(줄 수 예산·개인 값·비밀 꼴·gofmt 등) + `go test -race ./...`), 착지는 `hc-lane land main`이다.
 - 병합기가 켜진 저장소(원격 `refs/herdr/merger/<기계>`)에서 `hc-lane land`는 제출(`lane/<레인>` + `refs/merge-queue/<UTC초>-<레인>`)이고, 기본 브랜치에 쓰는 것은 그 기계의 `hc-lane merger` 하나다(README 「hc-lane 병합기」). 지시문·자동 감사의 「hc-lane land」 안내는 그대로다.
 - 쓰기 레인은 대기열(`hc-fill add`)로 넣는다. 지휘 터미널이 `hc-lane`으로 쓰기 레인을 직접 띄우면(`HC_LANE_FILL=1`·`--direct`·`--read`·`--print-steps`·`--dry-run` 없이) 아무것도 만들지 않고 종료 2다. 꼭 그 자리에 띄울 때만 `--direct`(레인 기록 종류 `direct`). 레인 안·터미널 밖·판정 못 함은 막지 않는다.
 - 끝난 레인 정리는 `hc-lane gc`(main에 다 들어갔고 깨끗하고 쓰는 터미널이 없는 작업 폴더·가지, `--integ`면 들어갔고 하루 지난 `refs/integ/*`만 지운다)이고, hc-fill이 설정 `gc` 분마다 부른다.

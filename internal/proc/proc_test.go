@@ -233,7 +233,8 @@ func TestWaitRecordAndStopCurrent(t *testing.T) {
 // M03: 신호로 멈출 때 상한 걸린 Run의 결과가 부른 쪽으로 돌아가지 않는다 — TERM을 무시하는 무리 안 자식까지 거둔 뒤 끝난다
 // M02·바탕 ①: 따로 신호 처리가 없는 도구가 TERM을 받으면, 상한 걸린 git 무리(따로 무리)를 거둔 뒤 143으로 끝난다
 func TestSignalStopsBoundedGroup(t *testing.T) {
-	for _, h := range []string{"ownsignal", "nosignal"} {
+	// started: Run을 거치지 않고 Start로 올린 무리(publish pack|unpack)도 같다
+	for _, h := range []string{"ownsignal", "nosignal", "started"} {
 		t.Run(h, func(t *testing.T) {
 			d := t.TempDir()
 			fakeStuckGit(t, d)
@@ -272,26 +273,29 @@ func TestReapOrphanAfterParentKill(t *testing.T) {
 	d := t.TempDir()
 	fakeStuckGit(t, d)
 	t.Setenv("HERDR_PROC_DIR", d+"/rec")
-	c := helperCmd("killed", d)
-	c.Env = append(c.Env, "PATH="+d+":"+os.Getenv("PATH"))
-	err := c.Run()
-	var ee *exec.ExitError
-	if !errors.As(err, &ee) || ee.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
-		t.Fatalf("흉내 도구가 SIGKILL로 끝나지 않았다: %v", err)
-	}
-	gc := waitFile(t, d+"/grandchild")
-	defer syscall.Kill(gc, syscall.SIGKILL)
-	if !Alive(gc) {
-		t.Fatal("부모가 죽은 뒤 무리가 남아 있어야 시험이 된다")
-	}
-	if n := Reap(); n != 1 {
-		t.Fatalf("고아 무리 하나를 거둬야: %d", n)
-	}
-	if !gone(gc) {
-		t.Fatal("고아 무리의 손자가 남았다")
-	}
-	if es, _ := os.ReadDir(d + "/rec"); len(es) != 0 {
-		t.Fatalf("거둔 기록은 지워야: %v", es)
+	for _, h := range []string{"killed", "startkilled"} { // startkilled: Start로 올린 무리도 고아 기록이 남는다
+		os.Remove(d + "/grandchild")
+		c := helperCmd(h, d)
+		c.Env = append(c.Env, "PATH="+d+":"+os.Getenv("PATH"))
+		err := c.Run()
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+			t.Fatalf("%s: 흉내 도구가 SIGKILL로 끝나지 않았다: %v", h, err)
+		}
+		gc := waitFile(t, d+"/grandchild")
+		defer syscall.Kill(gc, syscall.SIGKILL)
+		if !Alive(gc) {
+			t.Fatalf("%s: 부모가 죽은 뒤 무리가 남아 있어야 시험이 된다", h)
+		}
+		if n := Reap(); n != 1 {
+			t.Fatalf("%s: 고아 무리 하나를 거둬야: %d", h, n)
+		}
+		if !gone(gc) {
+			t.Fatalf("%s: 고아 무리의 손자가 남았다", h)
+		}
+		if es, _ := os.ReadDir(d + "/rec"); len(es) != 0 {
+			t.Fatalf("%s: 거둔 기록은 지워야: %v", h, es)
+		}
 	}
 	// 살아 있는 남의 부모 기록·다시 쓰인 번호는 건드리지 않는다
 	keep, bg := startGroup(t, "wait")
@@ -335,7 +339,7 @@ func helper(h, d string) int {
 		case <-time.After(300 * time.Millisecond):
 		}
 		return 0
-	case "ownsignal", "nosignal", "killed":
+	case "ownsignal", "nosignal", "killed", "started", "startkilled":
 		Grace = 300 * time.Millisecond
 		os.Setenv("HERDR_TIMEOUT_GIT", "60")
 		if h == "ownsignal" { // 병합기·hc-fill 꼴 — 도구가 신호를 받아 StopCurrent 뒤 128+신호
@@ -343,7 +347,7 @@ func helper(h, d string) int {
 			signal.Notify(ch, syscall.SIGTERM)
 			go func() { <-ch; StopCurrent(Grace); os.Exit(143) }()
 		}
-		if h == "killed" {
+		if h == "killed" || h == "startkilled" {
 			// 부모는 고아 기록이 쓰인 뒤에 죽는다 — Run은 손자가 뜬 뒤에도 ps(시작 시각)를 기다려 기록하니, 손자 파일만 보고 죽으면
 			// 부하 때 기록 전에 죽어 Reap이 0이었다(2026-11-22 proc-race-flaky). 느린 ps로 그 순서를 늘 벌려 둔다
 			os.WriteFile(d+"/ps", []byte("#!/bin/sh\nsleep 0.5\nexec /bin/ps \"$@\"\n"), 0o755)
@@ -362,7 +366,18 @@ func helper(h, d string) int {
 				syscall.Kill(os.Getpid(), syscall.SIGKILL)
 			}()
 		}
-		err := Run(exec.Command("git", "status"))
+		var err error
+		if h == "started" || h == "startkilled" { // publish의 pack|unpack 꼴 — 바깥에서 띄우고 기다리는 무리
+			c := exec.Command("git", "status")
+			Group(c)
+			var release func()
+			if release, err = Start(c); err == nil {
+				err = c.Wait()
+				release()
+			}
+		} else {
+			err = Run(exec.Command("git", "status"))
+		}
 		os.WriteFile(d+"/returned", []byte(fmt.Sprint(err)), 0o644)
 		return 0
 	}

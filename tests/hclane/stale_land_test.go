@@ -24,14 +24,9 @@ var stlDropEnv = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COM
 	"HC_TERMINAL_ID", "HC_LANE_COORD", "HC_LANE_FILL"}
 
 func TestStaleLand(t *testing.T) {
-	for _, impl := range impls() {
-		t.Run(impl, func(t *testing.T) {
-			k := stlNewK(t)
-			k.env["HC_LANE_IMPL"] = impl
-			stlRun(k)
-			t.Logf("%d개 중 실패 %d개", k.n, k.fails)
-		})
-	}
+	k := stlNewK(t)
+	stlRun(k)
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
 }
 
 func stlNewK(t *testing.T) *K {
@@ -40,10 +35,7 @@ func stlNewK(t *testing.T) *K {
 		t.Fatal(err)
 	}
 	k := &K{t: t, T: T, env: map[string]string{}}
-	k.LANE = os.Getenv("HC_LANE_BIN")
-	if k.LANE == "" {
-		k.LANE = filepath.Join(repo, "bin", "hc-lane")
-	}
+	k.LANE = laneBin(t)
 	for _, kv := range os.Environ() {
 		key, v, _ := strings.Cut(kv, "=")
 		k.env[key] = v

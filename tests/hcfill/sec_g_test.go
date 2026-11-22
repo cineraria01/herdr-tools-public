@@ -392,10 +392,8 @@ func secG2(k *K) {
 	k.add("hx", "--only", "slow", "--priority", "high")
 	k.run("run")
 	k.check("선행 먼저는 같은 우선순위 안에서만: 높음 hx가 먼저", k.where("hx") == "up slow slow/hx" && cl("pc1") == "wait")
-	if k.impl != "bash" { // 셸 판은 HC_LANE_PRIORITY를 넘기지 않음 — 알려진 차이(셸 판은 곧 걷는다)
-		k.check("HC_LANE_PRIORITY: 대기열 줄의 우선(높음)을 레인 환경에 — 제출 우선", hasFx(T+"/laneprio.log", "hx 높음"), read(T+"/laneprio.log"))
-		k.check("HC_LANE_PRIORITY: 우선을 안 준 줄은 보통", hasFx(T+"/laneprio.log", "p1 보통"), read(T+"/laneprio.log"))
-	}
+	k.check("HC_LANE_PRIORITY: 대기열 줄의 우선(높음)을 레인 환경에 — 제출 우선", hasFx(T+"/laneprio.log", "hx 높음"), read(T+"/laneprio.log"))
+	k.check("HC_LANE_PRIORITY: 우선을 안 준 줄은 보통", hasFx(T+"/laneprio.log", "p1 보통"), read(T+"/laneprio.log"))
 	k.fresh() // 떠 있는 먼저 띄움 레인도 기다리는 줄로 센다
 	k.add("z3", "--only", "slow")
 	k.add("p3", "--only", "slow")
@@ -422,9 +420,7 @@ func secG2(k *K) {
 	k.run("run")
 	k.check("선행 먼저: 기다리는 줄이 있는 b5의 감사 줄이 a5의 감사 줄보다 먼저",
 		k.where("audit-b5") == "up slow slow/audit-b5" && cl("audit-a5") == "wait", read(k.Q))
-	if k.impl != "bash" { // 알려진 차이(위와 같음)
-		k.check("HC_LANE_PRIORITY: 감사 줄(--read, 착지 안 함)에는 넘기지 않음", hasFx(T+"/laneprio.log", "audit-b5 없음"), read(T+"/laneprio.log"))
-	}
+	k.check("HC_LANE_PRIORITY: 감사 줄(--read, 착지 안 함)에는 넘기지 않음", hasFx(T+"/laneprio.log", "audit-b5 없음"), read(T+"/laneprio.log"))
 	secG2After(k)
 	secG2Block(k)
 	secG2Needs(k)

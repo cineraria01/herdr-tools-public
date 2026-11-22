@@ -8,7 +8,7 @@ import (
 
 // hc-lane-wait-guard.test.sh를 옮긴 것: hc-lane wait를 분리 실행(& · nohup · disown · setsid)하면 막는다.
 func TestHcLaneWaitGuard(t *testing.T) {
-	hook := hookPath(t, "hc-lane-wait-guard")
+	const hook = "hc-lane-wait-guard"
 	// bg: "" = run_in_background 없음, "true"/"false" = 그 값
 	cases := []struct {
 		name string
@@ -33,24 +33,22 @@ func TestHcLaneWaitGuard(t *testing.T) {
 		{"다른 명령의 &", 0, "sleep 5 & wait", ""},
 		{"명령 없음", 0, "", ""},
 	}
-	forImpls(t, "hc-lane-wait-guard", func(t *testing.T, impl []string) {
-		for _, c := range cases {
-			t.Run(c.name, func(t *testing.T) {
-				ti := map[string]any{"command": c.cmd}
-				if c.bg != "" {
-					ti["run_in_background"] = c.bg == "true"
-				}
-				in := toolInput(map[string]any{"tool_name": "Bash", "tool_input": ti})
-				rc, _, errOut := runHook(t, hook, in, envWith(nil, impl...), "")
-				checkRC(t, rc, c.want, errOut, "run_in_background")
-			})
-		}
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ti := map[string]any{"command": c.cmd}
+			if c.bg != "" {
+				ti["run_in_background"] = c.bg == "true"
+			}
+			in := toolInput(map[string]any{"tool_name": "Bash", "tool_input": ti})
+			rc, _, errOut := runHook(t, hook, in, envWith(nil), "")
+			checkRC(t, rc, c.want, errOut, "run_in_background")
+		})
+	}
 }
 
 // kill-by-lookup-guard.test.sh를 옮긴 것: 포트·이름으로 찾아 죽이기와 범위 kill을 막는다.
 func TestKillByLookupGuard(t *testing.T) {
-	hook := hookPath(t, "kill-by-lookup-guard")
+	const hook = "kill-by-lookup-guard"
 	cases := []blockCase{
 		// 막아야 할 것: 포트·이름으로 찾아 죽이기, 범위 kill
 		{"lsof -ti | xargs kill", 2, "lsof -ti :3000 | xargs kill"},
@@ -94,19 +92,17 @@ func TestKillByLookupGuard(t *testing.T) {
 		{"skill 낱말", 0, "ls ~/.claude/skills/kill-switch"},
 		{"명령 없음", 0, ""},
 	}
-	forImpls(t, "kill-by-lookup-guard", func(t *testing.T, impl []string) {
-		for _, c := range cases {
-			t.Run(c.name, func(t *testing.T) {
-				rc, _, errOut := runHook(t, hook, bashInput(c.cmd), envWith(nil, impl...), "")
-				checkRC(t, rc, c.want, errOut, "pid만 kill")
-			})
-		}
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rc, _, errOut := runHook(t, hook, bashInput(c.cmd), envWith(nil), "")
+			checkRC(t, rc, c.want, errOut, "pid만 kill")
+		})
+	}
 }
 
 // lane-no-shell-edit.test.sh를 옮긴 것: 레인 세션(HC_LANE)에서 셸로 파일 고치기·heredoc 커밋 메시지·zsh 확장 경로를 막는다.
 func TestLaneNoShellEdit(t *testing.T) {
-	hook := hookPath(t, "lane-no-shell-edit")
+	const hook = "lane-no-shell-edit"
 	msg := map[string]string{"write": "Edit·Write 도구로", "commit": "git commit -F", "zsh": "경로를 글자로"}
 	// want: "0" | write | commit | zsh. noLane: HC_LANE 없이(지휘·사람 세션)
 	cases := []struct {
@@ -165,28 +161,26 @@ func TestLaneNoShellEdit(t *testing.T) {
 		{"HC_LANE 없음: python 쓰기", "0", "python3 - <<EOF\nopen(\"a.go\",\"w\").write(\"x\")\nEOF", true},
 		{`HC_LANE 없음: ${(f)…}`, "0", `files=(${(f)"$(git status)"}); git add -- $files`, true},
 	}
-	forImpls(t, "lane-no-shell-edit", func(t *testing.T, impl []string) {
-		for _, c := range cases {
-			t.Run(c.name, func(t *testing.T) {
-				env := envWith([]string{"HC_LANE"}, append([]string{"HC_LANE=lane-x"}, impl...)...)
-				if c.noLane {
-					env = envWith([]string{"HC_LANE"}, impl...)
-				}
-				rc, _, errOut := runHook(t, hook, bashInput(c.cmd), env, "")
-				if c.want == "0" {
-					checkRC(t, rc, 0, errOut, "")
-				} else {
-					checkRC(t, rc, 2, errOut, msg[c.want])
-				}
-			})
-		}
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := envWith([]string{"HC_LANE"}, "HC_LANE=lane-x")
+			if c.noLane {
+				env = envWith([]string{"HC_LANE"})
+			}
+			rc, _, errOut := runHook(t, hook, bashInput(c.cmd), env, "")
+			if c.want == "0" {
+				checkRC(t, rc, 0, errOut, "")
+			} else {
+				checkRC(t, rc, 2, errOut, msg[c.want])
+			}
+		})
+	}
 }
 
 // loop-no-question.test.sh(hooks-go 준비 커밋)를 옮긴 것: 이름이나 job 라벨에 loop가 든 hc 터미널에서 질문 창을 막는다.
 // hc는 PATH 앞의 가짜 hc: FAKE_JSON을 그대로 찍고 FAKE_RC로 끝난다.
 func TestLoopNoQuestion(t *testing.T) {
-	hook := hookPath(t, "loop-no-question")
+	const hook = "loop-no-question"
 	T := t.TempDir()
 	for _, d := range []string{"bin", "home"} {
 		if err := os.MkdirAll(filepath.Join(T, d), 0o755); err != nil {
@@ -217,22 +211,20 @@ func TestLoopNoQuestion(t *testing.T) {
 		{"JSON 아님", 0, "t1", "not json loop", "", ""},
 		{"다른 키의 loop", 0, "t1", `{"name":"w","labels":{"role":"loop"},"cwd":"/loop"}`, "", ""},
 	}
-	forImpls(t, "loop-no-question", func(t *testing.T, impl []string) {
-		for _, c := range cases {
-			t.Run(c.name, func(t *testing.T) {
-				path, fakeRC := c.path, c.rc
-				if path == "" {
-					path = filepath.Join(T, "bin") + ":/usr/bin:/bin"
-				}
-				if fakeRC == "" {
-					fakeRC = "0"
-				}
-				env := envWith(nil, append([]string{"HOME=" + filepath.Join(T, "home"), "PATH=" + path,
-					"HC_TERMINAL_ID=" + c.term, "FAKE_JSON=" + c.json, "FAKE_RC=" + fakeRC}, impl...)...)
-				in := []byte(`{"tool_name":"AskUserQuestion","tool_input":{}}`)
-				rc, _, errOut := runHook(t, hook, in, env, "")
-				checkRC(t, rc, c.want, errOut, "질문 창을 띄우지 않는다")
-			})
-		}
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, fakeRC := c.path, c.rc
+			if path == "" {
+				path = filepath.Join(T, "bin") + ":/usr/bin:/bin"
+			}
+			if fakeRC == "" {
+				fakeRC = "0"
+			}
+			env := envWith(nil, "HOME="+filepath.Join(T, "home"), "PATH="+path,
+				"HC_TERMINAL_ID="+c.term, "FAKE_JSON="+c.json, "FAKE_RC="+fakeRC)
+			in := []byte(`{"tool_name":"AskUserQuestion","tool_input":{}}`)
+			rc, _, errOut := runHook(t, hook, in, env, "")
+			checkRC(t, rc, c.want, errOut, "질문 창을 띄우지 않는다")
+		})
+	}
 }

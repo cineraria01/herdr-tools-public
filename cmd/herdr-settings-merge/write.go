@@ -17,7 +17,7 @@ import (
 	"herdr-tools/internal/ojson"
 )
 
-// lockName: 같은 HOME의 병합끼리 잠그는 파일(~/.local/state/herdr-sync 아래, flock). 셸 판은 잡지 않는다(곧 걷음 — 알려진 차이)
+// lockName: 같은 HOME의 병합끼리 잠그는 파일(~/.local/state/herdr-sync 아래, flock)
 const lockName = "settings-merge.lock"
 
 // held: 병합 잠금 — 프로세스가 끝날 때까지 쥔다(끝나거나 죽으면 커널이 푼다)

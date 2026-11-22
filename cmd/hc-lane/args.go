@@ -192,9 +192,8 @@ func can(cmd string) func([]string) bool {
 func mustParse(cmd string, a []string) opts {
 	o, pe := parseArgs(cmd, a)
 	if pe != nil {
-		if pe.usage { // can이 걸렀다 — 여기 오면 포장을 거치지 않고 부른 것
-			fmt.Fprintln(os.Stderr, "hc-lane: 사용법은 셸 판(HC_LANE_IMPL=bash hc-lane -h)")
-			os.Exit(2)
+		if pe.usage { // 보통은 can이 먼저 거른다
+			usage()
 		}
 		fmt.Fprintln(os.Stderr, pe.msg)
 		os.Exit(pe.rc)

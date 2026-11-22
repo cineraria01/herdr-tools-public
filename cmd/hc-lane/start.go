@@ -364,7 +364,7 @@ func turnCheckBg(a, g string) {
 	}
 	c := exec.Command(self, "__turn-check")
 	c.Env = append(os.Environ(), "HC_LANE_TC_ADDR="+a, "HC_LANE_TC_G="+g, "HC_LANE_TC_FWAIT="+strconv.FormatInt(fwait, 10),
-		"HC_LANE_TC_POLL="+poll, "HC_LANE_TC_ON="+on, "HC_LANE_TC_NAME="+name, "HC_LANE_TC_LO="+loOwner, "HC_LANE_SH="+selfPath)
+		"HC_LANE_TC_POLL="+poll, "HC_LANE_TC_ON="+on, "HC_LANE_TC_NAME="+name, "HC_LANE_TC_LO="+loOwner)
 	if os.MkdirAll(evdir(), 0o777) == nil {
 		if f, err := os.OpenFile(evdir()+"/watch.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {
 			defer f.Close()

@@ -148,7 +148,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		if t == "" || t[0] == '#' {
 			continue
 		}
-		re, err := regexp.Compile(ereToGo(s))
+		re, err := regexp.Compile(ereToGo(s, true))
 		if err != nil {
 			return die2("틀린 패턴 %s (%s)", s, pf)
 		}
@@ -280,13 +280,30 @@ func writeByte(s *strings.Builder, c byte) {
 	}
 }
 
-// ereToGo: ERE 패턴 한 줄을 셸 판(LC_ALL=C grep -E -i)과 같게 거는 Go 정규식으로 — 바이트는 byteRunes처럼 옮기고,
+// ERE: 셸 판 LC_ALL=C grep -E(icase면 -i)처럼 한 줄을 바이트 단위로 거는 정규식 — 설정으로 ERE를 받는 도구가 쓴다(publish.secrets 등)
+type ERE struct{ re *regexp.Regexp }
+
+// CompileERE: ERE 한 줄을 ereToGo로 옮겨 컴파일. Go가 못 읽는 꼴(역참조 등)은 오류 — 부른 쪽은 「검사 못 함」으로 멈춘다
+func CompileERE(p string, icase bool) (*ERE, error) {
+	re, err := regexp.Compile(ereToGo(p, icase))
+	if err != nil {
+		return nil, err
+	}
+	return &ERE{re}, nil
+}
+
+// Match: 한 줄(줄바꿈 뺀 바이트)이 걸리는지
+func (e *ERE) Match(line []byte) bool { return e.re.MatchString(byteRunes(line)) }
+
+// ereToGo: ERE 패턴 한 줄을 셸 판(LC_ALL=C grep -E, icase면 -i)과 같게 거는 Go 정규식으로 — 바이트는 byteRunes처럼 옮기고,
 // 괄호 식 안의 역슬래시는 ERE처럼 글자 그대로, \< \> [[:<:]] [[:>:]]는 \b.
 // ponytail: \b는 낱말 시작·끝을 가리지 않아 셸보다 느슨하다(「tok\<x」 같은 꼴을 더 건다 — 개인 값 검사라 더 거는 쪽).
 // 역참조 등 Go가 못 읽는 꼴은 컴파일 오류 → 종료 2(조용히 통과하지 않게)
-func ereToGo(p string) string {
+func ereToGo(p string, icase bool) string {
 	var b strings.Builder
-	b.WriteString("(?i)")
+	if icase {
+		b.WriteString("(?i)")
+	}
 	for i := 0; i < len(p); i++ {
 		c := p[i]
 		switch {
@@ -401,7 +418,8 @@ func firstLine(f string) string {
 	return s
 }
 
-// SyncLint: 셸 판 `sync-lint <범용 저장소> <sync.list>`. 더할 줄은 stdout, 머리 줄은 stderr. 0 통과 · 1 줄이 모자람 · 2 sync.list 없음
+// SyncLint: `herdr-tools-config sync-lint <범용 저장소> <sync.list>` — herdr-sync도 맞추기 전에 부른다. 더할 줄은 stdout, 머리 줄·지울 줄은 stderr.
+// 0 통과 · 1 걷힌 셸 판 줄이 남음·바이너리 줄이 틀림·딸린 줄이 모자람 · 2 sync.list 없음
 func SyncLint(repo, list string, stdout, stderr io.Writer) int {
 	data, err := os.ReadFile(list)
 	if !isFile(list) || err != nil {
@@ -414,103 +432,124 @@ func SyncLint(repo, list string, stdout, stderr io.Writer) int {
 			rows = append(rows, f)
 		}
 	}
-	// 도구가 함께 쓰는 lib: lib/<이름>/OWNER 첫 줄이 그 lib를 쓰는 도구
-	dep := map[string][]string{}
-	owners, _ := filepath.Glob(repo + "/lib/*/OWNER")
-	for _, o := range owners {
-		if isFile(o) {
-			w := firstLine(o)
-			dep[w] = append(dep[w], filepath.Base(filepath.Dir(o)))
-		}
-	}
-	isLib := regexp.MustCompile(`^tools:lib/[^/]+/?$`)
-	type need struct{ b, dst, tool, t string }
-	var needs []need
-	lib := map[string]bool{}
-	for _, f := range rows {
-		if binTool(f[2]) != "" {
-			x := binTool(f[2])
-			for _, tl := range append([]string{x}, dep[x]...) {
-				needs = append(needs, need{f[0], macRoot(f[1]) + "lib/" + tl + "/**", tl, f[3]})
-			}
-			continue
-		}
-		if isLib.MatchString(f[2]) && strings.HasSuffix(f[1], "/**") {
-			lib[strings.TrimSuffix(f[2][10:], "/")+"\x00"+f[1]+"\x00"+f[3]] = true
-		}
-	}
 	bad := 0
-	for _, n := range needs {
-		if lib[n.tool+"\x00"+n.dst+"\x00"+n.t] || lib[n.tool+"\x00"+n.dst+"\x00all"] || !isDir(repo+"/lib/"+n.tool) {
+	// 1. 걷힌 셸 판 줄(2026-11-22 go-shell-remove): 저장소에 없는 tools:lib/…·tools:…*.sh·*.py 줄, cmd/<도구>가 있는데 저장소에 없는
+	// tools:bin/<도구> 줄이 남아 있으면 herdr-sync가 맥에 남은 옛 파일을 저장소로 다시 모은다(맥이 정본) — 맞추기 전에 멈추고 바이너리 줄을 권한다
+	var stale, repl []string
+	for _, f := range rows {
+		r, ok := strings.CutPrefix(f[2], "tools:")
+		if !ok || strings.Contains(r, "*") {
 			continue
 		}
-		if bad == 0 {
-			fmt.Fprintf(stderr, "%s: %s — lib 나무 줄이 없다(bin만 깔리면 그 도구가 멈춘다). 이 줄을 더한다:\n", me, list)
+		x, isBin := strings.CutPrefix(r, "bin/")
+		goTool := isBin && !strings.Contains(x, "/") && isDir(repo+"/cmd/"+x)
+		shellish := goTool || strings.HasPrefix(r, "lib/") || strings.HasSuffix(r, ".sh") || strings.HasSuffix(r, ".py")
+		if !shellish || exists(repo+"/"+strings.TrimSuffix(r, "/")) {
+			continue
 		}
-		fmt.Fprintf(stdout, "%s  %s  tools:lib/%s/  %s\n", n.b, n.dst, n.tool, n.t)
+		stale = append(stale, strings.Join(f[:4], "  "))
+		if goTool {
+			repl = append(repl, fmt.Sprintf("%s  %sbin/%s  tools:cmd/%s  %s", f[0], macRoot(f[1]), x, x, f[3]))
+		}
+	}
+	if len(stale) > 0 {
+		fmt.Fprintf(stderr, "%s: %s — 셸 판이 걷혔다(저장소에 없는 셸·파이썬·포장 줄). 이 줄을 지우고(기계에 남은 것은 「지움」 줄로):\n  %s\n",
+			me, list, strings.Join(stale, "\n  "))
+		if len(repl) > 0 {
+			fmt.Fprintf(stderr, "%s: 도구는 바이너리 줄로 바꾼다. 이 줄을 더한다:\n", me)
+			fmt.Fprintln(stdout, strings.Join(repl, "\n"))
+		}
 		bad = 1
 	}
-	if syncLintGo(repo, list, rows, stdout, stderr) {
+	if syncLintBins(repo, list, rows, stdout, stderr) {
 		bad = 1
 	}
 	return bad
 }
 
-var binRe = regexp.MustCompile(`^tools:bin/[^/]+$`)
+var cmdLineRe = regexp.MustCompile(`^tools:cmd/([^/]+)/?$`)
 
-func binTool(s string) string {
-	if binRe.MatchString(s) {
-		return s[10:]
+// BinLine: sync.list 바이너리 줄(저장소 경로 tools:cmd/<도구> — 나무 줄 아님)이면 그 도구 이름. herdr-sync가 그 도구의 Go 바이너리를
+// 맥 경로(<뿌리>bin/<도구>, 보통 .local/bin/<도구>)에 원자 교체로 깐다
+func BinLine(mac, repoPath string) string {
+	if strings.HasSuffix(mac, "/**") || strings.Contains(mac, "*") {
+		return ""
+	}
+	if m := cmdLineRe.FindStringSubmatch(repoPath); m != nil {
+		return m[1]
 	}
 	return ""
 }
 
-// syncLintGo: Go 판 도구(cmd/<이름>/, 그 bin 도구는 OWNER 첫 줄 — 없으면 <이름>)의 bin 줄마다 Go 소스 나무 줄 넷이
-// 그 대상을 덮는 대상(같음·all, local은 macos도)으로 있어야 한다. 모자라면 참
-func syncLintGo(repo, list string, rows [][]string, stdout, stderr io.Writer) bool {
-	if _, err := os.Stat(repo + "/go.mod"); err != nil {
+// covers: 대상 s가 대상 t를 덮나(같음·all, local은 macos도)
+func covers(s, t string) bool { return s == t || s == "all" || (t == "local" && s == "macos") }
+
+// syncLintBins: 바이너리 줄마다 — 맥 경로가 <뿌리>bin/<도구>이고 cmd/<도구>가 있어야 하고, 그 대상을 덮는 Go 소스 나무 줄 셋
+// (그 기계에서 지을 때 — 릴리스를 못 받을 때)과, 곁 도구(cmd/<곁>/OWNER 첫 줄이 이 도구 — 예: hc-merger는 hc-lane이 부른다)의
+// 바이너리 줄이 있어야 한다. 모자라면 참
+func syncLintBins(repo, list string, rows [][]string, stdout, stderr io.Writer) bool {
+	type bin struct{ b, root, tool, t string }
+	var bins []bin
+	have := map[string][]string{} // 맥 경로\t저장소 경로 → 대상들
+	bad := false
+	for _, f := range rows {
+		x := BinLine(f[1], f[2])
+		if x == "" {
+			have[f[1]+"\t"+f[2]] = append(have[f[1]+"\t"+f[2]], f[3])
+			continue
+		}
+		if !isDir(repo+"/cmd/"+x) || !strings.HasSuffix(f[1], "bin/"+x) {
+			fmt.Fprintf(stderr, "%s: %s — 바이너리 줄이 틀렸다(맥 경로는 <뿌리>bin/%s, 저장소에 cmd/%s가 있어야): %s\n", me, list, x, x, strings.Join(f[:4], "  "))
+			bad = true
+			continue
+		}
+		bins = append(bins, bin{f[0], macRoot(f[1]), x, f[3]})
+	}
+	has := func(k, t string) bool {
+		for _, s := range have[k] {
+			if covers(s, t) {
+				return true
+			}
+		}
 		return false
 	}
-	own := map[string]bool{}
-	cmds, _ := filepath.Glob(repo + "/cmd/*")
-	for _, c := range cmds {
-		if !isDir(c) {
-			continue
+	hasBin := func(tool, t string) bool {
+		for _, b := range bins {
+			if b.tool == tool && covers(b.t, t) {
+				return true
+			}
 		}
-		o := filepath.Base(c)
-		if isFile(c + "/OWNER") {
-			o = firstLine(c + "/OWNER")
-		}
-		own[o] = true
-	}
-	needs := [4][2]string{{"lib/herdr-go/go.mod", "tools:go.mod"}, {"lib/herdr-go/cmd/**", "tools:cmd/"},
-		{"lib/herdr-go/internal/**", "tools:internal/"}, {"lib/go-run.sh", "tools:lib/go-run.sh"}}
-	type bin struct{ b, root, t string }
-	var bins []bin
-	have := map[string]bool{}
-	for _, f := range rows {
-		if x := binTool(f[2]); x != "" && own[x] {
-			bins = append(bins, bin{f[0], macRoot(f[1]), f[3]})
-			continue
-		}
-		have[f[1]+"\t"+f[2]+"\t"+f[3]] = true
+		return false
 	}
 	var out []string
 	seen := map[string]bool{}
+	more := func(l string) {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	srcs := [3][2]string{{"lib/herdr-go/go.mod", "tools:go.mod"}, {"lib/herdr-go/cmd/**", "tools:cmd/"}, {"lib/herdr-go/internal/**", "tools:internal/"}}
+	cmds, _ := filepath.Glob(repo + "/cmd/*/OWNER")
 	for _, b := range bins {
-		for _, p := range needs {
-			key := b.root + p[0] + "\t" + p[1] + "\t"
-			if have[key+b.t] || have[key+"all"] || (b.t == "local" && have[key+"macos"]) || seen[key+b.t] {
-				continue
+		for _, p := range srcs {
+			if !has(b.root+p[0]+"\t"+p[1], b.t) {
+				more(fmt.Sprintf("%s  %s  %s  %s", b.b, b.root+p[0], p[1], b.t))
 			}
-			seen[key+b.t] = true
-			out = append(out, fmt.Sprintf("%s  %s  %s  %s", b.b, b.root+p[0], p[1], b.t))
+		}
+		for _, o := range cmds {
+			c := filepath.Base(filepath.Dir(o))
+			if c != b.tool && firstLine(o) == b.tool && !hasBin(c, b.t) {
+				more(fmt.Sprintf("%s  %sbin/%s  tools:cmd/%s  %s", b.b, b.root, c, c, b.t))
+			}
 		}
 	}
 	if len(out) == 0 {
-		return false
+		return bad
 	}
-	fmt.Fprintf(stderr, "%s: %s — Go 소스 나무 줄이 없다(Go 판 도구가 셸 판으로 떨어진다). 이 줄을 더한다:\n", me, list)
+	fmt.Fprintf(stderr, "%s: %s — 바이너리 줄에 딸린 줄이 없다(Go 소스 나무 — 그 기계에서 지을 때, 곁 도구 바이너리). 이 줄을 더한다:\n", me, list)
 	fmt.Fprintln(stdout, strings.Join(out, "\n"))
 	return true
 }
+
+func exists(p string) bool { _, err := os.Lstat(p); return err == nil }

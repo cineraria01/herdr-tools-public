@@ -173,11 +173,8 @@ func s20Stop(k *K) {
 	k.check("끝남: 막힘 뒤 끝남도 알림", has("\ttf7\tlane-f7\t멈춤\t-\t뜻밖의 종료(finished)"))
 	k.check("끝남: 착지·판정 뒤 끝남은 안 알림", !grep(k.out, `lane-f[48]`+"\t멈춤\t-\t"+`뜻밖의 종료\(finished`))
 	k.check("정리됨: 중간 뒤 정리됨은 「뜻밖의 종료(정리됨)」, 그 끝남은 두 번 안 알림", has("\ttf3\tlane-f3\t멈춤\t-\t뜻밖의 종료(정리됨) hc-sweep R2") && !has("lane-f3\t멈춤\t-\t뜻밖의 종료(finished)"))
-	if k.env["HC_LANE_IMPL"] == "bash" {
-		k.check("정리됨: 제출 뒤(그 턴 지나) 정리됨은 「제출 뒤 정리(정리됨)」 — 뜻밖의 종료로 안 읽게(2026-11-21 지휘 후속)", has("\ttf12\tlane-f12\t멈춤\t-\t제출 뒤 정리(정리됨) hc-sweep R2") && !has("lane-f12\t멈춤\t-\t뜻밖의 종료"))
-	} else { // go-alert-quiet(2026-11-22, Go 판만): 제출 뒤 정리됨은 turn과 상관없이 안 알림
-		k.check("정리됨: 제출 뒤(그 턴 지나) 정리됨은 안 알림(go-alert-quiet)", !has("lane-f12\t멈춤"))
-	}
+	// go-alert-quiet(2026-11-22): 제출 뒤 정리됨은 turn과 상관없이 안 알림
+	k.check("정리됨: 제출 뒤(그 턴 지나) 정리됨은 안 알림(go-alert-quiet)", !has("lane-f12\t멈춤"))
 	k.check("정리됨: 판정 뒤 정리됨은 안 알림, 정리됨 줄 그대로는 안 찍음", !has("lane-f4\t멈춤") && !has("\t정리됨\t"))
 	k.run("events")
 	k.check("정리됨: hc-lane events에는 보임", has("lane-f3\t정리됨"))

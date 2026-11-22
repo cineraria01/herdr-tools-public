@@ -24,7 +24,7 @@ const tab = "\t"
 // evstates: report가 받는 상태(셸 판 bin/hc-lane의 evstates와 같은 순서)
 const evstates = "중간 완료 착지 막힘 판정 제출 주차"
 
-// noHelp: 도움말(-h·--help)은 셸 판 usage — 그 인자면 Go 판이 맡지 않는다
+// noHelp: 도움말(-h·--help)이 든 인자는 거른다(→ usage)
 func noHelp(a []string) bool {
 	for _, s := range a {
 		if s == "-h" || s == "--help" {
@@ -168,9 +168,9 @@ func onlyChars(s, ok string) bool {
 
 func atoi(s string) int64 { n, _ := strconv.ParseInt(s, 10, 64); return n }
 
-// cfg: 개인 설정(herdr-tools-config, 셸 포장 bin/hc-lane 곁의 것 먼저). 도구가 없는 기계는 기본값, 읽기 오류는 종료 1
+// cfg: 개인 설정(herdr-tools-config, 이 바이너리 곁의 것 먼저). 도구가 없는 기계는 기본값, 읽기 오류는 종료 1
 func cfg(key, def string) string {
-	c := filepath.Join(filepath.Dir(selfSh()), "herdr-tools-config")
+	c := filepath.Join(filepath.Dir(selfExe()), "herdr-tools-config")
 	if st, err := os.Stat(c); err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
 		p, err := exec.LookPath("herdr-tools-config")
 		if err != nil {

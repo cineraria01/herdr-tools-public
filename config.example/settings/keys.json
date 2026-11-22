@@ -18,9 +18,11 @@
   ],
   "hooks": {
     "PreToolUse": [
-      "cotenant-guard.sh",
-      "loop-no-question.sh",
-      "hc-lane-wait-guard.sh"
+      "cotenant-guard",
+      "loop-no-question",
+      "hc-lane-wait-guard",
+      "kill-by-lookup-guard",
+      "lane-no-shell-edit"
     ]
   },
   "refs": [

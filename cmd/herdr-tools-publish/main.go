@@ -1,7 +1,7 @@
 // herdr-tools-publish: 범용 저장소(비공개)의 origin/main 트리를 공개 저장소에 기록 없이 내보낸다.
-// Go 판(2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go). 인자·출력·종료 코드·검사(fail-closed)는 셸 판 bin/herdr-tools-publish와 같다.
+// (2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go, 셸 판은 2026-11-22 걷음). 인자·출력·종료 코드·검사(fail-closed)는 옛 셸 판 그대로다.
 // 다른 점: 개인 값 검사를 곁의 herdr-tools-config 대신 같은 꾸러미(internal/toolcfg)로 한다. 경로 겹침(NFC·대소문자 접기)은
-// 표준 라이브러리에 정규화가 없어 셸 판처럼 python3로 본다. 되돌리기 HERDR_TOOLS_PUBLISH_IMPL=bash.
+// 표준 라이브러리에 정규화가 없어 python3로 본다(없으면 검사 못 함 — 내보내지 않는다).
 package main
 
 import (
@@ -489,9 +489,9 @@ func scan(files []string, extra string) ([]string, bool) {
 	if extra != "" {
 		pats = append(pats, extra)
 	}
-	res := make([]*regexp.Regexp, len(pats))
+	res := make([]*toolcfg.ERE, len(pats))
 	for i, p := range pats {
-		re, err := regexp.Compile(p)
+		re, err := toolcfg.CompileERE(p, false) // 셸 판 LC_ALL=C grep -E와 같은 ERE·바이트 판정
 		if err != nil {
 			return nil, false
 		}

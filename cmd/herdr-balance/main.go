@@ -1,5 +1,5 @@
 // herdr-balance: Herdr 탭의 오른쪽 worker 열을 고른 높이로 다시 붙인다(Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」).
-// 계약은 셸 판(lib/herdr-balance/herdr-balance.py)과 같다 — 인자·출력 JSON 꼴(한글 그대로)·종료 코드·상태 파일
+// 계약은 옛 셸 판(파이썬, 2026-11-22 go-shell-remove로 걷음)과 같다 — 인자·출력 JSON 꼴(한글 그대로)·종료 코드·상태 파일
 // ~/.local/state/herdr-balance/<탭>.json·herdr-app에 넘기는 인자 글자. 바뀐 것: herdr-app 응답이 JSON이 아니거나 상태 파일을
 // 못 쓰면 셸 판은 예외로 죽었고(--watch도 멈춤) Go 판은 그 회차 오류 한 줄로 친다, 상태 파일은 반쪽 없이 바꿔 넣는다,
 // herdr-app 목록에 spaces·tabs·탭 id·terminals·터미널 terminal·pane·name이 없으면 셸 판(KeyError로 죽음)처럼 그 맞춤은 실패다(B12 —

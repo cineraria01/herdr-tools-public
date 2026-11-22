@@ -1,7 +1,7 @@
 package util_test
 
 // 옛 tests/hc-sweep-disk.test.sh: hc-sweep 디스크 쓸기. 가짜 $TMPDIR에 오래된·새·열린·다른 이름·링크·쓰기 막힌 항목을 두고
-// bin/hc-sweep 한 바퀴(가짜 hc — 터미널 없음)가 정리 대상만 지우는지, 디스크 부족 알림(hc-lane report → 시험 HOME의
+// hc-sweep 한 바퀴(가짜 hc — 터미널 없음)가 정리 대상만 지우는지, 디스크 부족 알림(hc-lane report → 시험 HOME의
 // events.tsv)이 같은 상태에서 한 번만 나가고 회복 뒤 다시 나가는지 본다.
 
 import (
@@ -15,10 +15,10 @@ import (
 	"time"
 )
 
-func TestHcSweepDisk(t *testing.T) { eachImpl(t, "hc-sweep", testHcSweepDisk) }
+func TestHcSweepDisk(t *testing.T) { run1(t, testHcSweepDisk) }
 
 func testHcSweepDisk(t *testing.T, T string, e Env) {
-	SWEEP := filepath.Join(repo, "bin", "hc-sweep")
+	SWEEP := tool(t, "hc-sweep")
 	var out string
 	c := checker{t: t, out: &out}
 	mkdirs(t, T+"/bin", T+"/badbin", T+"/home", T+"/cfg", T+"/tmp", T+"/outside/keep")
@@ -36,11 +36,6 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	}
 	psComm(false)
 	G, OLD := T+"/gocache", T+"/home/Library/Caches/go-build"
-	if e[implVar("hc-sweep")] == "go" { // Go 판 바이너리는 바깥 GOCACHE로 미리 짓는다(아래 GOCACHE를 시험 폴더로 바꾸면 빈 캐시로 다시 지을 수 있다)
-		if o, rc := run(T, e, SWEEP, "--version"); rc != 0 {
-			t.Fatalf("hc-sweep --version: %d %s", rc, o)
-		}
-	}
 	// GOCACHE도 시험 폴더로: 병합기는 GOCACHE=~/.cache/go-build를 물려준다 — 그대로면 문턱을 크게 둔 바퀴가 진짜 Go 캐시를 훑고 줄인다
 	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+T+"/tmp", "GOCACHE="+G, "HC_SWEEP_GO_COMM=")
 	cfg := func(ls ...string) { write(t, T+"/cfg/config", strings.Join(ls, "\n")+"\n") }

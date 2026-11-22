@@ -319,7 +319,7 @@ func secE2(k *K) {
 	RL := k.aidof("rl")
 	RPATH := k.T + "/bin2:" + strings.TrimPrefix(k.env["PATH"], k.T+"/bin:") // 가짜 hc만(진짜 git으로 HEAD를 읽게)
 	k.exe(k.T, []string{"PATH=" + RPATH, "XDG_STATE_HOME=" + k.T + "/xdg-a", "HC_TERMINAL_ID=audit-" + RL, "HC_LANE=audit-" + RL, "HC_LANE_MACHINE=m"},
-		"bash", k.HL, "report", "판정", RS, "감사 완료 "+RL+" 높음 1·중간 0·낮음 0")
+		k.HL, "report", "판정", RS, "감사 완료 "+RL+" 높음 1·중간 0·낮음 0")
 	var evs []string
 	for _, r := range rows(k.T + "/xdg-a/hc-lane/events.tsv") {
 		for len(r) < 3 {
@@ -332,7 +332,7 @@ func secE2(k *K) {
 	k.lj("box-1/rl:claude-code:rl:done:"+RR, "box-1/audit-"+RL+":claude-code:audit-"+RL+":done:/")
 	k.run("run")
 	k.exe(k.T, nil, "/usr/bin/git", "-C", RR, "worktree", "add", "-q", "--detach", RR+".wt", "HEAD") // 레인은 연결 작업 트리에서 부른다
-	vo, _ := k.exe(RR+".wt", []string{"PATH=" + RPATH, "HC_TERMINAL_ID=rl", "HC_LANE=rl"}, "bash", k.HL, "verdict", RL)
+	vo, _ := k.exe(RR+".wt", []string{"PATH=" + RPATH, "HC_TERMINAL_ID=rl", "HC_LANE=rl"}, k.HL, "verdict", RL)
 	k.run("run")
 	k.check("진짜 report 판정(배포 틀 꼴) → 소비 → 판정 파일 → 진짜 hc-lane verdict가 지적을 수거(taken) → 차수 taken",
 		k.vkey("rl", "verdict", RL) == "fix" && strings.Contains(vo, "감사 지적") && eCut1(vd("rl", RL, ".ack")) == "taken" && k.acol(RL, 8) == "taken", vo, read(k.AT()))

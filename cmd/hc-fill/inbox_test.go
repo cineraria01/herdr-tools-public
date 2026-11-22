@@ -9,15 +9,19 @@ import (
 	"testing"
 )
 
-// 원격 sh 본문이 셸 판(lib/hc-fill/tick.sh)이 실제로 내는 글과 같다(골든 = 셸 판 함수의 출력)
+// 원격 sh 본문이 옛 셸 판(lib/hc-fill/tick.sh, 걷기 직전 992f3d9)이 실제로 내던 글과 같다 — 골든은 그 출력의 sha256
+// (셸 판은 2026-11-22 go-shell-remove로 걷었다. 비밀 꼴 검사에 걸리지 않게 16자씩 끊어 적는다)
 func TestInboxBodiesMatchShell(t *testing.T) {
-	for fn, want := range map[string]string{"s_ilist": inbSIlist, "s_iclaim": inbSIclaim, "s_ipub": inbSIpub} {
-		out, err := exec.Command("bash", "-c", `. ../../lib/hc-fill/tick.sh && "$1"`, "_", fn).Output()
-		if err != nil {
-			t.Fatalf("%s: %v", fn, err)
-		}
-		if string(out) != want {
-			t.Errorf("%s 본문이 셸 판과 다르다\n셸: %q\nGo: %q", fn, out, want)
+	for _, c := range []struct {
+		fn, body string
+		want     [4]string
+	}{
+		{"s_ilist", inbSIlist, [4]string{"e72908363677d327", "06bc3eedaaf92c7a", "920955a4a7f8b723", "92449b2a09a9d1dc"}},
+		{"s_iclaim", inbSIclaim, [4]string{"8b79a886f9b256c9", "068b613e3303bce1", "bc319b8e70ed640c", "d84f60a16041ae69"}},
+		{"s_ipub", inbSIpub, [4]string{"62885c86707a4df8", "dc98507177aa3f69", "58e5fae8d74de69d", "eb5759dcc23d416f"}},
+	} {
+		if got := sha256hex([]byte(c.body)); got != strings.Join(c.want[:], "") {
+			t.Errorf("%s 본문이 옛 셸 판과 다르다(sha256 %s)", c.fn, got)
 		}
 	}
 }

@@ -3,7 +3,7 @@ package main
 // herdr-tools-publish 계약 시험 — Go 전환 감사(2026-11-21) 지적 고침:
 //   A02 결과 파일(HERDR_TOOLS_PUBLISH_RESULT): 게시 성공(내보냄·같음)일 때만 검사한 비공개 커밋 전체 sha 한 줄, 그 밖은 없음(있던 것은 지움)
 //   A12 성공·실패 출력에 publish.repo 주소 원문을 싣지 않는다(git 오류 글 포함) · L02 남는 인자는 사용법·종료 2
-//   (Go 판만 — 셸 판은 곧 걷는 알려진 차이) B04 객체 전송 상한 · B12 작성자 비밀 꼴 · B13 막힌 미리보기는 변경 목록 없이 종료 ·
+//   B04 객체 전송 상한 · B12 작성자 비밀 꼴 · B13 막힌 미리보기는 변경 목록 없이 종료 ·
 //   B14 diff-tree 실패는 종료 1 · B16 push 뒤 로컬 ref 실패를 따로 알리고 다음 실행에서 원격 값으로 복구
 
 import (
@@ -71,9 +71,6 @@ func fixContract(f *pubFix) {
 	f.run("--dry-run", "extra")
 	c.Ok("남는 인자: 사용법·종료 2", f.r.RC == 2 && f.pmain() == h)
 
-	if os.Getenv("HERDR_TOOLS_PUBLISH_IMPL") != "go" {
-		return // 아래는 셸 판에도 있는 옛 결함 — Go 판만 고쳤다(셸 판은 곧 걷는다, README 알려진 차이)
-	}
 	// B13: 막힌 미리보기는 가린 진단 뒤 바로 끝 — 변경 목록(원래 경로)을 찍지 않는다
 	name := "docs/" + a16 + b16 + "-dry.md"
 	put(T+"/priv/"+name, "x\n")

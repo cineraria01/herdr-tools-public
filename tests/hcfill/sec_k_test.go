@@ -1,7 +1,6 @@
 package hcfill_test
 
 // gofix-fill(2026-11-21 Go 전환 전체 감사): 바깥 명령 시간 상한에 걸린 결과는 「모름」 — 상태를 바꾸지 않고 다음 바퀴에.
-// 셸 판은 상한이 없어(늦어도 끝까지 기다림) 같은 입력에서 늘 맞게 끝난다 — 두 판 모두 돈다.
 
 import (
 	"fmt"
@@ -66,9 +65,6 @@ func secKOrphan(k *K) {
 // T2 ③④(Fable)·L2: watch가 바퀴 상한(HC_FILL_ROUND_TIMEOUT)에 run을 TERM으로 끊으면 run은 상한 걸린 자식 무리(hc ls)를 거두고
 // 끝내기 훅(held.tsv 비움·지시문 사본 지움)을 돈다. 셸 판에는 바퀴 상한이 없다(Go 판만)
 func secKRoundTimeout(k *K) {
-	if k.impl == "bash" {
-		return
-	}
 	k.fresh()
 	pf := k.T + "/ls-slow.pid"
 	rm(pf)
@@ -110,9 +106,6 @@ func secKRoundTimeout(k *K) {
 // F3(Fable)·E01(아스트라): 이 기계 감사의 완료 sha 풀기(git rev-parse)와 herdr-balance도 상한 안에서만 — 멈추면 run.lock을 쥔 채
 // 끝없이 기다렸다. 셸 판은 상한이 없다(Go 판만)
 func secKLocalLimits(k *K) {
-	if k.impl == "bash" {
-		return
-	}
 	// herdr-balance가 답하지 않음: 상한(1초)마다 끊고 다섯 번 뒤 알림 — run은 끝난다
 	k.fresh()
 	k.add("hb", "--only", "here")
@@ -137,9 +130,6 @@ func secKLocalLimits(k *K) {
 
 // E03(아스트라): 일반 add가 잠금 밖에서 지휘를 적는 사이 같은 이름이 --then으로 붙으면 대기열 줄로 또 넣지 않는다
 func secKThenRace(k *K) {
-	if k.impl == "bash" { // 셸 판도 두 곳에 들어간다 — 알려진 차이(셸 판은 곧 걷는다)
-		return
-	}
 	k.fresh()
 	k.add("first")
 	hook := k.FILL + " add --name next --project app --brief " + k.brief("nextt") + " --then first"
@@ -168,9 +158,6 @@ func secKNeedTwo(k *K) {
 
 // E04(아스트라): hc machine ls를 못 읽으면 목록에 없는 원격 레인을 「끝남」으로 단정하지 않는다
 func secKLsUnknown(k *K) {
-	if k.impl == "bash" { // 셸 판은 「끝남」 — 알려진 차이(셸 판은 곧 걷는다)
-		return
-	}
 	k.fresh()
 	k.add("lu", "--only", "box-1")
 	k.run("run")
@@ -197,9 +184,6 @@ func secKUmask(k *K) {
 
 // F07(아스트라)·F4(Fable): 붙이기는 붙일 폴더(기본 ~/.claude-tasks) 안 파일만, 받은편지 줄에는 붙이지 않는다
 func secKPaste(k *K) {
-	if k.impl == "bash" { // 셸 판 paste_home은 HOME 아래 아무 파일 — 알려진 차이(셸 판은 곧 걷는다)
-		return
-	}
 	runs := k.DATA + "/runs"
 	k.fresh()
 	write(k.t, k.HOME+"/.netrc", "machine example.invalid login me password hunter2\n")
@@ -235,9 +219,6 @@ func secKReadFail(k *K) {
 	k.runE([]string{"HC_FAKE_GET_BAD=box-1/h3"}, "run")
 	k.check("hc get 실패 종료·잘린 응답: 시작 확인으로 보지 않음(box-1 남기고 box-2)", k.where("h3") == "up box-2 box-2/h3" && in(k.bQline("h3"), "box-1=box-1/h3"),
 		k.where("h3"), k.out)
-	if k.impl == "bash" { // E05: 셸 판은 hc exec 실패의 「no」를 그대로 믿는다 — 알려진 차이(셸 판은 곧 걷는다)
-		return
-	}
 	// E05(아스트라): 원격 작업 트리 검사가 「no」를 찍고 실패 종료 — 작업 트리 없음으로 안 세지 않는다(모름 → 셈)
 	W := k.W
 	mkdirs(k.t, W+"/app", W+"/app.wt/k1", W+"/app.wt/k2")
@@ -268,11 +249,9 @@ func secKLaunchTimeout(k *K) {
 	k.check("띄우기 시간 넘김: 같은 바퀴에 다른 기계로 또 띄우지 않음(착수 한 번)", starts() == 1 && !strings.HasPrefix(k.where("kl"), "up box-2"),
 		k.where("kl"), read(k.T+"/landprio.log"), k.out)
 	try := k.DATA + "/try.tsv"
-	if k.impl != "bash" { // 셸 판은 상한이 없어 첫 바퀴에 그대로 뜬다 — 미확정 기록(?)은 Go 판만
-		k.check("띄우기 시간 넘김: 시도 기록은 첫 기계 그대로·미확정(?)", hasE(try, "^kl\t[^\t]*\tbox-1\t[^\t]*\t[^\t]*\t\\?\t"), read(try))
-		k.run("run") // 첫 기계는 연결됐는데 그 이름 터미널이 안 보임 → 안 떴다고 보고 다시 띄울 수 있다(같은 기계 차례부터)
-		k.check("띄우기 시간 넘김 뒤 첫 기계에 터미널이 없으면 미확정을 풀고 다시 띄움", starts() == 2 && k.where("kl") == "up box-1 box-1/kl", k.where("kl"), k.out)
-	}
+	k.check("띄우기 시간 넘김: 시도 기록은 첫 기계 그대로·미확정(?)", hasE(try, "^kl\t[^\t]*\tbox-1\t[^\t]*\t[^\t]*\t\\?\t"), read(try))
+	k.run("run") // 첫 기계는 연결됐는데 그 이름 터미널이 안 보임 → 안 떴다고 보고 다시 띄울 수 있다(같은 기계 차례부터)
+	k.check("띄우기 시간 넘김 뒤 첫 기계에 터미널이 없으면 미확정을 풀고 다시 띄움", starts() == 2 && k.where("kl") == "up box-1 box-1/kl", k.where("kl"), k.out)
 	// 떠 있는 kl을 지우고 다시: 첫 기계에 터미널이 보이면 채택
 	k.fresh()
 	k.add("kl")
@@ -283,9 +262,6 @@ func secKLaunchTimeout(k *K) {
 	k.unset("HC_FAKE_LS_LANE")
 	k.check("띄우기 시간 넘김: 다음 바퀴에 첫 기계의 터미널을 채택(다시 띄우지 않음)", starts() == 1 && k.where("kl") == "up box-1 box-1/kl",
 		k.where("kl"), k.out)
-	if k.impl == "bash" { // 셸 판은 E02(띄운 직후 죽고 첫 기계가 끊김 → 다른 기계에 또)가 그대로 — 알려진 차이(셸 판은 곧 걷는다)
-		return
-	}
 	// 첫 기계가 끊기면 다른 기계에 띄우지 않고 기다린다 — 시간 넘김(F01)과 띄운 직후 죽음(E02) 둘 다 미확정
 	for _, env := range [][]string{{"HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1"}, {"HC_FILL_CRASH_AT=after-launch"}} {
 		k.fresh()
@@ -311,10 +287,8 @@ func secKFetchTimeout(k *K) {
 	k.lj("slow/ke:claude-code:ke")
 	k.runE([]string{"HC_FAKE_FETCH_SLOW=3", "HERDR_TIMEOUT_REMOTE=1"}, "run")
 	k.check("fetch 시간 넘김: 대기열에 없는 선행을 stop으로 정하지 않음(모름)", !strings.HasPrefix(k.gAfv("kp"), "stop"), k.gAfv("kp"), k.out)
-	if k.impl != "bash" { // 셸 판은 fetch 실패(명시)도 stop — 알려진 차이(셸 판은 곧 걷는다)
-		k.runE([]string{"HC_FAKE_FETCH_FAIL=1"}, "run")
-		k.check("fetch 실패: 대기열에 없는 선행을 stop으로 정하지 않음(모름)", !strings.HasPrefix(k.gAfv("kp"), "stop"), k.gAfv("kp"), k.out)
-	}
+	k.runE([]string{"HC_FAKE_FETCH_FAIL=1"}, "run")
+	k.check("fetch 실패: 대기열에 없는 선행을 stop으로 정하지 않음(모름)", !strings.HasPrefix(k.gAfv("kp"), "stop"), k.gAfv("kp"), k.out)
 	k.run("run")
 	k.check("fetch 시간 넘김 뒤 다음 바퀴(정상): 선행 들어감", strings.HasPrefix(k.gAfv("kp"), "go 들어감"), k.gAfv("kp"))
 	write(k.t, k.T+"/commits", "")

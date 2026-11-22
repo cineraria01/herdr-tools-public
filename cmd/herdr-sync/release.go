@@ -1,15 +1,19 @@
 package main
 
-// 릴리스: Go 판 도구 바이너리를 맥에서 한 번 지어 공개 저장소 릴리스로 올리고, 기계는 받아 쓴다
-// (2026-11-21 사용자 「각 컴퓨터 마다 빌드 하지말고 github 에다가 빌드 한것도 처리해서 차라리 각 컴퓨터에서는 받아서 하면 어때 ? <앱 저장소> 과 같은 방식으로」 — 이름은 개인 값이라 가림).
-//   - 빌드: herdr-tools-publish가 개인 값·비밀 꼴을 검사하고 내보낸 바로 그 비공개 커밋(HERDR_TOOLS_PUBLISH_RESULT로 받는다)을 git archive로
-//     꺼내 그 트리에서 cmd/* 를 darwin/arm64로, 리눅스 대상 기계가 있는 도구(linuxTools)는 linux/amd64로도(-trimpath, CGO_ENABLED=0, GOTOOLCHAIN=local, 커밋을 -ldflags -X로 새김, 상한 HERDR_TIMEOUT_BUILD 600초).
-//     그 커밋의 트리가 범용 저장소 HEAD(기계에 깐 소스)와 다르면 이번에는 올리지 않는다(gofix-ops A02·O-02 — 검사한 소스 = 지은 소스 = 깐 소스)
-//   - 올리기: publish.repo의 릴리스 bin-<커밋 12자>에 도구별 바이너리(<도구> = darwin/arm64, <도구>-linux-amd64) + SHA256SUMS 하나(gh). 이미 올린 자산은 덮지 않는다(--clobber 없음 — gh는 덮을 때
-//     먼저 지운다, A05): 같은 SHA256SUMS면 빠진 자산만 채우고, 다르면 크게 경고하고 둔다. 릴리스 조회가 「없음」이 아닌 오류(인증·통신·시간 넘김)면 모름 — 건너뜀
-//   - 받기: macOS 기계(맥 포함)와 리눅스 기계(x86_64만 — installFor, 2026-11-21 go-linux-dist 사용자 「난 다 고로 변경 하고 싶어」)마다 맥이 계산한 sha256과 소스 판(srcDigest)을 넘기고, 그 기계가 공개 릴리스를 토큰 없이 받아
-//     해시가 같을 때만 ~/.local/lib/herdr-go/.bin/<도구>에 바꿔 넣고 곁에 <도구>.src(소스 판)를 적는다(install). 다르면 쓰지 않고 크게 경고
-//   - lib/go-run.sh: <도구>.src가 지금 소스 판과 같으면 받은 것을 쓰고(빌드 안 함), 다르면 그 기계에서 빌드, 그것도 안 되면 셸 판
+// 바이너리: herdr-tools 도구는 Go 바이너리 하나다(2026-11-22 사용자 「셸 판 그냥 지금 즉시 지우고 go 로 된것만 집중 개선 수정하자」 — go-shell-remove).
+// sync.list 바이너리 줄(`<묶음> .local/bin/<도구> tools:cmd/<도구> <대상>`)마다 그 대상 기계의 ~/.local/bin/<도구>에 원자 교체로 깐다.
+//   - 짓기·올리기(release — 2026-11-21 사용자 「각 컴퓨터 마다 빌드 하지말고 github 에다가 빌드 한것도 처리해서 … 각 컴퓨터에서는 받아서」):
+//     herdr-tools-publish가 개인 값·비밀 꼴을 검사하고 내보낸 바로 그 비공개 커밋(HERDR_TOOLS_PUBLISH_RESULT)을 git archive로 꺼내
+//     바이너리 줄의 도구를 darwin/arm64로, 리눅스 기계에 가는 도구는 linux/amd64로도 짓는다(-trimpath, CGO_ENABLED=0, GOTOOLCHAIN=local,
+//     커밋을 -ldflags -X로 새김, 상한 HERDR_TIMEOUT_BUILD 600초). 그 커밋의 트리가 범용 저장소 HEAD와 다르면 올리지 않는다(gofix-ops A02).
+//     publish.repo 릴리스 bin-<커밋 12자>에 <도구>·<도구>-linux-amd64·SHA256SUMS. 이미 올린 자산은 덮지 않는다(A05)
+//   - 깔기(installSh — 기계마다, 맥도): 받은 것의 sha256이 맥이 계산한 값과 같으면 그것을, 못 받으면(릴리스 없음·통신·해시·다른 CPU)
+//     그 기계 ~/.local/lib/herdr-go(Go 소스 나무 줄이 깐다)의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다.
+//     어느 쪽이든 같은 폴더 임시 파일 → mv 한 번(본체 하나가 한 세대 — 옛 「.bin/<도구> + .src 두 파일」을 따로 바꾸던 길은 없다, R-01·R-11).
+//     옛 판으로 되돌릴 일도 없다: mv가 안 되면 옛 본체 그대로다. 기록(~/.local/state/herdr-sync/bin.tsv: 도구·본체 sha256·소스 판)은
+//     「이미 이 판인가」를 알아보는 데만 쓴다 — 실행은 기록을 보지 않는다. 기록이 본체와 어긋나면(쓰다 죽음) 판 모름으로 보고 다시 깐다.
+//     받기·짓기 모두 안 되면 그 기계는 「다름 (바이너리)」, 크게 경고하고 그 기계의 설정·지움은 미룬다(옛 포장으로 떨어지지 않는다)
+//   - 쓰는 쪽은 herdr-sync 하나(맥 잠금 안)다 — 「부를 때 짓는」 실행기(옛 lib/go-run.sh)는 없다(R-10·R-40)
 // 로그에는 publish.repo 주소 원문을 찍지 않는다(설정 키 이름만 — 주소에 인증값이 들 수 있다, A12).
 // 시험용: HERDR_SYNC_RELEASE_URL(받는 주소 앞부분, 기본 https://github.com/<주인/이름>/releases/download — file://도 됨)
 
@@ -33,81 +37,109 @@ import (
 	"herdr-tools/internal/proc"
 )
 
-// install: 기계에서 받아 바꿔 넣는 조각(POSIX sh — 리눅스 dash도). 인자: (주소 sha256 도구 소스판)…, 도구마다 정확히 한 줄
-// W(씀)·S(같음)·E(까닭 — 옛 판 그대로)·K(건너뜀 — 그 기계에 소스가 없거나 그 기계 소스 판이 보낸 판과 다름: 받은 바이너리를 go-run이 쓰지 않을 테니 바꾸지 않는다, C02).
-// 바꿔 넣기(A03): 받은 것을 sha256으로 확인한 뒤 옛 바이너리·옛 .src를 곁에 하드 링크로 걸어 두고, .src 지움 → 바이너리 → .src 순으로 바꾼다.
-// 어느 단계에서 실패하든 걸어 둔 옛 판으로 되돌린다(바이너리 먼저 — 그사이 「옛 바이너리 + .src 없음」은 go-run이 판 모름으로 보고 다시 짓는다).
-// 이 기계 소스 판(cur)은 lib/go-run.sh go_run_src와 같은 계산(srcDigest와 같은 값 — TestInstallSourceMismatch가 본다)
-const install = `g=$HOME/.local/lib/herdr-go
-d=$g/.bin
-if [ ! -f "$g/go.mod" ]; then
-  while [ $# -ge 4 ]; do printf 'K\t%s\t그 기계에 Go 소스가 없다\n' "$3"; shift 4; done
-  exit 0
-fi
-mkdir -p "$d" || exit 1
+// binUnit: sync.list 바이너리 줄 하나
+type binUnit struct{ tool, t string }
+
+// BINS: 바이너리 줄들(parseList)
+var BINS []binUnit
+
+// installSh: 기계에서 바이너리를 까는 조각(POSIX sh — 리눅스 dash도). 인자: <모드 set|check> <커밋12> <소스판> <CPU(uname -m)>, 그다음 (도구 주소 sha256)…
+// (주소·sha256이 -이면 받지 않고 짓기만). 도구마다 정확히 한 줄: S(이미 이 판)·W(받음)·B(지음 — 까닭)·E(못 깖 — 까닭, 옛 본체 그대로)·
+// D(--check: 다름 — 까닭). W·B 셋째 칸이 있으면 기록을 못 씀(다음 실행이 다시 깐다).
+// 이 기계 소스 판(cur)은 srcDigest와 같은 계산(TestInstallShSourceDigest가 본다)
+const installSh = `mode=$1 c12=$2 src=$3 arch=$4; shift 4
+b=$HOME/.local/bin
+st=$HOME/.local/state/herdr-sync/bin.tsv
+g=$HOME/.local/lib/herdr-go
+tab=$(printf '\t')
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | awk '{print $1}'; }
-cur=$(cd "$g" && find go.mod cmd internal -type f ! -path '*/.*' 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cksum | cksum | awk '{print $1"."$2}')
-while [ $# -ge 4 ]; do
-  url=$1 sum=$2 t=$3 src=$4; shift 4
-  if [ "$cur" != "$src" ]; then printf 'K\t%s\t그 기계 소스 판이 다르다\n' "$t"; continue; fi
-  if [ -x "$d/$t" ] && [ "$(cat "$d/$t.src" 2>/dev/null)" = "$src" ] && [ "$(sha "$d/$t")" = "$sum" ]; then printf 'S\t%s\n' "$t"; continue; fi
-  f=$d/.$t.dl.$$ s=$d/.$t.src.$$ o=$d/.$t.old.$$ os=$d/.$t.oldsrc.$$
-  if ! curl -fsSL --max-time 300 -o "$f" "$url"; then rm -f "$f"; printf 'E\t%s\t받지 못했다\n' "$t"; continue; fi
-  if [ "$(sha "$f")" != "$sum" ]; then rm -f "$f"; printf 'E\t%s\t해시가 다르다 — 쓰지 않음\n' "$t"; continue; fi
-  rm -f "$o" "$os"
-  if ! { chmod 755 "$f" && printf '%s\n' "$src" > "$s" && { [ ! -e "$d/$t" ] || ln "$d/$t" "$o"; } && { [ ! -e "$d/$t.src" ] || ln "$d/$t.src" "$os"; }; }; then
-    rm -f "$f" "$s" "$o" "$os"; printf 'E\t%s\t준비하지 못했다\n' "$t"; continue
+gob() {
+  command -v go 2>/dev/null && return 0
+  for x in /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do [ -x "$x" ] && { echo "$x"; return 0; }; done
+  return 0
+}
+um=$(uname -m); [ "$um" != amd64 ] || um=x86_64
+cur=
+[ ! -f "$g/go.mod" ] || cur=$(cd "$g" && find go.mod cmd internal -type f ! -path '*/.*' 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cksum | cksum | awk '{print $1"."$2}')
+[ "$mode" = check ] || mkdir -p "$b" "${st%/*}" || exit 1
+rec() {
+  { [ ! -f "$st" ] || awk -F'\t' -v t="$1" '$1 != t' "$st"; printf '%s\t%s\t%s\n' "$1" "$2" "$src"; } > "$st.$$" && mv -f "$st.$$" "$st" && return 0
+  rm -f "$st.$$"; return 1
+}
+while [ $# -ge 3 ]; do
+  t=$1 url=$2 sum=$3; shift 3
+  have=
+  [ ! -f "$b/$t" ] || have=$(sha "$b/$t")
+  if [ -n "$have" ] && grep -qxF "$t$tab$have$tab$src" "$st" 2>/dev/null; then printf 'S\t%s\n' "$t"; continue; fi
+  if [ -n "$have" ] && [ "$have" = "$sum" ]; then
+    [ "$mode" = check ] || rec "$t" "$have" || :
+    printf 'S\t%s\n' "$t"; continue
   fi
-  if rm -f "$d/$t.src" && mv -f "$f" "$d/$t" && mv -f "$s" "$d/$t.src"; then
-    rm -f "$o" "$os"; printf 'W\t%s\n' "$t"
+  if [ "$mode" = check ]; then
+    if [ -n "$have" ]; then printf 'D\t%s\t판이 다르거나 모름\n' "$t"; else printf 'D\t%s\t없음\n' "$t"; fi
+    continue
+  fi
+  n=$b/.$t.new.$$ why= how=W
+  rm -f "$n" "$n.log"
+  if [ "$url" = - ]; then why='릴리스 없음'
+  elif [ "$um" != "$arch" ]; then why="CPU가 $um"
+  elif ! curl -fsSL --max-time 300 -o "$n" "$url" 2>/dev/null; then why='받지 못했다'
+  elif [ "$(sha "$n")" != "$sum" ]; then why='받은 것의 해시가 다르다'
+  fi
+  if [ -n "$why" ]; then
+    rm -f "$n"; how=B
+    go=$(gob)
+    if [ -z "$go" ]; then printf 'E\t%s\t%s · 그 기계에 go가 없다\n' "$t" "$why"; continue; fi
+    if [ -z "$cur" ] || [ "$cur" != "$src" ]; then printf 'E\t%s\t%s · 그 기계 Go 소스 판이 범용 저장소와 다르다\n' "$t" "$why"; continue; fi
+    if ! (cd "$g" && GOTOOLCHAIN=local CGO_ENABLED=0 GOOS= GOARCH= GOFLAGS= \
+        "$go" build -trimpath -buildvcs=false -ldflags "-X herdr-tools/internal/version.Commit=$c12" -o "$n" "./cmd/$t" </dev/null >"$n.log" 2>&1); then
+      printf 'E\t%s\t%s · 그 기계에서 짓지 못했다: %s\n' "$t" "$why" "$(tail -n 1 "$n.log" 2>/dev/null)"; rm -f "$n" "$n.log"; continue
+    fi
+    rm -f "$n.log"
+  fi
+  if chmod 755 "$n" && s=$(sha "$n") && [ -n "$s" ] && mv -f "$n" "$b/$t"; then
+    note=$why
+    rec "$t" "$s" || note="$why${why:+ · }기록을 쓰지 못했다"
+    if [ -n "$note" ]; then printf '%s\t%s\t%s\n' "$how" "$t" "$note"; else printf '%s\t%s\n' "$how" "$t"; fi
   else
-    rm -f "$d/$t.src"
-    if [ -e "$o" ]; then ln -f "$o" "$d/$t"; else rm -f "$d/$t"; fi
-    [ ! -e "$os" ] || ln -f "$os" "$d/$t.src"
-    rm -f "$f" "$s" "$o" "$os"; printf 'E\t%s\t바꿔 넣지 못했다 — 옛 판으로 되돌림\n' "$t"
+    rm -f "$n"; printf 'E\t%s\t바꿔 넣지 못했다 — 옛 본체 그대로\n' "$t"
   fi
 done
 `
 
-// lxGuard: 리눅스 받기 앞머리 — 올리는 리눅스 바이너리는 amd64뿐이라 다른 구조면 받지 않고 도구마다 K 한 줄(go-run은 그 기계에서 짓거나 셸 판)
-const lxGuard = `case $(uname -m) in
-  x86_64|amd64) ;;
-  *) while [ $# -ge 4 ]; do printf 'K\t%s\t리눅스 amd64가 아니다\n' "$3"; shift 4; done; exit 0 ;;
-esac
-`
-
-// installFor: 그 기계 uname(-s)에 맞는 받기 조각
-func installFor(osname string) string {
-	if osname == "Linux" {
-		return lxGuard + install
-	}
-	return install
+// relInfo: 이번 실행의 바이너리 판 — 받을 곳(릴리스가 이 빌드와 같다고 확인됐을 때만 tag)과 짓는 판
+type relInfo struct {
+	c12, src  string            // 새길 커밋 12자 · 소스 판(srcDigest)
+	base, tag string            // 받는 주소 앞부분 · 릴리스 태그 — 비면 받지 않고 기계마다 짓는다
+	sums      map[string]string // 자산 이름 → sha256
+	lx        map[string]bool   // linux/amd64 자산이 있는 도구
 }
 
-// linuxTools: tools 가운데 linux/amd64로도 지을 도구 — 범용 저장소(repo)의 bin/<도구> 줄 대상이 리눅스 기계에 닿을 때(all이거나
-// osOf가 Linux라고 아는 기계 이름). 이름을 박지 않고 sync.list에서 고른다(all 도구가 늘어도 따라온다).
-// ponytail: 이름으로 리눅스 기계를 고른 줄은 그 기계가 이번에 닿아야 알아본다 — 못 닿은 날 지은 SHA256SUMS와 달라 그 커밋 릴리스를
-// 덮지 않고 건너뛸 수 있다(다음 커밋에서 맞음). 지금 리눅스로 가는 도구 줄은 all뿐이다. 늘면 기계 OS를 상태에 적어 둔다
-func linuxTools(tools []string, units []unit, repo string, osOf map[string]string) []string {
-	var lx []string
-	for m, o := range osOf {
-		if o == "Linux" {
-			lx = append(lx, m)
+// binTools: 그 기계에 갈 바이너리 도구(이름 순, 겹침 없이)
+func binTools(m, osname string) []string {
+	seen := map[string]bool{}
+	var r []string
+	for _, b := range BINS {
+		if targets(b.t, m, osname) && !seen[b.tool] {
+			seen[b.tool] = true
+			r = append(r, b.tool)
 		}
 	}
+	sort.Strings(r)
+	return r
+}
+
+// linuxTools: tools 가운데 linux/amd64로도 지을 도구 — 바이너리 줄 대상이 all이거나 osOf가 Linux라고 아는 기계 이름을 담을 때
+func linuxTools(tools []string, bins []binUnit, osOf map[string]string) []string {
 	want := map[string]bool{}
-	for _, u := range units {
-		t, ok := strings.CutPrefix(u.r, "bin/")
-		if u.tree || u.d != repo || !ok || strings.Contains(t, "/") {
+	for _, b := range bins {
+		if b.t == "all" {
+			want[b.tool] = true
 			continue
 		}
-		if u.t == "all" {
-			want[t] = true
-			continue
-		}
-		for _, m := range lx {
-			if u.t != "macos" && u.t != "local" && targets(u.t, m, "Linux") {
-				want[t] = true
+		for m, o := range osOf {
+			if o == "Linux" && b.t != "macos" && b.t != "local" && targets(b.t, m, "Linux") {
+				want[b.tool] = true
 			}
 		}
 	}
@@ -115,6 +147,118 @@ func linuxTools(tools []string, units []unit, repo string, osOf map[string]strin
 	for _, t := range tools {
 		if want[t] {
 			r = append(r, t)
+		}
+	}
+	return r
+}
+
+// installBins: 그 기계(맥은 "맥")에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다)
+func installBins(m, osname string, rel *relInfo) ([]string, bool) {
+	tools := binTools(m, osname)
+	if len(tools) == 0 || rel == nil {
+		return nil, true
+	}
+	mode, arch := "set", "arm64"
+	if check {
+		mode = "check"
+	}
+	if osname == "Linux" {
+		arch = "x86_64"
+	}
+	args := []string{mode, rel.c12, rel.src, arch}
+	for _, t := range tools {
+		a := t
+		if osname == "Linux" {
+			a = t + "-linux-amd64"
+		}
+		if rel.tag != "" && (osname != "Linux" || rel.lx[t]) {
+			args = append(args, t, rel.base+"/"+rel.tag+"/"+a, rel.sums[a])
+		} else {
+			args = append(args, t, "-", "-")
+		}
+	}
+	var c *exec.Cmd
+	if m == "맥" {
+		c = exec.Command("sh", append([]string{"-c", installSh, "_"}, args...)...)
+	} else {
+		c = exec.Command("hc", append([]string{"exec", "--timeout", "1800", "--on", m, "--", "sh", "-c", installSh, "_"}, args...)...)
+	}
+	var errb bytes.Buffer
+	c.Stderr = &errb
+	out, rc := output(c)
+	ok := rc == 0
+	for _, p := range installReport(m, tools, out) {
+		switch {
+		case p.bad:
+			ok = false
+			fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", p.s)
+		case p.warn:
+			warn("%s", p.s)
+		default:
+			say("%s", p.s)
+		}
+		if p.diff {
+			ok = false
+		}
+	}
+	if rc != 0 {
+		fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s 바이너리 깔기 실패 (종료 %d) %s !!!\n", m, rc, strings.TrimSpace(errb.String()))
+	}
+	if !ok {
+		if !check {
+			fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s 바이너리를 다 깔지 못했다 — 그 기계의 설정·지움은 미룬다(옛 도구가 남아 있게). 다음 herdr-sync에서 !!!\n", m)
+		}
+		return []string{"바이너리"}, false
+	}
+	return nil, true
+}
+
+type note struct {
+	s               string
+	warn, bad, diff bool // 경고 · 못 깖(크게) · 다름(--check)
+}
+
+// installReport: installSh 출력 → 알릴 줄. 보낸 도구마다 S·W·B·E·D 가운데 정확히 한 줄이어야 한다 — 빠짐·겹침·모르는 도구는 못 깖(C03)
+func installReport(m string, tools []string, out string) []note {
+	want := map[string]bool{}
+	for _, t := range tools {
+		want[t] = true
+	}
+	seen := map[string]int{}
+	var r []note
+	for _, l := range splitLines(out) {
+		a := strings.Split(l, "\t")
+		if len(a) < 2 || !want[a[1]] {
+			r = append(r, note{s: fmt.Sprintf("%s 바이너리 깔기: 알 수 없는 응답 %q", m, l), bad: true})
+			continue
+		}
+		seen[a[1]]++
+		why := ""
+		if len(a) > 2 {
+			why = a[2]
+		}
+		switch {
+		case a[0] == "S" && why == "":
+		case a[0] == "W" && why == "":
+			r = append(r, note{s: fmt.Sprintf("%s 받음 %s", m, a[1])})
+		case a[0] == "B" && why != "" && !strings.Contains(why, "기록을 쓰지 못했다"):
+			r = append(r, note{s: fmt.Sprintf("%s 지음 %s (릴리스를 못 받아 그 기계에서 — %s)", m, a[1], why)})
+		case (a[0] == "W" || a[0] == "B") && strings.Contains(why, "기록을 쓰지 못했다"):
+			r = append(r, note{s: fmt.Sprintf("%s 깖 %s — %s(다음 실행이 다시 깐다)", m, a[1], why), warn: true})
+		case a[0] == "E" && why != "":
+			r = append(r, note{s: fmt.Sprintf("%s %s 바이너리를 깔지 못했다: %s", m, a[1], why), bad: true})
+		case a[0] == "D" && why != "" && check:
+			r = append(r, note{s: fmt.Sprintf("%s 다름:바이너리 %s (%s)", m, a[1], why), diff: true})
+		default:
+			r = append(r, note{s: fmt.Sprintf("%s 바이너리 깔기: 알 수 없는 응답 %q", m, l), bad: true})
+		}
+	}
+	for _, t := range tools {
+		switch {
+		case seen[t] == 0:
+			r = append(r, note{s: fmt.Sprintf("%s %s 바이너리 깔기 응답이 없다 — 다음 herdr-sync에서", m, t), bad: true})
+		case seen[t] > 1:
+			r = append(r, note{s: fmt.Sprintf("%s %s 바이너리 깔기 응답이 %d번 — 다음 herdr-sync에서 다시 본다", m, t, seen[t]), bad: true})
 		}
 	}
 	return r
@@ -132,7 +276,7 @@ func githubSlug(url string) string {
 
 // srcDigest: 모듈 소스 판 — go.mod·cmd/**·internal/** 의 일반 파일 전부(go:embed 글 포함 — 임베드만 바뀐 판도 알아보게, gofix-core B10·M4)를
 // 상대 경로 바이트 순으로 「crc 크기 경로」 줄로 적은 목록의 cksum(crc.크기). 숨김 파일·숨김 폴더 아래는 뺀다(herdr-sync 나무 줄이 걷지 않아 기계에 없다).
-// lib/go-run.sh go_run_src(`find … ! -path '*/.*' | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
+// installSh의 cur(`find … ! -path '*/.*' | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
 func srcDigest(dir string) (string, error) {
 	var files []string
 	for _, top := range []string{"go.mod", "cmd", "internal"} {
@@ -220,23 +364,46 @@ func buildMax() time.Duration {
 
 var hex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// release: checked = herdr-tools-publish가 검사하고 내보낸 비공개 커밋(40자)
-func release(pub, checked string, machines []string, pubwarn func(string)) {
+// binsPrepare: 이번 실행의 바이너리 판(바이너리 줄이 없으면 nil). --check가 아니면 공개 내보내기(publish) 뒤 릴리스를 짓고 올린다 —
+// 기계 맞추기보다 먼저(새 본체가 깔린 뒤에 설정·지움이 옛 포장을 걷게)
+func binsPrepare(pubwarn func(string)) *relInfo {
+	checked, pub := "", ""
+	if !check {
+		checked, pub = publish(pubwarn)
+	}
+	if len(BINS) == 0 {
+		return nil
+	}
+	head, rc := gitq("-C", REPO, "rev-parse", "HEAD")
+	src, err := srcDigest(REPO)
+	if rc != 0 || len(head) < 12 || err != nil {
+		pubwarn("바이너리 판을 읽지 못했다(범용 저장소 HEAD·소스) — 바이너리를 깔지 않는다")
+		return &relInfo{c12: "unknown", src: "unknown"}
+	}
+	rel := &relInfo{c12: head[:12], src: src}
+	if !check && pub != "" {
+		release(rel, pub, checked, pubwarn)
+	}
+	return rel
+}
+
+// release: checked = herdr-tools-publish가 검사하고 내보낸 비공개 커밋(40자). 되면 rel에 받을 곳(tag·sums·lx)을 채운다
+func release(rel *relInfo, pub, checked string, pubwarn func(string)) {
 	if !isFile(REPO + "/go.mod") {
 		return
 	}
 	slug := githubSlug(pub)
 	if slug == "" {
-		warn("릴리스 건너뜀 — 설정 publish.repo가 GitHub 저장소가 아니다")
+		warn("릴리스 건너뜀 — 설정 publish.repo가 GitHub 저장소가 아니다. 기계는 각자 짓는다")
 		return
 	}
 	gob := goBin()
 	if gob == "" {
-		pubwarn("릴리스 건너뜀 — 맥에 go가 없다(brew install go). 기계는 각자 빌드한다")
+		pubwarn("릴리스 건너뜀 — 맥에 go가 없다(brew install go). 기계는 각자 짓는다")
 		return
 	}
 	if !hex40.MatchString(checked) {
-		pubwarn("릴리스 건너뜀 — herdr-tools-publish가 검사한 커밋을 알려 주지 않았다(HERDR_TOOLS_PUBLISH_RESULT). 기계는 각자 빌드한다")
+		pubwarn("릴리스 건너뜀 — herdr-tools-publish가 검사한 커밋을 알려 주지 않았다(HERDR_TOOLS_PUBLISH_RESULT). 기계는 각자 짓는다")
 		return
 	}
 	ht, rc1 := gitq("-C", REPO, "rev-parse", "HEAD^{tree}")
@@ -265,25 +432,15 @@ func release(pub, checked string, machines []string, pubwarn func(string)) {
 		pubwarn("릴리스 건너뜀 — 검사한 커밋을 풀지 못했다(tar)")
 		return
 	}
-	src, err := srcDigest(srcd)
-	if err != nil {
-		pubwarn("릴리스 건너뜀 — " + err.Error())
-		return
-	}
 	var tools []string
-	ents, err := os.ReadDir(srcd + "/cmd")
-	if err != nil {
-		pubwarn("릴리스 건너뜀 — cmd 폴더를 읽지 못했다")
-		return
-	}
-	for _, e := range ents {
-		if e.IsDir() {
-			tools = append(tools, e.Name())
+	seen := map[string]bool{}
+	for _, b := range BINS {
+		if !seen[b.tool] {
+			seen[b.tool] = true
+			tools = append(tools, b.tool)
 		}
 	}
-	if len(tools) == 0 {
-		return
-	}
+	sort.Strings(tools)
 	out := TMP + "/rel"
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		pubwarn("릴리스 건너뜀 — 임시 폴더")
@@ -291,7 +448,7 @@ func release(pub, checked string, machines []string, pubwarn func(string)) {
 	}
 	cache := os.Getenv("GOCACHE")
 	if cache == "" {
-		cache = STATE + "/go-build" // 맥 한 곳에만 쌓인다(기계는 받아 쓰니 빌드 캐시가 없다)
+		cache = STATE + "/go-build" // 맥 한 곳에만 쌓인다
 	}
 	sums := map[string]string{} // 자산 이름 → sha256
 	build := func(goos, goarch, t, name string) bool {
@@ -304,10 +461,10 @@ func release(pub, checked string, machines []string, pubwarn func(string)) {
 		switch proc.WaitMax(b, "", buildMax()) {
 		case 0:
 		case proc.TimeoutCode:
-			pubwarn("릴리스 빌드 시간 넘김 (" + name + ") — 이번 릴리스는 보류, 기계는 각자 빌드한다")
+			pubwarn("릴리스 빌드 시간 넘김 (" + name + ") — 이번 릴리스는 보류, 기계는 각자 짓는다")
 			return false
 		default:
-			pubwarn("릴리스 빌드 실패 (" + name + ") — 기계는 각자 빌드한다")
+			pubwarn("릴리스 빌드 실패 (" + name + ") — 기계는 각자 짓는다")
 			return false
 		}
 		s, err := sha256File(out + "/" + name)
@@ -324,12 +481,14 @@ func release(pub, checked string, machines []string, pubwarn func(string)) {
 			return
 		}
 	}
-	lxt := linuxTools(tools, U, REPO, machOS)
+	lxt := linuxTools(tools, BINS, machOS)
+	lx := map[string]bool{}
 	for _, t := range lxt {
 		if !build("linux", "amd64", t, t+"-linux-amd64") {
 			return
 		}
 		assets = append(assets, t+"-linux-amd64")
+		lx[t] = true
 	}
 	var sb strings.Builder
 	for _, a := range assets {
@@ -342,45 +501,7 @@ func release(pub, checked string, machines []string, pubwarn func(string)) {
 	if !upload(slug, tag, c12, out, assets, sb.String(), pubwarn) {
 		return
 	}
-	base := envOr("HERDR_SYNC_RELEASE_URL", "https://github.com/"+slug+"/releases/download")
-	var args, lxArgs []string
-	for _, t := range tools {
-		args = append(args, base+"/"+tag+"/"+t, sums[t], t, src)
-	}
-	for _, t := range lxt {
-		a := t + "-linux-amd64"
-		lxArgs = append(lxArgs, base+"/"+tag+"/"+a, sums[a], t, src) // 받는 자리는 .bin/<도구> 그대로
-	}
-	put := func(m string, tools []string, c *exec.Cmd) {
-		var errb bytes.Buffer
-		c.Stderr = &errb
-		o, rc := output(c)
-		for _, p := range installReport(m, tag, tools, o) {
-			if p.warn {
-				pubwarn(p.s)
-			} else {
-				say("%s", p.s)
-			}
-		}
-		if rc != 0 {
-			pubwarn(fmt.Sprintf("%s 바이너리 받기 실패 (%s) %s", m, tag, strings.TrimSpace(errb.String())))
-		}
-	}
-	put("맥", tools, exec.Command("sh", append([]string{"-c", install, "_"}, args...)...))
-	for _, m := range machines {
-		ts, a := tools, args
-		switch machOS[m] {
-		case "Darwin":
-		case "Linux":
-			if len(lxt) == 0 {
-				continue
-			}
-			ts, a = lxt, lxArgs
-		default:
-			continue
-		}
-		put(m, ts, exec.Command("hc", append([]string{"exec", "--timeout", "600", "--on", m, "--", "sh", "-c", installFor(machOS[m]), "_"}, a...)...))
-	}
+	rel.c12, rel.base, rel.tag, rel.sums, rel.lx = c12, envOr("HERDR_SYNC_RELEASE_URL", "https://github.com/"+slug+"/releases/download"), tag, sums, lx
 }
 
 // upload: 릴리스를 만들거나 빠진 자산을 채운다. 이미 올린 자산은 덮지 않는다(A05). 받기로 넘어가도 되면 참(릴리스가 이 빌드와 같다고 확인됨)
@@ -397,15 +518,15 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 	if rc != 0 {
 		if rc != proc.TimeoutCode && strings.Contains(strings.ToLower(errs), "not found") { // gh: 「release not found」 — 없음이 확인됨
 			args := append([]string{"release", "create", tag, "--repo", slug, "--title", tag,
-				"--notes", "herdr-tools " + c12 + " Go 판 도구 바이너리(<도구> darwin/arm64, <도구>-linux-amd64) — herdr-sync가 맥에서 지어 올림, 기계는 SHA256SUMS로 확인해 받는다"}, files(all)...)
+				"--notes", "herdr-tools " + c12 + " Go 도구 바이너리(<도구> darwin/arm64, <도구>-linux-amd64) — herdr-sync가 맥에서 지어 올림, 기계는 SHA256SUMS로 확인해 받는다"}, files(all)...)
 			if _, rc, _ := gh(args...); rc != 0 {
-				pubwarn("릴리스 만들기 실패 " + tag + " (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 빌드한다")
+				pubwarn("릴리스 만들기 실패 " + tag + " (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
 				return false
 			}
 			say("릴리스 올림 %s", tag)
 			return true
 		}
-		pubwarn("릴리스 조회 실패 " + tag + " (gh release view — 인증·통신·시간 넘김, 있는지 모름) — 이번에는 올리지 않는다, 다음 herdr-sync에서")
+		pubwarn("릴리스 조회 실패 " + tag + " (gh release view — 인증·통신·시간 넘김, 있는지 모름) — 이번에는 올리지 않는다, 기계는 각자 짓는다")
 		return false
 	}
 	have := map[string]bool{}
@@ -416,7 +537,7 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 		old := TMP + "/relold"
 		os.MkdirAll(old, 0o700)
 		if _, rc, _ := gh("release", "download", tag, "--repo", slug, "--pattern", "SHA256SUMS", "--dir", old, "--clobber"); rc != 0 {
-			pubwarn("릴리스 확인 실패 " + tag + " (gh release download SHA256SUMS) — 이번에는 올리지도 받지도 않는다, 다음 herdr-sync에서")
+			pubwarn("릴리스 확인 실패 " + tag + " (gh release download SHA256SUMS) — 이번에는 받지 않는다, 기계는 각자 짓는다")
 			return false
 		}
 		b, err := os.ReadFile(old + "/SHA256SUMS")
@@ -425,7 +546,7 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 			return false
 		}
 		if string(b) != sums {
-			pubwarn("릴리스 " + tag + "의 SHA256SUMS가 이번 빌드와 다르다 — 덮지 않는다(올린 자산을 지우지 않게). 기계는 각자 빌드한다")
+			pubwarn("릴리스 " + tag + "의 SHA256SUMS가 이번 빌드와 다르다 — 덮지 않는다(올린 자산을 지우지 않게). 기계는 각자 짓는다")
 			return false
 		}
 	}
@@ -440,52 +561,9 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 		return true
 	}
 	if _, rc, _ := gh(append([]string{"release", "upload", tag, "--repo", slug}, files(miss)...)...); rc != 0 {
-		pubwarn("릴리스 올리기 실패 " + tag + " (gh release upload — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 빌드한다")
+		pubwarn("릴리스 올리기 실패 " + tag + " (gh release upload — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
 		return false
 	}
 	say("릴리스 채움 %s (%s)", tag, strings.Join(miss, " "))
 	return true
-}
-
-type note struct {
-	s    string
-	warn bool
-}
-
-// installReport: install 조각 출력 → 알릴 줄. 보낸 도구마다 W·S·E·K 가운데 정확히 한 줄이어야 한다 — 빠짐·겹침·모르는 도구는 경고(C03)
-func installReport(m, tag string, tools []string, out string) []note {
-	want := map[string]bool{}
-	for _, t := range tools {
-		want[t] = true
-	}
-	seen := map[string]int{}
-	var r []note
-	for _, l := range splitLines(out) {
-		a := strings.Split(l, "\t")
-		if len(a) < 2 || !want[a[1]] {
-			r = append(r, note{fmt.Sprintf("%s 바이너리 받기: 알 수 없는 응답 %q (%s)", m, l, tag), true})
-			continue
-		}
-		seen[a[1]]++
-		switch {
-		case a[0] == "W":
-			r = append(r, note{fmt.Sprintf("%s 받음 %s (%s)", m, a[1], tag), false})
-		case a[0] == "S":
-		case a[0] == "E" && len(a) > 2:
-			r = append(r, note{fmt.Sprintf("%s %s 바이너리를 받지 않음: %s (%s)", m, a[1], a[2], tag), true})
-		case a[0] == "K" && len(a) > 2:
-			r = append(r, note{fmt.Sprintf("%s %s 바이너리 건너뜀: %s (%s)", m, a[1], a[2], tag), false})
-		default:
-			r = append(r, note{fmt.Sprintf("%s 바이너리 받기: 알 수 없는 응답 %q (%s)", m, l, tag), true})
-		}
-	}
-	for _, t := range tools {
-		switch {
-		case seen[t] == 0:
-			r = append(r, note{fmt.Sprintf("%s %s 바이너리 받기 응답이 없다 — 다음 herdr-sync에서 (%s)", m, t, tag), true})
-		case seen[t] > 1:
-			r = append(r, note{fmt.Sprintf("%s %s 바이너리 받기 응답이 %d번 — 다음 herdr-sync에서 다시 본다 (%s)", m, t, seen[t], tag), true})
-		}
-	}
-	return r
 }

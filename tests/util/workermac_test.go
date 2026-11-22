@@ -2,7 +2,7 @@ package util_test
 
 // 옛 tests/worker-mac.test.sh: worker-mac-check·worker-mac-setup 시험. 가짜 ssh·hc(PATH 앞)·임시 HOME 둘(맥·원격)·config.example 사본으로.
 // 원격 쪽 시스템 명령(launchctl·pmset·sudo 등)은 가짜 원격 HOME의 ~/.local/bin에 둔 가짜가 받는다. 실제 기계·네트워크는 쓰지 않는다.
-// 다른 사본은 WORKER_MAC_BIN=<bin 폴더>, 예시 설정은 WORKER_MAC_EXAMPLE=<config.example 폴더>.
+// 예시 설정은 WORKER_MAC_EXAMPLE=<config.example 폴더>.
 
 import (
 	"encoding/json"
@@ -15,11 +15,12 @@ import (
 	"testing"
 )
 
-func workerMacBin() string {
-	if b := os.Getenv("WORKER_MAC_BIN"); b != "" {
-		return b
-	}
-	return filepath.Join(repo, "bin")
+// workerMacBin: worker-mac-check·worker-mac-setup·hc-core-relaunch·herdr-tools-config Go 바이너리를 지은 폴더
+func workerMacBin(t *testing.T) string {
+	t.Helper()
+	tool(t, "worker-mac-setup")
+	tool(t, "hc-core-relaunch")
+	return filepath.Dir(tool(t, "worker-mac-check"))
 }
 
 // hasLine: 줄 하나가 s와 같은가(grep -Fxq).
@@ -83,12 +84,12 @@ func claudeJSON(f string) (bool, []string, bool) {
 }
 
 func TestWorkerMac(t *testing.T) {
-	// 두 도구를 한 흐름으로 본다: 판 스위치는 worker-mac-check 것을 고르고 setup에도 같은 값을 준다
-	eachImpl(t, "worker-mac-check", testWorkerMac)
+	// 두 도구(worker-mac-check·worker-mac-setup)를 한 흐름으로 본다
+	run1(t, testWorkerMac)
 }
 
 func testWorkerMac(t *testing.T, T string, e Env) {
-	BIN := workerMacBin()
+	BIN := workerMacBin(t)
 	EX := os.Getenv("WORKER_MAC_EXAMPLE")
 	if EX == "" {
 		EX = filepath.Join(repo, "config.example")
@@ -97,8 +98,7 @@ func testWorkerMac(t *testing.T, T string, e Env) {
 		t.Fatal("FAIL - 예시 설정이 없다: " + EX + "/config")
 	}
 	TLOG, RHOME, HOME := T+"/log", T+"/rh", T+"/mac"
-	e = e.With(implVar("worker-mac-setup")+"="+e[implVar("worker-mac-check")],
-		"T_LOG="+TLOG, "RHOME="+RHOME, "HOME="+HOME, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+	e = e.With("T_LOG="+TLOG, "RHOME="+RHOME, "HOME="+HOME, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_NOSYSTEM=1")
 	mkdirs(t, T+"/bin", TLOG, RHOME+"/.local/bin", HOME+"/.local/bin", RHOME+"/Library/Application Support/Google/Chrome")
 	os.Symlink(BIN+"/herdr-tools-config", T+"/bin/herdr-tools-config")
@@ -303,7 +303,7 @@ esac
 	newhome()
 	w(R+"/herdr-core", `echo "herdr-core $* PATH=$PATH" >>"$T_LOG/core.log"; echo "{\"live\":0}"`)
 	w(T+"/loginsh", `[ "$1" = -lc ] || exit 9; export PATH="/login/brew:$PATH"; exec /bin/sh -c "$2"`)
-	out, rc = run(T, e, "bash", BIN+"/hc-core-relaunch", "w1")
+	out, rc = run(T, e, BIN+"/hc-core-relaunch", "w1")
 	c.ok("relaunch: 원격에 한 번짜리 launchd 작업을 올림", rc == 0 && grep(read(TLOG+"/launchctl.log"), "^bootstrap gui/"))
 	write(t, TLOG+"/core.log", "")
 	out, rc = run(RHOME, e.With("HOME="+RHOME, "SHELL="+T+"/loginsh", "PATH="+R+":/usr/bin:/bin"), "bash", RHOME+"/.local/state/core-restart.sh")

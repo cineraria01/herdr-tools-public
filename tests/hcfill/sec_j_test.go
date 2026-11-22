@@ -1,7 +1,6 @@
 package hcfill_test
 
-// go-followups-2(2026-11-21): 바깥 명령 시간 상한 · 「완료 뒤 멈춤」 헛알림 빼기 · 큰 파일·바이너리 붙이기. 앞 둘은 Go 판에만 있다
-// (알려진 차이: 셸 판은 바깥 명령 상한·멈춤 알림이 없다). 큰 파일·바이너리는 경로만은 두 판 같다(gofix-fill F14 — 셸 판도 맞춤).
+// go-followups-2(2026-11-21): 바깥 명령 시간 상한 · 「완료 뒤 멈춤」 헛알림 빼기 · 큰 파일·바이너리 붙이기(gofix-fill F14).
 
 import (
 	"strconv"
@@ -13,10 +12,6 @@ import (
 func init() { reg(95, "j", secJ) }
 
 func secJ(k *K) {
-	if k.impl == "bash" {
-		secJPaste(k)
-		return
-	}
 	secJTimeout(k)
 	secJStall(k)
 	secJPaste(k)

@@ -1,7 +1,6 @@
 // hc-sweep: 끝났는데 안 닫힌 hc 에이전트 터미널을 닫고, 레인이 남긴 고아 프로세스·지운 작업 트리의 색인·임시 찌꺼기를 쓴다
-// (Go 판, 2026-11-21 사용자 「모두 고로 옮기고 싶어」). 규칙·출력·기록 꼴은 셸 판 lib/hc-sweep/sweep.py·disk.py 머리글과 같다 —
-// 두 판이 같은 closed.log·events.tsv·disk-low 표식·sweep.lock을 번갈아 써도 된다. 되돌리기: HC_SWEEP_IMPL=bash(bin/hc-sweep 포장).
-// 셸 판과 다른 점(Go 전환 감사 2026-11-21 base에서 고침 — 셸 판은 곧 걷는다): 「알려진 차이」는 lib/hc-sweep/sweep.py 머리글 끝.
+// (2026-11-21 사용자 「모두 고로 옮기고 싶어」 — 옛 셸·파이썬 판은 2026-11-22 go-shell-remove로 걷었다). 규칙·출력·기록 꼴
+// (closed.log·events.tsv·disk-low 표식·sweep.lock)은 옛 판 그대로다.
 package main
 
 import (
@@ -42,21 +41,17 @@ func stateHome() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "state")
 }
 
-// findBinDir: herdr-tools-config·hc-lane이 있는 bin 폴더. 포장(bin/hc-sweep)이 HERDR_BIN_DIR로 준다. 없으면 바이너리 자리에서
-// 짐작(저장소 <루트>/.bin → <루트>/bin, 깔린 곳 ~/.local/lib/herdr-go/.bin → ~/.local/bin)
+// findBinDir: herdr-tools-config·hc-lane이 있는 폴더 = 이 바이너리 곁(링크를 따른 실제 폴더 — 도구는 모두 한 폴더에 깔린다).
+// 실행 파일을 환경 변수로 바꿔 끼우는 길(옛 HERDR_BIN_DIR)은 없다
 func findBinDir() string {
-	if d := os.Getenv("HERDR_BIN_DIR"); d != "" {
-		return d
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	root := filepath.Dir(filepath.Dir(exe))
-	if filepath.Base(root) == "herdr-go" {
-		return filepath.Join(filepath.Dir(filepath.Dir(root)), "bin")
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
 	}
-	return filepath.Join(root, "bin")
+	return filepath.Dir(exe)
 }
 
 // result: 외부 명령 결과. err는 띄우지 못했거나 상한 시간을 넘김(파이썬 판의 예외)

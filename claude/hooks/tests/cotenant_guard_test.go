@@ -26,8 +26,7 @@ const deadST = "Mon Jan  1 00:00:00 2001"
 type cg struct {
 	t        *testing.T
 	T, H     string
-	hook     string   // HOOK
-	impl     []string // <훅>_IMPL=…
+	hook     string   // 훅 이름(hookCmds의 열쇠)
 	hookEnv  []string // HOOK_ENV
 	R        string   // hook의 기본 cwd
 	kids     []*exec.Cmd
@@ -207,13 +206,10 @@ func (c *cg) reg(pid int, session, cwd, name string, st ...string) {
 
 func (c *cg) unreg(pid int) { c.fatal(os.Remove(fmt.Sprintf("%s/.claude/sessions/%d.json", c.H, pid))) }
 
-// exec1: 훅을 bash(PATH에서 찾음, bashBin이 있으면 그것)로 부른다. RC·OUT·ERR을 채운다.
-func (c *cg) exec1(bashBin, hook string, in []byte, env []string) {
+// exec1: 훅을 settings.json 명령 줄 그대로(/bin/sh -c — PATH와 상관없이) 부른다. 가짜 HOME c.H에는 시험 빌드가 걸려 있다. RC·OUT·ERR을 채운다.
+func (c *cg) exec1(in []byte, env []string) {
 	c.t.Helper()
-	cmd := exec.Command(bashBin, hook)
-	cmd.Stdin = strings.NewReader(string(in))
-	cmd.Env = env
-	cmd.Dir = c.T
+	cmd := hookExec(c.hook, in, env, c.T)
 	var o, e strings.Builder
 	cmd.Stdout, cmd.Stderr = &o, &e
 	err := cmd.Run()
@@ -228,7 +224,7 @@ func (c *cg) exec1(bashBin, hook string, in []byte, env []string) {
 
 func (c *cg) env(path string) []string {
 	set := append([]string{"HOME=" + c.H, "PATH=" + path}, c.hookEnv...)
-	return envWith([]string{"CLAUDE_CONFIG_DIR", "HC_TERMINAL_ID"}, append(set, c.impl...)...)
+	return envWith([]string{"CLAUDE_CONFIG_DIR", "HC_TERMINAL_ID"}, set...)
 }
 
 func (c *cg) stdPath() string { return c.T + "/bin:" + os.Getenv("PATH") }
@@ -259,7 +255,7 @@ func (c *cg) run(s, tool, arg string, rest ...string) {
 	if len(rest) > 1 {
 		cwd = rest[1]
 	}
-	c.exec1("bash", c.hook, c.hookIn(s, tool, arg, agentID, cwd), c.env(c.stdPath()))
+	c.exec1(c.hookIn(s, tool, arg, agentID, cwd), c.env(c.stdPath()))
 }
 
 // check NAME WANT_RC [PATTERN in stderr+stdout] (패턴은 Go 정규식으로 옮긴 grep 패턴)
@@ -279,11 +275,11 @@ func (c *cg) checkOK(name string, ok bool, want int) {
 	c.check(name, want)
 }
 
-// calmWaited: 두 판(go·bash)이 함께 쓰는 calm 기다림 합(초). 판마다 따로 세면 상한의 두 배를 기다린다.
+// calmWaited: 이 시험 프로세스의 calm 기다림 합(초) — 시험마다 따로 세면 상한의 몇 배를 기다린다.
 var calmWaited int
 
-// 시간 시험은 맥 부하에 기대지 않게: calm이 1분 부하가 CPU 수 아래로 내리기를 10초마다 기다린다(두 판 합쳐 최대
-// COTENANT_CALM_MAX초, 기본 600 — 단 go test 기한까지 남은 시간의 절반까지: 기다린 뒤 두 판의 나머지가 부하 속에서도 기한 안에
+// 시간 시험은 맥 부하에 기대지 않게: calm이 1분 부하가 CPU 수 아래로 내리기를 10초마다 기다린다(합쳐 최대
+// COTENANT_CALM_MAX초, 기본 600 — 단 go test 기한까지 남은 시간의 절반까지: 기다린 뒤 나머지가 부하 속에서도 기한 안에
 // 끝나게. 2026-11-22 verify-go-timeout — 묶음 전체를 한 번에 돌리면 다른 꾸러미가 만든 부하로 기한 앞 90초까지 기다리다 10분을
 // 넘겼다). 그래도 높으면 시간 검사만 건너뛴다.
 func (c *cg) calm() {
@@ -358,11 +354,7 @@ func (c *cg) race(n int, prefix, tool, arg, cwd string) (passed int, ms int64) {
 			}
 			in := obj("session_id", fmt.Sprintf("%s%d", prefix, k), "cwd", cwd, "tool_name", tool, "tool_input", ti)
 			time.Sleep(time.Until(t0))
-			cmd := exec.Command("bash", c.hook)
-			cmd.Stdin = strings.NewReader(string(in))
-			cmd.Env = c.env(c.stdPath())
-			cmd.Dir = c.T
-			err := cmd.Run()
+			err := hookExec(c.hook, in, c.env(c.stdPath()), c.T).Run()
 			if ee, ok := err.(*exec.ExitError); ok {
 				rcs[k-1] = ee.ExitCode()
 			} else if err != nil {
@@ -380,35 +372,8 @@ func (c *cg) race(n int, prefix, tool, arg, cwd string) (passed int, ms int64) {
 	return passed, ms
 }
 
-// sedLines: 줄마다 처음 하나를 바꾼다(sed s|old|new|)
-func sedLines(s, old, repl string) string {
-	ls := strings.Split(s, "\n")
-	for i := range ls {
-		ls[i] = strings.Replace(ls[i], old, repl, 1)
-	}
-	return strings.Join(ls, "\n")
-}
-
 func TestCotenantGuard(t *testing.T) {
-	hook := hookPath(t, "cotenant-guard")
-	forImpls(t, "cotenant-guard", func(t *testing.T, impl []string) {
-		T, err := os.MkdirTemp(os.Getenv("TMPDIR"), "cotenant-test.")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if T, err = filepath.EvalSymlinks(T); err != nil {
-			t.Fatal(err)
-		}
-		c := &cg{t: t, T: T, H: T + "/home", hook: hook, impl: impl}
-		t.Cleanup(func() {
-			for _, k := range c.kids {
-				k.Process.Kill() //nolint:errcheck // 이미 끝났을 수 있다
-				k.Wait()         //nolint:errcheck
-			}
-			os.RemoveAll(T) //nolint:errcheck // 임시 폴더
-		})
-		cotenantScenario(c)
-	})
+	cotenantScenario(newCG(t))
 }
 
 // cotenantScenario: 셸 시험 차례 그대로 — 뒤 절이 앞 절의 저장소·에이전트(A·B·C)를 이어 쓴다. 600줄 한도로 절을 파일 셋에 나눴다.
@@ -416,33 +381,4 @@ func cotenantScenario(c *cg) {
 	A, B, C := cotenantBasics(c)
 	cotenantFix12(c, A, B, C)
 	cotenantFix34(c)
-}
-
-// settingsHookCommand: settings.json의 PreToolUse 훅 가운데 command에 name이 든 첫 것
-// (jq -r '.hooks.PreToolUse[]?.hooks[]? | select(.command | test(name)) | .command' | head -1). 못 읽으면 "".
-func settingsHookCommand(path, name string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	var s struct {
-		Hooks struct {
-			PreToolUse []struct {
-				Hooks []struct {
-					Command string `json:"command"`
-				} `json:"hooks"`
-			} `json:"PreToolUse"`
-		} `json:"hooks"`
-	}
-	if json.Unmarshal(b, &s) != nil {
-		return ""
-	}
-	for _, m := range s.Hooks.PreToolUse {
-		for _, h := range m.Hooks {
-			if strings.Contains(h.Command, name) {
-				return h.Command
-			}
-		}
-	}
-	return ""
 }

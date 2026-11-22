@@ -1,9 +1,9 @@
-// herdr-hooks: Claude Code PreToolUse 훅의 Go 판 (2026-11-21 hooks-go — 사용자 「모두 고로 옮기고 싶어」).
+// herdr-hooks: Claude Code PreToolUse 훅 (2026-11-21 hooks-go — 사용자 「모두 고로 옮기고 싶어」, 셸 판은 2026-11-22 걷음).
 //
-// claude/hooks/<훅>.sh가 lib/go-run.sh로 이 바이너리를 exec한다: herdr-hooks <훅> (표준 입력 = 훅 JSON).
-// 판정·문구·종료 코드·임대 파일 꼴은 셸 판과 같다 — 두 판이 같은 임대 폴더를 번갈아 읽고 써도 된다.
-// 셸 판이 부르던 jq·perl·awk·grep·plutil의 의미(그 기계의 bash 3.2·BWK awk·perl 바이트 의미·macOS grep 문자 부류)를
-// 그대로 흉내 낸다. 다른 점: jq·perl·awk가 없는 기계에서도 판정한다(셸 판은 그때 통과·막음으로 떨어졌다).
+// settings.json 훅 항목이 ~/.local/bin/herdr-hooks <훅>을 바로 부른다(표준 입력 = 훅 JSON) — 명령 줄은 claude/hooks/tests의 hookCmds.
+// 판정·문구·종료 코드·임대 파일 꼴은 옛 셸 판(claude/hooks/*.sh)과 같고, 그 셸 판이 부르던 jq·perl·awk·grep·plutil의 의미
+// (bash 3.2·BWK awk·perl 바이트 의미·macOS grep 문자 부류)를 그대로 흉내 낸다(골든 testdata/shell-golden.jsonl).
+// 실행 파일·판을 환경 변수로 바꾸지 않는다. 시험 손잡이(HERDR_HOOKS_TEST_*)는 -tags hookstest 빌드에만 있다(knobs*.go).
 //
 //	herdr-hooks cotenant-guard | kill-by-lookup-guard | hc-lane-wait-guard | lane-no-shell-edit | loop-no-question
 //	herdr-hooks --version
