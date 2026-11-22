@@ -59,6 +59,18 @@ func stop(msg string, detail ...string) {
 	os.Exit(1)
 }
 
+// termGate: 작업 폴더에서 도는 살아 있는 다른 터미널이 없음을 확정한다 — 모르거나(hc ls 실패·판독 오류·기계 연결 모름) 있으면 멈춘다.
+// 처음·보관 뒤·teardown 뒤(제거 직전)에 부른다 — 확인과 지우기 사이에 다시 붙은 터미널을 놓치지 않게(재감사2 lane/R-207)
+func termGate(when string) {
+	ps, r := termPairs()
+	if r != 0 {
+		stop(termWhy(r) + ": " + when + "이 폴더에서 도는 터미널을 확인하지 못했다")
+	}
+	if busy := busyTerms(ps, true); len(busy) > 0 {
+		stop(when+"살아 있는 터미널이 이 폴더에서 돈다(끝났으면 hc kill <주소> 뒤 다시): "+wt, strings.Join(busy, "\n"))
+	}
+}
+
 func addDid(s string) {
 	if did != "" {
 		did += ", "
@@ -211,13 +223,7 @@ func cleanMain(args []string) int {
 		}
 	}
 	if dir {
-		ps, r := termPairs()
-		if r != 0 {
-			stop(termWhy(r) + ": 이 폴더에서 도는 터미널을 확인하지 못했다")
-		}
-		if busy := busyTerms(ps, true); len(busy) > 0 {
-			stop("살아 있는 터미널이 이 폴더에서 돈다(끝났으면 hc kill <주소> 뒤 다시): "+wt, strings.Join(busy, "\n"))
-		}
+		termGate("")
 	}
 
 	// 1) 브랜치와 작업 폴더 HEAD가 기준에 들어갔는지(폴더가 없어도 등록의 HEAD로 본다)
@@ -488,6 +494,10 @@ func cleanMain(args []string) int {
 		}
 	}
 
+	// 2.9) 보관(.qa 복사·archive push)하는 사이 그 폴더에 터미널이 다시 붙었을 수 있다 — 지우기 전에 다시 확인(R-207)
+	if dir && !dry {
+		termGate("보관 뒤 ")
+	}
 	// 3) teardown(있으면, 실패해도 계속) → worktree remove → 남은 무시 파일 폴더 → branch -d
 	if reg && dir && xtest("-f", wt+"/.claude/herdr-teardown.sh") {
 		if dry {
@@ -499,6 +509,9 @@ func cleanMain(args []string) int {
 			tailLog(lg)
 			errf("hc-lane clean: herdr-teardown.sh 실패(위는 기록 끝 20줄), 정리는 계속한다\n")
 			td, did = "failed", "teardown"
+		}
+		if !dry {
+			termGate("teardown 뒤 제거 직전 ")
 		}
 	}
 	if reg {
