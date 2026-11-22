@@ -17,6 +17,7 @@ import (
 type entry struct {
 	q, s, l, m, d string // 큐 참조 · 제출 SHA · 레인 · 기록 SHA(없으면 -) · 제출 ID
 	v, p          string // 감사 판정 · 승인 patch-id(판정 없으면 둘 다 빈 값). 일지(cur)에는 안 적는다 — 복구는 착지하지 않는다
+	ow, owr       string // 제출 기록의 지휘·지휘 실행(없으면 빈 값) — 착지가 내는 중간 사건의 주인(ownerEnv)
 }
 
 // M: 병합기 일꾼의 상태(bash 판의 전역 변수들)
@@ -275,7 +276,7 @@ func (m *M) pickBatch() bool {
 		if len(m.b) == 0 {
 			m.bj, m.bd, m.bv, m.bp = mt.jobref, mt.id, mt.verdict, mt.patch
 		}
-		m.b = append(m.b, entry{q: mq, s: ms, l: ln, m: dash(mm), d: mt.id, v: mt.verdict, p: mt.patch})
+		m.b = append(m.b, entry{q: mq, s: ms, l: ln, m: dash(mm), d: mt.id, v: mt.verdict, p: mt.patch, ow: mt.owner, owr: mt.ownerRun})
 		if !batchable || len(m.b) >= n {
 			break
 		}
@@ -432,10 +433,18 @@ func (m *M) round() {
 	if !m.parentAlive() {
 		return
 	}
-	m.lr = fmt.Sprint(m.runCandidate())
+	lrc := m.runCandidate()
 	if !m.parentAlive() {
 		return
 	}
+	if lrc == rcNotRun { // 명령은 안 돌았다 — 후보만 치우고 큐는 그대로 쉰다(이어지면 deferNote가 막힘 사건)
+		if m.fin() {
+			// 까닭은 바퀴마다 같은 글(로그 경로처럼 바뀌는 값을 넣지 않는다 — deferNote가 같은 까닭으로 센다)
+			m.defer_("준비 훅·착지를 띄우지 못했다(모름 — 명령은 안 돎: 고아 기록·시작 시각을 확정 못 함 또는 실행 파일 없음, 자세한 것은 착지 로그)")
+		}
+		return
+	}
+	m.lr = fmt.Sprint(lrc)
 	m.ls1 = time.Now().Unix()
 	tail5(m.lgf)
 	m.judge()

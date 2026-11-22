@@ -12,6 +12,7 @@ import (
 
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/landing"
+	"herdr-tools/internal/proc"
 )
 
 // defer_: 큐를 두고 다음 바퀴에(bash mdefer)
@@ -59,6 +60,28 @@ func (m *M) deferNote() {
 	if err := os.WriteFile(f, []byte(fmt.Sprintf("%d\t%s\t%s\t%s\n", n, m.deferred, since, st)), 0o666); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 쉰 횟수를 쓰지 못했다: %v\n", err)
 	}
+}
+
+// childWait: 죽은 앞 실행이 남긴 착지 자식(<일지>/child)·고아 무리(proc 기록) 때문에 이 바퀴를 쉴 까닭(없으면 빈 값 — 무리 번호·기록
+// 경로를 담아 같은 기록이면 같은 글). count = 쉰 바퀴로 셀 것(deferNote — deferAlarm 바퀴 이어지면 막힘 사건). 기록한 그 착지가 착지
+// 상한 안에서 도는 중이면 세지 않고 끝나기를 기다린다(재감사 3바퀴 merger/R-3M01)
+func (m *M) childWait() (why string, count bool) {
+	rec := m.mj + "/child"
+	switch st, pid := proc.ChildCheck(rec); st {
+	case proc.ChildRunning:
+		if fi, err := os.Stat(rec); err == nil && (landMax() <= 0 || time.Since(fi.ModTime()) < landMax()+time.Minute) {
+			return fmt.Sprintf("앞 실행의 착지 자식 %d 이 아직 돈다(기록 %s)", pid, rec), false
+		}
+		return fmt.Sprintf("앞 실행의 착지 자식 %d 이 착지 상한을 넘겨 아직 돈다(기록 %s)", pid, rec), true
+	case proc.ChildLeft:
+		return fmt.Sprintf("앞 실행의 착지 자식 %d 은 끝났는데 그 무리가 남았다 — 소유를 입증할 수 없어 신호 없이 기다림(기록 %s)", pid, rec), true
+	case proc.ChildUnknown:
+		return fmt.Sprintf("앞 실행의 착지 자식 기록을 확인하지 못했다(모름, 기록 %s)", rec), true
+	}
+	if l := proc.Left(); len(l) > 0 {
+		return fmt.Sprintf("앞 실행이 남긴 자식 무리가 아직 도는지 모른다: %s", strings.Join(l, ", ")), true
+	}
+	return "", false
 }
 
 // reportBlockedKey: 막힘 사건(--name merger)을 결과 열쇠와 함께 상한 안에서 — 같은 열쇠의 사건이 이미 있으면 report가 다시 쓰지 않는다.

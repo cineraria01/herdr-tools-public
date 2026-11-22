@@ -171,7 +171,11 @@ func hc(args ...string) (map[string]any, error) {
 	m["shell"] = isShellPane(sv)
 	delete(m, "argv")
 	delete(m, "env")
-	delete(m, "foreground")
+	if fg := obj(m, "foreground"); fg != nil { // 전경은 이름만(착지한 keep 셸 판정 R-3M02 — argv·pid는 버린다)
+		m["foreground"] = map[string]any{"name": str(fg, "name")}
+	} else {
+		delete(m, "foreground")
+	}
 	return m, nil
 }
 

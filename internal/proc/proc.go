@@ -59,12 +59,20 @@ func Wait(c *exec.Cmd, record string) int { return WaitMax(c, record, 0) }
 // WaitMax: Wait에 상한 max(0이면 없음) — 넘으면 「시간 넘김」 한 줄을 적고 그 무리째 TERM → 5초 → KILL, 종료 코드는 TimeoutCode(모름).
 // record와 상관없이 Run·Start처럼 고아 기록에 올린다(재감사 2바퀴 P3 — 옛 판은 record가 빈 자식을 기록 없이 띄워 이 실행이 SIGKILL로
 // 죽으면 게시기·착지 뒤 명령·준비 훅이 아무도 모르게 남았다). 자식은 기록(고아 기록·record)이 다 쓰인 뒤에야 실제 명령을 시작하고(gate),
-// 기록을 못 쓰면 띄우지 않는다(127). 상한이 있으면 준비(시작 시각·고아 확인)도 그 안에서 — 넘기면 TimeoutCode.
-// 상한이 없으면(max 0 — 병합기 바퀴 일꾼·착지·게시기) 기록에 keep 표식: 이 실행이 죽어도 그 일은 끝까지 가고, 다음 실행은 거두지 않고
-// 끝날 때까지 센다(Orphans — 75로 미룸). 상한이 있으면 Run처럼 다음 실행이 소유를 확인하고 거둔다.
+// 기록을 못 쓰거나 준비(시작 시각·고아 확인)를 못 마치면 띄우지 않는다 — 명령은 한 줄도 안 돌았고 결과는 모름이라 TimeoutCode(재감사
+// 3바퀴 merger/R-3M02 — 옛 판은 127 = 「명령 실패」로 읽혀 병합기가 멀쩡한 제출을 반송했다). 실행 파일이 없어 못 띄운 것만 127.
+// 상한이 없으면(max 0 — 병합기 바퀴 일꾼·게시기) 기록에 keep 표식: 이 실행이 죽어도 그 일은 끝까지 가고, 다음 실행은 거두지 않고
+// 끝날 때까지 센다(Orphans — 75로 미룸). 상한이 있으면 Run처럼 다음 실행이 소유를 확인하고 거둔다(상한이 있어도 keep은 WaitFor).
 // 우두머리가 정상으로 끝난 뒤 무리에 남은 배경 프로세스는 신호 없이 놓아 준다(옛 판과 같음 — 검증이 남긴 배경 프로세스가 다음 실행을
 // 막지 않게, 그 정리는 hc-sweep 고아 몫)
 func WaitMax(c *exec.Cmd, record string, max time.Duration) int {
+	rc, _ := WaitFor(c, record, max, max <= 0)
+	return rc
+}
+
+// WaitFor: WaitMax에 keep(상한이 있어도 고아 기록에 keep 표식 — 이 실행이 죽으면 상한을 걸 쪽이 없지만 그 일은 끝까지 가게 둔다: 병합기
+// 착지, 재감사 3바퀴 merger/R-3M07). ran = 명령을 시작시켰다 — 거짓이면 명령은 한 줄도 안 돌았다(rc는 TimeoutCode 또는 127)
+func WaitFor(c *exec.Cmd, record string, max time.Duration, keep bool) (rc int, ran bool) {
 	setGroup(c)
 	grouped := isGrouped(c)
 	var deadline time.Time
@@ -78,12 +86,12 @@ func WaitMax(c *exec.Cmd, record string, max time.Duration) int {
 		}
 	}
 	path := c.Path
-	if err := launch(c, grouped, deadline, head(c.Args), max, extra, max <= 0); err != nil {
-		if past(deadline) {
-			return TimeoutCode // 「모름 … 띄우지 않음」 줄은 launch가 적었다
+	if err := launch(c, grouped, deadline, head(c.Args), max, extra, keep); err != nil {
+		if past(deadline) || errors.Is(err, ErrTimeout) {
+			return TimeoutCode, false // 「모름 … 띄우지 않음」 줄은 launch가 적었다
 		}
 		fmt.Fprintf(os.Stderr, "%s: %s 를 띄우지 못했다: %v\n", Who, path, err)
-		return 127
+		return 127, false
 	}
 	pid := c.Process.Pid
 	var fired bool
@@ -103,7 +111,7 @@ func WaitMax(c *exec.Cmd, record string, max time.Duration) int {
 			}
 		})
 	}
-	rc := Code(c.Wait())
+	rc = Code(c.Wait())
 	leaderDone(pid, grouped)
 	if t != nil && !t.Stop() {
 		<-stopped // 돈 타이머는 무리를 다 거둔 뒤에
@@ -122,7 +130,7 @@ func WaitMax(c *exec.Cmd, record string, max time.Duration) int {
 		rc = TimeoutCode // 상한이 먼저 — 자식이 TERM을 받고 0으로 끝냈어도 결과는 모름
 	}
 	curMu.Unlock()
-	return rc
+	return rc, true
 }
 
 // StopCurrent: 이 실행이 띄워 기다리는 무리(Run·Start·Wait)를 모두 끈다(StopGroup) — 신호를 받아 끝내기 직전에 부르고,
@@ -278,19 +286,36 @@ func startTimeBy(pid int, deadline time.Time) (string, error) {
 // 재감사 2바퀴 P5·merger R-207, 옛 판은 시작 시각 없이 그 번호의 무리를 거뒀다). 무리까지 사라졌거나 pid가 다른 프로세스에 다시
 // 쓰였으면 기록만 지운다. 모르면(기록·ps를 못 읽음·꼴이 틀림) 참 — 도는 착지 밑에서 치우는 것보다 기다리는 쪽이 안전하다
 func ChildBusy(record string, grace time.Duration) bool {
+	s, _ := ChildCheck(record)
+	return s != ChildNone
+}
+
+// ChildState: ChildCheck의 결과
+type ChildState int
+
+const (
+	ChildNone    ChildState = iota // 기록이 없거나, 그 자식·무리가 끝났거나 pid가 다시 쓰였다(기록을 지움)
+	ChildRunning                   // 기록한 그 자식(pid + 시작 시각)이 돈다
+	ChildLeft                      // 자식은 끝났는데 그 무리가 남았다 — 소유를 입증할 수 없다(신호 없이 기다림)
+	ChildUnknown                   // 기록·ps를 못 읽음·꼴이 틀림·시작 시각 없음(모름)
+)
+
+// ChildCheck: ChildBusy를 갈래로 — 부른 쪽이 「도는 착지를 기다림」과 「남은 무리·모름(사건으로 넘길 것)」을 가른다(재감사 3바퀴
+// merger/R-3M01). pid = 기록의 자식(무리) 번호, 모르면 0
+func ChildCheck(record string) (ChildState, int) {
 	b, err := os.ReadFile(record)
 	if errors.Is(err, os.ErrNotExist) {
-		return false
+		return ChildNone, 0
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: 자식 기록을 읽지 못했다(도는 것으로 친다): %v\n", Who, err)
-		return true
+		return ChildUnknown, 0
 	}
 	f := strings.SplitN(strings.TrimRight(string(b), "\n"), "\t", 2)
 	pid, err := strconv.Atoi(f[0])
 	if err != nil || pid <= 1 {
 		fmt.Fprintf(os.Stderr, "%s: 자식 기록 %s 의 꼴이 틀렸다(도는 것으로 친다)\n", Who, record)
-		return true
+		return ChildUnknown, 0
 	}
 	start := ""
 	if len(f) == 2 {
@@ -298,23 +323,23 @@ func ChildBusy(record string, grace time.Duration) bool {
 	}
 	if Alive(pid) {
 		if start == "" {
-			return true // 시작 시각 없이 적힌 기록 — 확인할 수 없어 도는 것으로 친다
+			return ChildUnknown, pid // 시작 시각 없이 적힌 기록 — 확인할 수 없어 도는 것으로 친다
 		}
 		st, serr := StartTime(pid)
 		if serr != nil {
 			fmt.Fprintf(os.Stderr, "%s: 자식 %d 의 시작 시각을 읽지 못했다(도는 것으로 친다): %v\n", Who, pid, serr)
-			return true
+			return ChildUnknown, pid
 		}
 		if st == start {
-			return true
+			return ChildRunning, pid
 		}
 	} else if !groupGone(pid) {
 		fmt.Fprintf(os.Stderr, "%s: 앞 실행의 자식 %d 는 끝났는데 그 무리가 남았다 — 소유를 입증할 수 없어 신호 없이 기다린다\n", Who, pid)
-		return true
+		return ChildLeft, pid
 	}
 	if err := os.Remove(record); err != nil && !errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintf(os.Stderr, "%s: 자식 기록을 지우지 못했다(도는 것으로 친다): %v\n", Who, err)
-		return true
+		return ChildUnknown, pid
 	}
-	return false
+	return ChildNone, 0
 }

@@ -3,6 +3,8 @@
 - 무시된 보관물 `.qa/`: `hc-lane clean`은 지우기 전(teardown 전)에 워크트리의 무시된 `.qa/` 파일(어느 깊이든)을 메인 폴더(첫 작업 트리)의 같은 자리로 복사(덮지 않음, `--on`이면 그 기계 안)하고 `옮김 <워크트리>/.qa → <메인>/.qa (파일 N개 — 새로 a, 이미 같음 b)` 한 줄을 찍는다.
   메인에 같은 이름의 다른 파일이 있거나 복사가 실패하거나 메인 폴더를 못 찾으면 그 파일 목록과 함께 멈추고 아무것도 지우지 않는다(2026-11-19 — 레인이 gc의 「남김 … 무시된 보관물 .qa」를 보고 손으로 지우다 출력을 잃었다).
   gc는 `.qa/`가 남은 작업 폴더를 지우지 않고 남긴다 — 손으로 지우지 말고 `hc-lane clean`.
+  gc도 clean과 같은 탐색(어느 깊이든 `.qa` 폴더 + `git check-ignore`)을 써서 무시된 폴더 안(`build/.qa/`)도 본다.
+  탐색이 실패하면 그 작업 폴더를 남기고 종료 1이다(R-3A20).
 
 - `hc-lane gc [--on <기계>] --repo <저장소> [--dry-run] [--integ[=<접두>]] [--remote-branches] [--min-age <시간>]`. 먼저 `--dry-run`으로 본다(`origin/<기본>`은 fetch하지 않고 지금 값으로 판정, `--integ` 판정용 커밋 객체만 받는다 — 참조·작업 폴더·index는 그대로).
 - 작업 폴더·가지: 메인 폴더가 아닌 연결된 작업 트리마다 HEAD가 `origin/<기본>`에 다 들어갔고(조상이거나 `git cherry`에 `+` 없음 — rebase로 들어간 것도), 깨끗하고(추적 변경·untracked 없음, 무시된 보관물 `.qa/` 없음), 그 폴더를 cwd로 쓰는 hc 터미널이 없고, 마지막 git 활동이 `--min-age`(기본 24h)보다 오래됐고 멈춘 rebase·merge·cherry-pick·bisect가 없을 때만 teardown → `worktree remove --force` → `branch -D`. 하나라도 아니면 `남김 <폴더> <까닭>`.

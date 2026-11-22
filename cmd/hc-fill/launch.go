@@ -403,8 +403,9 @@ func tryUnsure(name, rid string) bool {
 		return true
 	}
 	for _, t := range TERMS {
-		if t.M == m && t.Name == name {
-			say("미확정 시도 기다림 %s @%s: 같은 이름 터미널 %s 가 있다(채택하지 못함 — 지휘가 정리)", name, m, t.Addr)
+		// 이름 칸 모름(-)도 그 시도일 수 있다(재감사3 fill/R-202)
+		if t.M == m && (t.Name == name || t.Name == "-") {
+			say("미확정 시도 기다림 %s @%s: 같은 이름(또는 이름 모를) 터미널 %s 가 있다(채택하지 못함 — 지휘가 정리)", name, m, t.Addr)
 			return true
 		}
 	}

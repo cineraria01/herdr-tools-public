@@ -68,7 +68,7 @@ func code(err error) int {
 		return 0
 	}
 	var ee *exec.ExitError
-	if errors.As(err, &ee) || errors.Is(err, proc.ErrTimeout) {
+	if errors.As(err, &ee) || errors.Is(err, proc.ErrTimeout) || errors.Is(err, exec.ErrWaitDelay) {
 		return proc.Code(err) // 신호면 128+그 신호(gofix L09), 상한에 걸림(proc.Limit)이면 124 — 모름
 	}
 	return 127
@@ -95,12 +95,23 @@ func runCmd(o cmdOpt, name string, args ...string) int {
 	var err error
 	if o.noLimit {
 		err = c.Run()
+	} else if proc.Limit(c.Args) == 0 {
+		// 상한 없는 명령(검증·착지 훅 — bash 등)도 끝난 뒤 출력 관은 유예만큼만 기다린다. 남긴 배경 프로세스가 관을 쥐면 모름(재감사
+		// 3바퀴 merger/R-3M07 — 옛 판은 그 배경 프로세스가 끝날 때까지 hc-lane land가 끝나지 않았다)
+		err = proc.RunPipeGrace(c, pipeGrace)
 	} else {
 		err = proc.Run(c) // git·hc·ssh 등은 상한 안에서만(proc.Limit)
 	}
-	lastTimeout = errors.Is(err, proc.ErrTimeout)
+	held := errors.Is(err, exec.ErrWaitDelay)
+	if held {
+		eprintf("hc-lane: %s 이 끝났는데 남은 배경 프로세스가 출력 관을 %v 넘게 쥐었다 — 결과 모름\n", name, pipeGrace)
+	}
+	lastTimeout = held || errors.Is(err, proc.ErrTimeout)
 	return code(err)
 }
+
+// pipeGrace: 상한 없는 명령이 끝난 뒤 출력 관을 기다리는 유예
+const pipeGrace = 10 * time.Second
 
 // trim: $(…)처럼 끝 줄바꿈을 모두 뺀다
 func trim(s string) string { return strings.TrimRight(s, "\n") }

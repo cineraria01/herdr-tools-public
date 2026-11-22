@@ -213,8 +213,16 @@ func readTables() {
 		die("hc ls --label hc-lane=1 실패, 이번 바퀴는 띄우지 않았다")
 	}
 	LANEADDR = nil
+	all := map[string]bool{}
+	for _, t := range TERMS {
+		all[t.Addr] = true
+	}
 	for _, t := range lt {
 		LANEADDR = append(LANEADDR, t.Addr)
+		// 전체 목록 뒤에 읽은 라벨 목록에만 있다 — 그 사이에 뜬 터미널: 표에 넣는다(「없음」으로 읽혀 미확정 시도를 안 떴다고 확정하지 않게 — 재감사3 fill/R-202)
+		if !all[t.Addr] {
+			TERMS = append(TERMS, t)
+		}
 	}
 	found := false
 	for _, t := range TERMS {

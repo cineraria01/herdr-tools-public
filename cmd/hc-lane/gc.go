@@ -279,7 +279,6 @@ const gcAttScript = `c=$(git -C "$1" rev-parse --path-format=absolute --git-comm
     cat "$c"/rebase-*/head-name "$c"/worktrees/*/rebase-*/head-name 2>/dev/null; exit 0`
 
 var (
-	qaPathRe = regexp.MustCompile(`(^|/)\.qa(/|$)`)
 	reflogTS = regexp.MustCompile(`\A[^\n]*@\{([0-9]+)\}\z`) // reflog -1 --date=unix --format=%gd 한 줄
 )
 
@@ -437,17 +436,12 @@ func gcMain(args []string) int {
 				gcKeepf(wt, fmt.Sprintf("커밋 안 된 변경·untracked %d개", len(strings.Split(st, "\n"))))
 				continue
 			}
-			ig, r := xout("git", "--no-optional-locks", "-c", "core.quotePath=false", "-C", wt, "status", "--porcelain", "--ignored", "--untracked-files=normal")
-			if r != 0 {
-				gcKeepf(wt, "git status --ignored 실패")
+			// clean과 같은 탐색(어느 깊이든 .qa 폴더 + check-ignore) — status --ignored 는 무시된 폴더를 접어 그 안 .qa를 놓친다(R-3A20)
+			qa, ok := qaDirs(wt)
+			if !ok {
+				gcKeepf(wt, "무시된 보관물(.qa)을 확인하지 못함")
 				gcErr = true
 				continue
-			}
-			var qa []string
-			for _, ln := range strings.Split(ig, "\n") {
-				if p, ok := strings.CutPrefix(ln, "!! "); ok && qaPathRe.MatchString(p) {
-					qa = append(qa, p)
-				}
 			}
 			if len(qa) > 0 {
 				gcKeepf(wt, "무시된 보관물 "+strings.Join(qa, " ")+" (hc-lane clean이 메인 폴더로 옮기고 정리 — 손으로 지우지 말 것)")

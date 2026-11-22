@@ -18,11 +18,13 @@ func secGofix3R2(k *K) {
 	k.check("fill/R-201 준비: box-1에 띄우기를 시도했다", countE(ll, "^u8$") >= 1)
 	k.check("fill/R-201 hc-lane 종료 8(미확정): box-2에 또 띄우지 않고 그 시도를 미확정으로 남긴다",
 		countE(ll, "^box-2$") == 0 && !strings.HasPrefix(k.where("u8"), "up box-2") && grep(k.out, "모름 u8 @box-1"))
+	// fill/R-3M03: 종료 8 전용 갈래 — 받은 주소가 「시작 확인(hc get)을 못 함」 줄에 남는다(종료 8을 일반 미확정으로 보내면 주소 없는 다른 줄)
+	k.check("fill/R-201 종료 8: 받은 주소 box-1/u8 가 「시작 확인(hc get)을 못 함」 줄에", strings.Contains(k.out, "모름 u8 @box-1 box-1/u8: 시작 확인(hc get)을 못 함"), k.out)
 	n := countE(ll, "^u8$")
-	k.lj("box-1/u8:claude-code:u8")
+	k.lj("box-1/u8:claude-code:")
 	k.run("run")
 	k.lj()
-	k.check("fill/R-201 다음 바퀴: box-1에 같은 이름 터미널이 있으면 다시 띄우지 않는다(둘째 기계에도)", countE(ll, "^u8$") == n && countE(ll, "^box-2$") == 0)
+	k.check("fill/R-201 다음 바퀴: box-1에 이름 모를 터미널이 있으면 다시 띄우지 않는다(둘째 기계에도 — 착수 1회)", k.kStarts("u8") == 1 && countE(ll, "^u8$") == n && countE(ll, "^box-2$") == 0, k.out)
 
 	// fill/R-201: 유효한 live 응답에서 status 칸만 빠졌으면 확인된 실패가 아니다(fill의 시작 확인)
 	k.fresh()

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -222,9 +223,19 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// nosh: hc 오류 글이 그 기계에 sh가 없다는 뜻인가(hc-lane nosh()와 같은 글자)
+// nosh: hc 오류 글이 그 기계에 sh가 없다는 뜻인가. hc는 부재와 그 밖의 띄우기 실패(권한 13·자원 35·파일 한도 24)에
+// 같은 kind·머리말을 내니, 오류 JSON이 정확히 한 값이고 kind spawn_failed·message가 「cannot start 」로 시작하며 까닭이
+// 부재(program not found·os error 2·Windows 경로 없음 os error 3)일 때만 참. 그 밖·잘린 JSON은 연결 실패다(ops/R-3A13)
 func nosh(e string) bool {
-	return strings.Contains(e, `"spawn_failed"`) && strings.Contains(e, "cannot start ")
+	var v struct {
+		Error struct{ Kind, Message string }
+	}
+	d := json.NewDecoder(strings.NewReader(e))
+	if d.Decode(&v) != nil || d.Decode(new(any)) != io.EOF || v.Error.Kind != "spawn_failed" {
+		return false
+	}
+	m, ok := strings.CutPrefix(v.Error.Message, "cannot start ")
+	return ok && (strings.HasSuffix(m, "program not found") || strings.HasSuffix(m, "(os error 2)") || strings.HasSuffix(m, "(os error 3)"))
 }
 
 // query: where가 ""면 맥(저장소 base), 아니면 그 기계에서 q를 돌려 단위마다 현재·base·덮은 링크를 채운다.

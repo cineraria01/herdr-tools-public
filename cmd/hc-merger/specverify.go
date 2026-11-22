@@ -106,9 +106,10 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 	c := exec.Command("bash", verified.Script)
 	c.Dir, c.Stdout, c.Stderr = wt, lf, lf
 	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=")
-	rc := proc.WaitMax(c, "", time.Duration(specTimeout())*time.Second)
+	max := time.Duration(specTimeout()) * time.Second
+	rc, ran := proc.WaitFor(c, "", max, max <= 0)
 	fmt.Fprintf(lf, "hc-lane merger: 추측 검증 종료 %d\n", rc)
-	if rc == proc.TimeoutCode {
+	if rc == proc.TimeoutCode || !ran { // 못 띄움(검증은 안 돎)·시간 넘김은 모름 — spec-fail이 아니다(재감사 3바퀴 merger/R-3M02)
 		return resLost
 	}
 	t, trc := gitx.Out(wt, lf, "rev-parse", "HEAD^{tree}")

@@ -106,7 +106,11 @@ func (m *M) runCandidate() int {
 		c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+m.top, "LANE_BASE="+m.base)
 		// 준비 훅에도 상한(E11·G1 — 의존성 설치가 망에서 멈추면 main에 쓰는 유일한 프로세스가 선다). 넘으면 무리째 거두고 큐를 둔 채 쉰다
-		if rc := proc.WaitMax(c, m.mj+"/child", setupMax()); rc != 0 {
+		rc, ran := proc.WaitFor(c, m.mj+"/child", setupMax(), setupMax() <= 0)
+		if !ran {
+			return rcNotRun
+		}
+		if rc != 0 {
 			fmt.Fprintf(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패(종료 %d)\n", rc)
 			return 75
 		}
@@ -133,12 +137,48 @@ func (m *M) runCandidate() int {
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+strings.TrimSpace(ex),
 		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0, "HERDR_SPEC_TREE="+m.stree)
-	return proc.Wait(c, m.mj+"/child")
+	c.Env = append(c.Env, m.ownerEnv()...)
+	// 착지에도 상한(재감사 3바퀴 merger/R-3M07 — 검증·착지 훅이 끝나지 않으면 일꾼·상주가 사건 없이 끝없이 기다렸다). 넘으면 무리째 거두고
+	// 124(모름 — 일시 실패, judge가 원격부터 본다). keep: 이 일꾼이 죽으면 상한을 걸 쪽이 없지만 그 착지는 끝까지 가게 둔다(다음 바퀴가
+	// 기다리다 상한을 넘기면 쉰 바퀴로 센다 — childWait)
+	rc, ran := proc.WaitFor(c, m.mj+"/child", landMax(), true)
+	if !ran {
+		return rcNotRun
+	}
+	return rc
+}
+
+// rcNotRun: runCandidate가 준비 훅·착지를 띄우지 못했다(고아 기록·시작 시각을 확정 못 함, 실행 파일 없음 — 명령은 한 줄도 안 돎).
+// 착지 실패가 아니라 모름: 제출을 반송하지 않고 이 바퀴를 쉰다(재감사 3바퀴 merger/R-3M02 — 옛 판은 127을 착지 실패로 읽어 반송했다)
+const rcNotRun = -1
+
+// ownerEnv: 착지가 내는 중간 사건(「land 실패」 — hc-lane report)의 주인. 묶음 구성원이 모두 같은 지휘면 제출 기록의 owner(실행이
+// 모두 같으면 owner_run도), 아니면 빈 값 = 사건 주인 '-'(모든 지휘에게). 병합기 자신의 환경 값은 늘 덮는다
+func (m *M) ownerEnv() []string {
+	o, r := "", ""
+	for i, e := range m.b {
+		if i == 0 {
+			o, r = e.ow, e.owr
+		} else if e.ow != o {
+			o = ""
+		} else if e.owr != r {
+			r = ""
+		}
+	}
+	if o == "" {
+		r = ""
+	}
+	return []string{"HC_LANE_OWNER=" + o, "HC_LANE_OWNER_RUN=" + r}
 }
 
 // setupMax: 준비 훅 상한 HERDR_TIMEOUT_SETUP(초, 기본 1800 — 큰 저장소의 의존성 설치·빌드). 0이면 상한 없음
 func setupMax() time.Duration {
 	return time.Duration(intSetting("HERDR_TIMEOUT_SETUP", os.Getenv("HERDR_TIMEOUT_SETUP"), 1800, 0)) * time.Second
+}
+
+// landMax: 착지(hc-lane land) 상한 HERDR_TIMEOUT_LAND(초, 기본 10800 — 검증 자리·착지 차례 기다림과 전체 검증을 넉넉히). 0이면 상한 없음
+func landMax() time.Duration {
+	return time.Duration(intSetting("HERDR_TIMEOUT_LAND", os.Getenv("HERDR_TIMEOUT_LAND"), 10800, 0)) * time.Second
 }
 
 // ponytail: 도구 이름 하나로 거름, 준비 훅이 다른 색인 길을 쓰면 그때 LANE_MERGER 같은 표시로

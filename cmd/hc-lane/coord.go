@@ -118,6 +118,26 @@ func coordSet(addr string, launch bool) bool {
 	return atomic.WriteFileMode(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o600) == nil
 }
 
+// seedSeen: 새로 적은 지휘(hc-fill add → coord --set)의 커서 seen.<지휘>가 없을 때만 「#since 지금」으로 만든다 — 뒤에 뜨는 그 지휘
+// watch가 등록 전 남의 사건(새 커서 기본 2시간 치)을 보내지 않게. 이미 있는 커서는 그대로(O_EXCL)
+func seedSeen(addr string) error {
+	if err := os.MkdirAll(evdir(), 0o777); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(evdir()+"/seen."+ckey(addr), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString("#since" + tab + utcNow() + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // coordCheck: 그 지휘의 정보가 있고 지금 hc get pid·이름이 같으면 0(주소 addr). 1 다름·없음(까닭 why), 2 모름
 func coordCheck(addr string) (cad, why string, rc int) {
 	f := coordFile(addr)
@@ -194,6 +214,9 @@ func coordCmd(a []string) int {
 			return 2
 		}
 		if coordSet(sa, true) {
+			if err := seedSeen(sa); err != nil {
+				fmt.Fprintf(os.Stderr, "hc-lane coord --set: 경고 — 새 지휘 커서를 쓰지 못했다(watch가 2시간 전부터 본다): %v\n", err)
+			}
 			fmt.Println(sa)
 			return 0
 		}

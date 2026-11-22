@@ -467,15 +467,21 @@ func keepList() (map[string]bool, bool) {
 }
 
 // sameRun: 닫기 직전 다시 본 g가 판정한 t와 같은 실행이고 상태가 그대로인가(B04 — 주소는 다시 쓰인다). 이름·created_ms·status_ms·
-// state live·에이전트 상태 idle·done이 같아야 한다. 이 확인과 hc kill 사이의 재사용은 코어가 실행 조건 kill을 주기 전에는 못 막는다(모델 밖)
+// state live와 판정 때의 상태 꼴이 같아야 한다: 상태가 있었으면 idle·done, 없었으면(착지한 keep 셸 R-3M02) 그대로 없음·keep·같은
+// 셸 전경. 이 확인과 hc kill 사이의 재사용은 코어가 실행 조건 kill을 주기 전에는 못 막는다(모델 밖)
 func sameRun(t, g map[string]any) bool {
 	c1, ok1 := num(t, "created_ms")
 	c2, ok2 := num(g, "created_ms")
 	s1, _ := num(t, "status_ms")
 	s2, _ := num(g, "status_ms")
 	st := str(obj(g, "status"), "state")
+	shape := t["status"] != nil && (st == "idle" || st == "done")
+	if t["status"] == nil {
+		fg := str(obj(g, "foreground"), "name")
+		shape = g["status"] == nil && g["keep"] == true && shellName(fg) && fg == str(obj(t, "foreground"), "name")
+	}
 	return ok1 && ok2 && c1 == c2 && s1 == s2 && str(g, "name") == str(t, "name") && str(g, "address") == str(t, "address") &&
-		str(g, "state") == "live" && (st == "idle" || st == "done")
+		str(g, "state") == "live" && shape
 }
 
 // laneEvent: 레인 터미널(라벨 hc-lane=1)이면 events.tsv에 「정리됨」 한 줄(8칸 — 셸 판과 같음)을 적는 함수를 준다. kill 전에 파일을

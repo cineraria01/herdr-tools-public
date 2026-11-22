@@ -45,6 +45,8 @@ case $1 in
     { [ -d "$h" ] && [ ! -e "$h/OFFLINE" ]; } || { echo "connect failed: $m" >&2; exit 1; }
     # NOSH: PATH에 sh가 없는 기계(Windows 등) — 진짜 hc의 오류 글 그대로
     [ ! -e "$h/NOSH" ] || { echo '{"error":{"hint":"","kind":"spawn_failed","message":"cannot start sh: program not found"}}' >&2; exit 1; }
+    # SPAWN: sh를 띄우지 못함 — 까닭(파일 내용, 예: 「Permission denied (os error 13)」)을 진짜 hc 꼴로 (ops/R-3A13)
+    [ ! -e "$h/SPAWN" ] || { printf '{"error":{"hint":"check the program","kind":"spawn_failed","message":"cannot start sh: %s"}}\n' "$(cat "$h/SPAWN")" >&2; exit 1; }
     [ $in = 1 ] || exec < /dev/null
     if [ $in = 1 ]; then   # 진짜 hc처럼 입력은 8MB까지만 받는다
       cat > "$HCT/in.$$"
@@ -54,6 +56,8 @@ case $1 in
     if [ $in = 1 ] && [ "${HC_FAKE_CORRUPT-}" = "$m" ]; then head -c 3 | PATH="$h/.fakebin:$PATH" HOME=$h "$@"; exit; fi
     # HC_FAKE_NOO: 그 기계 조회 출력에서 OS 줄(O)이 잘린 꼴 — 종료 0
     if [ "${HC_FAKE_NOO-}" = "$m" ]; then PATH="$h/.fakebin:$PATH" HOME=$h "$@" | grep -v '^O'; exit 0; fi
+    # HC_FAKE_T255: 그 기계의 나무 보내기(T)는 다 보낸 뒤 255로 끝난다 (ops/R-3A23)
+    if [ "${HC_FAKE_T255-}" = "$m" ] && [ "${!#}" = T ]; then PATH="$h/.fakebin:$PATH" HOME=$h "$@"; exit 255; fi
     # 출력도 8MB에서 자른다
     PATH="$h/.fakebin:$PATH" HOME=$h "$@" | head -c 8388608; exit "${PIPESTATUS[0]}" ;;
   *) echo "fake hc: $*" >&2; exit 2 ;;
@@ -319,5 +323,6 @@ open(p, "w").write(a + "<!-- codex-shared:start -->\ncodex built\n<!-- codex-sha
 	s.lockAndRest() // 13·14·15(공개)·16
 	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(T+"/tmp"))
 	s.failures() // 17(실패 주입 — SIGKILL한 실행은 임시 폴더를 남기니 위 확인 뒤에)
+	s.gofix4()   // 18(재감사 바퀴 3)
 	s.c.Done()
 }

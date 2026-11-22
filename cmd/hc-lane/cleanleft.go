@@ -2,7 +2,11 @@ package main
 
 // clean의 미등록 작업 폴더 검사 조각(gofix3-shx — clean.go 줄 수 한도로 따로 둔다)
 
-import "herdr-tools/internal/shx"
+import (
+	"strings"
+
+	"herdr-tools/internal/shx"
+)
 
 // leftoverScript: 등록이 지워진 폴더에서 메인 폴더의 무시 규칙으로 무시되지 않는 것(추적 파일 포함)을 찍는다. 검사 오류는 종료 2.
 // 열거(find)와 경로 변환(sed)을 나눠 각 종료 코드를 본다 — 파이프로 이으면 find 실패를 sed 성공이 가려 빈 목록(지워도 됨)이 됐다(lane/R-206).
@@ -26,4 +30,31 @@ func leftover(repo, wt, common string) (string, bool) {
 	out, r := xout("sh", "-c", leftoverScript, "hc-lane", repo, wt, common)
 	left, ok := shx.Cut(out, r)
 	return trim(left), ok
+}
+
+// qaDirs: wt 안의 무시된 보관물 .qa 폴더 — clean과 같은 qaScript를 목록만(넷째 인자 1) 돌린다. ok=false면 모름(지우지 않는다)
+func qaDirs(wt string) ([]string, bool) {
+	out, r := xout("sh", "-c", qaScript, "hc-lane", wt, wt, wt, "1")
+	if r != 0 {
+		return nil, false
+	}
+	if out == "" {
+		return nil, true
+	}
+	var ds []string
+	seen := map[string]bool{}
+	for _, l := range strings.Split(out, "\n") {
+		p, ok := strings.CutPrefix(l, "n ")
+		if !ok || p == "" { // 줄 꼴이 틀리면 모름
+			return nil, false
+		}
+		if m := qaDirRe.FindStringSubmatch(p); m != nil {
+			p = m[1]
+		}
+		if !seen[p] {
+			seen[p] = true
+			ds = append(ds, p)
+		}
+	}
+	return ds, true
 }

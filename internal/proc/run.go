@@ -30,6 +30,14 @@ func RunMax(c *exec.Cmd, d time.Duration) error {
 	return run(nil, c, d)
 }
 
+// RunPipeGrace: 상한 없이(RunMax(c, 0)처럼 무리도 없이) 기다리되, 자식이 끝난 뒤 출력 관은 grace만 기다린다 — 남은 배경 프로세스가
+// 관을 쥐면 exec.ErrWaitDelay(Code → TimeoutCode, 모름). 검증·착지 훅처럼 기다림이 일인 명령(재감사 3바퀴 merger/R-3M07 — 옛 판은
+// 그 배경 프로세스가 끝날 때까지 돌아오지 않았다)
+func RunPipeGrace(c *exec.Cmd, grace time.Duration) error {
+	c.WaitDelay = grace
+	return c.Run()
+}
+
 // RunCtx: RunMax에 ctx — ctx가 끝나면 마감과 같게(무리째 TERM → Grace → KILL, 결과는 모름: errors.Is로 ErrTimeout과 ctx 오류 둘 다 참).
 // d가 0 이하면 ctx의 마감만(ctx도 끝나지 않는 것이면 c.Run())
 func RunCtx(ctx context.Context, c *exec.Cmd, d time.Duration) error {

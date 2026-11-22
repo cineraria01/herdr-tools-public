@@ -5,6 +5,7 @@ package tests
 // 이 레인의 몫은 R-H203·R-M201·R-M210(Mythos 판정, 지휘 2026-11-23) — 나머지 지적의 재현 시험은 고침과 함께 뺐다.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,8 +48,40 @@ func TestCotenantLegacyKeyLookup(t *testing.T) {
 	})
 }
 
-// R-M201: 여러 대상 Bash에서 둘째 대상이 거절되면 첫 대상의 인계(끝난 주인·멈춘 첫 획득)를 세대 확인 뒤 이전 상태로 되돌린다
+// leaseSnap: 임대 폴더 전체 — 폴더 시각과 파일마다 이름·내용·시각
+func leaseSnap(c *cg, ld string) string {
+	c.t.Helper()
+	fi, err := os.Lstat(ld)
+	c.fatal(err)
+	s := fmt.Sprintf(". %d\n", fi.ModTime().UnixNano())
+	es, err := os.ReadDir(ld)
+	c.fatal(err)
+	for _, e := range es {
+		p := ld + "/" + e.Name()
+		fi, err := os.Lstat(p)
+		c.fatal(err)
+		var b []byte
+		if !e.IsDir() {
+			b, err = os.ReadFile(p)
+			c.fatal(err)
+		}
+		s += fmt.Sprintf("%s %d %q\n", e.Name(), fi.ModTime().UnixNano(), b)
+	}
+	return s
+}
+
+// R-M201: 여러 대상 Bash에서 둘째 대상이 거절되면 첫 대상의 인계(끝난 주인·멈춘 첫 획득)를 세대 확인 뒤 이전 상태로 되돌린다.
+// 재감사 R-3M01: 되돌린 뒤 임대 폴더 전체(이름·주인 줄·시각)가 전과 같고, 곧바로 한 번 더 넘겨받을 수 있다(이번 claim이 남지 않았다)
 func TestCotenantBatchRecovery(t *testing.T) {
+	undone := func(t *testing.T, c *cg, ld, before string) {
+		if after := leaseSnap(c, ld); c.RC != 2 || after != before {
+			t.Errorf("rc=%d(want 2), 되돌린 임대 폴더\n%s(want 전 그대로)\n%s err=[%s]", c.RC, after, before, c.ERR)
+		}
+		c.run("sa", "Bash", "tee a.txt </dev/null")
+		if c.RC != 0 {
+			t.Errorf("되돌린 뒤 넘겨받기 rc=%d(want 0) err=[%s]", c.RC, c.ERR)
+		}
+	}
 	setup := func(t *testing.T) (*cg, string) {
 		c := newCG(t)
 		R, _, _ := repoAB(c)
@@ -63,22 +96,17 @@ func TestCotenantBatchRecovery(t *testing.T) {
 		st := procStart(c, D)
 		ld := c.rec(c.leaseDirs(R), "a.txt", D, st, true)
 		c.killAgent(D)
-		before, err := os.ReadFile(ld + "/owner")
-		c.fatal(err)
+		before := leaseSnap(c, ld)
 		c.run("sa", "Bash", "tee a.txt b.txt </dev/null")
-		after, _ := os.ReadFile(ld + "/owner")
-		if c.RC != 2 || string(after) != string(before) {
-			t.Errorf("rc=%d(want 2), a.txt 주인 %q(want 옛 주인 그대로 %q) err=[%s]", c.RC, after, before, c.ERR)
-		}
+		undone(t, c, ld, before)
 	})
 	t.Run("멈춘 첫 획득", func(t *testing.T) {
 		c, R := setup(t)
 		ld := c.leaseDirs(R) + "/" + md5hex("a.txt")
 		c.fatal(os.Mkdir(ld, 0o755))
 		c.touchOld(ld)
+		before := leaseSnap(c, ld)
 		c.run("sa", "Bash", "tee a.txt b.txt </dev/null")
-		if c.RC != 2 || exists(ld+"/owner") {
-			t.Errorf("rc=%d(want 2), a.txt 주인 %v(want 없음) err=[%s]", c.RC, exists(ld+"/owner"), c.ERR)
-		}
+		undone(t, c, ld, before)
 	})
 }

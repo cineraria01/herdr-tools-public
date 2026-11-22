@@ -484,12 +484,18 @@ func roundMain(a []string) {
 	if err != nil {
 		die("merger: 후보 잠금을 잡지 못했다: %v", err)
 	}
-	// 둘 다 죽은 앞 실행의 착지가 아직 돌면(자식 기록의 pid + 시작 시각) 그 후보도 쓰는 중이다
-	if busy || proc.ChildBusy(m.mj+"/child", landGrace) {
+	if busy {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 앞 실행이 후보 작업 트리를 쓰고 있다")
 		os.Exit(75)
 	}
-	if orphansDefer("후보 작업 트리") {
+	// 둘 다 죽은 앞 실행의 착지가 아직 돌거나(자식 기록의 pid + 시작 시각) 그 무리·고아 무리가 남았으면 그 후보도 쓰는 중이다 — 쉰다.
+	// 남은 무리·모름은 쉰 바퀴로 세어 이어지면 막힘 사건(재감사 3바퀴 merger/R-3M01 — 옛 판은 round에 못 들어가 사건 없이 끝없이 75)
+	if why, count := m.childWait(); why != "" {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 앞 실행이 후보 작업 트리를 쓰고 있다 — %s\n", why)
+		if count {
+			m.deferred = why
+			m.deferNote()
+		}
 		os.Exit(75)
 	}
 	m.round()

@@ -263,3 +263,29 @@ func TestCkey(t *testing.T) {
 		t.Fatalf("ckey = %s", got)
 	}
 }
+
+// event-owner-merger: hc-fill add가 새 지휘를 적으면(coord --set) 그 지휘 커서(seen.<지휘>)가 없을 때만 #since = 지금 —
+// 뒤에 뜨는 lane-watch가 남의 옛 사건(2시간 치)을 보내지 않게. 이미 있는 커서는 그대로
+func TestSeedSeen(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	before := utcNow()
+	if err := seedSeen("t1cj"); err != nil {
+		t.Fatal(err)
+	}
+	p := evdir() + "/seen.t1cj"
+	b, _ := os.ReadFile(p)
+	v, ok := strings.CutPrefix(string(b), "#since\t")
+	if v = strings.TrimSuffix(v, "\n"); !ok || v < before || v > utcNow() || strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("새 커서: %q", b)
+	}
+	old := "#since\t2026-01-01T00:00:00Z\nx\n"
+	if err := os.WriteFile(p, []byte(old), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedSeen("t1cj"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != old {
+		t.Fatalf("있던 커서를 바꿨다: %q", b)
+	}
+}

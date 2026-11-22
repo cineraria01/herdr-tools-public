@@ -58,3 +58,39 @@ func TestJudgeLandedKeepShell(t *testing.T) {
 		t.Fatal("working 레인을 닫음")
 	}
 }
+
+// [R-3M02] sameRun은 판정 때의 상태 꼴을 본다: 상태 없던 keep 셸은 그대로(없음·keep·같은 셸 전경)일 때만 같은 실행
+func TestSameRunKeepShellShape(t *testing.T) {
+	now := float64(time.Now().UnixMilli())
+	term := func(extra ...any) map[string]any {
+		m := map[string]any{"address": "t7", "name": "k", "state": "live", "keep": true, "status": nil,
+			"created_ms": now, "status_ms": now, "foreground": map[string]any{"name": "zsh"}}
+		for i := 0; i+1 < len(extra); i += 2 {
+			m[extra[i].(string)] = extra[i+1]
+		}
+		return m
+	}
+	idle := map[string]any{"app": "claude-code", "state": "idle"}
+	cases := []struct {
+		g    map[string]any
+		want bool
+		why  string
+	}{
+		{term(), true, "그대로인 keep 셸"},
+		{term("status", idle), false, "그사이 에이전트가 붙음"},
+		{term("foreground", map[string]any{"name": "vim"}), false, "전경이 셸 아님"},
+		{term("foreground", nil), false, "전경 모름"},
+		{term("keep", false), false, "keep 꺼짐"},
+	}
+	for _, c := range cases {
+		if sameRun(term(), c.g) != c.want {
+			t.Errorf("%s: sameRun=%v 기대 %v", c.why, !c.want, c.want)
+		}
+	}
+	if sameRun(term("status", idle), term()) {
+		t.Error("상태 있던 판정 뒤 상태가 사라졌는데 같은 실행으로 봄")
+	}
+	if !sameRun(term("status", idle), term("status", idle)) {
+		t.Error("idle 그대로를 다른 실행으로 봄")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,12 +110,13 @@ func (g *cg) scanForeign() {
 		return
 	}
 	// 바뀐 경로와 그 위 폴더 모두 — 소문자 열쇠 → git 철자. 임대 경로(줄)마다 맞으면 FDIRTY에는 git 철자로 적는다(재감사 R-H203:
-	// 옛 철자 SUB/C.TXT를 그대로 내 foreignUnder의 접두 비교 git add sub가 놓쳤다)
-	d := map[string]string{}
+	// 옛 철자 SUB/C.TXT를 그대로 내 foreignUnder의 접두 비교 git add sub가 놓쳤다). 열쇠 하나에 git 철자가 여럿이면(대소문자만 바꾼
+	// 이름 변경의 새·옛 이름) 모두 적는다 — 하나만 남기면 옛 철자 글롭 git add 'N*.txt'가 놓쳤다(재감사 R-3A01)
+	d := map[string][]string{}
 	for _, r := range dirty {
 		for x := r; ; {
-			if _, seen := d[strings.ToLower(x)]; !seen {
-				d[strings.ToLower(x)] = x
+			if k := strings.ToLower(x); !slices.Contains(d[k], x) {
+				d[k] = append(d[k], x)
 			}
 			i := strings.LastIndexByte(x, '/')
 			if i < 0 {
@@ -124,9 +126,12 @@ func (g *cg) scanForeign() {
 		}
 	}
 	for i, r := range keys {
-		if p, ok := d[r]; ok {
+		if ps, ok := d[r]; ok {
 			hit[i] = true
-			if lw[i] != "" {
+			for _, p := range ps {
+				if lw[i] == "" {
+					break
+				}
 				fd = append(fd, p+us+lw[i])
 			}
 		}

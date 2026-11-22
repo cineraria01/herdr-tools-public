@@ -154,8 +154,13 @@ func TestPullTreeProducerFails(t *testing.T) {
 	c := cksum.Dot([]byte("from worker\n")) + ".-"
 	pl := []string{k + "\t-\t" + c + "\t" + k}
 	t.Setenv("FAKE_RC", "255")
-	if ok, _ := pullTree("w1", pl); len(ok) != 0 {
+	ok, bad := pullTree("w1", pl)
+	if len(ok) != 0 {
 		t.Errorf("원격 전송 255인데 가져옴: %v", ok)
+	}
+	// ops/R-3A23: 받기 실패를 알리는 줄이 빠지면(bad 없음) 진입점이 「같음」·종료 0으로 끝난다 — 그 키 하나와 양쪽 종료 코드
+	if len(bad) != 1 || bad[0][0] != k || !strings.Contains(bad[0][1], "보냄 255 · 받음 0") {
+		t.Errorf("원격 전송 255: bad %v, 기대 [%s 「보냄 255 · 받음 0」]", bad, k)
 	}
 	if b, _ := os.ReadFile(mac + "/" + k); string(b) != "mac\n" {
 		t.Fatalf("원격 전송 255인데 맥 파일이 바뀌었다: %q", b)
