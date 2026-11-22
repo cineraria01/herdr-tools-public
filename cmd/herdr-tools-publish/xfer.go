@@ -50,15 +50,21 @@ func transfer(repo, dir, tree string, shas []string) bool {
 		return false
 	}
 	unpack.Stdin = pipe
-	// proc.Start: 두 무리를 proc에 올린다 — 이 프로세스가 신호를 받거나 SIGKILL로 죽어도 남지 않게(Run의 무리와 같음)
-	relP, err := proc.Start(pack)
+	// 마감은 띄우기 전에 — 두 무리의 준비(시작 시각·고아 기록)와 전송이 같은 남은 시간을 쓴다(재감사 R-C05)
+	d := proc.Limit([]string{"git", "pack-objects"})
+	var deadline time.Time
+	if d > 0 {
+		deadline = time.Now().Add(d)
+	}
+	// proc.StartBy: 두 무리를 proc에 올린다 — 기록이 쓰인 뒤에야 시작하고, 이 프로세스가 신호를 받거나 SIGKILL로 죽어도 남지 않게(Run의 무리와 같음)
+	relP, err := proc.StartBy(pack, deadline)
 	if err != nil {
 		return false
 	}
-	relU, err := proc.Start(unpack)
+	relU, err := proc.StartBy(unpack, deadline)
 	if err != nil {
 		pipe.Close()
-		proc.StopGroup(pack.Process.Pid, proc.Grace)
+		proc.Stop(pack.Process.Pid, proc.Grace)
 		pack.Wait()
 		relP()
 		return false
@@ -73,9 +79,8 @@ func transfer(repo, dir, tree string, shas []string) bool {
 		fin <- uerr == nil && perr == nil
 	}()
 	var limit <-chan time.Time
-	d := proc.Limit([]string{"git", "pack-objects"})
 	if d > 0 {
-		t := time.NewTimer(d)
+		t := time.NewTimer(time.Until(deadline))
 		defer t.Stop()
 		limit = t.C
 	}
@@ -89,7 +94,7 @@ func transfer(repo, dir, tree string, shas []string) bool {
 		var wg sync.WaitGroup
 		for _, c := range []*exec.Cmd{pack, unpack} {
 			wg.Add(1)
-			go func(pid int) { defer wg.Done(); proc.StopGroup(pid, proc.Grace) }(c.Process.Pid)
+			go func(pid int) { defer wg.Done(); proc.Stop(pid, proc.Grace) }(c.Process.Pid) // 이 실행이 올린 무리만(재감사 ops R-05)
 		}
 		wg.Wait()
 		// ponytail: 신호도 안 먹는 커널 대기면 거두지 못한다 — 조금만 더 기다리고 놓아 둔다(proc.Run과 같음)

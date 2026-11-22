@@ -59,6 +59,9 @@ func fetchr(quiet bool, args ...string) int {
 	for _, w := range waits {
 		var e bytes.Buffer
 		rc = gitx.Run("", os.Stdout, &e, append([]string{"fetch"}, args...)...)
+		if rc == proc.TimeoutCode {
+			break // 모름 — 반쪽 오류 글로 잠금 경합을 판정하지 않는다(재감사 R-C01). 「시간 넘김」 줄은 proc이 적었다
+		}
 		errw.Write(e.Bytes())
 		if rc == 0 || w == "-" || !lockContention.Match(e.Bytes()) {
 			break

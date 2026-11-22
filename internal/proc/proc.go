@@ -165,7 +165,7 @@ func StopCurrent(grace time.Duration) {
 		wg.Add(1)
 		go func(pg int, st string) {
 			defer wg.Done()
-			stopOwned(pg, st, grace)
+			stopOwned(pg, st, grace, true)
 		}(pg, st)
 	}
 	wg.Wait()
@@ -191,9 +191,9 @@ func StopGroup(pg int, grace time.Duration) {
 }
 
 // stopOwned: 무리 pg가 기록한 그것(우두머리 시작 시각 start)일 때만 끈다 — 우두머리가 끝나 번호가 다른 무리에 다시 쓰였으면 건드리지 않는다.
-// 끝나면 고아 기록도 지운다
-func stopOwned(pg int, start string, grace time.Duration) {
-	switch ownGroup(pg, start) {
+// live = 이 실행이 띄운 무리(bounded). 끝나면 고아 기록도 지운다
+func stopOwned(pg int, start string, grace time.Duration, live bool) {
+	switch ownGroup(pg, start, live) {
 	case groupMine:
 		StopGroup(pg, grace)
 		if groupGone(pg) {
@@ -212,17 +212,20 @@ const (
 	groupNone                      // 그 무리가 없거나 다른 것이 번호를 쓴다
 )
 
-// ownGroup: 무리 pg가 기록한 그것인가. 무리가 살아 있는 동안 그 번호는 다시 쓰이지 않으니(POSIX) 우두머리가 끝났어도 남은 무리는 그것이다.
-// 우두머리가 살아 있으면 시작 시각을 견준다(start가 비면 우리가 막 띄운 것으로 친다)
-func ownGroup(pg int, start string) groupState {
+// ownGroup: 무리 pg가 기록한 그것인가. live(이 실행이 띄워 bounded에 올린 무리)와 디스크 기록(앞 실행이 남김)을 가른다(재감사 R-04·R-C02·R-07).
+//   - live: 우두머리는 이 실행의 자식이다 — 거두기 전에는 그 번호를 다른 프로세스가 못 쓰고, 거둔 뒤에도 무리가 남은 동안 번호는 그 무리의
+//     것이다(POSIX). 그래서 무리가 있으면 ps 없이 그것이다(시간 넘김 때 ps가 실패해도 거둔다 — R-C01)
+//   - 디스크 기록: 기록한 실행이 죽은 뒤에는 무리 소멸·번호 재사용·새 우두머리 퇴장을 가르지 못한다 — 우두머리가 살아 있고 기록한 시작
+//     시각과 같을 때만 그것이다. 우두머리가 끝났거나 시작 시각이 비었으면 모름(신호를 보류하고 기록을 둔다)
+func ownGroup(pg int, start string, live bool) groupState {
 	if pg <= 1 || groupGone(pg) {
 		return groupNone
 	}
-	if !Alive(pg) {
+	if live {
 		return groupMine
 	}
-	if start == "" {
-		return groupMine
+	if !Alive(pg) || start == "" {
+		return groupUnknown
 	}
 	st, err := StartTime(pg)
 	if err != nil {
@@ -238,8 +241,20 @@ func ownGroup(pg int, start string) groupState {
 var psPath = "/bin/ps"
 
 // StartTime: 그 pid의 시작 시각(ps lstart) — pid 재사용 검사용. ps를 못 부르거나 그 pid가 없으면 오류(모름 — 「다른 프로세스」로 읽지 않는다)
-func StartTime(pid int) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+func StartTime(pid int) (string, error) { return startTimeBy(pid, time.Time{}) }
+
+// startTimeBy: StartTime을 deadline 안에서(빈 값이면 20초) — 상한 걸린 Run의 준비도 같은 남은 시간을 쓴다(재감사 R-C05)
+func startTimeBy(pid int, deadline time.Time) (string, error) {
+	d := 20 * time.Second
+	if !deadline.IsZero() {
+		if r := time.Until(deadline); r < d {
+			d = r
+		}
+	}
+	if d <= 0 {
+		return "", fmt.Errorf("ps %d: %w", pid, ErrTimeout)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	c := exec.CommandContext(ctx, psPath, "-o", "lstart=", "-p", strconv.Itoa(pid))
 	c.Env = append(os.Environ(), "LC_ALL=C")

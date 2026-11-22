@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,13 +39,28 @@ func cotenantBasics(c *cg) (A, B, C int) {
 	return cotenantBasicsB(c, R, A)
 }
 
-// TestCotenantCommands: 명령 분석만 보는 단언 — 등록부·동거 에이전트 없이 저장소 하나로 따로 돈다(아스트라 M07: 시나리오 한가운데 있어
-// -run으로 이것만 골라도 앞 준비(에이전트 등록·ps)가 다 돌고, 준비가 깨지면 하나도 못 돌았다)
+// TestCotenantCommands: 명령 분석만 보는 단언 — 동거 에이전트 없이 저장소 하나로 따로 돈다(아스트라 M07: 시나리오 한가운데 있어
+// -run으로 이것만 골라도 앞 준비(에이전트 등록·ps)가 다 돌고, 준비가 깨지면 하나도 못 돌았다). 단언마다 훅 호출과 같은 하위 시험이라
+// -run으로 하나를 고르면 그 훅만 돈다(재감사 R-M05). sa는 고정 시작 시각으로 등록해 정상 쓰기도 ps에 기대지 않는다
 func TestCotenantCommands(t *testing.T) {
 	c := newCG(t)
 	c.R = c.T + "/r"
 	c.mkrepo(c.R)
+	c.reg(c.agent(), "sa", c.T, "agent-a", deadST)
 	cotenantCommands(c, c.R)
+}
+
+// runCheck NAME WANT PATTERN SESSION TOOL ARG: 준비가 필요 없는 단언 하나 — 훅 호출과 단언을 같은 하위 시험 안에서
+func (c *cg) runCheck(name string, want int, pat, s, tool, arg string) {
+	c.t.Helper()
+	c.t.Run(name, func(t *testing.T) {
+		cc := *c
+		cc.t = t
+		cc.run(s, tool, arg)
+		if cc.RC != want || (pat != "" && !regexp.MustCompile(pat).MatchString(cc.ERR+"\n"+cc.OUT)) {
+			t.Errorf("rc=%d, want %d %q err=[%s] out=[%s]", cc.RC, want, pat, cc.ERR, cc.OUT)
+		}
+	})
 }
 
 // cotenantCommands: 임대·동거와 상관없는 명령 분석 단언(세션 sa, 저장소 R)
@@ -58,8 +74,7 @@ func cotenantCommands(c *cg, R string) {
 		"git -C " + R + " push -f origin main", "env HERDR_LAND=1 git push --force origin main", "git -c x.y=1 push -f origin main",
 		"git fetch && git push -f origin main", "true; git push -f origin main", "echo x | git push -f origin main",
 		"bash -c 'git push -f origin main'", "x=$(git push -f origin main)", "git -C /nonexistent push -f origin main"} {
-		c.run("sa", "Bash", cmd)
-		c.check("강제 push 차단(동거 없음): "+cmd, 2, "강제 push.*기대값을 적은 --force-with-lease")
+		c.runCheck("강제 push 차단(동거 없음): "+cmd, 2, "강제 push.*기대값을 적은 --force-with-lease", "sa", "Bash", cmd)
 	}
 	// audit M1: remote wrappers (hc exec/run --on … --, ssh <host> …) and nested shells; L1: git -c alias/mirror/+push
 	for _, cmd := range []string{"hc exec --on mini -- git push -f origin main", "hc exec --on mini --timeout 60 -- bash -lc 'git push -f origin main'",
@@ -67,15 +82,13 @@ func cotenantCommands(c *cg, R string) {
 		"ssh mini -- git push origin +main", "hc run --bg --on mini --name x -- git push --mirror origin",
 		`sh -c "bash -lc 'zsh -c \"git push -f origin main\"'"`, `ssh mini "hc exec --on m2 -- sh -c 'git push -f origin main'"`,
 		"git -c alias.p='push -f' p origin main", "git -c remote.origin.mirror=true push origin", "git -c remote.origin.push=+refs/heads/*:refs/heads/* push origin"} {
-		c.run("sa", "Bash", cmd)
-		c.check("감싼 강제 push 차단: "+cmd, 2, "강제 push")
+		c.runCheck("감싼 강제 push 차단: "+cmd, 2, "강제 push", "sa", "Bash", cmd)
 	}
 	for _, cmd := range []string{"hc exec --on mini -- git push origin main", "ssh mini 'git push --force-with-lease=r:abc origin HEAD:r'",
 		"hc exec --on mini -- git fetch origin +refs/heads/*:refs/remotes/origin/*", "ssh mini 'echo git push -f'",
 		`hc exec --on mini -- bash -lc 'git push -q origin "${c}:refs/claims/$n" --force-with-lease="refs/claims/$n:"'`,
 		"hc send t1 'git push -f 금지'", "git -c alias.st=status st", "ssh -t mini", "hc exec --on mini -- ls"} {
-		c.run("sa", "Bash", cmd)
-		c.check("감싼 정상 명령은 허용: "+cmd, 0)
+		c.runCheck("감싼 정상 명령은 허용: "+cmd, 0, "", "sa", "Bash", cmd)
 	}
 	// 2026-11-17 cg-multibyte: awk splits the command into bytes and cuts long words at 1024 bytes, mid-character for
 	// Korean/emoji; in a UTF-8 locale awk's regex then died (towc: multibyte conversion failure) = "Bash 명령 분석 실패"
@@ -86,12 +99,12 @@ func cotenantCommands(c *cg, R string) {
 			for _, body := range []string{strings.Repeat("가나다라 ", 120), strings.Repeat("🙂한글 ", 120), strings.Repeat("깨�진 ", 150)} {
 				b2 := string([]rune(body)[:2])
 				c.hookEnv = []string{"LC_ALL=" + loc}
-				c.run("sa", "Bash", "MSG='"+pad+body+`'; for t in a/t1 a/t2; do hc send "$t" "$MSG" 2>&1 | tail -1; done; hc read b/t3 2>&1 | grep -E "Model:|effort" | tail -1`)
-				c.check(fmt.Sprintf("긴 한국어 글 hc send 허용(%s, 자름 위치 +%d, %s)", loc, p, b2), 0)
-				c.run("sa", "Bash", "MSG='"+pad+body+"'; git push -f origin main")
-				c.check(fmt.Sprintf("긴 한국어 글 뒤 강제 push는 그대로 차단(%s, +%d, %s)", loc, p, b2), 2, "강제 push")
-				c.run("sa", "Bash", "bash -c 'git push -f origin main; echo "+pad+body+"'")
-				c.check(fmt.Sprintf("긴 한국어 글이 든 bash -c 안 강제 push 차단(%s, +%d, %s)", loc, p, b2), 2, "강제 push")
+				c.runCheck(fmt.Sprintf("긴 한국어 글 hc send 허용(%s, 자름 위치 +%d, %s)", loc, p, b2), 0, "",
+					"sa", "Bash", "MSG='"+pad+body+`'; for t in a/t1 a/t2; do hc send "$t" "$MSG" 2>&1 | tail -1; done; hc read b/t3 2>&1 | grep -E "Model:|effort" | tail -1`)
+				c.runCheck(fmt.Sprintf("긴 한국어 글 뒤 강제 push는 그대로 차단(%s, +%d, %s)", loc, p, b2), 2, "강제 push",
+					"sa", "Bash", "MSG='"+pad+body+"'; git push -f origin main")
+				c.runCheck(fmt.Sprintf("긴 한국어 글이 든 bash -c 안 강제 push 차단(%s, +%d, %s)", loc, p, b2), 2, "강제 push",
+					"sa", "Bash", "bash -c 'git push -f origin main; echo "+pad+body+"'")
 				c.hookEnv = nil
 			}
 		}
@@ -141,11 +154,10 @@ func cotenantCommands(c *cg, R string) {
 		if cmd == "" {
 			continue
 		}
-		c.run("sa", "Bash", cmd)
 		if want == "2" {
-			c.check("감싸기 문법 표 막힘: "+cmd, 2, "강제 push|겹침")
+			c.runCheck("감싸기 문법 표 막힘: "+cmd, 2, "강제 push|겹침", "sa", "Bash", cmd)
 		} else {
-			c.check("감싸기 문법 표 허용: "+cmd, 0)
+			c.runCheck("감싸기 문법 표 허용: "+cmd, 0, "", "sa", "Bash", cmd)
 		}
 	}
 	for _, cmd := range []string{"git push origin main", "git push -u origin HEAD", "git push origin --delete refs/integ/x", "git push origin :refs/integ/x",
@@ -157,8 +169,7 @@ func cotenantCommands(c *cg, R string) {
 		`git push -q origin "${c2}:refs/claims/$n" --force-with-lease="refs/claims/$n:$old"`,
 		`git push -q origin --delete "refs/claims/$n" --force-with-lease="refs/claims/$n:$c"`,
 		`git push -q origin --delete refs/wt-claims/x --force-with-lease=refs/wt-claims/x:0123abcd`} {
-		c.run("sa", "Bash", cmd)
-		c.check("강제 push 아님(기대값 적은 lease·선점 포함)은 허용: "+cmd, 0)
+		c.runCheck("강제 push 아님(기대값 적은 lease·선점 포함)은 허용: "+cmd, 0, "", "sa", "Bash", cmd)
 	}
 }
 

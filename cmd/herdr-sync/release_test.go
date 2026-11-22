@@ -233,6 +233,64 @@ func TestInstallReport(t *testing.T) {
 	}
 }
 
+// 빌드 입력은 게시기가 검사한 커밋의 원본 blob 그대로다 — 저장소 속성(export-ignore·export-subst·eol)이 붙은 파일도 빠지거나
+// 바뀌지 않는다(재감사 R-14). 실행 권한·링크도 커밋 그대로
+func TestExportTreeRawBlobs(t *testing.T) {
+	r := newRepo(t)
+	TMP = t.TempDir()
+	files := map[string]string{
+		".gitattributes": "notice.txt export-ignore\nsubst.txt export-subst\ncrlf.txt text eol=crlf\n",
+		"notice.txt":     "embed me\n",
+		"subst.txt":      "$Format:%H$\n",
+		"crlf.txt":       "a\nb\n",
+		"sub/x.sh":       "#!/bin/sh\n",
+	}
+	for p, c := range files {
+		os.MkdirAll(filepath.Dir(r+"/"+p), 0o755)
+		os.WriteFile(r+"/"+p, []byte(c), 0o644)
+	}
+	os.Chmod(r+"/sub/x.sh", 0o755)
+	os.Symlink("notice.txt", r+"/lnk")
+	gitT(t, r, "add", "-A")
+	gitT(t, r, "commit", "-qm", "attrs")
+	dst := t.TempDir()
+	if err := exportTree(r, gitT(t, r, "rev-parse", "HEAD"), dst); err != nil {
+		t.Fatal(err)
+	}
+	files["asset"] = "initial\n"
+	for p, c := range files {
+		if got := readOr(dst + "/" + p); got != c {
+			t.Errorf("%s: %q, 바람 %q(원본 blob)", p, got, c)
+		}
+	}
+	if fi, err := os.Stat(dst + "/sub/x.sh"); err != nil || fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("실행 권한이 빠졌다: %v", err)
+	}
+	if l, err := os.Readlink(dst + "/lnk"); err != nil || l != "notice.txt" {
+		t.Errorf("링크: %q %v", l, err)
+	}
+}
+
+// 전송(hc exec)이 실패로 끝났으면 응답 줄을 믿지 않는다 — 「받음」(확정 설치)을 찍지 않고, 받았는지 모른다고 경고한다(재감사 R-19)
+func TestPutNotesTransportFailed(t *testing.T) {
+	ns := putNotes("w1", []string{"hello"}, "W\thello\n", 255, "connection reset")
+	warned := false
+	for _, n := range ns {
+		if !n.bad && strings.Contains(n.s, "받음") {
+			t.Errorf("전송 실패인데 확정 줄: %q", n.s)
+		}
+		if n.bad && strings.Contains(n.s, "connection reset") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("실패 경고가 없다: %v", ns)
+	}
+	if ns := putNotes("w1", []string{"hello"}, "W\thello\n", 0, ""); len(ns) != 1 || ns[0].warn || ns[0].bad || ns[0].s != "w1 받음 hello" {
+		t.Errorf("정상: %v", ns)
+	}
+}
+
 // ghEnv: PATH 앞에 가짜 gh — 호출을 $HCT/gh.calls에. 릴리스 자산은 $HCT/rel/<태그>/, GH_VIEW_ERR가 있으면 view가 그 글로 실패,
 // GH_DL_FAIL이면 download 실패
 const fakeGHUnit = `#!/bin/sh
@@ -258,11 +316,14 @@ func ghEnv(t *testing.T) (hct, out string) {
 	t.Setenv("HCT", hct)
 	TMP = t.TempDir()
 	out = t.TempDir()
-	for n, c := range map[string]string{"a": "A", "SHA256SUMS": "sa  a\n"} {
+	for n, c := range map[string]string{"a": "A", "SHA256SUMS": sumsA} {
 		os.WriteFile(out+"/"+n, []byte(c), 0o644)
 	}
 	return
 }
+
+// sumsA: 자산 a(바이트 "A") 하나의 SHA256SUMS
+var sumsA = func() string { h := sha256.Sum256([]byte("A")); return hex.EncodeToString(h[:]) + "  a\n" }()
 
 // 이미 있는 릴리스는 덮지 않는다: 조회·확인을 못 하면 모름(올리지 않음), SHA256SUMS가 다르면 둔다, 빠진 자산만 --clobber 없이 채운다(감사 A05·C01·O-12)
 func TestUploadNeverClobbers(t *testing.T) {
@@ -272,13 +333,21 @@ func TestUploadNeverClobbers(t *testing.T) {
 		have                  map[string]string // 이미 올린 자산
 		want                  bool
 		up                    string // 올린 이름들(없으면 "")
+		files                 string // 올린 파일 이름(빈칸으로, 순서대로)
 	}{
-		{"없음 확인 → 만듦", "", "", nil, true, "create"},
-		{"조회 오류(통신) → 모름", "HTTP 502: Bad Gateway", "", nil, false, ""},
-		{"SHA256SUMS 받기 실패 → 모름", "", "1", map[string]string{"a": "A", "SHA256SUMS": "sa  a\n"}, false, ""},
-		{"SHA256SUMS 다름 → 둔다", "", "", map[string]string{"a": "OLD", "SHA256SUMS": "old  a\n"}, false, ""},
-		{"바이너리 빠짐 → 채움", "", "", map[string]string{"SHA256SUMS": "sa  a\n"}, true, "upload"},
-		{"같음", "", "", map[string]string{"a": "A", "SHA256SUMS": "sa  a\n"}, true, ""},
+		{"없음 확인 → 만듦", "", "", nil, true, "create", "a SHA256SUMS"},
+		{"조회 오류(통신) → 모름", "HTTP 502: Bad Gateway", "", nil, false, "", ""},
+		// gh 오류 글에 「not found」가 들어 있어도 릴리스 없음(release not found)이 아니면 모름(R-12)
+		{"조회 오류(프록시 이름 풀기) → 모름", "proxy host not found", "", nil, false, "", ""},
+		{"조회 오류(저장소 없음) → 모름", "HTTP 404: Not Found (https://api.github.com/repos/o/r/releases/tags/bin-x)", "", nil, false, "", ""},
+		{"SHA256SUMS 받기 실패 → 모름", "", "1", map[string]string{"a": "A", "SHA256SUMS": sumsA}, false, "", ""},
+		{"SHA256SUMS 다름 → 둔다", "", "", map[string]string{"a": "OLD", "SHA256SUMS": "old  a\n"}, false, "", ""},
+		{"바이너리 빠짐 → 채움", "", "", map[string]string{"SHA256SUMS": sumsA}, true, "upload", "a"},
+		// SHA256SUMS 없이 바이너리만 남은 반쪽 릴리스: 남은 바이트가 이번 빌드와 같을 때만 명세를 올린다(R-13)
+		{"명세 빠짐·남은 바이너리 같음 → 명세 채움", "", "", map[string]string{"a": "A"}, true, "upload", "SHA256SUMS"},
+		{"명세 빠짐·남은 바이너리 다름 → 둔다", "", "", map[string]string{"a": "OLD"}, false, "", ""},
+		{"명세 빠짐·남은 바이너리 받기 실패 → 모름", "", "1", map[string]string{"a": "A"}, false, "", ""},
+		{"같음", "", "", map[string]string{"a": "A", "SHA256SUMS": sumsA}, true, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hct, out := ghEnv(t)
@@ -290,29 +359,48 @@ func TestUploadNeverClobbers(t *testing.T) {
 					os.WriteFile(hct+"/rel/bin-x/"+n, []byte(c), 0o644)
 				}
 			}
-			got := upload("o/r", "bin-x", "c12", out, []string{"a"}, "sa  a\n", quiet)
+			got := upload("o/r", "bin-x", "c12", out, []string{"a"}, sumsA, quiet)
 			calls := readOr(hct + "/gh.calls")
 			if got != tc.want {
 				t.Errorf("돌려준 값 %v, 바람 %v (calls %q)", got, tc.want, calls)
 			}
-			up := ""
+			up, files := "", ""
 			for _, l := range strings.Split(calls, "\n") {
 				if strings.HasPrefix(l, "release upload") && strings.Contains(l, "--clobber") {
 					t.Errorf("--clobber로 올렸다: %q", l)
 				}
-				if strings.HasPrefix(l, "release create") {
-					up = "create"
-				} else if strings.HasPrefix(l, "release upload") {
-					up = "upload"
+				if strings.HasPrefix(l, "release create") || strings.HasPrefix(l, "release upload") {
+					up = strings.Fields(l)[1]
+					for _, w := range strings.Fields(l) {
+						if strings.HasPrefix(w, out+"/") {
+							files = strings.TrimSpace(files + " " + strings.TrimPrefix(w, out+"/"))
+						}
+					}
 				}
 			}
-			if up != tc.up {
-				t.Errorf("올림 %q, 바람 %q (calls %q)", up, tc.up, calls)
+			if up != tc.up || files != tc.files {
+				t.Errorf("올림 %q %q, 바람 %q %q (calls %q)", up, files, tc.up, tc.files, calls)
+			}
+			// 올린 파일은 릴리스에 이번 빌드의 바이트 그대로 있다(R-31 — 명세만 다시 올리는 꼴을 잡는다)
+			for _, n := range strings.Fields(tc.files) {
+				if b := readOr(hct + "/rel/bin-x/" + n); b != readOr(out+"/"+n) {
+					t.Errorf("올린 %s의 바이트가 이번 빌드와 다르다: %q", n, b)
+				}
+			}
+			if tc.want {
+				for _, n := range []string{"a", "SHA256SUMS"} {
+					if !exists(hct + "/rel/bin-x/" + n) {
+						t.Errorf("받기로 넘어가는데 릴리스에 %s가 없다", n)
+					}
+				}
 			}
 			for n, c := range tc.have {
 				if readOr(hct+"/rel/bin-x/"+n) != c {
 					t.Errorf("있던 자산 %s가 바뀌었다", n)
 				}
+			}
+			if !tc.want && tc.have != nil && tc.have["SHA256SUMS"] == "" && exists(hct+"/rel/bin-x/SHA256SUMS") {
+				t.Errorf("남은 바이너리를 확인하지 못했는데 명세를 올렸다")
 			}
 		})
 	}

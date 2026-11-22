@@ -8,7 +8,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	wm "herdr-tools/internal/workermac"
@@ -44,8 +43,6 @@ type node struct {
 	w, user, v4, v6, pub, fp string
 	ok                       bool
 }
-
-var badRe = regexp.MustCompile(`(없음|다름|실패|안 됨)`)
 
 func b01(b bool) string {
 	if b {
@@ -167,7 +164,11 @@ func meshRun(ctx context.Context, mesh, f string, check bool, d string) int {
 			}
 			// 셸 판은 authorized_keys 「넣음」을 두 번 셌다(「$line $r」) — 여기는 한 번
 			add += strings.Count(line, "넣음")
-			if rc == 0 && r != "실패" && !badRe.MatchString(line) && strings.Contains(line, "접속 됨") {
+			// 단계마다 정확히 한 줄·허용 값만 성공(R-38 — 빈 응답·접속만 남은 응답도 성공으로 셌다). 빠짐·겹침(Field가 줄바꿈으로
+			// 잇는다)·모르는 값은 그 방향 실패. 「넣음」은 바꿀 때만 나온다 — --check에서 보이면 모르는 값
+			okv := func(v string) bool { return v == "있음" || (!check && v == "넣음") }
+			if rc == 0 && okv(r) && okv(wm.Field(out, "kh=")) && okv(wm.Field(out, "cfg=")) && okv(wm.Field(out, "hc=")) &&
+				wm.Field(out, "conn=") == "됨" {
 				fmt.Printf("  %s\n", line)
 			} else {
 				fmt.Printf("✗ %s\n", line)

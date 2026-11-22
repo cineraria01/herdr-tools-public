@@ -70,7 +70,7 @@ func (g *cg) bashGit(kind, dir, arg string) {
 		if glob {
 			base := ""
 			if !top {
-				base = strings.TrimPrefix(strings.TrimPrefix(g.pd, g.root), "/")
+				base = strings.TrimSuffix(g.prefix, "/")
 			}
 			a = strings.TrimPrefix(a, "./")
 			if base != "" {
@@ -109,6 +109,10 @@ func (g *cg) bashWrite(dir, arg string, noglob bool) {
 		a = dir + "/" + a
 	}
 	if !noglob && strings.ContainsAny(a, "*?[") {
+		if patLocale == locOther {
+			g.globLocale(arg, a)
+			return
+		}
 		// arg는 낱말 가르기가 낸 셸 낱말 하나라 안의 공백은 따옴표·\로 지킨 것 — 다시 가르지 않고 통째로 펼친다
 		// (아스트라 E07: `tee "팀 문서"/*.txt`가 없는 「팀」에만 임대를 썼다. 셸 판 m=($a)는 그대로 가른다 — 알려진 차이)
 		for _, f := range bashGlob(a) {
@@ -123,14 +127,7 @@ func (g *cg) bashWrite(dir, arg string, noglob bool) {
 	if g.prest != "" {
 		g.full += "/" + g.prest
 	}
-	switch {
-	case g.full == g.root:
-		g.rel = ""
-	case strings.HasPrefix(g.full, g.root+"/"):
-		g.rel = g.full[len(g.root)+1:]
-	default:
-		return
-	}
+	g.rel = g.canonRel()
 	if isDir(g.full) {
 		what := g.rel
 		if what == "" {
@@ -139,8 +136,20 @@ func (g *cg) bashWrite(dir, arg string, noglob bool) {
 		g.foreignUnder(g.rel, false, "'"+arg+"' 는 "+what+" 폴더를 바꾸므로 막았다. 그 파일을 빼고 네 파일만 경로로 지정하라.")
 		return
 	}
+	g.checkWritten()
 	g.lease(g.rel, "check")
 	g.pend += g.pd + us + g.rel + "\n"
+}
+
+// globLocale: C·POSIX·UTF-8 밖의 로캘(ko_KR.eucKR·en_US.ISO8859-1 등)에서는 bash 글롭의 글자 폭·문자 부류를 흉내 내지 못한다
+// (재감사 R-M12: 바이트로 읽어 bash와 다른 파일을 골랐다). 어느 로캘의 한 글자에도 맞는 넓은 패턴(widePat)으로 펼쳐, 하나라도
+// 작업 트리 안이면 고를 파일을 정할 수 없어 막는다(판정 보류). 트리 밖뿐이면 임대할 것이 없다
+func (g *cg) globLocale(arg, a string) {
+	for _, f := range bashGlob(widePat(a)) {
+		if g.phys(f) && g.tree(g.pd) {
+			g.block("'" + arg + "' 의 글롭을 이 로캘(" + ctypeLocale() + ")에서 판정할 수 없어 막았다(" + f + " 이 작업 트리 안). LC_ALL=C 또는 UTF-8 로캘로 다시 하거나 경로를 글자로 적어라.")
+		}
+	}
 }
 
 // analyze CMD CWD DEPTH REMOTE: 낱말 가르기의 찾은 것들 — SUB(bash -c·eval이 돌릴 줄)는 다시 가른다,
@@ -183,7 +192,16 @@ func (g *cg) checkBash() {
 	}
 	g.pend = ""
 	g.analyze(g.cmd, g.hcwd, 0, false)
-	for _, l := range heredocLines(g.pend) { // 막힌 데가 없으면 파일 대상들에 임대를 남긴다
+	// 막힌 데가 없으면 파일 대상들에 임대를 남긴다. 중간에 막히면(git 실패·기한·넘겨받기 다툼) 이번 호출이 새로 만든 임대만
+	// 그 주인 줄이 그대로일 때 되돌린다 — 명령은 돌지 않으니 앞 파일들의 임대가 남아 남을 막으면 안 된다(재감사 R-M04)
+	g.made = nil
+	defer func() {
+		if r := recover(); r != nil {
+			g.undoMade()
+			panic(r)
+		}
+	}()
+	for _, l := range heredocLines(g.pend) {
 		f := bashRead(l, 0x1f, 2)
 		if f[1] != "" && g.tree(f[0]) {
 			g.lease(f[1], "0")

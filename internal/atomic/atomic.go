@@ -14,8 +14,16 @@ import (
 // rename: 시험이 rename 직전 실패를 끼워 넣는 자리
 var rename = os.Rename
 
-// WriteFile: path를 data로 바꿔 넣는다. 권한은 perm에서 umask를 뺀 것(셸 `>`·os.WriteFile로 새로 만들 때와 같다)
+// WriteFile: path를 data로 바꿔 넣는다. 새 파일의 권한은 perm에서 umask를 뺀 것(셸 `>`·os.WriteFile로 새로 만들 때와 같다),
+// 이미 있는 파일은 그 권한 그대로 — 임시 파일도 처음부터 그 권한으로 만든다(재감사 fill R-11: 0600 장부가 다음 실행의 umask 022로 0644가 되지 않게)
 func WriteFile(path string, data []byte, perm os.FileMode) error {
+	st, err := os.Stat(path)
+	switch {
+	case err == nil && st.Mode().IsRegular():
+		return write(path, data, st.Mode().Perm(), true)
+	case err != nil && !errors.Is(err, os.ErrNotExist): // 기존 권한을 모르면 느슨한 권한으로 바꿔 넣지 않는다
+		return fmt.Errorf("기존 파일 권한 읽기 %s: %w", path, err)
+	}
 	return write(path, data, perm, false)
 }
 

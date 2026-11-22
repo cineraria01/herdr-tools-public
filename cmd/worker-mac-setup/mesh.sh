@@ -1,5 +1,6 @@
 # worker-mac-setup mesh 원격 조각: 그 기계에서 bash가 돈다(원격에는 Go가 없다). 셸 판의 MESH_HEAD·MESH_INFO·MESH_AUTH·MESH_CLI와 같은 내용
-# (다른 것 하나: cli의 hc 목록은 JSON을 풀어 정확한 이름으로, 조회 실패는 「실패」 — 셸 판은 grep, 실패를 「없음」으로 읽는다. E02, 셸 판은 알려진 차이).
+# (다른 것 하나: cli의 hc 목록은 JSON을 풀어 정확한 이름으로, 조회 실패·이름 없는 행이 든 목록은 「실패」 — 셸 판은 grep, 실패를 「없음」으로
+# 읽는다. E02·R-17, 셸 판은 알려진 차이).
 # 「#@ 이름」 줄이 조각을 나눈다. 한 번 부를 때 「<설정 값>;」 + head + 조각 하나를 보내고, 인자는 CHECK 날짜다
 #@ head
 set -u; CHECK=$1; D=$2
@@ -48,7 +49,8 @@ else bak "$cf"; nl "$cf"; printf "\nHost %s\n    HostName %s\n    User %s\n" "$B
 if l=$(perl -e "alarm 20; exec @ARGV" hc machine ls --json 2>/dev/null </dev/null); then
   printf "%s" "$l" | perl -MJSON::PP -e 'my $j = eval { decode_json(do { local $/; <STDIN> }) };
     exit 2 unless ref $j eq "HASH" && ref $j->{machines} eq "ARRAY";
-    exit((grep { ref $_ eq "HASH" && defined $_->{name} && $_->{name} eq $ARGV[0] } @{$j->{machines}}) ? 0 : 1)' "$B"; k=$?
+    for (@{$j->{machines}}) { exit 2 unless ref $_ eq "HASH" && defined $_->{name} && !ref $_->{name} && $_->{name} ne "" }
+    exit((grep { $_->{name} eq $ARGV[0] } @{$j->{machines}}) ? 0 : 1)' "$B"; k=$?
 else k=9; fi
 if [ $k = 0 ]; then echo hc=있음
 elif [ $k != 1 ]; then echo "hc=실패(machine ls를 못 읽음 — 모름)"

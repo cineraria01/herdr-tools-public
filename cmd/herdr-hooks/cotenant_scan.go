@@ -3,7 +3,9 @@ package main
 // cotenant-guard Go 판 — 남의 미커밋 임대 훑기(scan_foreign)·hc 에이전트 찾기·동거 판정·foreign_under (cotenant.go에서 옮김)
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -32,15 +34,26 @@ func (g *cg) scanForeign() {
 		g.changedLeases()
 		return
 	}
-	var owners []string
-	if ents, err := os.ReadDir(g.leases); err == nil {
-		for _, e := range ents {
-			if n := e.Name(); !strings.HasPrefix(n, ".") {
-				if _, err := os.Lstat(g.leases + "/" + n + "/owner"); err == nil {
-					owners = append(owners, n)
-				}
+	var owners, stale []string
+	ents, err := os.ReadDir(g.leases)
+	if err != nil { // 목록을 못 읽음은 「임대 없음」이 아니다(모름) — 정리 없이 바뀐 경로만(작업 중 발견해 함께 고침)
+		rmF(g.leases + "/.cleaning")
+		g.changedLeases()
+		return
+	}
+	for _, e := range ents {
+		n := e.Name()
+		if pid, ok := strings.CutPrefix(n, ".trash-"); ok && !bashKill0(pid) {
+			stale = append(stale, g.leases+"/"+n) // 끝난 정리자가 못 지운 휴지통(재감사 R-L02)
+		}
+		if !strings.HasPrefix(n, ".") {
+			if _, err := os.Lstat(g.leases + "/" + n + "/owner"); err == nil {
+				owners = append(owners, n)
 			}
 		}
+	}
+	if len(stale) > 0 { // 지금 정리자는 이 실행(.cleaning) — 그 pid가 끝난 휴지통만 뒤에서 지운다
+		bgRm(stale...)
 	}
 	sort.Strings(owners)
 	for _, n := range owners {
@@ -76,45 +89,24 @@ func (g *cg) scanForeign() {
 		}
 		return
 	}
+	// 임대 경로는 옛 판이 적은 철자(NFD·다른 대소문자)일 수 있다 — git이 같은 파일로 찾게 icase로 묻고, 견줄 때는 NFC·소문자로
+	// (재감사 R-H03: 혼용 기간의 임대를 「안 바뀜」으로 읽어 지우지 않게. 대소문자만 다른 두 파일이 있는 파일시스템에서는 더 많이
+	// 맞아 덜 지울 뿐이다)
 	pathspecs := make([]string, len(lr))
 	for i, p := range lr {
-		pathspecs[i] = ":(literal)" + p
+		pathspecs[i] = ":(literal,icase)" + p
 	}
-	out, ok := g.statusZ(pathspecs)
-	if !ok { // 실패한 출력은 파싱하지 않는다(아스트라 E02) — 정리 없이 바뀐 경로만 다시(그 status도 실패면 막힘)
+	dirty, ok := g.statusZ(pathspecs)
+	keys, nok := g.foldKeys(lr)
+	if !ok || !nok { // 실패한 출력은 파싱하지 않는다(아스트라 E02·R-H05) — 정리 없이 바뀐 경로만 다시(그 status도 실패면 막힘)
 		rmF(cleaning)
 		g.changedLeases()
 		return
 	}
-	recs := strings.Split(out, "\x00") // statusZ가 NUL로 끝남을 확인했다 — 마지막 칸은 빈 칸
-	tail := recs[len(recs)-1]
-	recs = recs[:len(recs)-1]
-	for i := 0; i < len(recs); i++ {
-		e := recs[i]
-		st := e
-		if len(st) > 2 {
-			st = st[:2]
-		}
-		if len(e) > 3 {
-			dirty = append(dirty, e[3:])
-		} else {
-			dirty = append(dirty, "")
-		}
-		if strings.HasPrefix(st, "R") || strings.HasPrefix(st, "C") {
-			next := tail
-			if i+1 < len(recs) {
-				next = recs[i+1]
-			}
-			i++
-			if strings.HasPrefix(st, "R") {
-				dirty = append(dirty, next)
-			}
-		}
-	}
 	if len(dirty) > 0 {
 		// awk 한 번: 바뀐 경로와 그 위 폴더 모두를 모으고, 임대 경로(줄)마다 맞으면 그 줄 번호
 		d := map[string]bool{}
-		for _, r := range strings.Split(strings.Join(dirty, "\n"), "\n") {
+		for _, r := range strings.Split(strings.ToLower(strings.Join(dirty, "\n")), "\n") {
 			d[r] = true
 			for x := r; ; {
 				i := strings.LastIndexByte(x, '/')
@@ -125,7 +117,7 @@ func (g *cg) scanForeign() {
 				d[x] = true
 			}
 		}
-		for i, r := range strings.Split(strings.Join(lr, "\n"), "\n") {
+		for i, r := range keys {
 			if d[r] {
 				hit[i] = true
 				if i < len(lw) && lw[i] != "" {
@@ -208,10 +200,43 @@ func (g *cg) scanForeign() {
 			os.Rename(s, trash+"/"+baseName(s))
 		}
 	}
-	c := exec.Command("/bin/rm", "-rf", trash)
+	bgRm(trash)
+}
+
+// bgRm: /bin/rm -rf 경로… 를 뒤에서(기다리지 않는다) — 휴지통 폴더만
+func bgRm(paths ...string) {
+	c := exec.Command("/bin/rm", append([]string{"-rf", "--"}, paths...)...)
 	if c.Start() == nil {
-		c.Process.Release()
+		c.Process.Release() //nolint:errcheck
 	}
+}
+
+// foldKeys: 임대 경로를 견줄 열쇠로 — git argv의 NFC(ASCII 아닌 것만 check-attr 한 번), 소문자. git이 실패하면 ok=false(모름)
+func (g *cg) foldKeys(paths []string) ([]string, bool) {
+	keys := make([]string, len(paths))
+	var idx []int
+	args := []string{"-C", g.root, "check-attr", "-z", "herdr-hooks-path", "--"}
+	for i, p := range paths {
+		keys[i] = p
+		if !isASCII(p) {
+			idx = append(idx, i)
+			args = append(args, p)
+		}
+	}
+	if len(idx) > 0 {
+		out, rc := g.gitRun(nil, "", args...)
+		f := strings.Split(out, "\x00")
+		if rc != 0 || len(f) != 3*len(idx)+1 || f[len(f)-1] != "" {
+			return nil, false
+		}
+		for k, i := range idx {
+			keys[i] = f[3*k]
+		}
+	}
+	for i := range keys {
+		keys[i] = strings.ToLower(keys[i])
+	}
+	return keys, true
 }
 
 // hcWho: hc ls에서 이 기계의 산 에이전트 CLI 가운데 ROOT 안에 있는 것(허용 목록 — 개발 서버·빌드·셸은 아님).
@@ -223,64 +248,20 @@ func (g *cg) hcWho() {
 		return
 	}
 	out, _, rc := hookRun([]string{"hc", "ls"}, 2*time.Second, nil, "", hc, "ls", "--json")
-	vals, jerr := jqValues([]byte(out))
-	if rc != 0 || jerr != nil {
+	terms, perr := hcTerminals(out)
+	if rc != 0 || perr != "" {
 		why := fmt.Sprintf("종료 %d", rc)
 		if rc == timeoutRC {
 			why = "시간 넘김"
 		} else if rc == 0 {
-			why = "JSON을 읽지 못함"
+			why = perr
 		}
 		g.who += ", hc ls 실패(" + why + ") — 같은 트리의 hc 에이전트를 모름"
 		return
 	}
-	var b strings.Builder
-hcLoop:
-	for _, v := range vals {
-		m, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		var elems []any
-		switch x := m["terminals"].(type) {
-		case []any:
-			elems = x
-		case map[string]any:
-			for _, e := range x {
-				elems = append(elems, e)
-			}
-		}
-		for _, e := range elems {
-			if e != nil {
-				if _, ok := e.(map[string]any); !ok {
-					break hcLoop
-				}
-			}
-			if mapGet(e, "state") != "live" {
-				continue
-			}
-			addr, ok := mapGet(e, "address").(string)
-			if !ok {
-				break hcLoop
-			}
-			if strings.Contains(addr, "/") {
-				continue
-			}
-			var f []string
-			for _, k := range []string{"address", "agent", "cwd", "name"} {
-				x := mapGet(e, k)
-				if !jqTruthy(x) {
-					x = ""
-				}
-				f = append(f, jqToString(x))
-			}
-			b.WriteString(strings.Join(f, us) + "\n")
-		}
-	}
-	for _, l := range heredocLines(capture(b.String())) {
-		f := bashRead(l, 0x1f, 4)
-		addr, agent, cwd, name := f[0], f[1], f[2], f[3]
-		if addr == "" || addr == g.hcTerm {
+	for _, t := range terms {
+		addr, agent, cwd, name := t[0], t[1], t[2], t[3]
+		if strings.Contains(addr, "/") || addr == g.hcTerm {
 			continue
 		}
 		if !(strings.HasPrefix(agent, "claude") || strings.HasPrefix(agent, "codex") || agent == "agy" || strings.HasPrefix(agent, "grok") ||
@@ -294,6 +275,54 @@ hcLoop:
 			g.who += ", " + name + "[" + addr + "]"
 		}
 	}
+}
+
+// hcTerminals: hc ls --json 응답의 산(live) 터미널마다 {address, agent, cwd, name}. 완전한 목록만 읽는다 —
+// JSON 값 하나인 객체, terminals는 배열, 항목마다 객체·state 문자열, live면 address는 비지 않은 문자열이고 agent·cwd·name은
+// 없음·null·문자열. 하나라도 어긋나면 그 까닭(빈 값이 아님 = 모름. 재감사 R-H02: 빈 성공·terminals 없음·null·주소 없는 live를
+// 「hc 에이전트 없음」으로 읽어 미커밋 파일을 넘겼다)
+func hcTerminals(out string) ([][4]string, string) {
+	dec := json.NewDecoder(strings.NewReader(out))
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil || m == nil {
+		return nil, "JSON 객체 하나가 아님"
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, "JSON 값이 둘 이상"
+	}
+	list, ok := m["terminals"].([]any)
+	if !ok {
+		return nil, "terminals 목록 없음"
+	}
+	var terms [][4]string
+	for _, e := range list {
+		t, ok := e.(map[string]any)
+		if !ok {
+			return nil, "터미널 항목이 객체가 아님"
+		}
+		st, ok := t["state"].(string)
+		if !ok {
+			return nil, "터미널 state 없음"
+		}
+		if st != "live" {
+			continue
+		}
+		var f [4]string
+		for i, k := range []string{"address", "agent", "cwd", "name"} {
+			switch x := t[k].(type) {
+			case nil:
+			case string:
+				f[i] = x
+			default:
+				return nil, "터미널 " + k + " 꼴이 틀림"
+			}
+		}
+		if f[0] == "" {
+			return nil, "산 터미널에 address 없음"
+		}
+		terms = append(terms, f)
+	}
+	return terms, ""
 }
 
 // cotenant: 다른 산 에이전트가 ROOT를 같이 쓴다 — 레지스트리의 Claude, hc 에이전트 터미널, 미커밋 파일을 쥔 산 임대 주인. WHO가 그 이름들
@@ -354,6 +383,9 @@ func (g *cg) foreignUnder(prefix string, pattern bool, msg string) {
 		switch {
 		case prefix == "":
 		case pattern:
+			if patLocale == locOther { // 로캘을 모르면 더 넓게 맞춰 덜 막지 않는다(R-M12)
+				prefix = widePat(prefix)
+			}
 			if !bashMatch(f[0], prefix) && !bashMatch(f[0], prefix+"/*") {
 				continue
 			}

@@ -34,8 +34,11 @@ var frags = []string{
 	"hc-lane wait", "hc-lane  wait", "hc-lane\twait", "&>/tmp/w", "가", "한글", "🙂", "\x01", "x", "y", "z", "_", "-", "=", "(", "[", "?",
 }
 
-func corpus(t *testing.T) []string {
+// corpus: 대조 입력과, 그 가운데 HERDR_HOOKS_CORPUS에서 읽은 실제 명령의 번호 지도(이 읽기 한 번의 값 — 재감사 R-M09:
+// 프로세스 전역 지도에 앞 시험의 번호가 남아 뒤 시험의 번호가 틀렸다)
+func corpus(t *testing.T) ([]string, corpusIdx) {
 	var out []string
+	ext := corpusIdx{}
 	// 훅 계약 시험(Go — 옛 셸 시험 *.test.sh를 옮긴 것, 2026-11-21 go-tests-hooks)의 문자열 글자들(대략) — 맨 앞(느린 대조는 앞쪽만 본다).
 	// 작은 훅 셋(small_hooks) 먼저, 그다음 cotenant-guard. Go 글자는 풀어서(\" 등), 못 풀면 그대로
 	for _, f := range []string{"small_hooks_test.go", "cotenant_basics_test.go", "cotenant_fix12_test.go", "cotenant_fix34_test.go"} {
@@ -70,32 +73,38 @@ func corpus(t *testing.T) []string {
 		for i, c := range strings.Split(string(b), "\x00") {
 			if c != "" && !strings.Contains(c, "\x00") {
 				out = append(out, c)
-				if _, ok := corpusExt[c]; !ok {
-					corpusExt[c] = i + 1
+				if _, ok := ext[c]; !ok {
+					ext[c] = i + 1
 				}
 			}
 		}
 	}
-	return out
+	return out, ext
 }
 
-// corpusExt: HERDR_HOOKS_CORPUS에서 읽은 실제 명령 → 그 파일 안 번호(1부터). 실패 로그에는 원문·출력 대신 번호만
+// corpusIdx: HERDR_HOOKS_CORPUS에서 읽은 실제 명령 → 그 파일 안 번호(1부터). 실패 로그에는 원문·출력 대신 번호만
 // (아스트라 H04 — 실제 명령 이력에는 토큰·내부 주소가 섞일 수 있다)
-var corpusExt = map[string]int{}
+type corpusIdx map[string]int
 
 // show: 실패 로그에 적을 입력과 실제 명령인지 — 실제 명령이면 번호만
-func show(s string) (string, bool) {
-	if n, ok := corpusExt[s]; ok {
+func (ext corpusIdx) show(s string) (string, bool) {
+	if n, ok := ext[s]; ok {
 		return fmt.Sprintf("HERDR_HOOKS_CORPUS #%d", n), true
 	}
 	return strconv.Quote(s), false
 }
 
+// reporter: 실패 로그를 받는 쪽(*testing.T — 시험은 받아 적는 가짜로 실제 로그 경로를 본다)
+type reporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+}
+
 // diffErr: 다름 한 건 — 실제 명령이면 출력(명령 조각이 든다)은 빼고 번호와 detail(종료 코드 등)만
-func diffErr(t *testing.T, kind, s, detail string, outs ...any) {
+func (ext corpusIdx) diffErr(t reporter, kind, s, detail string, outs ...any) {
 	t.Helper()
-	label, ext := show(s)
-	if ext {
+	label, real := ext.show(s)
+	if real {
 		t.Errorf("%s %s: 다름 %s(원문·출력은 그 파일에서 번호로)", kind, label, detail)
 		return
 	}
@@ -155,6 +164,8 @@ func loadGolden(t *testing.T) []goldenCase {
 
 // TestGoldenShell: kill-by-lookup-guard·lane-no-shell-edit 판정과 cotenant-guard 낱말 가르기가 셸 판 골든과 같다
 func TestGoldenShell(t *testing.T) {
+	var none corpusIdx // 골든은 합성 입력뿐
+	diffErr := none.diffErr
 	bad, toks := 0, 0
 	for _, c := range loadGolden(t) {
 		s := string(c.In)
@@ -188,7 +199,7 @@ func TestGoldenShell(t *testing.T) {
 
 // TestDiffHeredoc: perl 원문 치환 하나만
 func TestDiffHeredoc(t *testing.T) {
-	in := corpus(t)
+	in, ext := corpus(t)
 	perl, err := exec.LookPath("perl")
 	if err != nil {
 		t.Skip("perl 없음")
@@ -203,13 +214,22 @@ func TestDiffHeredoc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	checkHeredoc(t, ext, in, strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00"))
+}
+
+// checkHeredoc: heredocStrip(in[i])가 perl의 답 want[i]와 같다 — 다르면 앞 10건을 실패 로그로(실제 명령은 번호만)
+func checkHeredoc(t reporter, ext corpusIdx, in, want []string) {
+	t.Helper()
 	bad := 0
 	for i, s := range in {
-		if got := heredocStrip(s); got != want[i] {
+		if got := heredocStrip(s); i >= len(want) || got != want[i] {
+			w := ""
+			if i < len(want) {
+				w = want[i]
+			}
 			bad++
 			if bad <= 10 {
-				diffErr(t, "heredoc", s, "go·perl", got, want[i])
+				ext.diffErr(t, "heredoc", s, "go·perl", got, w)
 			}
 		}
 	}

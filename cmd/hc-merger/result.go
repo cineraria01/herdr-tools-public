@@ -115,14 +115,14 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 	if mt.id != "" {
 		sidref = "refs/hc-landed/" + mt.id
 	}
-	qa := []string{"ls-remote", "origin", q, "refs/heads/lane/" + ln, "refs/merge-queue-meta/" + n, "refs/merge-done/" + ln, lanep + "*"}
+	qa := []string{"origin", q, "refs/heads/lane/" + ln, "refs/merge-queue-meta/" + n, "refs/merge-done/" + ln, lanep + "*"}
 	if sidref != "" {
 		qa = append(qa, sidref)
 	}
 	if mt.jobref != "" {
 		qa = append(qa, mt.jobref)
 	}
-	rr, rc := out(qa...)
+	rr, rc := lsRemote(qa...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 정리할 참조를 보지 못했다(git ls-remote) — 다음 바퀴에 일지로 판정")
 		return 1
@@ -219,7 +219,7 @@ func (m *M) fail(q, s, ln, rec, lg, why string) bool {
 		p = append(p, rec+":"+fm, ":"+qm, "--force-with-lease="+fm+":", "--force-with-lease="+qm+":"+rec)
 	}
 	if runQ(append([]string{"push", "-q", "--atomic", "--porcelain", "origin"}, p...)...) != 0 {
-		rb, rc := out("ls-remote", "origin", q, qm, fr, fm)
+		rb, rc := lsRemote("origin", q, qm, fr, fm)
 		if rc != 0 {
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 실패한 제출을 옮겼는지 확인하지 못했다(%s) — 다음 바퀴에 다시\n", q)
 			return false
@@ -250,6 +250,7 @@ func (m *M) fail(q, s, ln, rec, lg, why string) bool {
 func (m *M) fretry() {
 	des, err := os.ReadDir(m.mj + "/fail")
 	if err != nil {
+		m.listFail("돌려보낼 일", err)
 		return
 	}
 	for _, d := range des {
@@ -276,6 +277,15 @@ func (m *M) fretry() {
 			m.mer = true
 		}
 	}
+}
+
+// listFail: fail/·out/ 목록을 못 읽음(R-C07) — 폴더가 없으면 남은 일도 없다. 그 밖의 오류는 못 본 것이 있음(--once 75, 다음 바퀴에 다시)
+func (m *M) listFail(what string, err error) {
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "hc-lane merger: %s 목록을 읽지 못했다 — 두고 다음 바퀴에: %v\n", what, err)
+	m.mer = true
 }
 
 // readLines: 파일 앞 n줄(read -r처럼 앞뒤 빈칸·탭을 뺌). 모자라거나 못 읽으면 빈 값

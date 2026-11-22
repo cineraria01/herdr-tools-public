@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,29 +16,35 @@ import (
 
 func init() { register("coord", coordCmd, noHelp) }
 
-var (
-	reGetKnown = regexp.MustCompile(`"kind" *: *"not_found"|"address" *:`)
-	reNotFound = regexp.MustCompile(`"kind" *: *"not_found"`)
-)
+// getState: hc get --json 한 번의 판정. 0 살아 있음(state live), 1 없음(완전한 not_found 오류 객체)·끝남(확인된 live 아닌 state),
+// 2 모름(코어 연결 실패·잘린 응답·찌꺼기·state 없음 — gofix L04, 재감사 R-13). 0이면 그 객체도
+func getState(out string, hrc int) (map[string]any, int) {
+	m := jone(strings.TrimSpace(out))
+	if m == nil {
+		return nil, 2
+	}
+	if hrc != 0 { // 실패한 hc get은 완전한 not_found 오류 객체일 때만 「없음」
+		if e, _ := m["error"].(map[string]any); e != nil && e["kind"] == "not_found" {
+			return nil, 1
+		}
+		return nil, 2
+	}
+	st, ok := m["state"].(string)
+	switch {
+	case !ok || st == "":
+		return nil, 2
+	case st != "live":
+		return nil, 1
+	}
+	return m, 0
+}
 
-// tinfo: 그 터미널의 맨 위 pid·이름(없으면 -)·레인/감시 라벨. rc 0 살아 있음, 1 없음·끝남·pid 모름, 2 모름(코어 연결 실패 등)
+// tinfo: 그 터미널의 맨 위 pid·이름(없으면 -)·레인/감시 라벨. rc 0 살아 있음, 1 없음·끝남·live인데 pid 없음, 2 모름(getState)
 func tinfo(addr string) (pid, name string, laneLabel bool, rc int) {
 	out, hrc := hcRun(10, errMerge, "get", addr, "--json")
-	if !reGetKnown.MatchString(out) {
-		return "", "", false, 2
-	}
-	if hrc != 0 { // 실패한 hc get의 출력(잘린 응답 등)으로 「끝남」을 정하지 않는다 — 확인된 not_found만 1(gofix L04)
-		if reNotFound.MatchString(out) {
-			return "", "", false, 1
-		}
-		return "", "", false, 2
-	}
-	m := jparse(out)
-	if m == nil {
-		return "", "", false, 2
-	}
-	if m["state"] != "live" {
-		return "", "", false, 1
+	m, r := getState(out, hrc)
+	if r != 0 {
+		return "", "", false, r
 	}
 	pid = topNum(m, "pid", "")
 	name, _ = jget(m, "name")
@@ -144,6 +149,9 @@ func coordDefault() (string, string, int) {
 		}
 	}
 	if ba == "" {
+		if ut >= 0 { // 확인된 지휘는 없지만 조회 못 한 후보가 있다 — 「없음」이 아니다(R-13)
+			return "", "확인 못 한 지휘 정보가 있다(hc get 실패·잘린 응답)", 2
+		}
 		return "", "살아 있고 pid·이름이 맞는 지휘가 없다(지휘가 레인을 띄우거나 wait를 걸면 생김)", 1
 	}
 	if ut > bt {
@@ -184,6 +192,10 @@ func coordCmd(a []string) int {
 	if rc == 0 {
 		fmt.Println(cad)
 		return 0
+	}
+	if rc == 2 {
+		fmt.Fprintf(os.Stderr, "hc-lane coord: 지휘 모름 — %s\n", why)
+		return 2
 	}
 	fmt.Fprintf(os.Stderr, "hc-lane coord: 지휘 없음 — %s\n", why)
 	return 1

@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 	"herdr-tools/internal/version"
 )
 
@@ -63,22 +63,41 @@ type result struct {
 
 type runner func(timeout time.Duration, env []string, name string, args ...string) result
 
-// run: 띄우고(표준 입력 /dev/null) 상한 시간이면 그 자식을 KILL. env가 nil이면 물려받은 환경.
-// 자식은 이 프로세스와 같은 무리에 둔다(셸 판 subprocess와 같게, B19) — launchd·사람이 쓸기 무리를 끄면(SIGKILL 포함) 자식도 함께 끝난다.
-// ponytail: 상한에 걸린 자식의 손자는 거두지 않는다 — 부르는 것(hc·ps·lsof·du·sqlite3·getconf, 포장이 exec하는 Go 도구)은 손자를 두지 않는다
+// run: 띄우고(표준 입력 /dev/null) 기다린다. env가 nil이면 물려받은 환경. 자식은 따로 무리로 띄워 proc에 올린다(R-11·R-32):
+//   - 상한 시간이면 그 무리째 TERM → proc.Grace → KILL(포장이 한 번 더 띄운 손자까지), 결과는 모름(출력은 읽지 않는다)
+//   - 자식이 끝났는데 출력 관을 쥔 자손이 남으면(3초 뒤 ErrWaitDelay) 모름, 남은 무리는 release가 거둔다
+//   - 이 쓸기가 TERM·INT·HUP을 받으면 proc가 그 무리를 거두고, SIGKILL로 죽으면 다음 회차가(proc 고아 기록 — pid·시작 시각) 거둔다
+//
+// ponytail: 무리를 따로 만든(setsid) 자손은 거두지 못한다 — 부르는 것(hc·ps·lsof·du·sqlite3·getconf·포장)은 그러지 않는다
 func run(timeout time.Duration, env []string, name string, args ...string) result {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	c := exec.CommandContext(ctx, name, args...)
+	c := exec.Command(name, args...)
 	var o, e bytes.Buffer
 	c.Stdout, c.Stderr, c.Env = &o, &e, env
 	c.WaitDelay = 3 * time.Second
-	err := c.Run()
+	proc.Group(c)
+	release, err := proc.Start(c)
+	if err != nil {
+		return result{rc: -1, err: err}
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.Wait() }()
+	tm := time.NewTimer(timeout)
+	defer tm.Stop()
+	select {
+	case err = <-done:
+		release() // 우두머리가 끝났는데 무리에 남은 것(출력 관을 쥔 자손 등)을 거둔다
+	case <-tm.C:
+		proc.StopGroup(c.Process.Pid, proc.Grace)
+		select { // KILL 뒤 관이 닫히길 잠깐 — 안 닫혀도(커널 대기) 출력은 읽지 않으니 놓아 둔다
+		case <-done:
+		case <-time.After(proc.Grace + 5*time.Second):
+		}
+		release()
+		return result{rc: -1, err: fmt.Errorf("%s: 시간 초과", name)}
+	}
 	r := result{out: o.String(), errs: e.String()}
 	var ee *exec.ExitError
 	switch {
-	case ctx.Err() != nil:
-		r.rc, r.err = -1, fmt.Errorf("%s: 시간 초과", name)
 	case errors.As(err, &ee):
 		r.rc = ee.ExitCode()
 		if r.rc < 0 {
@@ -313,6 +332,13 @@ func sweepMain(args []string) int {
 	self := fs.Bool("self-test", false, "가짜 기록으로 규칙 판정 확인")
 	minAge := fs.Float64("min-age", 10, "고아·색인 최소 나이(분, 기본 10)")
 	only := fs.String("only-under", "", "이 폴더 아래 작업 트리만(시험용)")
+	for _, a := range args { // 위치 인자를 받지 않으니 끝표시 「--」도 사용 오류(셸 판 argparse와 같게, R-39 — flag가 삼켜 0으로 돌았다)
+		if a == "--" {
+			fmt.Fprintln(os.Stderr, "hc-sweep: 모르는 인자: --")
+			fs.Usage()
+			return 2
+		}
+	}
 	fs.Parse(args)
 	if fs.NArg() > 0 { // 셸 판 argparse와 같게 쓸기 전에 사용 오류(B02 — flag는 첫 위치 인자에서 멈춰 뒤의 --dry-run을 놓친다)
 		fmt.Fprintf(os.Stderr, "hc-sweep: 모르는 인자: %s\n", strings.Join(fs.Args(), " "))
@@ -333,12 +359,11 @@ func sweepMain(args []string) int {
 			fmt.Fprintln(os.Stderr, "hc-sweep: 다른 쓸기가 도는 중(sweep.lock) — 이번 바퀴는 건너뜀")
 			return 75
 		}
-		if err != nil {
-			// 잠금 파일을 못 만듦(상태 폴더 자리가 막힘 등): 같은 자리를 쓰는 다른 판도 쥘 수 없다 — 경고하고 돈다
-			fmt.Fprintln(os.Stderr, "hc-sweep: 경고 — 잠금을 못 잡음(그대로 돈다):", err)
-		} else {
-			defer lk.Close()
+		if err != nil { // 잠금을 실제로 얻지 못하면 바꾸는 회차를 시작하지 않는다(R-06 — 다른 판이 쥐었는지 모른다)
+			fmt.Fprintln(os.Stderr, "hc-sweep: 잠금을 못 잡음(sweep.lock) — 쓸지 않음:", err)
+			return 1
 		}
+		defer lk.Close()
 	}
 	// 색인·디스크 쓸기·Tailscale 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
 	sweepIndex(*dry, *minAge*60)
@@ -352,9 +377,12 @@ func sweepMain(args []string) int {
 		return 1
 	}
 	terms := ls["terminals"]
-	sweepTerminals(terms, *dry)
+	failed := sweepTerminals(terms, *dry)
 	if _, err := sweepOrphans(terms, *dry, *minAge*60, *only); err != nil {
 		return 1 // 셸 판처럼 고아 판정 실패(ps 등)는 종료 코드에(B23). 줄은 sweepOrphans가 찍었다
+	}
+	if failed > 0 { // 닫기 실패·모름(R-36)
+		return 1
 	}
 	return 0
 }

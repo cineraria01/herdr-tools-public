@@ -116,7 +116,14 @@ func lfail(rc int) {
 	// 줄 단위로 읽고 서로 다른 실패 40줄을 찾으면 멈춘다(로그 전체를 한 버퍼에 올리지 않는다, gofix L14)
 	seen, n := map[string]bool{}, 0
 	pick := func(l string) bool {
-		if failLine.MatchString(l) && !seen[l] {
+		loc := failLine.FindStringIndex(l)
+		if loc == nil {
+			return true
+		}
+		if len(l) > 400 { // 긴 줄(조각)은 맞은 자리 앞뒤 200바이트만 보인다(R-28)
+			l = strings.ToValidUTF8(l[max(0, loc[0]-200):min(len(l), loc[1]+200)], "")
+		}
+		if !seen[l] {
 			seen[l] = true
 			eprintf("%s\n", l)
 			n++
@@ -292,14 +299,49 @@ func rb(onto string) int {
 		ro, rr = gitWrite2([]string{"LC_ALL=C", "GIT_EDITOR=true"}, "rebase", "--continue")
 		lerr(ro)
 	}
-	if rr != 0 && mgx == "1" {
-		if un, rc := gitOut("ls-files", "--unmerged"); rc != 0 || un == "" {
-			lerr("hc-lane land: rebase 실패. 미해결 충돌이 확인되지 않아 큐에서 다시 시도한다")
+	// 모든 착지 길에서: 색인 잠금(index.lock)으로 rebase가 시작도 못 했으면(미해결 없음·멈춘 rebase 없음) 다시 할 수 있는 75,
+	// 미해결 항목·멈춘 rebase 조회 불능도 75(R-26). 훅 거절 같은 다른 중단은 다시 해도 같으니 3 그대로. 병합기 안은 미해결이 없으면 늘 75
+	if rr != 0 {
+		un, rc := gitOut("ls-files", "--unmerged")
+		if rc != 0 {
+			lerr("hc-lane land: rebase 실패. 미해결 항목을 확인하지 못했다(git ls-files 실패) — 같은 줄을 다시")
 			exit(75)
+		}
+		if un == "" {
+			if mgx == "1" {
+				lerr("hc-lane land: rebase 실패. 미해결 충돌이 확인되지 않아 큐에서 다시 시도한다")
+				exit(75)
+			}
+			switch rebaseStopped() {
+			case 1:
+				if strings.Contains(ro, "index.lock") {
+					lerr("hc-lane land: rebase가 시작되지 못했다(내용 충돌 아님 — 색인 잠금). 같은 줄을 다시")
+					exit(75)
+				}
+			case 2:
+				lerr("hc-lane land: rebase 실패. 멈춘 rebase가 있는지 확인하지 못했다(git rev-parse 실패) — 같은 줄을 다시")
+				exit(75)
+			}
 		}
 	}
 	if rr == 0 && len(resolved) > 0 {
 		lverdictResolved(resolved, onto)
 	}
 	return rr
+}
+
+// rebaseStopped: 0 멈춘 rebase가 있음(rebase-merge·rebase-apply), 1 없음, 2 모름(git·파일 조회 실패)
+func rebaseStopped() int {
+	for _, f := range []string{"rebase-merge", "rebase-apply"} {
+		gp, r := gitOut("rev-parse", "--git-path", f)
+		if r != 0 || gp == "" {
+			return 2
+		}
+		if _, err := os.Lstat(gp); err == nil {
+			return 0
+		} else if !os.IsNotExist(err) {
+			return 2
+		}
+	}
+	return 1
 }

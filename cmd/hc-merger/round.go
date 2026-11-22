@@ -42,38 +42,6 @@ type M struct {
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
 
-// defer_: 큐를 두고 다음 바퀴에(bash mdefer)
-func (m *M) defer_(why string) {
-	fmt.Fprintf(os.Stderr, "hc-lane merger: %s — 큐를 두고 다음 바퀴에\n", why)
-	m.mer, m.mq = true, ""
-	m.deferred = why
-}
-
-// deferNote: 같은 까닭의 「다음 바퀴에」가 deferAlarm 바퀴 이어지면 막힘 사건을 한 번 낸다(G4 — 영구 실패가 사건 없이 75만 되풀이하지 않게).
-// 바퀴가 쉬지 않고 끝나면(다른 까닭 포함) 센 것을 지운다
-const deferAlarm = 10
-
-func (m *M) deferNote() {
-	f := m.mj + "/defer"
-	if m.deferred == "" {
-		removeQuiet(f)
-		return
-	}
-	n := 0
-	if b, err := os.ReadFile(f); err == nil {
-		if c, why, ok := strings.Cut(strings.TrimRight(string(b), "\n"), "\t"); ok && why == m.deferred {
-			n, _ = strconv.Atoi(c)
-		}
-	}
-	n++
-	if err := os.WriteFile(f, []byte(fmt.Sprintf("%d\t%s\n", n, m.deferred)), 0o666); err != nil {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: 쉰 횟수를 쓰지 못했다: %v\n", err)
-	}
-	if n == deferAlarm {
-		reportBlocked(fmt.Sprintf("병합기가 같은 까닭으로 %d바퀴째 쉼: %s (클론 %s)", n, m.deferred, m.top))
-	}
-}
-
 func (m *M) reserved(l string) bool {
 	switch l {
 	case m.base, "merge-batch", "batch", "main", "master":
@@ -85,16 +53,6 @@ func (m *M) reserved(l string) bool {
 // laneOK: 레인 이름은 hc-fill과 같은 글자(a-z 0-9 _ -)·32자까지, 맨 앞 - 아님
 func laneOK(l string) bool {
 	return l != "" && l[0] != '-' && len(l) <= 32 && strings.Trim(l, "abcdefghijklmnopqrstuvwxyz0123456789_-") == ""
-}
-
-// refsha: ls-remote 목록에서 그 참조의 SHA(없으면 빈 값)
-func refsha(list, ref string) string {
-	for _, line := range strings.Split(list, "\n") {
-		if f := strings.Fields(line); len(f) == 2 && f[1] == ref {
-			return f[0]
-		}
-	}
-	return ""
 }
 
 // ianc: a가 b에 들어갔나. git이 모르면(0·1 밖) 멈춘다(「모름」을 「아니오」로 읽지 않는다)
@@ -349,7 +307,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = out(append([]string{"ls-remote", "origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
+	m.qs, rc = lsRemote(append([]string{"origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
@@ -425,7 +383,7 @@ func (m *M) round() {
 	}
 	m.mjx = ""
 	if m.bj != "" && m.bj != "refs/hc-landed/"+m.bd {
-		hk, rc := out("ls-remote", "origin", m.bj)
+		hk, rc := lsRemote("origin", m.bj)
 		if rc != 0 {
 			fmt.Fprintln(os.Stderr, "hc-lane merger: 작업 표식을 보지 못했다(git ls-remote) — 다음 바퀴에")
 			m.mer, m.mq = true, ""
@@ -517,8 +475,15 @@ func (m *M) filterBatch() bool {
 		}
 	}
 	// 맨 앞의 승인이 지금 변경과 다르면(또는 모르면) 혼자 — 착지가 그 판정으로 지금처럼 다시 보고 돌려보낸다
-	if len(m.b) > 1 && !m.approved(m.b[0]) {
-		m.keep(0)
+	// 혼자여도 먼저 본다 — 모름이면 묶음을 줄이지도 혼자 착지(그 판정 대조가 또 git 실패면 일시 실패로 세다 반송)로 넘기지도 않고 쉰다(R-H02)
+	if m.b[0].v != "" {
+		switch m.approved(m.b[0]) {
+		case apDiffer:
+			m.keep(0)
+		case apUnknown:
+			m.defer_("승인 patch-id 확인 실패")
+			return false
+		}
 	}
 	su := false
 	switch m.touch(m.b[0].s) {
@@ -550,8 +515,8 @@ func (m *M) filterBatch() bool {
 			if hl != "" && m.hb == "" {
 				continue
 			}
-			if !m.approved(m.b[i]) {
-				continue // 큐에 그대로 — 맨 앞이 되면 혼자 착지가 판정을 본다
+			if m.approved(m.b[i]) != apOK {
+				continue // 다름·모름 모두 큐에 그대로(반송 아님) — 맨 앞이 되면 다시 확인한다(모름이면 그때 쉰다)
 			}
 			switch m.touch(s) {
 			case 0:

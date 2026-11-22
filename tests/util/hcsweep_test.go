@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 // bash: 준비용 셸 조각(실패면 시험 중단). 인자는 $1…로.
@@ -47,19 +49,51 @@ func testHcSweep(t *testing.T, T string, e Env) {
 	var out string
 	var rc int
 	c := checker{t: t, out: &out}
-	pids := map[string]int{}
-	// sig: 이 시험이 띄운 양수 pid에만 신호(pid 0·음수는 무리 전체 — B16: 자식 조회 실패 뒤 0이 들어가 시험 무리가 TERM으로 죽었다)
-	sig := func(p int, s syscall.Signal) {
-		if p > 0 {
-			syscall.Kill(p, s)
+	// pids: 이 시험이 띄운 프로세스의 pid와 시작 시각(R-35 — 끝난 pid는 다시 쓰인다). 끝남을 확인하면 뺀다
+	type owned struct {
+		pid   int
+		start string
+	}
+	pids := map[string]owned{}
+	own := func(n string, p int) {
+		st, err := proc.StartTime(p)
+		if p <= 0 || err != nil {
+			t.Fatalf("준비 실패: %s pid %d 시작 시각 모름: %v", n, p, err)
+		}
+		pids[n] = owned{p, st}
+	}
+	// mine: 그 pid가 아직 이 시험이 띄운 그 프로세스인가(양수 pid·시작 시각 같음 — pid 0·음수는 무리 전체, B16)
+	mine := func(n string) bool {
+		o, ok := pids[n]
+		if !ok || o.pid <= 0 {
+			return false
+		}
+		st, err := proc.StartTime(o.pid)
+		return err == nil && st == o.start
+	}
+	// sig: 신호 직전에 소유를 다시 확인한다
+	sig := func(n string, s syscall.Signal) {
+		if mine(n) {
+			syscall.Kill(pids[n].pid, s)
 		}
 	}
+	// goneN: 2초 안에 끝나는가. 끝났으면 정리 대상에서 뺀다
+	goneN := func(n string) bool {
+		for i := 0; i < 10; i++ {
+			if !mine(n) {
+				delete(pids, n)
+				return true
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return false
+	}
 	t.Cleanup(func() {
-		for _, p := range pids {
-			sig(p, syscall.SIGKILL)
+		for n := range pids {
+			sig(n, syscall.SIGKILL)
 		}
 	})
-	pid := func(n string) int { return pids[n] }
+	pid := func(n string) int { return pids[n].pid }
 
 	out, rc = run(T, e, SWEEP, "--self-test")
 	c.ok("self-test", strings.TrimSpace(out) == "ok" && rc == 0)
@@ -166,7 +200,7 @@ exit 1
 		if err != nil {
 			t.Fatalf("orphan %s: %q", n, s)
 		}
-		pids[n] = p
+		own(n, p)
 		for i := 0; i < 10; i++ {
 			if o, _ := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(p)).Output(); strings.TrimSpace(string(o)) == "1" {
 				return
@@ -182,14 +216,14 @@ exit 1
 	}
 	kid := func(n string) {
 		for i := 0; i < 10; i++ {
-			o, _ := exec.Command("pgrep", "-P", strconv.Itoa(pids[n])).Output()
+			o, _ := exec.Command("pgrep", "-P", strconv.Itoa(pid(n))).Output()
 			if k, err := strconv.Atoi(strings.TrimSpace(strings.SplitN(string(o), "\n", 2)[0])); err == nil && k > 0 {
-				pids[n+"-kid"] = k
+				own(n+"-kid", k)
 				return
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
-		t.Fatalf("준비 실패: %s(pid %d)의 자식을 못 찾음(pgrep)", n, pids[n]) // 0을 남기면 아래 신호가 무리 전체로 간다(B16)
+		t.Fatalf("준비 실패: %s(pid %d)의 자식을 못 찾음(pgrep)", n, pid(n)) // 0을 남기면 아래 신호가 무리 전체로 간다(B16)
 	}
 
 	W := T + "/app.wt"
@@ -226,7 +260,7 @@ exit 1
 	none := func() bool { return !grep(out, fmt.Sprintf("(끌|끈) 고아: pid (%d|%d) ", pid("b"), pid("o"))) }
 	allalive := func(ns ...string) bool {
 		for _, n := range ns {
-			if !alive(pid(n)) {
+			if !mine(n) {
 				return false
 			}
 		}
@@ -270,19 +304,20 @@ exit 1
 
 	cfg("sweep.orphan_kill on")
 	sweep("--min-age", "0")
-	c.ok("작업 트리 지움(cwd로만) a2: 끔", gone(pid("a2")))
-	c.ok("지워진 작업 트리 c: 끔, 자식 sleep도", gone(pid("c")) && gone(pid("c-kid")))
-	c.ok("작업 트리 있고 쓰는 터미널 없음 e: 끔", gone(pid("e")))
+	pe, pc := pid("e"), pid("c") // 아래 기록 확인용(끝나면 맵에서 빠진다)
+	c.ok("작업 트리 지움(cwd로만) a2: 끔", goneN("a2"))
+	c.ok("지워진 작업 트리 c: 끔, 자식 sleep도", goneN("c") && goneN("c-kid"))
+	c.ok("작업 트리 있고 쓰는 터미널 없음 e: 끔", goneN("e"))
 	c.ok("남김: cwd로만 a, 링크 경로 터미널 b, 본 저장소 h, 자손 터미널 k, 밖 o, 공백 경로 keep s", allalive("a", "b", "h", "k", "o", "s"))
 	log = read(LOG)
 	// [E05] 명령 줄(인자 — 자격증명이 섞일 수 있다)을 남기지 않고 실행 파일만
 	c.ok("기록: pid·나이·실행 파일",
-		grep(log, fmt.Sprintf("(?m)pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 /bin/bash$", pid("e"), q(E))) &&
-			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pid("c"))) && !strings.Contains(log, E+"/bin/idle"))
+		grep(log, fmt.Sprintf("(?m)pid:%d\t.*고아\\(쓰는 터미널 없음\\)\t%s\t-\t나이 0분 /bin/bash$", pe, q(E))) &&
+			grep(log, fmt.Sprintf("pid:%d\t.*작업 트리 지워짐", pc)) && !strings.Contains(log, E+"/bin/idle"))
 
 	os.RemoveAll(H)
 	sweep("--min-age", "0")
-	c.ok("본 저장소 터미널이 있어도 작업 트리를 지우면 끔", gone(pid("h")))
+	c.ok("본 저장소 터미널이 있어도 작업 트리를 지우면 끔", goneN("h"))
 
 	// quiet-alerts 3: 닫은 레인 터미널(라벨 hc-lane=1)은 닫기 전에 events.tsv에 「정리됨」 한 줄(hc-lane wait는 안 알리고 events에 보임)
 	e = e.Without("XDG_STATE_HOME", "HC_LANE_MACHINE")
@@ -299,9 +334,9 @@ exit 1
 	script(t, T+"/bin/hc", T, `#!/bin/bash
 case $1 in
   ls) exec cat "@T@/ls.json" ;;
-  get) [ -e "@T@/killed-$2" ] && { echo "{\"address\":\"$2\",\"state\":\"finished\"}"; exit 0; }
+  get) [ -e "@T@/killed-$2" ] && { exec sed 's/"state":"live"/"state":"finished"/' "@T@/get-$2.json"; }
        [ -f "@T@/get-$2.json" ] && exec cat "@T@/get-$2.json" ;;
-  kill) [ -s "@T@/home/.local/state/hc-lane/events.tsv" ] && cp "@T@/home/.local/state/hc-lane/events.tsv" "@T@/ev-at-kill"; touch "@T@/killed-$2"; exit 0 ;;
+  kill) cat "@T@/home/.local/state/hc-lane/events.tsv" >"@T@/ev-at-kill-$2" 2>/dev/null; touch "@T@/killed-$2"; exit 0 ;;
   rm) exit 0 ;;
 esac
 exit 1
@@ -317,10 +352,11 @@ exit 1
 		f := strings.Split(strings.TrimRight(ev, "\n"), "\t")
 		return len(f) == 8 && f[2] == "t61" && f[3] == "lane-t61" && f[4] == "정리됨" && f[5] == "-" && strings.Contains(f[6], "hc-sweep R3") && f[7] == "4"
 	}())
-	c.ok("정리됨: kill 전에 적음(그 사이 wait가 끝남을 봐도 뜻밖의 종료로 안 알리게)", strings.Contains(read(T+"/ev-at-kill"), "정리됨"))
+	// R-36: kill 전에는 종료 의도(closed.log)만 — 정리됨은 끝남(finished)을 확인한 뒤에 적는다(kill이 실패하면 wait가 끝남으로 소비하지 않게)
+	c.ok("정리됨: kill 뒤 끝남을 확인하고 적음(kill 때는 아직 없음)", exists(T+"/ev-at-kill-t61") && !strings.Contains(read(T+"/ev-at-kill-t61"), "\tt61\tlane-t61\t정리됨"))
 
-	sig(pid("b-kid"), syscall.SIGTERM)
-	sig(pid("k-kid"), syscall.SIGTERM)
+	sig("b-kid", syscall.SIGTERM)
+	sig("k-kid", syscall.SIGTERM)
 	// H110: 정리됨을 못 쓰면(events.tsv 자리 못 만듦) 레인 터미널은 닫지 않는다 — 닫으면 hc-lane wait가 reason killed로 보고
 	// 조용히 넘겨 뜻밖의 종료 알림이 사라진다. 레인 아닌 터미널은 그대로 닫는다
 	rmKilled := func() {
@@ -331,8 +367,9 @@ exit 1
 		os.Remove(EVT)
 	}
 	rmKilled()
-	write(t, T+"/notdir", "x")
-	sweepEnv(e.With("XDG_STATE_HOME="+T+"/notdir"), "--min-age", "0")
+	mkdirs(t, T+"/st")
+	write(t, T+"/st/hc-lane", "x") // events.tsv 자리(hc-lane 폴더)가 파일 — 잠금(hc-sweep 폴더)은 잡힌다(R-06: 잠금을 못 잡으면 아예 안 돈다)
+	sweepEnv(e.With("XDG_STATE_HOME="+T+"/st"), "--min-age", "0")
 	c.ok("정리됨 못 씀: 레인 터미널은 kill 안 함", !exists(T+"/killed-t61") && has("실패(정리됨 못 씀): R3 t61"))
 	c.ok("정리됨 못 씀: 레인 아닌 터미널은 닫음", exists(T+"/killed-t62") && has("닫힘: R3 t62"))
 	c.ok("정리됨 못 씀: closed.log에 남김", grep(read(LOG), "\tt61\t.*실패\\(정리됨 못 씀\\)"))
@@ -353,7 +390,7 @@ exit 1
 	script(t, T+"/bin/hc", T, `#!/bin/bash
 case $1 in
   ls) exec cat "@T@/ls.json" ;;
-  get) [ -e "@T@/killed-$2" ] && { echo "{\"address\":\"$2\",\"state\":\"finished\"}"; exit 0; }
+  get) [ -e "@T@/killed-$2" ] && { exec sed 's/"state":"live"/"state":"finished"/' "@T@/get-$2.json"; }
        [ -f "@T@/get-$2.json" ] && exec cat "@T@/get-$2.json" ;;
   exec) echo '{"error":{"message":"cannot start folder: No such file or directory"}}' >&2; exit 1 ;;
   read) echo "  ⏵⏵ bypass permissions on (shift+tab to cycle)"; exit 0 ;;
@@ -395,7 +432,7 @@ case $1 in
       for a in t81 t82 t83 t84; do [ -e "@T@/killed-$a" ] && continue
         printf '%s{"address":"%s","state":"live","status":"done","cwd":"%s"}' "$s" "$a" "$(sed -n 's/.*"cwd":"\([^"]*\)".*/\1/p' "@T@/get-$a.json")"; s=,; done
       echo ']}' ;;
-  get) [ -e "@T@/killed-$2" ] && { echo "{\"address\":\"$2\",\"state\":\"finished\"}"; exit 0; }
+  get) [ -e "@T@/killed-$2" ] && { exec sed 's/"state":"live"/"state":"finished"/' "@T@/get-$2.json"; }
        [ -f "@T@/get-$2.json" ] && exec cat "@T@/get-$2.json"; exit 1 ;;
   exec) shift; d=
         while [ "$1" != -- ]; do case $1 in --cwd) d=$2; shift 2 ;; --env) export "$2"; shift 2 ;; --timeout) shift 2 ;; *) shift ;; esac; done
@@ -419,11 +456,11 @@ esac
 		exists(R+".wt/land-d") && exists(R+".wt/land-n") && exists(R+".wt/land-u"))
 
 	for _, n := range []string{"a", "b", "k", "o", "s"} {
-		sig(pid(n), syscall.SIGTERM)
+		sig(n, syscall.SIGTERM)
 	}
 	c.ok("이 시험의 고아 0", func() bool {
-		for _, p := range pids {
-			if !gone(p) {
+		for n := range pids {
+			if !goneN(n) {
 				return false
 			}
 		}

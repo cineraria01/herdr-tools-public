@@ -49,7 +49,7 @@
 #          처리한 반송은 ~/.local/share/hc-fill/reland.tsv(처음 생긴 때 앞의 반송은 안 봄)
 # reland_wait  원래 레인을 기다리는 분(빼면 30): 반송된 레인의 터미널이 살아 있고 작업 트리가 남았으면 다시 맞춤 대신
 #          그 터미널에 hc send(rebase해 풀고 다시 land)·주인 지휘에 「원래 레인에 보냄」. 이만큼 지나도 다시 안 내면 그때 다시 맞춤
-# merger_verifiers  <프로젝트> <기계,…>  추측 병렬 검증(README 「추측 검증」): 그 프로젝트 병합기가 큐 뒤쪽 후보(main+A+B …)를
+# merger_verifiers  <프로젝트> <기계,…>  추측 병렬 검증(docs/hc-lane/merger-spec-verify.md): 그 프로젝트 병합기가 큐 뒤쪽 후보(main+A+B …)를
 #          이 기계들의 클론(그 기계의 repo 줄 경로 — 미리 clone해 둔다)에서 hc run --on으로 함께 검증한다. hc-fill이 원격 표식
 #          refs/herdr/spec-verifiers로 올리고, 줄을 지우면 표식을 지운다(추측 없음 — 지금 동작 그대로). 병합기 기계 자신은 쓰지 않는다
 # wake_every  판정을 둔 뒤 레인이 수거(hc-lane verdict)할 때까지 깨우는 간격, 분(빼면 10). 깨우기는 여러 번 가도 무해하다

@@ -10,18 +10,26 @@ trap 'rm -rf "$T" "$G"' EXIT
 trap 'exit 1' HUP INT TERM
 at() { p=${1%%#*}; p=${p%@}; f=$HOME/$p; }
 mark() { n=$(grep -n -x -F -- "$MARK" "$f" | head -n 1 | cut -d: -f1); [ -n "$n" ]; }
+# gone <경로>: 그 자리에 일반 파일이 없음이 확정인가 — 무엇이 있거나(폴더·링크), 가장 가까운 있는 위 폴더를 뒤질 수 있거나, 위가 일반 파일.
+# 위 폴더를 뒤질 수 없으면(권한) 있는지 모른다 — 「없음」으로 답하면 모음이 저장소 파일을 지운다(R-01)
+gone() {
+  { [ -e "$1" ] || [ -L "$1" ]; } && return 0
+  g=${1%/*}
+  while [ -n "$g" ] && [ ! -e "$g" ] && [ ! -L "$g" ]; do g=${g%/*}; done
+  [ -z "$g" ] || [ ! -d "$g" ] || [ -x "$g" ]
+}
 val() {
   at "$1"
   case $1 in
-    *'#body') [ -f "$f" ] || return 1; [ -r "$f" ] || return 6; mark || return 3; tail -n +"$((n + 1))" "$f" || return 6 ;;
-    *'#codex-shared') [ -f "$f" ] || return 4; [ -r "$f" ] || return 6; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
+    *'#body') [ -f "$f" ] || { gone "$f" || return 6; return 1; }; [ -r "$f" ] || return 6; mark || return 3; tail -n +"$((n + 1))" "$f" || return 6 ;;
+    *'#codex-shared') [ -f "$f" ] || { gone "$f" || return 6; return 4; }; [ -r "$f" ] || return 6; grep -q -x -F -- "$CS" "$f" && grep -q -x -F -- "$CE" "$f" || return 5
       awk -v s="$CS" -v e="$CE" '$0==e{k=0} k; $0==s{k=1}' "$f" || return 6 ;;
-    *) [ -f "$f" ] || return 1; cat "$f" || return 6 ;;
+    *) [ -f "$f" ] || { gone "$f" || return 6; return 1; }; cat "$f" || return 6 ;;
   esac
 }
 sum() { cksum < "$1" | awk '{print $1"."$2}'; }
 sig() {
-  case $1 in *@) at "$1"; if [ -L "$f" ]; then readlink "$f"; elif [ -e "$f" ]; then echo '!'; else echo -; fi; return ;; esac
+  case $1 in *@) at "$1"; if [ -L "$f" ]; then readlink "$f"; elif [ -e "$f" ]; then echo '!'; elif gone "$f"; then echo -; else echo "읽지 못했다: $f" >&2; return 1; fi; return ;; esac
   val "$1" > "$T/v"
   case $? in 0) ;; 3) echo '!'; return ;; 4) echo '~'; return ;; 5) echo '?'; return ;; 6) echo "읽지 못했다: $f" >&2; return 1 ;; *) echo -; return ;; esac
   x=-; case $1 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
@@ -42,7 +50,7 @@ bak() { at "$1"; [ -f "$f" ] || return 0; o=$S/bak/$2/$p; mkdir -p "$(dirname "$
 lt() {
   ld=$1 lp=$2 lx=$3
   if [ -L "$ld" ]; then printf 'L\t%s\n' "$lp"; return 0; fi
-  [ -d "$ld" ] || return 0
+  [ -d "$ld" ] || { gone "$ld" && return 0; echo "나무를 읽지 못했다: $lp" >&2; return 1; }
   set -- \( -name '.*' -o -name __pycache__ -o -name node_modules
   if [ -f "$lx" ]; then while IFS= read -r e; do [ -n "$e" ] && set -- "$@" -o -path "./$e"; done < "$lx"; fi
   set -- "$@" \)

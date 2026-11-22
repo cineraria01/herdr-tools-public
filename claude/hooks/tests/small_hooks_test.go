@@ -199,17 +199,30 @@ func TestLoopNoQuestion(t *testing.T) {
 		path       string // 빈 값이면 가짜 hc가 앞에 선 PATH
 	}{
 		// 막을 것: 이름이나 job 라벨에 loop(대소문자 무관)
-		{"이름 loop", 2, "t1", `{"name":"d1-loop-150","labels":{}}`, "", ""},
-		{"이름 대문자 LOOP", 2, "t1", `{"name":"Inquiry-LOOP"}`, "", ""},
-		{"job 라벨 loop", 2, "t1", `{"name":"worker","labels":{"job":"inquiry-loop"}}`, "", ""},
-		{"이름 없음·job loop", 2, "t1", `{"labels":{"job":"loop"}}`, "", ""},
-		// 통과할 것
-		{"loop 아닌 이름", 0, "t1", `{"name":"hooks-go","labels":{"job":"lane"}}`, "", ""},
+		{"이름 loop", 2, "t1", `{"address":"t1","name":"d1-loop-150","labels":{}}`, "", ""},
+		{"이름 대문자 LOOP", 2, "t1", `{"address":"t1","name":"Inquiry-LOOP"}`, "", ""},
+		{"job 라벨 loop", 2, "t1", `{"address":"t1","name":"worker","labels":{"job":"inquiry-loop"}}`, "", ""},
+		{"이름 없음·job loop", 2, "t1", `{"address":"t1","labels":{"job":"loop"}}`, "", ""},
+		// R-H01(재감사): 터미널 ID가 있는데 hc get이 실패·판독 불가면 루프인지 모른다 — 막는다(정상 응답은 늘 address가 있는 객체 하나)
+		{"hc get 실패 7", 2, "t1", `{"address":"t1","name":"w"}`, "7", ""},
+		{"hc get 실패 1", 2, "t1", `{"address":"t1","name":"w"}`, "1", ""},
+		{"빈 성공", 2, "t1", "", "", ""},
+		{"JSON 아님", 2, "t1", "not json loop", "", ""},
+		{"깨진 JSON", 2, "t1", `{"address":"t1","name":"w"`, "", ""},
+		{"빈 객체", 2, "t1", `{}`, "", ""},
+		{"null", 2, "t1", `null`, "", ""},
+		{"배열", 2, "t1", `[{"address":"t1","name":"w"}]`, "", ""},
+		{"주소 없음", 2, "t1", `{"name":"w","labels":{}}`, "", ""},
+		{"JSON 뒤 군글", 2, "t1", `{"address":"t1","name":"w"} x`, "", ""},
+		{"이름이 문자열 아님", 2, "t1", `{"address":"t1","name":7}`, "", ""},
+		{"라벨이 객체 아님", 2, "t1", `{"address":"t1","name":"w","labels":"loop"}`, "", ""},
+		// 통과할 것: 정상 응답(주소 있는 객체)으로 루프가 아님이 확인됐거나, hc 터미널이 아님
+		{"loop 아닌 이름", 0, "t1", `{"address":"t1","name":"hooks-go","labels":{"job":"lane"}}`, "", ""},
+		{"이름·라벨 없음", 0, "t1", `{"address":"t1"}`, "", ""},
+		{"이름 null", 0, "t1", `{"address":"t1","name":null,"labels":{}}`, "", ""},
 		{"hc 터미널 아님", 0, "", `{"name":"d1-loop"}`, "", ""},
-		{"hc get 실패", 0, "t1", `{"name":"d1-loop"}`, "1", ""},
 		{"hc 없음", 0, "t1", `{"name":"d1-loop"}`, "0", "/usr/bin:/bin"},
-		{"JSON 아님", 0, "t1", "not json loop", "", ""},
-		{"다른 키의 loop", 0, "t1", `{"name":"w","labels":{"role":"loop"},"cwd":"/loop"}`, "", ""},
+		{"다른 키의 loop", 0, "t1", `{"address":"t1","name":"w","labels":{"role":"loop"},"cwd":"/loop"}`, "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

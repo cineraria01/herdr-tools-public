@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -154,32 +153,78 @@ func onp(a string) string {
 	return a
 }
 
-// termPairs: hc ls --json에서 터미널마다 「<주소> <cwd>」. 1 hc ls 실패, 2 꼴을 못 읽음(뽑은 수가 "cwd" 수와 다름) — 셸 판과 같은 판정
-var (
-	pairRe = regexp.MustCompile(`.*"address" *: *"([^"]*)".*"cwd" *: *"([^"]*)".*`)
-	cwdRe  = regexp.MustCompile(`"cwd" *:`)
-)
-
+// termPairs: hc ls --json에서 터미널마다 「<주소> <cwd>」. 1 hc ls 실패, 2 꼴을 못 읽음, 3 대상 기계(--on)가 연결돼 있지 않음.
+// 2·3은 「터미널 없음」이 아니다 — 모르면 지우지 않는다(gofix E01, 재감사 R-06·R-07)
 func termPairs() ([][2]string, int) {
 	out, r := outOf(nil, []string{"hc", "ls", "--json"})
 	if r != 0 {
 		return nil, 1
 	}
-	if !json.Valid([]byte(out)) { // 잘린 목록(0으로 끝났어도)은 「터미널 없음」이 아니다 — 모르면 지우지 않는다(gofix E01)
+	return parsePairs(out, on)
+}
+
+// jstr: JSON 문자열 값이면 그 글(null·숫자·빠짐은 false)
+func jstr(raw json.RawMessage) (string, bool) {
+	var s string
+	if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// parsePairs: 입력 전체가 JSON 객체 하나, terminals는 배열이고 항목마다 address·cwd가 문자열이어야 한다 — 하나라도 어긋나면 2.
+// mach가 있으면 machines 배열에 그 기계가 connected로 있어야 한다(목록에 그 기계 터미널이 빠진 것을 「아무도 안 씀」으로 읽지 않게) — 아니면 3
+func parsePairs(out, mach string) ([][2]string, int) {
+	d := json.NewDecoder(strings.NewReader(out))
+	var top map[string]json.RawMessage
+	if d.Decode(&top) != nil || top == nil {
 		return nil, 2
 	}
-	var ps [][2]string
-	for _, ch := range strings.Split(out, "{") {
-		for _, ln := range strings.Split(ch, "\n") {
-			if m := pairRe.FindStringSubmatch(ln); m != nil {
-				ps = append(ps, [2]string{m[1], m[2]})
+	if _, err := d.Token(); err != io.EOF {
+		return nil, 2
+	}
+	var ts []map[string]json.RawMessage
+	if json.Unmarshal(top["terminals"], &ts) != nil || ts == nil {
+		return nil, 2
+	}
+	ps := make([][2]string, 0, len(ts))
+	for _, t := range ts {
+		a, ok1 := jstr(t["address"])
+		c, ok2 := jstr(t["cwd"])
+		if t == nil || !ok1 || !ok2 || a == "" {
+			return nil, 2
+		}
+		ps = append(ps, [2]string{a, c})
+	}
+	if mach != "" {
+		var ms []map[string]json.RawMessage
+		if json.Unmarshal(top["machines"], &ms) != nil || ms == nil {
+			return nil, 3
+		}
+		conn := false
+		for _, m := range ms {
+			n, _ := jstr(m["name"])
+			s, _ := jstr(m["state"])
+			if n == mach {
+				conn = s == "connected"
 			}
 		}
-	}
-	if len(cwdRe.FindAllStringIndex(out, -1)) != len(ps) {
-		return nil, 2
+		if !conn {
+			return nil, 3
+		}
 	}
 	return ps, 0
+}
+
+// termWhy: termPairs의 0 아닌 판정을 사람이 읽을 한 줄로
+func termWhy(r int) string {
+	switch r {
+	case 1:
+		return "hc ls 실패"
+	case 3:
+		return "대상 기계 " + on + " 가 hc ls 기계 목록에 연결(connected)로 없다 — 그 기계의 터미널을 모른다"
+	}
+	return "hc ls --json 출력을 읽지 못했다(잘림·형식 — 터미널마다 address·cwd가 있어야 한다)"
 }
 
 // busyTerms: 대상 기계의 터미널이고 cwd가 작업 폴더(wt) 안인 것 「<주소> <cwd>」. skipSelf면 부른 터미널 자신은 뺀다(clean)

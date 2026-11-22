@@ -126,7 +126,8 @@ func leftCheck(what, common string) {
 const qaScript = `cd "$1" || exit 2
       r=$(find . -path ./.git -prune -o -type d -name .qa -print -prune) || exit 2
       [ -n "$r" ] || exit 0
-      f=$(printf "%s\n" "$r" | while IFS= read -r d; do find "$d" ! -type d; done | sed "s|^\./||") || exit 2
+      f=$(printf "%s\n" "$r" | while IFS= read -r d; do find "$d" ! -type d || exit 2; done) || exit 2
+      f=$(printf "%s\n" "$f" | sed "/^$/d; s|^\./||") || exit 2
       [ -n "$f" ] || exit 0
       i=$(printf "%s\n" "$f" | git -c core.quotePath=false -C "$3" check-ignore --stdin); [ $? -le 1 ] || exit 2
       [ -n "$i" ] || exit 0
@@ -135,13 +136,17 @@ const qaScript = `cd "$1" || exit 2
       printf "%s\n" "$i" | while IFS= read -r p; do
         if [ -e "$2/$p" ] || [ -L "$2/$p" ]; then k=s; cmp -s "$p" "$2/$p" || k=d
         else
-          t=$2/$(dirname "$p")/.hc-lane-qa.$$.${p##*/}
-          if { mkdir -p "$2/$(dirname "$p")" && cp -pP "$p" "$t" && cmp -s "$p" "$t"; }; then
-            if ln -P "$t" "$2/$p" 2>/dev/null; then k=c
+          t= k=f
+          if mkdir -p "$2/$(dirname "$p")" && t=$(mktemp "$2/$(dirname "$p")/.hc-lane-qa.XXXXXX") && cp -pP "$p" "$t" && cmp -s "$p" "$t"; then
+            if ln -P "$t" "$2/$p" 2>/dev/null; then
+              # 그사이 목적지가 폴더가 됐으면 ln은 그 안에 넣고 0 — 목적지 자체가 이 파일일 때만 보관됨(R-12)
+              if [ ! -d "$2/$p" ] && [ "$t" -ef "$2/$p" ]; then k=c
+              else rm -f "$2/$p/${t##*/}"; k=f; fi
+            elif [ -d "$2/$p" ]; then k=f
             elif [ -e "$2/$p" ] || [ -L "$2/$p" ]; then k=s; cmp -s "$p" "$2/$p" || k=d
-            else k=f; fi
-          else k=f; fi
-          rm -f "$t"
+            fi
+          fi
+          [ -z "$t" ] || rm -f "$t"
         fi
         echo "$k $p"
       done`
@@ -220,11 +225,8 @@ func cleanMain(args []string) int {
 	}
 	if dir {
 		ps, r := termPairs()
-		switch r {
-		case 1:
-			stop("hc ls 실패: 이 폴더에서 도는 터미널을 확인하지 못했다")
-		case 2:
-			stop("hc ls --json 출력을 읽지 못했다(형식이 바뀌었나?): 이 폴더에서 도는 터미널을 확인하지 못했다")
+		if r != 0 {
+			stop(termWhy(r) + ": 이 폴더에서 도는 터미널을 확인하지 못했다")
 		}
 		if busy := busyTerms(ps, true); len(busy) > 0 {
 			stop("살아 있는 터미널이 이 폴더에서 돈다(끝났으면 hc kill <주소> 뒤 다시): "+wt, strings.Join(busy, "\n"))
@@ -452,10 +454,10 @@ func cleanMain(args []string) int {
 			nc, ns := 0, 0
 			var dq []string
 			for _, l := range ls {
-				p := l
-				if len(l) >= 2 {
-					p = l[2:]
+				if len(l) < 3 || l[1] != ' ' || !strings.ContainsRune("csdfn", rune(l[0])) { // 줄 꼴이 틀리면 보관 결과를 모른다(R-11)
+					stop("무시된 .qa 보관 결과를 읽지 못했다(줄 꼴): "+wt, l)
 				}
+				p := l[2:]
 				if m := qaDirRe.FindStringSubmatch(p); m != nil {
 					p = m[1]
 				}

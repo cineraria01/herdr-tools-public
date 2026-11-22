@@ -65,6 +65,7 @@ func (s *sx) lockAndRest() {
 	s.ok("publish.repo 있음: 맞춘 뒤 내보내기를 부른다", s.r.RC == 0 && strings.TrimRight(ct.Read(T+"/published"), "\n") == T+"/repo "+T+"/conf ")
 	s.runEnv([]string{"PUB_FAKE_RC=1"})
 	s.ok("내보내기 실패: 크게 경고, 맞추기 종료 코드는 그대로", s.r.RC == 0 && s.has("!!! herdr-sync: 공개 저장소 내보내기 실패 — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시. 바이너리는 기계마다 짓는다 !!!"))
+	s.pubTerm()
 
 	s.release()
 }

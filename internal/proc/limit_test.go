@@ -29,7 +29,9 @@ func TestLimitTable(t *testing.T) {
 		{[]string{"hc", "wait", "x"}, 0},
 		{[]string{"hc", "run", "--name", "x", "cmd"}, 0},
 		{[]string{"hc", "run", "--bg", "--name", "x", "cmd"}, 120},
-		{[]string{"hc", "exec", "--timeout", "600", "--on", "m", "--", "sh"}, 0},
+		// 재감사 R-19: 원격 상한을 받은 hc도 로컬 hc 프로세스는 원격 상한 + 전송 여유(REMOTE) 안에서만
+		{[]string{"hc", "exec", "--timeout", "600", "--on", "m", "--", "sh"}, 720},
+		{[]string{"hc", "exec", "--timeout", "0", "--on", "m", "--", "sh"}, 0},
 		{[]string{"ssh", "m", "true"}, 120},
 		{[]string{"hc-lane", "coord"}, 600},
 		{[]string{"/x/bin/hc-lane", "land", "main"}, 0},
@@ -41,7 +43,7 @@ func TestLimitTable(t *testing.T) {
 		{[]string{"hc", "exec", "--on", "m", "hc-lane", "wait", "--timeout", "0"}, 120},
 		{[]string{"hc", "run", "--name", "x", "--", "sleep", "--bg"}, 0},
 		{[]string{"hc", "exec", "--on", "--bg", "true"}, 120},
-		{[]string{"hc", "send", "x", "--timeout=5", "--wait"}, 0},
+		{[]string{"hc", "send", "x", "--timeout=5", "--wait"}, 125},
 	}
 	for _, c := range cases {
 		if got := Limit(c.args); got != time.Duration(c.want)*time.Second {

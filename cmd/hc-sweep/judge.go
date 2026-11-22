@@ -191,10 +191,9 @@ func submitted(t map[string]any, path string) bool {
 		return false
 	}
 	name := dash(str(t, "name"))
-	key := str(t, "address") + "@" + pyStr(t["created_ms"])
 	last := ""
-	for _, r := range rows {
-		if len(r) > 4 && r[2] == str(t, "address") && r[4] != "정리됨" && r[3] == name && (len(r) < 10 || r[9] == "-" || r[9] == key) {
+	for _, r := range rows { // 옛 꼴(실행 키 없음) 줄도 thisRun으로 이 실행에 묶는다(R-01 — 2020년 제출 줄을 새 실행에 쓰지 않게)
+		if len(r) > 4 && r[2] == str(t, "address") && r[4] != "정리됨" && r[3] == name && thisRun(t, r) {
 			last = r[4]
 		}
 	}
@@ -202,7 +201,7 @@ func submitted(t map[string]any, path string) bool {
 }
 
 // thisRun: 사건 줄이 이 터미널의 이 실행 것인가(B03 — 이름은 다시 쓰인다). 실행 키 칸(10째)이 있으면 <주소>@<created_ms>와 같아야
-// 하고, 없거나 「-」인 옛 꼴이면 같은 주소이고 그 시각이 이 터미널이 생긴 뒤(초 단위)여야 한다. 모르면 false(증거 아님)
+// 하고, 없거나 「-」인 옛 꼴이면 같은 주소이고 그 초가 이 터미널이 생긴 초보다 뒤여야 한다(같은 초는 앞뒤 모호 — R-01). 모르면 false(증거 아님)
 func thisRun(t map[string]any, row []string) bool {
 	created, ok := num(t, "created_ms")
 	if !ok || created <= 0 {
@@ -212,7 +211,12 @@ func thisRun(t map[string]any, row []string) bool {
 		return row[9] == str(t, "address")+"@"+pyStr(t["created_ms"])
 	}
 	at, err := time.Parse("2006-01-02T15:04:05Z", row[0])
-	return err == nil && len(row) > 2 && row[2] == str(t, "address") && float64(at.UnixMilli()) >= created-1000
+	return err == nil && len(row) > 2 && row[2] == str(t, "address") && afterCreated(at.Unix(), created)
+}
+
+// afterCreated: 초 단위 시각 sec이 created_ms가 든 초보다 뒤인가(같은 초면 앞뒤를 모른다)
+func afterCreated(sec int64, created float64) bool {
+	return created > 0 && sec > int64(created)/1000
 }
 
 // hcGit: cwd에서 git(hc exec — launchd가 띄운 git은 ~/Documents에서 TCC에 멈춘다)
@@ -325,8 +329,24 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 			if len(f) != 2 || !strings.HasPrefix(f[1], "refs/hc-landed/"+branch+"/") {
 				continue
 			}
-			if s, err := strconv.ParseInt(strings.TrimPrefix(f[1], "refs/hc-landed/"+branch+"/"), 10, 64); err == nil && created > 0 &&
-				float64(s)*1000 >= created-1000 {
+			s, err := strconv.ParseInt(strings.TrimPrefix(f[1], "refs/hc-landed/"+branch+"/"), 10, 64)
+			if err != nil || !afterCreated(s, created) {
+				continue
+			}
+			// 표식 커밋 C(병합기가 main에 넣은 후보)가 origin/main에 들었고 이 가지의 변경을 담았을 때만 증거(R-01 — 관계없는 커밋의
+			// 표식 거름). 병합기는 rebase하니 HEAD가 C의 조상이 아닐 수 있다 — 패치로(cherry C HEAD에 + 없음) 본다
+			anc := hcGit(r, cwd, 20, "merge-base", "--is-ancestor", f[0], "origin/main")
+			if anc.err != nil || (anc.rc != 0 && anc.rc != 1) {
+				return "", "", "모름(git merge-base 실패)"
+			}
+			if anc.rc == 1 {
+				continue
+			}
+			in, err := git(20, "cherry", f[0], "HEAD")
+			if err != nil {
+				return "", "", "모름(" + err.Error() + ")"
+			}
+			if !strings.Contains("\n"+in, "\n+") {
 				said = true
 			}
 		}
@@ -418,12 +438,37 @@ func sameRun(t, g map[string]any) bool {
 		str(g, "state") == "live" && (st == "idle" || st == "done")
 }
 
-// laneEvent: 레인 터미널(라벨 hc-lane=1)이면 events.tsv에 「정리됨」 한 줄(8칸 — 셸 판과 같음). kill 전에 적는다.
-// 레인 아님·적음이면 true, 못 쓰면 false — 그때는 닫지 않는다(닫으면 hc-lane wait가 뜻밖의 종료를 놓친다)
-func laneEvent(t map[string]any, why string) bool {
+// laneEvent: 레인 터미널(라벨 hc-lane=1)이면 events.tsv에 「정리됨」 한 줄(8칸 — 셸 판과 같음)을 적는 함수를 준다. kill 전에 파일을
+// 열어 두고(못 열면 ok=false — 닫지 않는다: 닫으면 hc-lane wait가 뜻밖의 종료를 놓친다), 끝남을 확인한 뒤에만 적는다(R-36 — kill이
+// 실패했는데 정리됨이 남으면 wait가 그 줄을 끝남으로 소비한다). 레인 아님이면 아무것도 안 하는 함수. 첫 부름만 듣는다:
+// done(true)는 적고 닫고, done(false)는 적지 않고 닫는다(그 뒤 부름은 true)
+func laneEvent(t map[string]any, why string) (done func(write bool) bool, ok bool) {
 	if str(obj(t, "labels"), "hc-lane") != "1" {
-		return true
+		return func(bool) bool { return true }, true
 	}
+	if os.MkdirAll(laneDir, 0o755) != nil {
+		return nil, false
+	}
+	fh, err := os.OpenFile(filepath.Join(laneDir, "events.tsv"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, false
+	}
+	return func(write bool) bool {
+		if fh == nil {
+			return true
+		}
+		f := fh
+		fh = nil
+		if !write {
+			return f.Close() == nil
+		}
+		_, err := f.WriteString(laneEventLine(t, why) + "\n")
+		return f.Close() == nil && err == nil
+	}, true
+}
+
+// laneEventLine: 「정리됨」 사건 한 줄(칸 안 탭·줄바꿈은 빈칸으로)
+func laneEventLine(t map[string]any, why string) string {
 	machine := os.Getenv("HC_LANE_MACHINE")
 	if machine == "" {
 		h, _ := os.Hostname()
@@ -437,25 +482,32 @@ func laneEvent(t map[string]any, why string) bool {
 	for i := range f {
 		f[i] = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(f[i])
 	}
-	if os.MkdirAll(laneDir, 0o755) != nil {
-		return false
-	}
-	return appendLine(filepath.Join(laneDir, "events.tsv"), strings.Join(f, "\t")) == nil
+	return strings.Join(f, "\t")
+}
+
+// sameOwner: g가 t와 같은 실행(이름·created_ms가 같음)의 행인가 — 주소는 다시 쓰인다(R-02). 칸이 없으면 모름(false)
+func sameOwner(t, g map[string]any) bool {
+	c1, ok1 := num(t, "created_ms")
+	c2, ok2 := num(g, "created_ms")
+	return ok1 && ok2 && c1 == c2 && str(g, "name") == str(t, "name")
 }
 
 // closeTerm: 닫기. 「닫힘…」이면 닫힌 것이 확인됨(그때만 부른 쪽이 작업 트리를 정리한다), 「남김…」이면 손대지 않음, 그 밖은 실패·모름
 func closeTerm(t map[string]any, why string) string {
 	address, name, cwd, title := str(t, "address"), str(t, "name"), str(t, "cwd"), str(t, "title")
+	pid, _ := num(t, "pid")
+	sid := sessionID(int(pid)) // 느린 조회(ps)는 마지막 확인 앞에서 끝낸다(R-02 — 그동안 주소가 바뀔 수 있다)
+	event, ok := laneEvent(t, why)
+	if !ok {
+		record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)
+		return "실패(정리됨 못 씀)"
+	}
+	defer event(false) // 끝남을 확인하지 못한 길: 적지 않고 닫는다
 	if g, err := hc("get", address); err != nil || !sameRun(t, g) {
 		return "남김(닫기 직전 다시 보니 실행·상태가 바뀜 또는 모름)"
 	}
-	pid, _ := num(t, "pid")
-	if err := record(address, name, why, cwd, sessionID(int(pid)), title); err != nil {
-		return "실패(closed.log 못 씀)" // 먼저: closed.log를 못 쓰면 정리됨도 안 남기고 멈춘다
-	}
-	if !laneEvent(t, why) {
-		record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)
-		return "실패(정리됨 못 씀)"
+	if err := record(address, name, why, cwd, sid, title); err != nil { // 종료 의도(정리됨은 끝남을 확인한 뒤)
+		return "실패(closed.log 못 씀)"
 	}
 	if _, err := hc("kill", address); err != nil {
 		record(address, name, why+" 실패(kill): "+err.Error(), cwd, "-", title)
@@ -465,11 +517,19 @@ func closeTerm(t map[string]any, why string) string {
 	for i := 0; i < 30 && !finished; i++ {
 		g, err := hc("get", address)
 		if isNotFound(err) {
+			if !event(true) {
+				record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)
+				return "실패(정리됨 못 씀)"
+			}
 			return "닫힘(이미 지워짐)" // 감싸는 실행기가 끝날 때 자기 터미널을 지우기도 한다
 		}
 		if err != nil { // 망·시간 초과·모르는 답: 닫혔는지 모른다 — 작업 트리 정리로 가지 않는다(B05). 다음 바퀴에 다시 본다
 			record(address, name, why+" 모름(kill 뒤 hc get 실패): "+err.Error(), cwd, "-", title)
 			return "모름(kill 뒤 hc get 실패)"
+		}
+		if !sameOwner(t, g) { // 그 주소가 다른 실행 행이 됨: 우리 것이 끝났는지·그 행을 지워도 되는지 모른다(R-02)
+			record(address, name, why+" 모름(kill 뒤 주소가 다른 실행)", cwd, "-", title)
+			return "모름(kill 뒤 주소가 다른 실행)"
 		}
 		if finished = str(g, "state") == "finished"; !finished {
 			time.Sleep(time.Second)
@@ -479,101 +539,13 @@ func closeTerm(t map[string]any, why string) string {
 		record(address, name, why+" 실패(30초 안에 안 끝남)", cwd, "-", title)
 		return "실패(안 끝남)"
 	}
+	if !event(true) {
+		record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)
+		return "실패(정리됨 못 씀)"
+	}
 	if _, err := hc("rm", address); err != nil {
 		record(address, name, why+" 실패(rm): "+err.Error(), cwd, "-", title)
 		return "실패(rm)"
 	}
 	return "닫힘"
-}
-
-// sweepTerminals: 터미널 쓸기 한 바퀴(요약 한 줄까지)
-func sweepTerminals(terms any, dry bool) {
-	keep, keepOK := keepList()
-	if !keepOK {
-		fmt.Println("터미널 쓸기 건너뜀: ~/.claude-tasks/keep을 못 읽음(보호 목록을 모름)")
-		return
-	}
-	now := float64(time.Now().UnixNano()) / 1e6
-	list, _ := terms.([]any)
-	var listed []map[string]any
-	for _, x := range list {
-		t, ok := x.(map[string]any)
-		if ok && str(t, "state") == "live" && str(t, "address") != "" && !strings.Contains(str(t, "address"), "/") &&
-			(str(t, "status") == "idle" || str(t, "status") == "done") {
-			listed = append(listed, t)
-		}
-	}
-	closed, targets := 0, 0
-	for _, brief := range listed {
-		t, err := hc("get", str(brief, "address"))
-		if err != nil {
-			if dry {
-				fmt.Printf("남김: %s %s — hc get 실패\n", str(brief, "address"), dash(str(brief, "name")))
-			}
-			continue
-		}
-		f := facts{worktree: triOf(linkedWorktree(str(t, "cwd")))}
-		var wtRepo, wtBranch string
-		sub := submitted(t, "")
-		if isWorker(t) && f.worktree == yes && (sub || now-orNow(t, now) >= 30*minute) {
-			// 착지한 깨끗한 작업 트리: 닫고 hc-lane clean(교착 풀기)
-			if wtRepo, wtBranch, f.wtwhy = landedClean(t, run, ""); wtRepo != "" {
-				f.worktree, f.unlanded = no, no
-			}
-		}
-		if isWorker(t) && f.worktree == no { // R2 보호에만 쓴다
-			if wtRepo == "" {
-				f.unlanded = triOf(unlanded(str(t, "cwd"), run))
-			}
-			tail := screenTail(str(t, "address"), run)
-			f.tail, f.fill, f.submitted = &tail, fillState(str(t, "name"), str(t, "address"), ""), sub
-		}
-		why, kept := judge(t, f, now, keep)
-		if why == "" {
-			if dry {
-				fmt.Printf("남김: %s %s — %s\n", str(t, "address"), dash(str(t, "name")), kept)
-			}
-			continue
-		}
-		created, changed := now, orNow(t, now)
-		if v, ok := num(t, "created_ms"); ok && v != 0 {
-			created = v
-		}
-		line := fmt.Sprintf("%s %s %s (만든 지 %d분·상태 그대로 %d분, turn %s) %s", why, str(t, "address"), dash(str(t, "name")),
-			int((now-created)/minute), int((now-changed)/minute), pyStr(t["turn"]), pyStr(t["cwd"]))
-		targets++
-		if dry {
-			if wtRepo != "" {
-				line += " (닫은 뒤 hc-lane clean " + wtBranch + ")"
-			}
-			fmt.Println("닫을 것:", line)
-			continue
-		}
-		res := closeTerm(t, why)
-		if strings.HasPrefix(res, "닫힘") {
-			closed++
-		}
-		fmt.Println(res+":", line)
-		if wtRepo != "" && strings.HasPrefix(res, "닫힘") {
-			ok, msg := laneClean(wtRepo, wtBranch, run)
-			fail := ""
-			if !ok {
-				fail = " 실패"
-			}
-			record(str(t, "address"), str(t, "name"), "작업 트리 정리(hc-lane clean "+wtBranch+")"+fail, wtRepo, "-", msg)
-			fmt.Printf("작업 트리 정리%s: %s %s — %s\n", fail, wtRepo, wtBranch, msg)
-		}
-	}
-	word, n := "닫음", closed
-	if dry {
-		word, n = "닫을 것", targets
-	}
-	fmt.Printf("%s 이 기계 idle·done %d개 확인, %s %d개\n", time.Now().Format("2006-01-02 15:04:05"), len(listed), word, n)
-}
-
-func orNow(t map[string]any, now float64) float64 {
-	if v, ok := num(t, "status_ms"); ok && v != 0 {
-		return v
-	}
-	return now
 }

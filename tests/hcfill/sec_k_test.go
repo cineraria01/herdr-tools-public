@@ -395,6 +395,14 @@ func secKUmask(k *K) {
 		st, err := os.Stat(f)
 		k.check("umask 077: "+f[strings.LastIndex(f, "/")+1:]+" 은 0600", err == nil && st.Mode().Perm() == 0o600, fmt.Sprint(err), fmt.Sprint(st))
 	}
+	// 재감사 fill R-11: 기존 0600 파일을 다음 실행(umask 022)이 바꿔 넣어도 0600 그대로
+	syscall.Umask(0o022)
+	k.run("prio", "um", "low")
+	k.add("um3", "--then", "um")
+	for _, f := range []string{k.Q, k.DATA + "/briefs/added/um.md"} {
+		st, err := os.Stat(f)
+		k.check("umask 022에서 바꿔 넣어도: "+f[strings.LastIndex(f, "/")+1:]+" 은 0600 그대로", err == nil && st.Mode().Perm() == 0o600, fmt.Sprint(err), fmt.Sprint(st))
+	}
 }
 
 // F07(아스트라)·F4(Fable): 붙이기는 붙일 폴더(기본 ~/.claude-tasks) 안 파일만, 받은편지 줄에는 붙이지 않는다

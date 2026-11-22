@@ -122,14 +122,40 @@ func TestRunBounded(t *testing.T) {
 	}
 }
 
+// 재감사 base R-15: 바깥 마감(-test.timeout)이 cmdMax보다 먼저 오면 명령 상한을 남은 시간 안으로 줄여 무리를 거두고 124로 돌아온다
+func TestRunWithinTestDeadline(t *testing.T) {
+	if pidf := os.Getenv("UTIL_DEADLINE_PIDF"); pidf != "" {
+		T := tmpdir(t)
+		if _, rc := run(T, isolated(T), "/bin/sh", "-c", "sleep 60 & echo $! >"+pidf+"; wait"); rc != 124 {
+			t.Fatalf("바깥 마감 전에 시간 넘김(124)이어야: %d", rc)
+		}
+		return
+	}
+	T := tmpdir(t)
+	pidf := T + "/pid"
+	e := isolated(T)
+	e["UTIL_DEADLINE_PIDF"] = pidf
+	out, rc := run(T, e, os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=8s", "-test.count=1")
+	b, _ := os.ReadFile(pidf)
+	kid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if kid > 0 && syscall.Kill(kid, 0) == nil {
+		syscall.Kill(kid, syscall.SIGKILL)
+		t.Errorf("바깥 마감 뒤 손자(%d)가 남았다", kid)
+	}
+	if rc != 0 || kid <= 0 {
+		t.Fatalf("안쪽 시험이 마감 전에 끝나야(종료 0): rc %d kid %d\n%s", rc, kid, out)
+	}
+}
+
 // start: name을 새 프로세스 무리로, cmdMax 상한과 함께. 끝나면 무리에 남은 것(출력을 문 손자 등)도 거둔다 — 시험이 띄운 무리만
 func start(dir string, e Env, name string, args ...string) (*exec.Cmd, context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdMax)
+	max := clitest.Budget(cmdMax) // 바깥 마감(-test.timeout)보다 먼저 끝나게(재감사 R-15)
+	ctx, cancel := context.WithTimeout(context.Background(), max)
 	cmd := exec.CommandContext(ctx, name, args...)
 	proc.Group(cmd)
 	cmd.Cancel = func() error { proc.StopGroup(cmd.Process.Pid, 2*time.Second); return nil }
 	cmd.Dir, cmd.Env = dir, e.list()
-	cmd.WaitDelay = 10 * time.Second // 출력을 물고 남은 손자가 있어도 끝나게
+	cmd.WaitDelay = min(10*time.Second, max) // 출력을 물고 남은 손자가 있어도 끝나게
 	return cmd, ctx, cancel
 }
 

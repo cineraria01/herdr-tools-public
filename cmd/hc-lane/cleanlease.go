@@ -8,13 +8,28 @@ import (
 	"strings"
 )
 
-// legacyParked: 이 기계 사건(events.tsv)에서 그 레인의 마지막 주차·제출 사건이 그 커밋(sha, 7자 이상 앞부분도)의 「주차」인가 —
-// 옛 판 주차(원격 lane/<레인>)를 반송된 제출 가지와 가른다(gofix L07). 못 읽으면 false(멈춤 쪽)
+// legacyParked: 대상 기계(--on이면 그 기계, 아니면 이 기계) 사건(events.tsv)에서 그 레인의 마지막 주차·제출 사건이 그 커밋(sha,
+// 7자 이상 앞부분도)의 「주차」인가 — 옛 판 주차(원격 lane/<레인>)를 반송된 제출 가지와 가른다(gofix L07). 주차 사건은 레인이 돈
+// 기계에 적히니 --on이면 그 기계 것을 읽는다(재감사 R-24). 못 읽으면 false(멈춤 쪽)
 func legacyParked(lane, sha string) bool {
-	ls, err := readLines(evdir() + "/events.tsv")
-	if err != nil {
-		return false
+	var ls []string
+	if on != "" {
+		out, r := xoutQ("sh", "-c", evrd, "hc-lane", "0")
+		if r != 0 {
+			return false
+		}
+		ls = lines(out)
+	} else {
+		var err error
+		if ls, err = readLines(evdir() + "/events.tsv"); err != nil {
+			return false
+		}
 	}
+	return lastParkIs(ls, lane, sha)
+}
+
+// lastParkIs: 사건 줄들에서 그 레인의 마지막 주차·제출 사건이 그 커밋의 「주차」인가
+func lastParkIs(ls []string, lane, sha string) bool {
 	ok := false
 	for _, l := range ls {
 		f := strings.Split(l, "\t")

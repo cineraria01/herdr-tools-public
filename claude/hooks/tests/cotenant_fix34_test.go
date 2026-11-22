@@ -204,10 +204,11 @@ func cotenantFix34(c *cg) {
 	c.write(R5+"/.git/index", "garbage")
 	c.write(L5D+"/.cleaning", "") // someone else cleans: the changed-paths way
 	c.run("s5b", "Bash", "git add e.txt", "", R5)
-	c.check("작업 중 발견: git status가 실패하면 남의 미커밋 파일 git add를 허용하지 않고 막음(바뀐 경로만 읽는 판정)", 2, "git status가 실패")
+	// 깨진 색인은 경로 철자 확인(git ls-files — 재감사 R-H03)에서 먼저 걸릴 수 있다 — 어느 git이든 실패하면 막는다
+	c.check("작업 중 발견: git status가 실패하면 남의 미커밋 파일 git add를 허용하지 않고 막음(바뀐 경로만 읽는 판정)", 2, "git status가 실패|git을 실행하지 못했다")
 	os.Remove(L5D + "/.cleaning") //nolint:errcheck // rm -f
 	c.run("s5b", "Bash", "git add e.txt", "", R5)
-	c.check("작업 중 발견: 같은 것을 정리자가 판정할 때도 막음", 2, "git status가 실패")
+	c.check("작업 중 발견: 같은 것을 정리자가 판정할 때도 막음", 2, "git status가 실패|git을 실행하지 못했다")
 	c.checkOK("작업 중 발견: 그때 정리 잠금을 남기지 않음", exists(L5D+"/.cleaning"), 1)
 	c.write(R5+"/.git/index", string(idx5))
 

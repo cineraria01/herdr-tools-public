@@ -5,6 +5,7 @@ package main
 // 안전 시험(2026-11-22 gofix-ops — Go 전환 감사 A10·C06·C08·B06·B07·B19): 계약 시험(TestContract)과 따로 둔다.
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	ct "herdr-tools/internal/clitest"
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/proc"
 )
 
 type mergeEnv struct {
@@ -159,16 +161,60 @@ func TestConcurrentMergeLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan ct.Res, 1)
-	go func() { done <- e.run(`{"values":{".model":"new"}}`, "") }()
-	time.Sleep(1500 * time.Millisecond)
+	// 병합기가 실제로 잠금 앞에서 기다린다고 알린 뒤에만(시간이 아니라 그 줄로 — R-30) 잠금을 쥔 쪽이 쓰고 놓는다
+	c := exec.Command(e.merge)
+	c.Env = append(os.Environ(), e.env()...)
+	c.Stdin = strings.NewReader(`{"values":{".model":"new"}}`)
+	var so strings.Builder
+	c.Stdout = &so
+	ep, err := c.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waiting := make(chan bool, 1)
+	scanned := make(chan struct{}) // 표준 오류를 다 읽음 — Wait는 그 뒤에(StderrPipe 규칙)
+	var se strings.Builder
+	go func() {
+		defer close(scanned)
+		sc := bufio.NewScanner(ep)
+		said := false
+		for sc.Scan() {
+			se.WriteString(sc.Text() + "\n")
+			if !said && strings.Contains(sc.Text(), "잠금") && strings.Contains(sc.Text(), "기다린다") {
+				said = true
+				waiting <- true
+			}
+		}
+		if !said {
+			waiting <- false
+		}
+	}()
+	select {
+	case ok := <-waiting:
+		if !ok {
+			<-scanned
+			c.Wait()
+			lk.Close()
+			t.Fatalf("병합기가 잠금을 기다린다고 알리지 않고 끝났다: out=%q err=%q", so.String(), se.String())
+		}
+	case <-time.After(50 * time.Second):
+		lk.Close()
+		t.Fatal("병합기가 잠금 앞에 오지 않았다")
+	}
 	// 잠금을 쥔 다른 병합기: 잠금 안에서 읽은 판에 .language만 바꿔 쓴다
 	ct.Put(t, e.S(), `{"language":"new","model":"old"}`+"\n")
 	ct.Put(t, e.Base(), e.baseOf(".language", `"new"`, ".model", `"old"`))
 	lk.Close()
+	done := make(chan error, 1)
+	go func() { <-scanned; done <- c.Wait() }()
 	var r ct.Res
 	select {
-	case r = <-done:
+	case werr := <-done:
+		r.RC = proc.Code(werr)
+		r.Out, r.Err = strings.TrimRight(so.String(), "\n"), se.String()
 	case <-time.After(90 * time.Second):
 		t.Fatal("잠금이 풀린 뒤에도 병합기가 끝나지 않았다")
 	}

@@ -1,7 +1,7 @@
 // herdr-sync: 맥의 실제 파일을 정본으로 두 저장소(범용 도구·개인 설정)와 hc에 등록된 기계에 맞춘다 (계약 CONTRACT.md).
 // Go 판(2026-11-21 사용자 「모두 고로 옮기고 싶어」 — ops-go). 인자·출력·종료 코드·상태 파일(base.tsv·repo-base.tsv·bak)은 셸 판 bin/herdr-sync와 같다.
-// 짜임: 기계마다(맥 포함) 도는 조각(agent.sh — 셸 판 heredoc과 같은 글자, agent_test.go가 본다)은 그대로 sh로 돌린다 — 원격 기계에는
-// Go가 없을 수 있고(리눅스 dash), 서명·쓰기·백업이 두 판에서 같은 코드여야 같은 base를 번갈아 읽는다. Go 판은 맥 쪽 지휘(sync.list 풀기,
+// 짜임: 기계마다(맥 포함) 도는 조각(agent.sh — 셸 판 heredoc에서 나왔고, 2026-11-22 gofix2-ops R-01부터 「모름이면 실패」만 갈린다)은
+// 그대로 sh로 돌린다 — 원격 기계에는 Go가 없을 수 있고(리눅스 dash), 성공한 서명·쓰기·백업 꼴이 두 판에서 같아 같은 base를 번갈아 읽는다. Go 판은 맥 쪽 지휘(sync.list 풀기,
 // 3-way 판정, 저장소 모음·깖, 기계 쓰기 묶음, 설정, 표)를 맡는다. 되돌리기 HERDR_SYNC_IMPL=bash(또는 HERDR_IMPL=bash).
 // 잠금은 셸 판 lockf와 같은 파일·같은 flock이라 두 판이 함께 돌지 못한다.
 package main
@@ -107,15 +107,21 @@ func main() {
 	STATE = home + "/.local/state/herdr-sync"
 
 	// 맥 확인: Herdr 앱이 있고 hc가 다른 기계를 아는 곳. 워커 맥의 hc는 다른 기계를 모른다.
-	// hc 조회가 실패하거나 시간을 넘기면(모름) 「맥이 아님」과 가른다(gofix-ops B03)
+	// hc 조회가 실패하거나 시간을 넘기거나 목록이 온전하지 않으면(모름) 「맥이 아님」과 가른다(gofix-ops B03·R-03)
+	notMac := func() {
+		fmt.Fprintln(os.Stderr, "herdr-sync: 맥에서만 돈다 (~/Applications/Herdr.app 또는 /Applications/Herdr.app이 있고 hc machine ls에 기계가 있는 곳)")
+		os.Exit(2)
+	}
+	if !isDir(home+"/Applications/Herdr.app") && !isDir(envOr("HERDR_SYNC_SYSAPPS", "/Applications")+"/Herdr.app") {
+		notMac()
+	}
 	all, herr := machinesFromHC()
 	if herr != nil {
 		fmt.Fprintf(os.Stderr, "herdr-sync: hc machine ls를 읽지 못했다 (%v) — 모름, 아무것도 쓰지 않음\n", herr)
 		os.Exit(1)
 	}
-	if (!isDir(home+"/Applications/Herdr.app") && !isDir(envOr("HERDR_SYNC_SYSAPPS", "/Applications")+"/Herdr.app")) || len(all) == 0 {
-		fmt.Fprintln(os.Stderr, "herdr-sync: 맥에서만 돈다 (~/Applications/Herdr.app 또는 /Applications/Herdr.app이 있고 hc machine ls에 기계가 있는 곳)")
-		os.Exit(2)
+	if len(all) == 0 {
+		notMac()
 	}
 	if err := os.MkdirAll(STATE, 0o755); err != nil {
 		os.Exit(1)
@@ -247,29 +253,6 @@ func git(args ...string) (string, int) {
 func gitq(args ...string) (string, int) { // 표준 오류를 버린다
 	out, err := proc.Output(exec.Command("git", args...))
 	return strings.TrimRight(string(out), "\n"), proc.Code(err)
-}
-
-// ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only. git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다
-// (gofix-ops B01·O-01·K-01: 실패한 status의 빈 출력을 깨끗함으로 읽어 커밋 안 된 내용을 맥·기계에 깔았다)
-func ready(r string) {
-	if _, rc := gitq("-C", r, "rev-parse", "--git-dir"); rc == proc.TimeoutCode {
-		die("저장소 상태를 읽지 못했다 (git rev-parse 시간 넘김): %s", r)
-	} else if rc != 0 {
-		die("저장소가 없다: %s", r)
-	}
-	if b, rc := gitq("-C", r, "symbolic-ref", "--short", "HEAD"); rc == proc.TimeoutCode {
-		die("저장소 상태를 읽지 못했다 (git symbolic-ref 시간 넘김): %s", r)
-	} else if b != "main" {
-		die("저장소가 main 브랜치가 아니다: %s", r)
-	}
-	if s, rc := git("-C", r, "status", "--porcelain"); rc != 0 {
-		die("저장소 상태를 읽지 못했다 (git status 종료 %d — 모름): %s", rc, r)
-	} else if s != "" {
-		die("저장소에 커밋하지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시: %s", r)
-	}
-	if _, rc := git("-C", r, "pull", "-q", "--ff-only"); rc != 0 {
-		die("git pull --ff-only 실패: %s (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main)", r)
-	}
 }
 
 // ---- sync.list ----

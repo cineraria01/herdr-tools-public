@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/proc"
 )
 
@@ -26,13 +27,45 @@ func (m *M) stack() bool {
 		m.fin()
 		return false
 	}
+	// 승인 구성원은 얹은 결과가 승인 원본의 순변경과 같을 때만 묶음에 남는다(R-H01). 맨 앞이 증명되지 않으면 혼자(착지가 판정을 본다)
 	k := []int{0}
-	for i := 1; i < len(m.b); i++ {
+	h0, rc := out("rev-parse", "--verify", "refs/heads/"+m.br)
+	if rc != 0 {
+		m.defer_("후보 가지 조회 실패")
+		return false
+	}
+	front := m.applied(m.b[0], m.B, h0)
+	if front == apUnknown {
+		m.defer_("승인 구성원의 후보 트리 대조 실패")
+		return false
+	}
+	for i := 1; front == apOK && i < len(m.b); i++ { // 맨 앞이 다르면 뒤를 얹지 않는다 — 아래에서 원본 제출 하나로 줄인다
 		mf, rc := out("merge-base", m.b[i].s, m.B)
 		if rc != 0 {
 			dieGit(rc, "merger: git merge-base 실패(%s)", m.b[i].l)
 		}
+		prev, rc := out("rev-parse", "--verify", "refs/heads/"+m.br)
+		if rc != 0 {
+			m.defer_("후보 가지 조회 실패")
+			return false
+		}
 		if inLog(m.mwt, m.lgf, "rebase", "-q", "--onto", m.br, mf, m.b[i].s) == 0 {
+			got, rc := gitx.Out(m.mwt, os.Stderr, "rev-parse", "--verify", "HEAD")
+			ap := apUnknown
+			if rc == 0 {
+				ap = m.applied(m.b[i], prev, got)
+			}
+			switch ap {
+			case apUnknown:
+				m.defer_("승인 구성원의 후보 트리 대조 실패")
+				return false
+			case apDiffer: // 앞 구성원까지의 후보로 되돌리고 이 구성원은 큐에 그대로
+				if inLog(m.mwt, m.lgf, "checkout", "-q", "-f", m.br) != 0 {
+					m.defer_("앞 구성원의 후보 작업 트리를 복구하지 못했다")
+					return false
+				}
+				continue
+			}
 			if inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br) != 0 {
 				m.defer_("후보 가지 전환 실패")
 				return false
@@ -80,18 +113,25 @@ func (m *M) runCandidate() int {
 	}
 	// 혼자면 착지가 그 제출의 승인 patch-id를 대조한다. 묶음 HEAD는 어느 한 승인 변경도 아니라 묶음 전체에 대한 판정은 넘기지 않는다 —
 	// 판정이 붙은 구성원은 filterBatch(approved)가 하나씩 확인해야만 묶음에 들었다
-	v, p := m.bv, m.bp
+	v, p, ex := m.bv, m.bp, m.ex
 	if len(m.b) > 1 {
 		v, p = "", ""
+		lease := false
 		for _, e := range m.b {
 			if e.v != "" {
 				fmt.Fprintf(lf, "hc-lane merger: 묶음 구성원 승인 확인됨 — %s 제출 ID %s 판정 %s patch-id %s\n", e.l, e.d, e.v, e.p)
+				lease = true
 			}
+		}
+		// 승인 구성원의 결과 트리는 기준 m.B 위에서 확인했다(stack·applied) — 착지가 더 새 기준으로 다시 rebase하면 그 확인이 무효라
+		// 기본 브랜치가 m.B일 때만 올린다(lease, 바뀌었으면 착지가 종료 6 → 다음 바퀴에 새 기준으로 다시 확인. R-H01)
+		if lease {
+			ex += " --force-with-lease=refs/heads/" + m.base + ":" + m.B
 		}
 	}
 	c := exec.Command(gSelf, "land", m.base)
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
-	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
+	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+strings.TrimSpace(ex),
 		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0, "HERDR_SPEC_TREE="+m.stree)
 	return proc.Wait(c, m.mj+"/child")
 }

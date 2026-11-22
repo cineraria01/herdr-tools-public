@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 // decodeAll: 글 안의 JSON 값들(jq 입력 흐름). 못 읽는 곳이 있으면 ok=false
@@ -157,7 +159,9 @@ func upOK(m string) bool { return m == LOCAL || has(ICON, m) }
 func onm(in io.Reader, m, body string, args ...string) (string, int) {
 	a := append([]string{"-c", X + body, "_"}, args...)
 	if m == LOCAL {
-		return Cmd{Name: "sh", Args: a, In: in, Err: errPass}.Run()
+		// 로컬도 원격(hc exec --on … sh)과 같은 상한 — proc.Limit이 sh를 몰라 받은편지 해시 등이 멈추면 run.lock을 쥔 채 기다렸다(재감사 fill R-13).
+		// 넘기면 124(모름) — 부르는 쪽은 「다음 바퀴에」로 읽는다
+		return Cmd{Name: "sh", Args: a, In: in, Err: errPass, Max: proc.Limit([]string{"hc", "exec", "--on", m, "--", "sh"})}.Run()
 	}
 	h := []string{"exec"}
 	if in != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,6 +31,39 @@ func TestTailFileLines(t *testing.T) {
 	eachLine(p, func(string) bool { n++; return n < 40 })
 	if n != 40 {
 		t.Fatalf("eachLine 멈춤: %d", n)
+	}
+}
+
+// R-29: 긴 이력 파일에서 끝 한 줄만 읽을 때 파일 전체를 올리지 않는다(읽은 할당이 파일 크기보다 훨씬 작다)
+func TestTailFileLinesAlloc(t *testing.T) {
+	p := t.TempDir() + "/ev"
+	line := strings.Repeat("y", 99) + "\n"
+	os.WriteFile(p, []byte(strings.Repeat(line, 40000)+"last\n"), 0o644) // 약 4MB
+	var a, b runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&a)
+	ls, err := tailFileLines(p, 1)
+	runtime.ReadMemStats(&b)
+	if err != nil || len(ls) != 1 || ls[0] != "last" {
+		t.Fatalf("tailFileLines 1: %v %v", ls, err)
+	}
+	if got := b.TotalAlloc - a.TotalAlloc; got > 1<<20 {
+		t.Fatalf("끝 한 줄에 %d바이트 할당 — 파일 전체를 읽은 꼴", got)
+	}
+}
+
+// R-28: 64KB를 넘는 한 줄의 뒤쪽 실패 표식도 실패 요약(eachLine → failLine)에 잡힌다
+func TestEachLineLongTail(t *testing.T) {
+	p := t.TempDir() + "/log"
+	os.WriteFile(p, []byte("ok\n"+strings.Repeat("x", 66000)+" --- FAIL: TestZ\nend\n"), 0o644)
+	hit, n := false, 0
+	eachLine(p, func(l string) bool {
+		n++
+		hit = hit || failLine.MatchString(l)
+		return true
+	})
+	if !hit {
+		t.Fatalf("긴 줄 뒤쪽 실패 표식을 놓침(조각 %d개)", n)
 	}
 }
 

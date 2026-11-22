@@ -148,7 +148,7 @@ func LintAt(base, dir string, strict bool, files []string, stdout, stderr io.Wri
 		if t == "" || t[0] == '#' {
 			continue
 		}
-		re, err := regexp.Compile(ereToGo(s, true))
+		re, err := compileERE(s, true)
 		if err != nil {
 			return die2("틀린 패턴 %s (%s)", s, pf)
 		}
@@ -285,11 +285,19 @@ type ERE struct{ re *regexp.Regexp }
 
 // CompileERE: ERE 한 줄을 ereToGo로 옮겨 컴파일. Go가 못 읽는 꼴(역참조 등)은 오류 — 부른 쪽은 「검사 못 함」으로 멈춘다
 func CompileERE(p string, icase bool) (*ERE, error) {
-	re, err := regexp.Compile(ereToGo(p, icase))
+	re, err := compileERE(p, icase)
 	if err != nil {
 		return nil, err
 	}
 	return &ERE{re}, nil
+}
+
+func compileERE(p string, icase bool) (*regexp.Regexp, error) {
+	g, err := ereToGo(p, icase)
+	if err != nil {
+		return nil, err
+	}
+	return regexp.Compile(g)
 }
 
 // Match: 한 줄(줄바꿈 뺀 바이트)이 걸리는지
@@ -297,36 +305,57 @@ func (e *ERE) Match(line []byte) bool { return e.re.MatchString(byteRunes(line))
 
 // ereToGo: ERE 패턴 한 줄을 셸 판(LC_ALL=C grep -E, icase면 -i)과 같게 거는 Go 정규식으로 — 바이트는 byteRunes처럼 옮기고,
 // 괄호 식 안의 역슬래시는 ERE처럼 글자 그대로, \< \> [[:<:]] [[:>:]]는 \b.
-// ponytail: \b는 낱말 시작·끝을 가리지 않아 셸보다 느슨하다(「tok\<x」 같은 꼴을 더 건다 — 개인 값 검사라 더 거는 쪽).
-// 역참조 등 Go가 못 읽는 꼴은 컴파일 오류 → 종료 2(조용히 통과하지 않게)
-func ereToGo(p string, icase bool) string {
+// C 로캘 ERE와 같은 뜻을 보장 못 하는 꼴은 오류(재감사 R-18·R-09 — 맥 BSD grep은 \d를 숫자, \v·\A·\z를 그 글자, \b를 아무 데나로 읽어 Go와 어긋난다):
+// 글자·숫자 앞 역슬래시, 괄호 식 안 동등 클래스 [=…=]·정렬 요소 [.….]·POSIX 12개 밖 문자 부류, Go 전용 「(?」·「{,」,
+// 낱말 글자가 늘 붙지 않는 \< \> [[:<:]] [[:>:]](\<는 바로 뒤 원소가, \>는 바로 앞 원소가 빠질 수 없는 낱말 글자
+// — 낱말 글자 하나나 낱말 글자만 든 괄호 식, 수량자는 없거나 최소 1 — 일 때만: 그때만 Go \b가 낱말 시작·끝과 같다).
+// 역참조 등 Go가 못 읽는 꼴은 컴파일 오류. 부른 쪽은 둘 다 종료 2(조용히 다르게 걸지 않게)
+func ereToGo(p string, icase bool) (string, error) {
+	bad := func(why string) (string, error) {
+		return "", fmt.Errorf("C 로캘 ERE와 뜻이 같다고 보장 못 하는 꼴(%s): %q", why, p)
+	}
 	var b strings.Builder
 	if icase {
 		b.WriteString("(?i)")
 	}
+	lastWord := false // 바로 앞 원소(수량자까지)가 늘 낱말 글자로 끝나는가 — \>를 받는가
 	for i := 0; i < len(p); i++ {
 		c := p[i]
+		word := false
 		switch {
 		case strings.HasPrefix(p[i:], "[[:<:]]"), strings.HasPrefix(p[i:], "[[:>:]]"):
+			if (p[i+3] == '<' && !wordAtom(p, i+7)) || (p[i+3] == '>' && !lastWord) {
+				return bad("낱말 글자가 늘 붙지는 않는 낱말 경계")
+			}
 			b.WriteString(`\b`)
 			i += 6
 		case c == '\\' && i+1 < len(p):
-			i++
-			switch n := p[i]; {
+			switch n := p[i+1]; {
+			case n == '<' && !wordAtom(p, i+2), n == '>' && !lastWord:
+				return bad("낱말 글자가 늘 붙지는 않는 낱말 경계")
 			case n == '<' || n == '>':
 				b.WriteString(`\b`)
-			case n >= 0x80: // Go는 ASCII 아닌 글자의 역슬래시를 못 읽는다 — 글자 그대로
+			case n >= 0x80: // Go는 ASCII 아닌 글자의 역슬래시를 못 읽는다 — 글자 그대로(BSD grep도 그 바이트)
 				writeByte(&b, n)
+			case isWordByte(n) && n != '_':
+				return bad(`글자·숫자 앞 역슬래시 \` + string(n))
 			default:
 				b.WriteByte('\\')
 				b.WriteByte(n)
 			}
+			i++
+		case c == '(' && i+1 < len(p) && p[i+1] == '?', c == '{' && i+1 < len(p) && p[i+1] == ',':
+			return bad("Go 전용 " + p[i:i+2])
 		case c == '[':
 			j := bracketEnd(p, i)
 			if j < 0 {
 				b.WriteByte(c) // 닫히지 않은 괄호 — Go도 틀린 패턴으로 본다
 				continue
 			}
+			if why := bracketUnsure(p[i : j+1]); why != "" {
+				return bad(why)
+			}
+			word = bracketWordOnly(p[i : j+1])
 			for ; i <= j; i++ {
 				if p[i] == '\\' {
 					b.WriteString(`\\`)
@@ -335,11 +364,153 @@ func ereToGo(p string, icase bool) string {
 				}
 			}
 			i = j
+		case c == '{':
+			if n, e, ok := braceMin(p, i); ok {
+				word = lastWord && n >= 1
+				b.WriteString(p[i : e+1])
+				i = e
+			} else {
+				b.WriteByte(c)
+			}
+		case c == '+':
+			word = lastWord
+			b.WriteByte(c)
 		default:
+			word = isWordByte(c)
 			writeByte(&b, c)
 		}
+		lastWord = word
 	}
-	return b.String()
+	return b.String(), nil
+}
+
+// wordAtom: p[k]에서 시작하는 원소가 빠질 수 없는 낱말 글자인가 — 낱말 글자 하나나 낱말 글자만 든 괄호 식, 뒤 수량자는 없거나 최소 1
+func wordAtom(p string, k int) bool {
+	var e int
+	switch {
+	case k < len(p) && isWordByte(p[k]):
+		e = k + 1
+	case k < len(p) && p[k] == '[':
+		j := bracketEnd(p, k)
+		if j < 0 || !bracketWordOnly(p[k:j+1]) {
+			return false
+		}
+		e = j + 1
+	default:
+		return false
+	}
+	if e >= len(p) {
+		return true
+	}
+	switch p[e] {
+	case '*', '?':
+		return false
+	case '{':
+		n, _, ok := braceMin(p, e)
+		return ok && n >= 1
+	}
+	return true
+}
+
+// braceMin: p[i]의 { 로 여는 수량자 {n} {n,} {n,m}의 최소 n과 닫는 }의 자리. 꼴이 아니면 ok 거짓
+func braceMin(p string, i int) (n, end int, ok bool) {
+	k := i + 1
+	for k < len(p) && p[k] >= '0' && p[k] <= '9' {
+		n = n*10 + int(p[k]-'0')
+		if n > 1000 {
+			return 0, 0, false
+		}
+		k++
+	}
+	if k == i+1 {
+		return 0, 0, false
+	}
+	if k < len(p) && p[k] == ',' {
+		k++
+		for k < len(p) && p[k] >= '0' && p[k] <= '9' {
+			k++
+		}
+	}
+	if k < len(p) && p[k] == '}' {
+		return n, k, true
+	}
+	return 0, 0, false
+}
+
+// bracketWordOnly: 괄호 식 [ … ](부정 아님)이 낱말 글자만 받는가 — 낱말 글자, 같은 갈래(숫자·소문자·대문자) 안의 범위, alnum·alpha·digit·upper·lower·xdigit 부류
+func bracketWordOnly(s string) bool {
+	in := s[1 : len(s)-1]
+	if in == "" || in[0] == '^' {
+		return false
+	}
+	for k := 0; k < len(in); {
+		if strings.HasPrefix(in[k:], "[:") {
+			e := strings.Index(in[k+2:], ":]")
+			if e < 0 {
+				return false
+			}
+			switch in[k+2 : k+2+e] {
+			case "alnum", "alpha", "digit", "upper", "lower", "xdigit":
+			default:
+				return false
+			}
+			k += 2 + e + 2
+			continue
+		}
+		if k+2 < len(in) && in[k+1] == '-' {
+			lo, hi := in[k], in[k+2]
+			if !((isDigit(lo) && isDigit(hi)) || (lo >= 'a' && hi <= 'z' && lo <= hi) || (lo >= 'A' && hi <= 'Z' && lo <= hi)) {
+				return false
+			}
+			k += 3
+			continue
+		}
+		if !isWordByte(in[k]) {
+			return false
+		}
+		k++
+	}
+	return true
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// isWordByte: C 로캘 낱말 글자(ASCII 글자·숫자·_)
+func isWordByte(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// posixClasses: C 로캘과 Go가 같게 읽는 문자 부류(ASCII)
+var posixClasses = map[string]bool{"alnum": true, "alpha": true, "blank": true, "cntrl": true, "digit": true, "graph": true,
+	"lower": true, "print": true, "punct": true, "space": true, "upper": true, "xdigit": true}
+
+// bracketUnsure: 괄호 식 하나(bracketEnd로 찾은 [ … ])에 Go가 C 로캘과 다르게 읽는 꼴이 있으면 그 까닭, 없으면 ""
+func bracketUnsure(s string) string {
+	k := 1
+	if k < len(s) && s[k] == '^' {
+		k++
+	}
+	if k < len(s) && s[k] == ']' {
+		k++
+	}
+	for ; k < len(s)-1; k++ {
+		if s[k] != '[' || strings.IndexByte(":.=", s[k+1]) < 0 {
+			continue
+		}
+		d := s[k+1]
+		e := strings.Index(s[k+2:], string(d)+"]")
+		if e < 0 {
+			return "닫히지 않은 [" + string(d)
+		}
+		if d != ':' {
+			return "동등 클래스·정렬 요소 [" + string(d) + "…" + string(d) + "]"
+		}
+		if name := s[k+2 : k+2+e]; !posixClasses[name] {
+			return "POSIX 밖 문자 부류 [:" + name + ":]"
+		}
+		k += 2 + e + 1
+	}
+	return ""
 }
 
 // bracketEnd: p[i]의 [로 여는 괄호 식을 닫는 ]의 자리(없으면 -1). 맨 앞 ^ 다음의 ]는 글자, [:…:] [.….] [=…=]는 통째로 건너뛴다
@@ -417,139 +588,3 @@ func firstLine(f string) string {
 	}
 	return s
 }
-
-// SyncLint: `herdr-tools-config sync-lint <범용 저장소> <sync.list>` — herdr-sync도 맞추기 전에 부른다. 더할 줄은 stdout, 머리 줄·지울 줄은 stderr.
-// 0 통과 · 1 걷힌 셸 판 줄이 남음·바이너리 줄이 틀림·딸린 줄이 모자람 · 2 sync.list 없음
-func SyncLint(repo, list string, stdout, stderr io.Writer) int {
-	data, err := os.ReadFile(list)
-	if !isFile(list) || err != nil {
-		fmt.Fprintf(stderr, "%s: sync.list 없음: %s\n", me, list)
-		return 2
-	}
-	var rows [][]string
-	for _, l := range strings.Split(string(data), "\n") {
-		if f := ListFields(l); len(f) >= 4 {
-			rows = append(rows, f)
-		}
-	}
-	bad := 0
-	// 1. 걷힌 셸 판 줄(2026-11-22 go-shell-remove): 저장소에 없는 tools:lib/…·tools:…*.sh·*.py 줄, cmd/<도구>가 있는데 저장소에 없는
-	// tools:bin/<도구> 줄이 남아 있으면 herdr-sync가 맥에 남은 옛 파일을 저장소로 다시 모은다(맥이 정본) — 맞추기 전에 멈추고 바이너리 줄을 권한다
-	var stale, repl []string
-	for _, f := range rows {
-		r, ok := strings.CutPrefix(f[2], "tools:")
-		if !ok || strings.Contains(r, "*") {
-			continue
-		}
-		x, isBin := strings.CutPrefix(r, "bin/")
-		goTool := isBin && !strings.Contains(x, "/") && isDir(repo+"/cmd/"+x)
-		shellish := goTool || strings.HasPrefix(r, "lib/") || strings.HasSuffix(r, ".sh") || strings.HasSuffix(r, ".py")
-		if !shellish || exists(repo+"/"+strings.TrimSuffix(r, "/")) {
-			continue
-		}
-		stale = append(stale, strings.Join(f[:4], "  "))
-		if goTool {
-			repl = append(repl, fmt.Sprintf("%s  %sbin/%s  tools:cmd/%s  %s", f[0], macRoot(f[1]), x, x, f[3]))
-		}
-	}
-	if len(stale) > 0 {
-		fmt.Fprintf(stderr, "%s: %s — 셸 판이 걷혔다(저장소에 없는 셸·파이썬·포장 줄). 이 줄을 지우고(기계에 남은 것은 「지움」 줄로):\n  %s\n",
-			me, list, strings.Join(stale, "\n  "))
-		if len(repl) > 0 {
-			fmt.Fprintf(stderr, "%s: 도구는 바이너리 줄로 바꾼다. 이 줄을 더한다:\n", me)
-			fmt.Fprintln(stdout, strings.Join(repl, "\n"))
-		}
-		bad = 1
-	}
-	if syncLintBins(repo, list, rows, stdout, stderr) {
-		bad = 1
-	}
-	return bad
-}
-
-var cmdLineRe = regexp.MustCompile(`^tools:cmd/([^/]+)/?$`)
-
-// BinLine: sync.list 바이너리 줄(저장소 경로 tools:cmd/<도구> — 나무 줄 아님)이면 그 도구 이름. herdr-sync가 그 도구의 Go 바이너리를
-// 맥 경로(<뿌리>bin/<도구>, 보통 .local/bin/<도구>)에 원자 교체로 깐다
-func BinLine(mac, repoPath string) string {
-	if strings.HasSuffix(mac, "/**") || strings.Contains(mac, "*") {
-		return ""
-	}
-	if m := cmdLineRe.FindStringSubmatch(repoPath); m != nil {
-		return m[1]
-	}
-	return ""
-}
-
-// covers: 대상 s가 대상 t를 덮나(같음·all, local은 macos도)
-func covers(s, t string) bool { return s == t || s == "all" || (t == "local" && s == "macos") }
-
-// syncLintBins: 바이너리 줄마다 — 맥 경로가 <뿌리>bin/<도구>이고 cmd/<도구>가 있어야 하고, 그 대상을 덮는 Go 소스 나무 줄 셋
-// (그 기계에서 지을 때 — 릴리스를 못 받을 때)과, 곁 도구(cmd/<곁>/OWNER 첫 줄이 이 도구 — 예: hc-merger는 hc-lane이 부른다)의
-// 바이너리 줄이 있어야 한다. 모자라면 참
-func syncLintBins(repo, list string, rows [][]string, stdout, stderr io.Writer) bool {
-	type bin struct{ b, root, tool, t string }
-	var bins []bin
-	have := map[string][]string{} // 맥 경로\t저장소 경로 → 대상들
-	bad := false
-	for _, f := range rows {
-		x := BinLine(f[1], f[2])
-		if x == "" {
-			have[f[1]+"\t"+f[2]] = append(have[f[1]+"\t"+f[2]], f[3])
-			continue
-		}
-		if !isDir(repo+"/cmd/"+x) || !strings.HasSuffix(f[1], "bin/"+x) {
-			fmt.Fprintf(stderr, "%s: %s — 바이너리 줄이 틀렸다(맥 경로는 <뿌리>bin/%s, 저장소에 cmd/%s가 있어야): %s\n", me, list, x, x, strings.Join(f[:4], "  "))
-			bad = true
-			continue
-		}
-		bins = append(bins, bin{f[0], macRoot(f[1]), x, f[3]})
-	}
-	has := func(k, t string) bool {
-		for _, s := range have[k] {
-			if covers(s, t) {
-				return true
-			}
-		}
-		return false
-	}
-	hasBin := func(tool, t string) bool {
-		for _, b := range bins {
-			if b.tool == tool && covers(b.t, t) {
-				return true
-			}
-		}
-		return false
-	}
-	var out []string
-	seen := map[string]bool{}
-	more := func(l string) {
-		if !seen[l] {
-			seen[l] = true
-			out = append(out, l)
-		}
-	}
-	srcs := [3][2]string{{"lib/herdr-go/go.mod", "tools:go.mod"}, {"lib/herdr-go/cmd/**", "tools:cmd/"}, {"lib/herdr-go/internal/**", "tools:internal/"}}
-	cmds, _ := filepath.Glob(repo + "/cmd/*/OWNER")
-	for _, b := range bins {
-		for _, p := range srcs {
-			if !has(b.root+p[0]+"\t"+p[1], b.t) {
-				more(fmt.Sprintf("%s  %s  %s  %s", b.b, b.root+p[0], p[1], b.t))
-			}
-		}
-		for _, o := range cmds {
-			c := filepath.Base(filepath.Dir(o))
-			if c != b.tool && firstLine(o) == b.tool && !hasBin(c, b.t) {
-				more(fmt.Sprintf("%s  %sbin/%s  tools:cmd/%s  %s", b.b, b.root, c, c, b.t))
-			}
-		}
-	}
-	if len(out) == 0 {
-		return bad
-	}
-	fmt.Fprintf(stderr, "%s: %s — 바이너리 줄에 딸린 줄이 없다(Go 소스 나무 — 그 기계에서 지을 때, 곁 도구 바이너리). 이 줄을 더한다:\n", me, list)
-	fmt.Fprintln(stdout, strings.Join(out, "\n"))
-	return true
-}
-
-func exists(p string) bool { _, err := os.Lstat(p); return err == nil }

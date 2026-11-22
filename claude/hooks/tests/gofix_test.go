@@ -100,20 +100,7 @@ func TestCotenantGofix(t *testing.T) {
 			t.Errorf("rc=%d(want 0), options.log 임대 %v(want 있음) err=[%s]", c.RC, exists(c.leasefile(R, "options.log")), c.ERR)
 		}
 	})
-	// H03(아스트라)·M2(Fable): 훅이 띄운 git은 훅과 같은 프로세스 무리 — 훅이 무리째 꺼지면 함께 끝난다
-	t.Run("H03 git은 훅 무리 안", func(t *testing.T) {
-		c := newCG(t)
-		R, _, _ := repoAB(c)
-		fakeGit(c, "case \" $* \" in *\" status \"*) /bin/ps -o pgid= -p $$ > \""+c.T+"/pg\" ;; esac")
-		c.exec1(c.hookIn("sa", "Bash", "echo x | tee d.txt", "", R), c.env(c.stdPath()))
-		b, err := os.ReadFile(c.T + "/pg")
-		if err != nil {
-			t.Fatalf("가짜 git status가 돌지 않았다 rc=%d err=[%s]", c.RC, c.ERR)
-		}
-		if got, want := strings.TrimSpace(string(b)), strconv.Itoa(syscall.Getpgrp()); got != want {
-			t.Errorf("git 무리 %s, 훅을 부른 쪽 무리 %s — 따로 무리면 훅이 꺼져도 git이 남는다", got, want)
-		}
-	})
+	// H03(아스트라)·M2(Fable): 훅이 꺼지면 git도 함께 끝난다 — 재감사 R-M01로 감독 무리가 되어 TestCotenantHookKilled(gofix2_test.go)가 본다
 	// E01(아스트라)·E4(Fable): rev-parse 종료 128이라도 「저장소 아님」이 아니면(dubious ownership 등) 모름 → 막음
 	t.Run("E01 rev-parse 128 dubious", func(t *testing.T) {
 		c := newCG(t)

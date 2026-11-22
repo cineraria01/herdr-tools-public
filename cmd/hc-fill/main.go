@@ -100,13 +100,9 @@ func main() {
 	case "add":
 		addCmd(args)
 	case "rm":
-		if len(args) != 1 {
-			usage()
-		}
-		if withQ(func() { qRm(args[0]) }) != 0 {
-			exit(1)
-		}
-		say("뺌 %s (떠 있는 터미널은 그대로)", args[0])
+		rmCmd(args)
+	case "edit":
+		editCmd(args)
 	case "prio":
 		prioCmd(args)
 	case "ls":
@@ -191,6 +187,7 @@ func watchCmd(args []string) {
 		exit(75)
 	}
 	heldLocks = append(heldLocks, f)
+	proc.TakeSignals() // 이 처리기 하나만(재감사 R-H04 — proc 처리기가 짧은 유예로 먼저 끝내지 않게)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
@@ -234,14 +231,14 @@ func runCmd(args []string) {
 	}
 	heldLocks = append(heldLocks, f)
 	runHooks() // 신호 고루틴보다 먼저(R-20)
-	// 바퀴 상한·watch 멈춤으로 TERM을 받으면: 상한 걸고 따로 무리로 띄운 자식(git·hc 등 — 이 무리 신호가 안 닿는다)까지 거두고 끝낸다
+	// 바퀴 상한·watch 멈춤으로 TERM을 받으면: 상한 걸고 따로 무리로 띄운 자식(git·hc 등 — 이 무리 신호가 안 닿는다)까지 거두고 끝낸다.
+	// 이 처리기 하나만(proc.TakeSignals — 재감사 R-H04: proc 처리기가 함께 받아 먼저 끝내면 아래 훅·거두기가 반쯤 끊겼다)
+	proc.TakeSignals()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
 		s := <-sig
-		// 끝내기 훅(held.tsv 비움·지시문 사본 지움 — 셸 판 EXIT trap과 같게)을 먼저: internal/proc도 같은 신호를 받아 무리를 끈 뒤
-		// 신호를 다시 올려 끝낸다 — 무리 끄기(TERM 뒤 끝날 때까지)를 기다리면 훅이 못 돈다.
-		// ponytail: 파일 둘이라 proc 쪽보다 먼저 끝나는 것에 기댄다 — 길어지면 proc에 끝내기 훅 자리를 둔다(다른 영역)
+		// 끝내기 훅(held.tsv 비움·지시문 사본 지움 — 셸 판 EXIT trap과 같게)
 		runExitHooks()
 		say("바퀴를 끝낸다(신호 %v) — 다음 바퀴가 이어 간다", s)
 		proc.StopCurrent(2 * time.Second)
@@ -249,6 +246,12 @@ func runCmd(args []string) {
 	}()
 	if dry {
 		P = "[dry-run] "
+	}
+	// 앞 바퀴(SIGKILL로 죽음)의 자식 무리를 거두고도 소유를 모르는 채 우두머리가 도는 것이 있으면 그 자식(hc ls·herdr-balance 등이
+	// 쥔 잠금)과 겹치지 않게 이 바퀴를 미룬다(재감사 fill R-06)
+	if n := proc.Orphans(); n > 0 {
+		say("앞 바퀴가 남긴 자식 무리 %d개가 아직 도는지 모른다(%s) — 이번 바퀴는 건너뜀", n, proc.RecordDir())
+		exit(75)
 	}
 	runRound()
 }

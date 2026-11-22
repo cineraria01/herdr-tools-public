@@ -64,9 +64,16 @@ func output(c *exec.Cmd) (string, int) {
 // pipeDrain: 소비자가 0으로 끝난 뒤 생산자가 끝나기를 기다리는 상한 — 넘으면 생산자를 끄고 124(모름)
 var pipeDrain = 60 * time.Second
 
+// pipeMax: 묶음 하나(생산자 | 소비자)의 전체 상한 — 두 명령의 proc.Limit 가운데 큰 것, 둘 다 없으면(tar·sh·hc exec --timeout) 이 값.
+// hc exec의 --timeout 600에 여유를 둔다. 넘으면 두 무리를 다 끄고 둘 다 124(모름)
+var pipeMax = 660 * time.Second
+
 // pipeline: prefix + producer의 표준 출력을 consumer의 표준 입력으로(셸 판 `{ cat …; echo .; prod; } | cons`). 두 종료 코드.
 // 둘 사이는 OS 파이프 하나(Go가 가운데서 복사하지 않는다): 소비자가 끝나면 이쪽 읽기 끝을 닫아 생산자의 쓰기가 EPIPE로 끝나게 하고,
 // 소비자가 실패했으면 생산자를 바로 끈다 — 실패한 소비자 뒤에서 생산자를 끝까지 기다리며 잠금을 쥐지 않는다(gofix-ops A08)
+//
+// 둘 다 새 무리로 띄워 proc에 올리고(proc.Start — 신호·SIGKILL 뒤에도 남지 않게), 전송 시작부터 한 기한(pipeMax 등) 안에서 기다린다.
+// 소비자가 실패하거나 기한·생산자 기다림을 넘기면 PID 하나가 아니라 그 무리째(자손까지) 거둔다 — 남은 자손이 완료표를 쓰지 않게(R-08)
 func pipeline(prefix []byte, producer, consumer *exec.Cmd, out io.Writer) (int, int) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -74,49 +81,97 @@ func pipeline(prefix []byte, producer, consumer *exec.Cmd, out io.Writer) (int, 
 	}
 	consumer.Stdin, consumer.Stdout = r, out
 	producer.Stdout = w
+	proc.Group(producer)
+	proc.Group(consumer)
+	producer.WaitDelay, consumer.WaitDelay = proc.Grace, proc.Grace // 출력 관을 쥔 손자를 끝없이 기다리지 않게
+	d := max(proc.Limit(producer.Args), proc.Limit(consumer.Args))
+	if d <= 0 {
+		d = pipeMax
+	}
+	limit := time.NewTimer(d)
+	defer limit.Stop()
+	relC, err := proc.Start(consumer)
+	r.Close() // 소비자가 제 사본을 쥔다 — 소비자가 끝나면 생산자의 쓰기가 EPIPE
+	if err != nil {
+		w.Close()
+		return 1, proc.Code(err)
+	}
+	cdone := make(chan error, 1)
+	go func() { e := consumer.Wait(); relC(); cdone <- e }()
 	type started struct {
-		ok  bool
+		rel func()
 		err error
 	}
-	st := make(chan started, 1)
+	pst := make(chan started, 1)
 	go func() { // 앞부분을 다 쓴 뒤에 생산자를 띄운다(순서). 소비자가 먼저 죽으면 쓰기가 EPIPE로 돌아온다
 		if _, err := w.Write(prefix); err != nil {
 			w.Close()
-			st <- started{false, nil}
+			pst <- started{nil, err}
 			return
 		}
-		err := producer.Start()
+		rel, err := proc.Start(producer)
 		w.Close() // 생산자가 제 사본을 쥔다 — 생산자가 끝나면 소비자가 EOF
-		st <- started{err == nil, err}
+		pst <- started{rel, err}
 	}()
-	crc := run(consumer)
-	r.Close()
-	s := <-st
-	if !s.ok {
-		if s.err != nil {
-			return proc.Code(s.err), crc
-		}
-		return 1, crc // 앞부분을 다 넘기지 못했다(소비자가 먼저 끝남)
-	}
-	done := make(chan error, 1)
-	go func() { done <- producer.Wait() }()
-	if crc != 0 {
+	stop := func(c *exec.Cmd) { go proc.StopGroup(c.Process.Pid, proc.Grace) }
+	pdone := make(chan error, 1)
+	var drain <-chan time.Time
+	prc, crc := -1, -1
+	pup, timedOut := false, false
+	for pst != nil || prc < 0 || crc < 0 {
 		select {
-		case err := <-done:
-			return proc.Code(err), crc
-		default:
+		case s := <-pst:
+			pst = nil
+			if s.rel == nil {
+				prc = 1 // 앞부분을 다 넘기지 못했거나(소비자가 먼저 끝남) 생산자를 못 띄웠다
+				if s.err != nil && !errors.Is(s.err, syscall.EPIPE) {
+					prc = proc.Code(s.err)
+				}
+				break
+			}
+			pup = true
+			go func() { e := producer.Wait(); s.rel(); pdone <- e }()
+			if timedOut || crc > 0 {
+				stop(producer)
+			}
+		case e := <-cdone:
+			crc = proc.Code(e)
+			switch {
+			case timedOut:
+			case crc != 0 && pup:
+				stop(producer) // 실패한 소비자 뒤에서 생산자를 끝까지 기다리며 잠금을 쥐지 않는다(gofix-ops A08)
+			case crc == 0 && prc < 0:
+				t := time.NewTimer(pipeDrain)
+				defer t.Stop()
+				drain = t.C
+			}
+		case e := <-pdone:
+			prc = proc.Code(e)
+		case <-drain:
+			drain = nil
+			if prc < 0 {
+				fmt.Fprintf(os.Stderr, "herdr-sync: 소비자가 끝난 뒤 생산자가 %v 안에 끝나지 않았다 — 끈다\n", pipeDrain)
+				timedOut = true
+				stop(producer)
+			}
+		case <-limit.C:
+			fmt.Fprintf(os.Stderr, "herdr-sync: 시간 넘김 %s | %s %d — 둘 다 끈다\n", producer.Path, consumer.Path, int(d/time.Second))
+			timedOut = true
+			if pup && prc < 0 {
+				stop(producer)
+			}
+			if crc < 0 {
+				stop(consumer)
+			}
 		}
-		producer.Process.Kill()
-		return proc.Code(<-done), crc
 	}
-	select {
-	case err := <-done:
-		return proc.Code(err), crc
-	case <-time.After(pipeDrain):
+	if timedOut {
+		if crc == 0 { // 소비자는 다 받고 끝났다 — 생산자만 모름
+			return proc.TimeoutCode, crc
+		}
+		return proc.TimeoutCode, proc.TimeoutCode
 	}
-	producer.Process.Kill()
-	<-done
-	return proc.TimeoutCode, crc
+	return prc, crc
 }
 
 // tarCreate: 맥 tar(bsdtar) — 확장 속성·ACL·맥 메타데이터를 빼고, 이름을 바이트 그대로(hdrcharset=BINARY). list 파일의 경로를 dir 아래에서

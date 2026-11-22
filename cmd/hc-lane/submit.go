@@ -150,6 +150,51 @@ func lprio() string {
 	}
 }
 
+// metaPrio <메타 ref> <옛 SHA> <우선 라벨>: 메타 커밋 제목의 priority=가 다르면 커밋 객체를 글 그대로(priority만) 다시 써
+// --force-with-lease로 갈아 끼우고 참. 같으면 거짓. 못 바꾸면 경고하고 거짓(큐 그대로 — 제출은 이미 있다)
+// ponytail: 병합기가 그 항목을 착지하는 바로 그 사이면 lease가 거절하거나 병합기 정리가 새 메타를 못 지운다 — hc-fill prio와 같은 창
+func metaPrio(ref, old, pl string) bool {
+	var b bytes.Buffer
+	if runCmd(cmdOpt{stdout: &b}, "git", "cat-file", "commit", old) != 0 {
+		eprintf("hc-lane land: 경고 — 큐 메타 %s 를 못 읽어 우선을 그대로 둔다\n", ref)
+		return false
+	}
+	head, msg, ok := strings.Cut(b.String(), "\n\n")
+	if !ok {
+		eprintf("hc-lane land: 경고 — 큐 메타 %s 꼴을 몰라 우선을 그대로 둔다\n", ref)
+		return false
+	}
+	subj, rest, nl := strings.Cut(msg, "\n")
+	ws, found := strings.Fields(subj), false
+	for i, w := range ws {
+		if strings.HasPrefix(w, "priority=") {
+			ws[i], found = "priority="+pl, true
+		}
+	}
+	if !found {
+		ws = append(ws, "priority="+pl)
+	}
+	ns := strings.Join(ws, " ")
+	if ns == subj {
+		return false
+	}
+	if nl {
+		ns += "\n" + rest
+	}
+	var nb bytes.Buffer
+	if runCmd(cmdOpt{stdout: &nb, stderr: os.Stderr, stdin: strings.NewReader(head + "\n\n" + ns)}, "git", "hash-object", "-t", "commit", "-w", "--stdin") != 0 {
+		eprintf("hc-lane land: 경고 — 새 큐 메타를 못 만들어 우선을 그대로 둔다\n")
+		return false
+	}
+	nw := strings.TrimSpace(nb.String())
+	if po, rc := gitOut2(nil, "push", "-q", "--porcelain", "origin", nw+":"+ref, "--force-with-lease="+ref+":"+old); rc != 0 {
+		eprintf("%s\nhc-lane land: 경고 — 큐 메타 %s 를 못 바꿨다(push 거절 — 그 사이 병합기가 바꿨거나 지웠다) — 우선 그대로\n", po, ref)
+		return false
+	}
+	fmt.Printf("hc-lane land: 이 커밋은 이미 병합기 큐에 있다(lane/%s) — 새로 내지 않고 큐 메타 %s 만 priority=%s 로 바꿨다\n", sln, ref, pl)
+	return true
+}
+
 func mreserved(l string) bool {
 	switch l {
 	case base, "merge-batch", "batch", "main", "master":
@@ -316,6 +361,11 @@ func submitCmd() {
 	oldm := "refs/merge-queue-meta/" + oldq[strings.LastIndex(oldq, "/")+1:]
 	if cur == sh && oldq != "" && receiptMatches(oldm, field2(rs, oldm)) {
 		s, _ := gitOut("rev-parse", "--short", sh)
+		// 우선만 바꿔 다시 냄(fill-edit-after): 적은 HC_LANE_PRIORITY가 지금 메타와 다르면 메타만 갈아 끼운다. 적지 않았으면 그대로
+		// (띄울 때 값이 남은 레인이 지휘가 올린 우선을 되돌리지 않게)
+		if os.Getenv("HC_LANE_PRIORITY") != "" && metaPrio(oldm, field2(rs, oldm), lprio()) {
+			exit(0)
+		}
 		fmt.Printf("hc-lane land: 이 커밋(%s)은 이미 병합기 큐에 있다(lane/%s) — 새로 내지 않음. 결과는 병합기가 사건으로 알린다\n", s, sln)
 		exit(0)
 	}
@@ -326,7 +376,19 @@ func submitCmd() {
 	submitGuard(rs, cur, sh)
 	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
 	// 돌리는 것은 제출 커밋 속 판만(무시·추적 안 된 로컬 파일을 돌리지 않는다 — committedHook, gofix L12)
-	_, inCommit := gitOutQ("rev-parse", "-q", "--verify", sh+":"+precheck)
+	// 후보 트리에서 훅의 있음·없음·조회 실패를 가른다 — 조회 실패를 「선택 훅 없음」으로 읽고 제출하지 않는다(R-16)
+	lt, lr := gitOutQ("ls-tree", "--name-only", sh, "--", precheck)
+	inCommit := 1
+	switch {
+	case lr != 0:
+		eprintf("hc-lane land(제출): 제출 커밋(%s)에서 사전 검사 %s 를 찾지 못했다(git ls-tree 종료 %d) — 큐에 넣지 않았다. 같은 줄을 다시\n", cut(sh, 9), precheck, lr)
+		exit(75)
+	case lt == precheck:
+		inCommit = 0
+	case lt != "":
+		eprintf("hc-lane land(제출): git ls-tree 응답을 읽지 못했다(%q) — 큐에 넣지 않았다. 같은 줄을 다시\n", cut(lt, 80))
+		exit(75)
+	}
 	if inCommit == 0 {
 		committedHook(sh, precheck)
 	} else if isFile(precheck) {

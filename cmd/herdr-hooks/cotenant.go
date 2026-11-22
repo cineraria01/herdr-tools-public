@@ -11,8 +11,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +41,9 @@ type cg struct {
 	tSet, tRC            bool
 	root, gitdir, leases string
 	pd, prest, full, rel string
+	prefix               string // tree가 본 폴더의 ROOT 기준 접두(git 철자, 끝 / 포함 또는 "")
+
+	made []madeLease // 이번 호출이 새로 만든 임대 — Bash 여러 대상이 중간에 막히면 되돌린다(R-M04)
 
 	regDone, meDone        bool
 	reg                    string
@@ -65,7 +70,8 @@ type cg struct {
 
 func cotenantGuard(in []byte, stdout, stderr io.Writer) (code int) {
 	hookBudget(4 * time.Second) // 훅 제한 5초에서 bash·실행기 몫을 뺀 것
-	lastPD, patByte = "", byteLocale()
+	lastPD, patLocale = "", localeKind()
+	patByte = patLocale != locUTF8
 	g := &cg{stdout: stdout, stderr: stderr, start: time.Now().Unix() + testSecondsOffset(),
 		psc: map[string]string{}, aok: map[string]bool{}}
 	defer func() {
@@ -145,6 +151,7 @@ func (g *cg) run(in []byte) {
 	switch g.tool {
 	case "Edit", "Write", "MultiEdit", "NotebookEdit":
 		if g.fp != "" && g.relof(g.fp) {
+			g.checkWritten()
 			g.lease(g.rel, "1")
 		}
 	case "Bash":
@@ -295,8 +302,7 @@ func norm(s string) string {
 var lastPD string
 
 // cdP: cd -P -- p — 성공하면 bash 3.2의 PWD: 적은 경로에서 심볼릭 링크만 푼 값(철자 — 대소문자·한글 NFC/NFD — 는 적은 그대로).
-// getcwd(디스크 철자)를 쓰면 디스크가 NFD인 한글 폴더에서 셸 판과 임대 열쇠·경로가 달라져 남의 미커밋 파일을 놓쳤다(Fable H1).
-// 대소문자만 다르게 적은 경로를 다른 파일로 보는 것(Fable E3)은 셸 판과 같은 기존 한계다 — 근본은 git 철자로 맞추기
+// 임대 열쇠는 이 철자가 아니라 git 철자로 따로 정한다(canonRel — 재감사 R-H03, Fable H1·E3)
 func cdP(p string) (string, bool) {
 	if p == "" || os.Chdir(p) != nil {
 		return "", false
@@ -372,32 +378,55 @@ func (g *cg) gitFail(what string, rc int) {
 	g.block(fmt.Sprintf("git을 실행하지 못했다(%s, %s, %s). 판정할 수 없어 막았다. 잠시 뒤 다시 하고, 되풀이되면 사람에게 알려라.", g.git, why, what))
 }
 
-// tree: 물리 폴더 $1의 ROOT GITDIR LEASES — 작업 트리 밖(.git 안 포함)이면 false. 밖임은 git이 그렇게 말한 때만
-// (종료 128이라도 dubious ownership·설정 깨짐 등은 모름 → 막음 — 아스트라 E01·Fable E4, 셸 판은 128을 모두 밖으로 본다)
+// tree: 물리 폴더 $1의 ROOT GITDIR LEASES PREFIX — 작업 트리 밖(.git 안 포함)이면 false. 밖임은 git이 그렇게 말하고
+// 위로 .git 표식도 없을 때만(종료 128이라도 dubious ownership·설정 깨짐 등은 모름 → 막음 — 아스트라 E01·Fable E4.
+// 재감사 R-H04: .git을 읽을 수 없거나 gitfile이 끊겨도 git은 「not a git repository」라 영문 문구만으로 밖이라 했다).
+// ROOT·PREFIX는 git의 철자(디스크의 대소문자, core.precomposeunicode면 NFC) — 임대 열쇠를 git이 내는 경로와 맞춘다(R-H03)
 func (g *cg) tree(dir string) bool {
 	if g.tSet && dir == g.tDir {
 		return g.tRC
 	}
 	g.tDir, g.tSet, g.tRC = dir, true, false
-	out, errOut, rc := g.gitRunE([]string{"LC_ALL=C", "LANGUAGE="}, "", "-C", dir, "rev-parse", "--show-toplevel", "--absolute-git-dir")
-	if rc == 128 && (strings.Contains(errOut, "fatal: not a git repository") || strings.Contains(errOut, "fatal: this operation must be run in a work tree")) {
+	out, errOut, rc := g.gitRunE([]string{"LC_ALL=C", "LANGUAGE="}, "", "-C", dir, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix")
+	if rc == 128 && strings.Contains(errOut, "fatal: this operation must be run in a work tree") {
+		return false
+	}
+	if rc == 128 && strings.Contains(errOut, "fatal: not a git repository") {
+		if m := gitMarker(dir); m != "" {
+			g.block(m + " 이 있는데 git이 저장소로 열지 못했다(읽을 수 없음·끊긴 gitfile 등). 작업 트리인지 판정할 수 없어 막았다. 사람에게 알려라.")
+		}
 		return false
 	}
 	if rc != 0 {
 		g.gitFail("작업 트리(git rev-parse)", rc)
 	}
-	o := capture(out)
-	var ok bool
-	g.root, g.gitdir, ok = strings.Cut(o, "\n")
-	if !ok || !strings.HasPrefix(g.root, "/") || !strings.HasPrefix(g.gitdir, "/") || strings.Contains(g.gitdir, "\n") {
-		g.block("git rev-parse가 작업 트리·git 폴더 두 절대 경로를 내지 않았다(" + g.git + "). 판정할 수 없어 막았다. 사람에게 알려라.")
+	l := strings.Split(out, "\n")
+	if len(l) != 4 || l[3] != "" || !strings.HasPrefix(l[0], "/") || !strings.HasPrefix(l[1], "/") || (l[2] != "" && !strings.HasSuffix(l[2], "/")) {
+		g.block("git rev-parse가 작업 트리·git 폴더 두 절대 경로와 접두를 내지 않았다(" + g.git + "). 판정할 수 없어 막았다. 사람에게 알려라.")
 	}
+	g.root, g.gitdir, g.prefix = l[0], l[1], l[2]
 	g.leases = g.gitdir + "/agent-leases"
 	g.tRC = true
 	return true
 }
 
-// relof: REL = $1의 ROOT 기준 경로(ROOT 자체나 밖이면 false), FULL = 물리 경로
+// gitMarker: dir이나 그 위 폴더에 .git이 있으면(또는 있는지 못 읽으면) 그 경로, 없으면 ""
+func gitMarker(dir string) string {
+	for p := dir; ; p = p[:strings.LastIndexByte(p, '/')] {
+		if p == "" {
+			p = "/"
+		}
+		m := strings.TrimSuffix(p, "/") + "/.git"
+		if _, err := os.Lstat(m); err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return m
+		}
+		if p == "/" || !strings.Contains(p, "/") {
+			return ""
+		}
+	}
+}
+
+// relof: REL = $1의 ROOT 기준 경로(git 철자 — canonRel, ROOT 자체나 밖이면 false), FULL = 물리 경로
 func (g *cg) relof(p string) bool {
 	if !g.phys(p) || !g.tree(g.pd) {
 		return false
@@ -406,27 +435,100 @@ func (g *cg) relof(p string) bool {
 	if g.prest != "" {
 		g.full += "/" + g.prest
 	}
-	g.rel = strings.TrimPrefix(g.full, g.root+"/")
-	return g.rel != g.full && g.rel != ""
+	g.rel = g.canonRel()
+	return g.rel != ""
 }
 
-// intree: 폴더 $1이 ROOT이거나 그 아래(안에 둔 다른 작업 트리 제외)
+// canonRel: phys·tree가 정한 PD·PREST의 ROOT 기준 경로를 git이 내는 철자로(재감사 R-H03: 적은 철자 — 뿌리·하위 폴더의 대소문자,
+// 디렉터리에서 읽은 NFD — 를 그대로 열쇠로 써, 같은 파일에 다른 임대가 생기고 뿌리 대소문자가 다르면 임대가 아예 없었다).
+// 있는 폴더 부분은 git -C PD의 접두(PREFIX), 있는 파일 이름은 ls-files :(literal,icase)가 낸 철자, 없는 부분은 적은 대소문자를
+// git argv의 NFC로(check-attr — ASCII면 그대로). git이 실패하면 막는다(모름)
+func (g *cg) canonRel() string {
+	if g.prest == "" {
+		return strings.TrimSuffix(g.prefix, "/")
+	}
+	want := g.prefix + g.prest
+	if !isASCII(g.prest) {
+		out, rc := g.gitRun(nil, "", "-C", g.pd, "check-attr", "-z", "herdr-hooks-path", "--", g.prest)
+		f := strings.Split(out, "\x00")
+		if rc != 0 || len(f) != 4 || f[0] == "" || f[3] != "" {
+			g.gitFail(g.prest+" 의 경로 철자(git check-attr)", rc)
+		}
+		want = g.prefix + f[0]
+	}
+	if strings.Contains(g.prest, "/") {
+		return want
+	}
+	if _, err := os.Lstat(g.pd + "/" + g.prest); err != nil {
+		return want
+	}
+	out, rc := g.gitRun(nil, "", "-C", g.pd, "ls-files", "-z", "-c", "-o", "--full-name", "--", ":(literal,icase)"+g.prest)
+	if rc != 0 {
+		g.gitFail(g.prest+" 의 경로 철자(git ls-files)", rc)
+	}
+	var hits []string
+	for _, h := range strings.Split(out, "\x00") {
+		if h == want { // 대소문자만 다른 두 파일이 함께 있는 파일시스템에서는 적은 쪽
+			return want
+		}
+		if h != "" && (len(hits) == 0 || hits[0] != h) {
+			hits = append(hits, h)
+		}
+	}
+	if len(hits) == 1 {
+		return hits[0]
+	}
+	return want
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// writtenRel: 옛 판의 임대 열쇠 — 적은 철자 그대로의 FULL이 ROOT 글자로 시작하면 그 나머지, 아니면 "".
+// 옛 판(재감사 R-H03 전)이 쓴 임대를 고친 판이 놓치지 않게 함께 본다(혼용 기간)
+func (g *cg) writtenRel() string {
+	if r, ok := strings.CutPrefix(g.full, g.root+"/"); ok && r != g.rel {
+		return r
+	}
+	return ""
+}
+
+// checkWritten: 옛 철자 열쇠(writtenRel)에 산 남의 임대가 있으면 그 규칙대로 막는다
+func (g *cg) checkWritten() {
+	if alt := g.writtenRel(); alt != "" {
+		rel := g.rel
+		g.lease(alt, "check")
+		g.rel = rel
+	}
+}
+
+// intree: 폴더 $1이 ROOT이거나 그 아래(안에 둔 다른 작업 트리 제외) — 같은 폴더인지는 파일시스템이 정한다(대소문자·NFD 철자가
+// git의 ROOT와 달라도 — R-H03)
 func (g *cg) intree(d string) bool {
 	p, ok := cdP(d)
 	if !ok {
 		return false
 	}
-	if p == g.root {
-		return true
-	}
-	if !strings.HasPrefix(p, g.root+"/") {
+	rfi, err := os.Stat(g.root)
+	if err != nil {
 		return false
 	}
-	for p != g.root {
-		if exists(p + "/.git") {
+	for {
+		if fi, err := os.Stat(p); err == nil && os.SameFile(fi, rfi) {
+			return true
+		}
+		if exists(p+"/.git") || p == "/" {
 			return false
 		}
 		p = p[:strings.LastIndexByte(p, '/')]
+		if p == "" {
+			p = "/"
+		}
 	}
-	return true
 }

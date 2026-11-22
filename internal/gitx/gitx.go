@@ -64,7 +64,7 @@ func Probe(out string, rc int, absent ...int) State {
 }
 
 // PatchID: 두 커밋 사이 변경(a → b 트리 차이)의 patch-id(--stable)와 종료 코드. 변경이 없으면 「-」. 0이 아니면 모름 —
-// 상한에 걸렸으면 proc.TimeoutCode(부르는 쪽이 「다시」로 읽게, gofix M01), 빈 patch-id면 1.
+// 상한에 걸렸으면 proc.TimeoutCode(부르는 쪽이 「다시」로 읽게, gofix M01), 빈·잘린·여러 줄 patch-id면 1.
 // 감사 승인의 판정이다 — hc-lane land(승인 착지·제출)와 병합기 묶음(구성원별 승인 확인)이 같은 이 함수를 쓴다
 func PatchID(stderr io.Writer, a, b string) (string, int) {
 	d, rc := Out("", stderr, "--literal-pathspecs", "diff", "-U0", "--binary", a, b, "--")
@@ -80,9 +80,17 @@ func PatchID(stderr io.Writer, a, b string) (string, int) {
 	if rc := proc.Code(proc.Run(c)); rc != 0 {
 		return "", rc
 	}
-	p, _, _ := strings.Cut(strings.TrimRight(o.String(), "\n"), " ")
-	if p == "" {
+	// 결과는 「<patch-id> <커밋 id>」 한 줄 — 두 칸 모두 같은 길이(SHA-1 40·SHA-256 64)의 16진수. 잘린 지문·여러 줄·빈 출력은 모름(1)
+	// (R-22: 세 글자 지문이 승인으로 큐·메타 ref에 기록됐다)
+	line := strings.TrimRight(o.String(), "\n")
+	f := strings.Fields(line)
+	if strings.Contains(line, "\n") || len(f) != 2 || !hexID(f[0]) || len(f[1]) != len(f[0]) || !hexID(f[1]) {
 		return "", 1
 	}
-	return p, 0
+	return f[0], 0
+}
+
+// hexID: git 객체 이름 꼴(소문자 16진 40자 또는 64자)
+func hexID(s string) bool {
+	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }

@@ -59,11 +59,11 @@ func TestCorpusLogHidesRealCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HERDR_HOOKS_CORPUS", p)
-	corpus(t)
-	if s, ext := show("echo SYNTH_ONLY_MARK"); !ext || s != "HERDR_HOOKS_CORPUS #2" {
+	_, idx := corpus(t)
+	if s, ext := idx.show("echo SYNTH_ONLY_MARK"); !ext || s != "HERDR_HOOKS_CORPUS #2" {
 		t.Errorf("실제 명령 표시 %q(번호만이어야)", s)
 	}
-	if s, ext := show("git push -f"); ext || s != `"git push -f"` {
+	if s, ext := idx.show("git push -f"); ext || s != `"git push -f"` {
 		t.Errorf("합성 명령 표시 %q", s)
 	}
 }

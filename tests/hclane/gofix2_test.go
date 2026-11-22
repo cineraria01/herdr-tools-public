@@ -82,10 +82,17 @@ func gfGcStuckGit(k *K) {
 
 // M4: wait 바퀴의 hc ls가 멈추면 상한(HERDR_TIMEOUT_REMOTE) 안에서 끝난다(--timeout 0은 한 바퀴)
 func gfWaitStuckHc(k *K) {
-	p := k.gfBin(map[string]string{"hc": `case $1 in ls) exec sleep 30 ;; get) echo '{"address":"t4m","name":"boss","pid":4242,"state":"live"}'; exit 0 ;; esac; exit 3`})
+	// R-33: 조회가 정말 시작됐는지(시작 표식)·기대 종료 75·미확정 사유를 본다. R-23: 상한에 걸린 조회의 손자(배경 subshell)도 함께 거둔다
+	st, gc := filepath.Join(k.T, "m4-start"), filepath.Join(k.T, "m4-grandchild")
+	os.Remove(st)
+	os.Remove(gc)
+	p := k.gfBin(map[string]string{"hc": `case $1 in ls) : >` + sq(st) + `; (sleep 3; : >` + sq(gc) + `) & exec sleep 30 ;; get) echo '{"address":"t4m","name":"boss","pid":4242,"state":"live"}'; exit 0 ;; esac; exit 3`})
 	t0 := time.Now()
 	k.runE([]string{p, "HERDR_TIMEOUT_REMOTE=1", "HC_TERMINAL_ID=t4m", "XDG_STATE_HOME=" + filepath.Join(k.T, "wst-m4")}, "wait", "--timeout", "0")
-	k.check("M4 wait --timeout 0: 멈춘 hc ls는 상한 안에서 끊고 돌아온다", time.Since(t0) < 15*time.Second && k.rc != 0)
+	el := time.Since(t0)
+	k.check("M4 wait --timeout 0: 멈춘 hc ls는 상한 안에서 끊고 75(모름)로 돌아온다", exists(st) && el < 15*time.Second && k.rc == 75 && strings.Contains(k.errf(), "hc ls"))
+	time.Sleep(5 * time.Second) // 손자가 살아 있었다면 표식을 쓸 시간
+	k.check("R-23 wait: 상한에 걸린 hc ls의 손자도 거둬 표식이 안 생긴다", !exists(gc))
 }
 
 // M01: 착지의 바깥 명령이 시간 상한에 걸리면 모름 — 종료 1(실패)이 아니라 75(다시), 아무것도 보내지 않음

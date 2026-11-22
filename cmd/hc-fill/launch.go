@@ -177,7 +177,18 @@ func afterOK(lane, p, list string) int {
 	ok := 0
 	for _, a := range words(list) {
 		// 들어감 = 커밋 제목 머리 규칙 또는 그 선행 줄을 넣은 뒤의 착지 표식이 origin/<기본>의 조상(대기열에 그 줄이 있을 때)
-		switch landingHit(a) {
+		// <이름>@<프로젝트>(--after-any-project)는 그 프로젝트 저장소 기본 가지에서 찾는다(fill-edit-after)
+		n, op, at := strings.Cut(a, "@")
+		if at && fetchProj(op) != 0 {
+			say("선행 %s ← %s: 판정 못 함(%s 저장소 설정·fetch)", lane, a, op)
+			fetchProj(p)
+			return 2
+		}
+		lh := landingHit(n)
+		if at {
+			fetchProj(p) // FR·FB를 이 프로젝트로 되돌림(fetch는 바퀴에 한 번)
+		}
+		switch lh {
 		case 0:
 			say("선행 %s ← %s: 들어감 (%s)", lane, a, hit)
 		case 1:

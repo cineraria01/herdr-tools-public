@@ -183,7 +183,7 @@ func (e *ev) pick() {
 		return
 	}
 	js, rc := hcRun(0, errDrop, "machine", "ls", "--json")
-	if rc != 0 || !jlistOK(js, "machines") {
+	if rc != 0 || !jlistOK(js, "machines", "name", "state") {
 		fmt.Fprintf(os.Stderr, "hc-lane %s: hc machine ls 실패 — 이 기계만 본다\n", e.ec)
 		e.pbad = true
 		return
@@ -366,14 +366,15 @@ func (e *ev) loop(to int64) int {
 	wsleep := func() { time.Sleep(tk) }
 	for {
 		if e.ec == "watch" {
-			g, _ := hcRun(10, errMerge, "get", e.wto, "--json")
-			if reLive.MatchString(g) {
+			g, hrc := hcRun(10, errMerge, "get", e.wto, "--json")
+			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13)
+			if _, st := getState(g, hrc); st == 0 {
 				gone = 0
 				if !e.wcheck() {
 					wsleep()
 					continue
 				}
-			} else if reGetKnown.MatchString(g) {
+			} else if st == 1 {
 				gone++
 				if gone >= 3 {
 					fmt.Fprintf(os.Stderr, "hc-lane watch: 지휘 터미널 %s 사라짐(hc get %d바퀴 없음·끝남) — 끝낸다\n", e.wto, gone)
@@ -418,7 +419,7 @@ func (e *ev) loop(to int64) int {
 		if e.myp != "" || e.ec == "watch" || wantStop {
 			var rc int
 			e.tl, rc = hcRun(0, errDrop, "ls", "--all", "--json", "--label", "hc-lane=1")
-			e.lsok = rc == 0 && jlistOK(e.tl, "terminals") // 잘린 목록은 「레인 없음」이 아니라 실패(gofix K2)
+			e.lsok = rc == 0 && jlistOK(e.tl, "terminals", "address", "state") // 부실한 목록은 「레인 없음」이 아니라 실패(gofix K2, R-14)
 			if e.myp != "" || e.ec == "watch" {
 				e.pmap = jlist(e.tl, "terminals", "address", "parent")
 			}
@@ -473,8 +474,6 @@ func (e *ev) loop(to int64) int {
 		wsleep()
 	}
 }
-
-var reLive = regexp.MustCompile(`"state" *: *"live"`)
 
 func orDefault(s, d string) string {
 	if s == "" {

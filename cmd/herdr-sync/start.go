@@ -9,24 +9,25 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 )
 
 // onSignals: INT·TERM·HUP을 받으면 상한으로 따로 띄운 자식 무리(git push·commit, gh 등)를 거두고 임시 폴더를 지운 뒤 128+신호로
-// 끝낸다 — 단말의 Ctrl-C는 앞쪽 무리에만 가서 따로 된 무리는 고아로 남는다(gofix-ops O-04). proc도 같은 신호로 무리를 거둔 뒤
-// 그 신호로 끝낼 수 있어(어느 쪽이 먼저인지 모름) 임시 폴더부터 지운다 — 부모가 보는 끝은 130·143·129 또는 그 신호
+// 끝낸다 — 단말의 Ctrl-C는 앞쪽 무리에만 가서 따로 된 무리는 고아로 남는다(gofix-ops O-04). 이 처리기 하나만(proc.TakeSignals —
+// 재감사 R-H04). 게시기(herdr-tools-publish)도 따로 무리로 기다리니 함께 TERM을 받는다 — 게시기는 제 push·pack 무리를 거두고 임시
+// 폴더를 지운 뒤 끝나니(제 유예 proc.Grace) 그보다 넉넉히 기다린 뒤 KILL하고, 끝난 것을 본 뒤에 잠금을 놓는다(재감사 ops R-09)
 func onSignals() {
+	proc.TakeSignals()
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		s := <-ch
 		cleanup()
-		proc.StopCurrent(proc.Grace)
+		proc.StopCurrent(4*proc.Grace + 2*time.Second)
 		code := 130
 		switch s {
 		case syscall.SIGTERM:
@@ -38,28 +39,32 @@ func onSignals() {
 	}()
 }
 
-// machinesFromHC: hc machine ls의 기계 이름. hc가 없거나 실패하면(워커 맥 등 — 셸 판과 같게) 빈 목록, 시간 넘김이면 오류(모름)
+// machinesFromHC: hc machine ls의 기계 이름. hc가 없으면 빈 목록(맥이 아님). hc 실패·시간 넘김, JSON이 정확히 한 값이 아님,
+// machines 칸 없음, 이름(빈 아닌 글자)이 없는 행은 오류(모름) — 목록 전체가 온전할 때만 쓴다(R-03)
 func machinesFromHC() ([]string, error) {
 	out, err := proc.Output(exec.Command("hc", "machine", "ls"))
-	if errors.Is(err, proc.ErrTimeout) {
-		return nil, err
-	}
-	if err != nil {
+	if errors.Is(err, exec.ErrNotFound) {
 		return nil, nil
 	}
-	var v struct {
-		Machines []struct {
-			Name string `json:"name"`
-		} `json:"machines"`
+	if err != nil {
+		return nil, fmt.Errorf("hc machine ls: %w", err)
 	}
-	if json.Unmarshal(out, &v) != nil {
-		return nil, nil // 기계 목록을 내지 않는 hc(맥이 아닌 곳)
+	var v struct {
+		Machines *[]map[string]any `json:"machines"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return nil, fmt.Errorf("hc machine ls 출력이 JSON 한 값이 아니다: %w", err)
+	}
+	if v.Machines == nil {
+		return nil, errors.New("hc machine ls 출력에 machines가 없다")
 	}
 	var r []string
-	for _, m := range v.Machines {
-		if m.Name != "" {
-			r = append(r, m.Name)
+	for i, m := range *v.Machines {
+		n, ok := m["name"].(string)
+		if !ok || n == "" {
+			return nil, fmt.Errorf("hc machine ls %d번째 행에 이름이 없다", i+1)
 		}
+		r = append(r, n)
 	}
 	return r, nil
 }
@@ -94,33 +99,6 @@ func sameFile(f *os.File, p string) bool {
 	return err1 == nil && err2 == nil && os.SameFile(a, b)
 }
 
-// orphansLeft: proc 고아 기록 가운데 부모가 죽었는데 남은 것(proc이 거두지 못함 — 모름)의 수
-func orphansLeft() int {
-	d := proc.RecordDir()
-	if d == "" {
-		return 0
-	}
-	es, err := os.ReadDir(d)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range es {
-		b, err := os.ReadFile(filepath.Join(d, e.Name()))
-		if err != nil {
-			continue
-		}
-		f := strings.Split(strings.TrimRight(string(b), "\n"), "\t")
-		if len(f) != 4 {
-			continue
-		}
-		var pp int
-		if _, err := fmt.Sscanf(f[2], "%d", &pp); err != nil || pp == os.Getpid() {
-			continue
-		}
-		if !proc.Alive(pp) {
-			n++
-		}
-	}
-	return n
-}
+// orphansLeft: 앞 실행(부모가 죽음)의 자식 무리를 먼저 거둔 뒤에도 소유를 모르는 채 우두머리가 도는 것의 수(proc.Orphans — 옛 판은
+// 거두기 전에 세어 거둘 수 있는 기록에도 멈췄다)
+func orphansLeft() int { return proc.Orphans() }

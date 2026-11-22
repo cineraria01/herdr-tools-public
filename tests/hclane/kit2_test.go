@@ -135,21 +135,29 @@ func upto(f func() bool) bool {
 // alive: 그 pid가 살아 있다(kill -0).
 func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
 
-// Bg: 배경으로 띄운 명령(셸 `… &`). 자기 프로세스 무리로 띄우고, 절이 끝나면(Cleanup) 무리째 끈다.
+// Bg: 배경으로 띄운 명령(셸 `… &`). 감독 프로세스(sleep)가 우두머리인 무리에 넣고, 절이 끝나면(Cleanup) 무리째 끈다.
+// 감독은 Cleanup에서만 거두니 명령이 먼저 끝나 거둬진 뒤에도 무리 번호가 다른 무리에 다시 쓰이지 않는다 — 명령의 남은 손자까지
+// 끈다(재감사 R-35, 숫자 PGID 재사용 방지 gofix L18은 그대로)
 type Bg struct {
 	Pid    int
+	pg     int // 감독 pid = 무리 번호
 	done   chan struct{}
 	rc     int
-	mu     sync.Mutex // 거두기(wait4)와 신호를 가른다 — 거두기 전에는 그 pid·무리 번호가 다른 프로세스에 쓰이지 않는다
+	mu     sync.Mutex // 거두기(wait4)와 신호를 가른다 — 거두기 전에는 그 pid가 다른 프로세스에 쓰이지 않는다
 	reaped bool
 }
 
 // bg: dir에서 이름을 배경으로. stdout·stderr는 파일 경로(빈 값이면 버림). `VAR=값`은 extra.
 func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args ...string) *Bg {
 	k.t.Helper()
+	sup := exec.Command("sleep", "86400")
+	sup.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := sup.Start(); err != nil {
+		k.t.Fatal(err)
+	}
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env = dir, k.environ(extra)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: sup.Process.Pid}
 	if outPath != "" {
 		f, err := os.Create(outPath)
 		if err != nil {
@@ -167,9 +175,11 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 		cmd.Stderr = f
 	}
 	if err := cmd.Start(); err != nil {
+		syscall.Kill(-sup.Process.Pid, syscall.SIGKILL)
+		sup.Wait()
 		k.t.Fatal(err)
 	}
-	b := &Bg{Pid: cmd.Process.Pid, done: make(chan struct{}), rc: -1}
+	b := &Bg{Pid: cmd.Process.Pid, pg: sup.Process.Pid, done: make(chan struct{}), rc: -1}
 	go func() { // 잠금 안에서 WNOHANG으로 거둔다 — signal이 거둔 뒤의 번호에 신호를 보내지 않게(cmd.Wait는 거두는 순간을 알 수 없다)
 		for {
 			var ws syscall.WaitStatus
@@ -192,20 +202,24 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
-	// 아직 안 거둔(Wait 전) 무리에만 신호 — 거둔 뒤의 번호는 다른 무리에 다시 쓰일 수 있다(gofix L18)
-	k.t.Cleanup(func() { b.signal(true, syscall.SIGKILL); b.Wait() })
+	// 무리 번호는 감독이 쥐고 있어 명령을 거둔 뒤에도 안전하다 — 남은 손자까지 끄고 나서 감독을 거둔다
+	k.t.Cleanup(func() {
+		syscall.Kill(-b.pg, syscall.SIGKILL)
+		b.Wait()
+		sup.Wait()
+	})
 	return b
 }
 
-// signal: 끝나 거두기 전일 때만 그 pid(group이면 무리)에 신호. 거둔 뒤면 보내지 않고 ESRCH
+// signal: group이면 무리(감독이 쥔 번호 — 명령이 끝났어도 남은 자손에게), 아니면 명령이 끝나 거두기 전일 때만 그 pid에. 거둔 뒤면 ESRCH
 func (b *Bg) signal(group bool, s syscall.Signal) error {
+	if group {
+		return syscall.Kill(-b.pg, s)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.reaped {
 		return syscall.ESRCH
-	}
-	if group {
-		return syscall.Kill(-b.Pid, s)
 	}
 	return syscall.Kill(b.Pid, s)
 }

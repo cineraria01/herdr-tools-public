@@ -8,27 +8,6 @@ import (
 	"testing"
 )
 
-// 조각(agent.sh)은 셸 판 bin/herdr-sync heredoc과 같은 글자여야 한다 — 두 판이 같은 base·서명을 번갈아 읽는다(셸 판을 걷는 날 이 시험도 걷는다)
-func TestAgentMatchesShell(t *testing.T) {
-	b, err := os.ReadFile("../../bin/herdr-sync")
-	if err != nil {
-		t.Skip("셸 판 없음(깔린 곳)")
-	}
-	s := string(b)
-	start := strings.Index(s, "IFS= read -r -d '' AGENT << 'EOF'\n")
-	if start < 0 {
-		t.Fatal("셸 판에서 AGENT heredoc을 못 찾았다")
-	}
-	s = s[start+len("IFS= read -r -d '' AGENT << 'EOF'\n"):]
-	end := strings.Index(s, "\nEOF\n")
-	if end < 0 {
-		t.Fatal("AGENT heredoc 끝을 못 찾았다")
-	}
-	if got, want := agent, s[:end+1]; got != want {
-		t.Errorf("cmd/herdr-sync/agent.sh가 셸 판 AGENT와 다르다 — 셸 판 heredoc을 agent.sh로 그대로 옮긴다")
-	}
-}
-
 // srcDigest는 lib/go-run.sh go_run_src와 같은 값이어야 받은 바이너리를 기계가 알아본다
 func TestSrcDigestMatchesGoRun(t *testing.T) {
 	gr, err := os.ReadFile("../../lib/go-run.sh")

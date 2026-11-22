@@ -47,6 +47,8 @@ func helper(h string) {
 		d := os.Getenv("HC_MERGER_TEST_DIR")
 		onSignals(time.Second)
 		proc.Wait(exec.Command("sh", "-c", "trap '' TERM; sleep 30 & echo $! >"+d+"/bg.tmp; mv "+d+"/bg.tmp "+d+"/bg; wait"), "")
+	default:
+		reauditProcHelper(h)
 	}
 }
 

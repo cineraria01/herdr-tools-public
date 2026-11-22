@@ -49,7 +49,8 @@ if [ "$1" = ls ]; then   # $HC_FAKE_LS(JSON)를 답한다. $HC_FAKE_LS_FAIL이�
   [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3
   [ ! -e "$HCLOG.lsfail" ] || exit 3
   [ ! -f "$HCLOG.lsfile" ] || { cat "$HCLOG.lsfile"; exit 0; }   # 배경 watch가 도중에 바뀌는 목록을 보게 파일이 앞
-  if [ -n "${HC_FAKE_LS-}" ]; then printf '%s\n' "$HC_FAKE_LS"; else echo '{"terminals":[]}'; fi; exit 0
+  # 기본은 원격 시험 기계 box가 연결된 빈 목록(--on box의 gc·clean은 그 기계가 connected여야 터미널 목록을 믿는다)
+  if [ -n "${HC_FAKE_LS-}" ]; then printf '%s\n' "$HC_FAKE_LS"; else echo '{"machines":[{"name":"box","state":"connected"}],"terminals":[]}'; fi; exit 0
 fi
 if [ "$1" = machine ]; then   # machine ls --json: $HC_FAKE_MACHINES(JSON)
   if [ -n "${HC_FAKE_MACHINES-}" ]; then printf '%s\n' "$HC_FAKE_MACHINES"; else echo '{"machines":[]}'; fi; exit 0

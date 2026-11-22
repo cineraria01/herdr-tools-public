@@ -270,6 +270,8 @@ Codex공통 .codex/AGENTS.md#codex-shared  codex/AGENTS.shared.md     all
 	// 가짜 공개 내보내기: 부른 것을 적는다(PUB_FAKE_RC로 실패시킴). 성공이면 「검사한」 커밋(origin/main, PUB_FAKE_CHECKED로 바꿈)을 결과 파일에
 	s.putx(T+"/bin/herdr-tools-publish", "#!/bin/sh\necho \"$HERDR_TOOLS_REPO $HERDR_TOOLS_CONFIG $*\" >> \"$HCT/published\"\n"+
 		"[ \"${PUB_FAKE_RC:-0}\" = 0 ] || exit $PUB_FAKE_RC\n"+
+		// PUB_FAKE_HANG=<파일>: 게시기가 배경 자식(push 흉내)을 띄워 기다린다 — 자기 pid는 <파일>, 자식 pid는 <파일>.bg(재감사 ops R-09)
+		"[ -z \"${PUB_FAKE_HANG-}\" ] || { sleep 60 & echo $! > \"$PUB_FAKE_HANG.bg\"; echo $$ > \"$PUB_FAKE_HANG\"; wait; exit 0; }\n"+
 		"[ -z \"${HERDR_TOOLS_PUBLISH_RESULT-}\" ] || echo \"${PUB_FAKE_CHECKED:-$(git -C \"$HERDR_TOOLS_REPO\" rev-parse origin/main)}\" > \"$HERDR_TOOLS_PUBLISH_RESULT\"\n")
 	s.put(T+"/conf/settings/keys.json", `{"values":[".language",".model",".effortLevel",".nope"],"hooks":{"PreToolUse":["cotenant-guard.sh"]},"refs":[".permissions"],"exceptions":{"lx":[".effortLevel"]}}`+"\n")
 	s.put(T+"/conf/config", "sync.prebuild  python3 ~/.local/share/claude-md/build_codex.py\n")

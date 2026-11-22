@@ -381,5 +381,5 @@ func helper(h, d string) int {
 		os.WriteFile(d+"/returned", []byte(fmt.Sprint(err)), 0o644)
 		return 0
 	}
-	return 2
+	return reauditHelper(h, d)
 }

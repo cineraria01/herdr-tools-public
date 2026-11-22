@@ -49,7 +49,7 @@ func TestLandedClean(t *testing.T) {
 		t.Fatal(why)
 	}
 	after := strconv.FormatInt(int64(created/1000)+60, 10)
-	if repo, _, _ = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("abc\trefs/hc-landed/land-n/"+after+"\n")), ev); repo != "/r" {
+	if repo, _, _ = landedClean(other, seq(ok(""), ok("land-n\n"), ok("/r/.git\n"), ok(""), ok("abc\trefs/hc-landed/land-n/"+after+"\n"), ok(""), ok("")), ev); repo != "/r" {
 		t.Fatal("이 터미널 뒤 원격 표식이면 착지")
 	}
 	// [B03] 이 터미널보다 먼저 생긴 표식(같은 이름의 옛 레인)·다른 주소의 옛 사건은 증거 아님

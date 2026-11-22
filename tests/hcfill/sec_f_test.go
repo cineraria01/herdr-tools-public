@@ -288,7 +288,8 @@ func secF(k *K) {
 	k.fQset("p1", 6, "wait")
 	k.run("ls")
 	k.check("ls: 선행 줄 비고에 「이어서 n1」", grep(k.out, `^p1 .*이어서 n1`))
-	k.run("add", "--name", "a1", "--project", "app", "--brief", k.brief("a1"), "--after", "p1,q1")
+	// q1은 다른 프로젝트(tools) 레인 — 2026-11-22부터 --after-any-project 없이는 거절(sec_r)
+	k.run("add", "--name", "a1", "--project", "app", "--brief", k.brief("a1"), "--after", "p1,q1", "--after-any-project")
 	k.check("--after에 대기 중 같은 프로젝트 레인 → 알림 한 줄 + 정상 추가, 다른 프로젝트는 알림 없음", k.rc == 0 && k.where("a1") != "" &&
 		has(lines(k.out), "알림: p1가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then p1로 한 레인에 이어 붙인다") && !strings.Contains(k.out, "q1가 아직"))
 	k.fQset("p1", 6, "up")

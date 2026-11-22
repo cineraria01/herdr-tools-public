@@ -270,6 +270,7 @@ func s23park(k *K) {
 	k.check("--resume: 주차한 가지가 없으면 안 띄움(종료 1, 작업 트리 없음)", k.rc != 0 && !exists(k.R+".wt/pk-z") && strings.Contains(k.errf(), "refs/park/pk-z"))
 	// 옛 판이 주차한 lane/<레인>(refs/park/<레인> 없음)도 받는다
 	k.git(k.D+"/origin.git", "update-ref", "refs/heads/lane/pk-o", ps)
+	k.runE([]string{"HC_LANE=pk-o"}, "report", "주차", ps, "옛 판 주차") // 옛 판도 주차 사건을 남겼다 — 사건 없는 lane/<레인>은 재개 안 함(재감사 R-15)
 	k.run("--resume", "--name", "pk-o", "--repo", k.R, "--", "claude")
 	k.check("--resume: refs/park 없으면 옛 주차 가지 lane/<레인>에서", k.rc == 0 && k.git(k.R+".wt/pk-o", "rev-parse", "HEAD") == ps)
 	k.run("--read", "--resume", "--name", "pk-r", "--repo", k.R, "--", "claude")

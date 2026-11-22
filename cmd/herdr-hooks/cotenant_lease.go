@@ -5,7 +5,9 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"sort"
@@ -13,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"herdr-tools/internal/atomic"
 )
 
 // regLoad: Claude가 쓰는 세션 레지스트리 — 파일마다 JSON 흐름으로 읽어 「pid sessionId procStart cwd name」 줄
@@ -158,13 +162,10 @@ func (g *cg) alive(pid, st string) bool {
 }
 
 // dirty: rel에 미커밋 변경이 있는가. git status가 실패·시간 넘김이면 막는다(모름 — 「깨끗함」으로 읽으면 산 주인의 미커밋 파일을
-// 넘겨줬다: 아스트라 H01·Fable E1·M2). drop이 있으면 막기 전에 그 폴더(이번에 막 만든 임대)를 지운다
-func (g *cg) dirty(rel, drop string) bool {
+// 넘겨줬다: 아스트라 H01·Fable E1·M2). 이번에 막 만든 임대 폴더는 lease가 거둔다
+func (g *cg) dirty(rel string) bool {
 	out, rc := g.gitRun([]string{"GIT_OPTIONAL_LOCKS=0"}, "", "-C", g.root, "status", "--porcelain", "-uall", "--", ":(literal)"+rel)
 	if rc != 0 {
-		if drop != "" {
-			os.Remove(drop)
-		}
 		g.gitFail(rel+" 의 미커밋 여부(git status)", rc)
 	}
 	return capture(out) != ""
@@ -215,19 +216,36 @@ func (g *cg) mine() bool {
 	return norm(g.oStart) == norm(g.mystart)
 }
 
-func (g *cg) own(ld, rel string) {
+// own: 임대 주인 줄을 원자로 쓴다 — 쓴 줄을 돌려준다(되돌릴 때 세대 확인용)
+func (g *cg) own(ld, rel string) string {
 	g.me()
 	line := strings.Join([]string{g.sid, g.mypid, g.mystart, g.aid, g.myname, time.Now().Format("2006-01-02 15:04:05"), rel}, us) + "\n"
-	tmp := ld + "/owner." + strconv.Itoa(os.Getpid())
-	err := os.WriteFile(tmp, []byte(line), 0o666)
-	if err == nil {
-		if err = os.Rename(tmp, ld+"/owner"); err != nil {
-			os.Remove(tmp)
-		}
-	}
-	if err != nil { // 임대를 남기지 못한 채 허용하면 다음 에이전트가 이 편집을 모른다(아스트라 E06 — 셸 판은 통과)
+	// 파일 fsync·닫기·rename·폴더 fsync의 오류까지 본다 — 디스크에 남기 전에 편집을 허용하지 않게(재감사 R-M03)
+	if err := atomic.WriteFile(ld+"/owner", []byte(line), 0o666); err != nil { // 임대를 남기지 못한 채 허용하면 다음 에이전트가 이 편집을 모른다(아스트라 E06 — 셸 판은 통과)
 		g.block(rel + ": 임대를 기록하지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
 	}
+	return line
+}
+
+// madeLease: 이번 호출이 새로 만든 임대 — 폴더와 거기 쓴 주인 줄
+type madeLease struct{ ld, line string }
+
+// undoMade: 이번 호출이 새로 만든 임대를 되돌린다 — 폴더에 주인 파일 하나뿐이고 그 줄이 이번에 쓴 그대로일 때만
+// (넘겨받기는 claim 파일을 먼저 만든다 — 남이 손댄 세대는 건드리지 않는다)
+func (g *cg) undoMade() {
+	for _, m := range g.made {
+		ents, err := os.ReadDir(m.ld)
+		if err != nil || len(ents) != 1 || ents[0].Name() != "owner" {
+			continue
+		}
+		if b, err := os.ReadFile(m.ld + "/owner"); err != nil || string(b) != m.line {
+			continue
+		}
+		if os.Remove(m.ld+"/owner") == nil {
+			os.Remove(m.ld) //nolint:errcheck // 그 사이 누가 넣었으면 남긴다
+		}
+	}
+	g.made = nil
 }
 
 // claim: 파일을 배타로 만든다(O_EXCL). 있으면(폴더여도) 실패
@@ -327,7 +345,7 @@ func (g *cg) checkIgnore(rel string) bool {
 func (g *cg) refuseLive(ld, rel string) {
 	busy := rel + " 은 " + g.oName + "(pid " + g.oPID + ", since " + g.oSince + ")이 고치는 중이다(임대는 그 프로세스가 끝나면 풀린다)"
 	out := "다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리거나, 꼭 지금이면 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라."
-	if g.dirty(rel, "") {
+	if g.dirty(rel) {
 		g.block(busy + "(미커밋 변경 있음). " + out)
 	}
 	if g.checkIgnore(rel) {
@@ -355,6 +373,21 @@ func (g *cg) addWarn(s string) {
 	g.warn += s
 }
 
+// firstOK: 주인 없는 임대를 잡기 전의 검사 — 미커밋 파일이면 Bash 쓰기(0)는 기록 없이 통과(false), 편집 도구(1)는 같은 트리에
+// 다른 에이전트가 있으면 막는다(누구 것인지 모른다)
+func (g *cg) firstOK(rel, mode string) bool {
+	if !g.dirty(rel) {
+		return true
+	}
+	if mode != "1" {
+		return false
+	}
+	if g.cotenant() {
+		g.block(rel + ": 임대 기록 없는 미커밋 변경이 있다(같은 작업 트리: " + g.who + "). 누구 것인지 git diff -- " + shq(rel) + "로 확인하라. 남의 것이면 다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리고, 네 것(Bash로 바꾼 것 등)이면 그 변경을 커밋한 뒤 고치거나 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라.")
+	}
+	return true
+}
+
 // lease REL MODE — 1(편집 도구)은 트리를 같이 쓸 때 주인 없는 미커밋 파일도 막는다 · 0 = Bash 쓰기 · check = 막기만, 기록 안 함
 func (g *cg) lease(rel, mode string) {
 	if mode == "check" {
@@ -377,19 +410,23 @@ func (g *cg) lease(rel, mode string) {
 		}
 	}
 	ld := g.leases + "/" + md5hex(rel)
-	if os.Mkdir(ld, 0o777) == nil {
-		if g.dirty(rel, ld) {
-			if mode != "1" {
-				os.Remove(ld)
-				return
+	if err := os.Mkdir(ld, 0o777); err == nil {
+		// 이번 실행이 만든 빈 폴더 — 주인을 적기 전에 막히거나(git·ps 실패, 동거) 그냥 통과하면 거둔다(재감사 R-H06:
+		// 남은 빈 폴더를 10초 뒤 재시도가 넘겨받기로 읽어 아래 검사를 건너뛰었다). os.Remove는 빈 폴더만 지운다
+		kept := false
+		defer func() {
+			if !kept {
+				os.Remove(ld) //nolint:errcheck // 그 사이 남이 넣었으면 남긴다
 			}
-			if g.cotenant() {
-				os.Remove(ld)
-				g.block(rel + ": 임대 기록 없는 미커밋 변경이 있다(같은 작업 트리: " + g.who + "). 누구 것인지 git diff -- " + shq(rel) + "로 확인하라. 남의 것이면 다른 일을 먼저 하고 나중에 다시 시도하거나 지휘에 알리고, 네 것(Bash로 바꾼 것 등)이면 그 변경을 커밋한 뒤 고치거나 git worktree add -b <슬러그> ../" + baseName(g.root) + ".wt/<슬러그> origin/main 에서 하라.")
-			}
+		}()
+		if !g.firstOK(rel, mode) {
+			return
 		}
-		g.own(ld, rel)
+		g.made = append(g.made, madeLease{ld, g.own(ld, rel)})
+		kept = true
 		return
+	} else if !errors.Is(err, fs.ErrExist) { // 임대 없이 허용하지 않는다(아스트라 E06) — 「있음」으로 읽어 시각 오류로 빠지지 않게(R-M06)
+		g.block(rel + ": 임대 폴더를 만들지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
 	}
 	g.me()
 	if !g.owner(ld) {
@@ -400,6 +437,10 @@ func (g *cg) lease(rel, mode string) {
 		}
 		if now-m < 10 {
 			g.block(rel + ": 다른 에이전트가 지금 이 파일 임대를 잡는 중이다. 잠시 뒤 다시 시도하라.")
+		}
+		// 주인을 적기 전에 멈춘 첫 획득(훅이 죽음) — 첫 획득의 안전 검사를 다시 한 뒤에만 넘겨받는다(R-H06)
+		if !g.firstOK(rel, mode) {
+			return
 		}
 		g.takeover(ld, rel)
 		return
@@ -423,57 +464,69 @@ func (g *cg) lease(rel, mode string) {
 		g.takeover(ld, rel)
 		return
 	}
-	left := g.oSID != g.sid && g.dirty(rel, "") // 넘겨받기 전에 — git을 못 읽으면 임대를 그대로 두고 막는다
+	left := g.oSID != g.sid && g.dirty(rel) // 넘겨받기 전에 — git을 못 읽으면 임대를 그대로 두고 막는다
 	g.takeover(ld, rel)
 	if left {
 		g.addWarn(rel + " 에 끝난 에이전트 " + g.oName + "(pid " + g.oPID + ", since " + g.oSince + ")의 미커밋 변경이 남아 있다. 고치기 전에 git diff -- " + shq(rel) + "을 먼저 보라.")
 	}
 }
 
-// statusZ: git status --porcelain -z -uall [-- 경로…] 의 출력, 실패면 ok=false
-func (g *cg) statusZ(paths []string) (string, bool) {
+// statusZ: git status --porcelain -z -uall [-- 경로…] 의 바뀐 경로들 — 이름 바꿈(R)은 원래 이름도(복사 C의 원본은 그대로라 뺀다).
+// 실패면 ok=false: 종료 0이 아니거나, 레코드가 온전하지 않다(재감사 R-H05: 이름 바꿈의 원래 이름 레코드만 빠진 성공 응답을 읽어
+// 산 주인의 임대를 지웠다 — 실패 표식을 끝에 붙이던 셸 판 꼴의 잘림은 아스트라 E02)
+func (g *cg) statusZ(paths []string) ([]string, bool) {
 	args := []string{"-C", g.root, "status", "--porcelain", "-z", "-uall"}
 	if paths != nil {
 		args = append(args, "--")
 		args = append(args, paths...)
 	}
 	out, rc := g.gitRun([]string{"GIT_OPTIONAL_LOCKS=0"}, "", args...)
-	// 실패면 출력을 쓰지 않는다 — 실패 표식을 출력 끝에 붙이던 셸 판 꼴은 마지막 기록이 NUL 전에 끊기면 표식이 경로에 붙어 실패를 놓쳤다(아스트라 E02)
-	return out, rc == 0 && (out == "" || strings.HasSuffix(out, "\x00"))
+	if rc != 0 {
+		return nil, false
+	}
+	return parseStatusZ(out)
+}
+
+// parseStatusZ: 레코드마다 「XY 경로」(X·Y는 상태 글자, 셋째는 공백, 경로는 비지 않음), X나 Y가 R·C면 바로 뒤에 비지 않은 원래
+// 경로 레코드, 마지막은 NUL로 끝난다 — 하나라도 어긋나면 ok=false
+func parseStatusZ(out string) ([]string, bool) {
+	if out == "" {
+		return nil, true
+	}
+	if !strings.HasSuffix(out, "\x00") {
+		return nil, false
+	}
+	recs := strings.Split(out[:len(out)-1], "\x00")
+	st := func(b byte) bool { return strings.IndexByte(" MTADRCU?!", b) >= 0 }
+	var paths []string
+	for i := 0; i < len(recs); i++ {
+		r := recs[i]
+		if len(r) < 4 || r[2] != ' ' || !st(r[0]) || !st(r[1]) {
+			return nil, false
+		}
+		paths = append(paths, r[3:])
+		if x, y := r[0], r[1]; x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+			i++
+			if i >= len(recs) || recs[i] == "" {
+				return nil, false
+			}
+			if x == 'R' || y == 'R' {
+				paths = append(paths, recs[i])
+			}
+		}
+	}
+	return paths, true
 }
 
 // changedLeases: FDIRTY를 바뀐 경로와 그 위 폴더의 임대에서만 — 트리 status 한 번
 func (g *cg) changedLeases() {
-	out, ok := g.statusZ(nil)
+	changed, ok := g.statusZ(nil)
 	if !ok {
 		g.block("git status가 실패했다(" + g.root + "). 남의 미커밋 파일을 판정할 수 없어 막았다. 색인·권한을 사람에게 알려라.")
 	}
-	recs := strings.Split(out, "\x00")
-	if recs[len(recs)-1] == "" {
-		recs = recs[:len(recs)-1]
-	}
 	var lines []string
-	skip, src := false, false
 	seen := map[string]bool{}
-	for _, r := range recs {
-		if skip {
-			skip = false
-			continue
-		}
-		p := r
-		if src {
-			src = false
-		} else {
-			st := r
-			if len(st) > 2 {
-				st = st[:2]
-			}
-			p = ""
-			if len(r) >= 3 {
-				p = r[3:]
-			}
-			src, skip = strings.HasPrefix(st, "R"), strings.HasPrefix(st, "C")
-		}
+	for _, p := range changed {
 		for ; p != ""; p = parentStrip(p) {
 			if seen[p] {
 				continue

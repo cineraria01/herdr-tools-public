@@ -30,6 +30,11 @@ func TestCompileERELikeShell(t *testing.T) {
 		{`[[:<:]]tok`, "a tok", false, true},
 		{"x\xc3\xa9", "X\xc3\xa9", true, true},
 		{"\xc3\xa9", "\xc3\x89", true, false}, // 대소문자 무시는 ASCII만(C 로캘)
+		{`\/x`, "/x", false, true}, {`a\-b`, "a-b", false, true}, {`\}`, "}", false, true}, {`a\.b`, "axb", false, false},
+		{`\<tok\>`, "a tok b", false, true}, {`\<tok\>`, "atok b", false, false}, {`\<tok\>`, "a toks", false, false},
+		{`[[:alpha:]_][[:digit:]]`, "_7", false, true}, {`[^[:space:]]x`, " x", false, false},
+		{`\<wbtok[0-9]{3}\>`, "id wbtok123 here", false, true}, {`\<wbtok[0-9]{3}\>`, "awbtok123b", false, false},
+		{`\<wbtok[0-9]{3}\>`, "wbtok1234", false, false}, {`\<[A-Za-z_]+\>`, "--", false, false}, {`\<[A-Za-z_]+\>`, "-x-", false, true},
 	}
 	grep, _ := exec.LookPath("grep")
 	for _, c := range cases {
@@ -56,6 +61,37 @@ func TestCompileERELikeShell(t *testing.T) {
 	}
 	if _, err := CompileERE(`(a)\1`, false); err == nil {
 		t.Error("Go가 못 읽는 꼴(역참조)은 오류여야 — 조용히 통과하지 않게")
+	}
+}
+
+// 재감사 ops R-18 · base R-09: C 로캘 ERE와 같은 뜻을 보장 못 하는 꼴은 읽을 때 거절(조용히 다르게 걸지 않게).
+// 맥 /usr/bin/grep(BSD 2.6.0) LC_ALL=C 실측: \d는 숫자, \v·\A·\z·\p·\0은 그 글자, \b는 아무 데나, [[=a=]]·[[.a.]]는 a,
+// \>tok·tok\<는 늘 안 맞음 — Go 옮김(\d 숫자·\v 세로 탭·\A 앞 고정·\b 낱말 경계, 동등 클래스·정렬 요소 못 읽음)과 어긋난다
+func TestCompileERERejectsUnsure(t *testing.T) {
+	bad := []string{`\d`, `\w`, `\s`, `\b`, `\B`, `\v`, `\A`, `\z`, `\p`, `\0`, `\x41`, `\Q`, `\n`, `\t`, `\e`,
+		`[[=a=]]`, `[[.a.]]`, `x[[=a=]b]`, `[[:word:]]`, `[[:^alpha:]]`,
+		`\>tok`, `tok\<`, `a.\>`, `\<.a`, `\<a?b`, `\<a*`, `[[:>:]]x`, `(?i)a`, `a{,2}`,
+		`\<[^a]x`, `[0-9]{0,3}\>`, `[[:punct:]]\>`, `[a-]\>`, `(ab)\>`, `\<[a-z]{0}x`}
+	for _, p := range bad {
+		if _, err := CompileERE(p, false); err == nil {
+			t.Errorf("%q: C 로캘 ERE와 뜻이 같다고 보장 못 하는 꼴인데 받았다", p)
+		}
+		d, base := t.TempDir(), t.TempDir()
+		os.WriteFile(d+"/private-patterns.txt", []byte(p+"\n"), 0o644)
+		os.WriteFile(base+"/f.txt", []byte("x\n"), 0o644)
+		var out, errb bytes.Buffer
+		if rc := LintAt(base, d, false, []string{"f.txt"}, &out, &errb); rc != 2 {
+			t.Errorf("lint 패턴 %q: 종료 %d(검사 못 함 2여야)", p, rc)
+		}
+	}
+	// 받는 꼴: 문장 부호의 역슬래시(글자 그대로), 낱말 글자 바로 앞의 \< · 바로 뒤의 \>, POSIX 문자 부류 12개, 게시기 기본 패턴
+	good := []string{`a\.b`, `\/x`, `\-x`, `\}`, `\]`, `\\d`, `\<tok\>`, `\<t+`, `[[:<:]]tok[[:>:]]`, `[[:alpha:][:digit:]_]`,
+		`[^[:space:]]x`, `(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{30,}`, `-----BEGIN[A-Z0-9 ]*PRIVATE KEY`, `a{2,3}`, "x\\\xc3\xa9",
+		`\<wbtok[0-9]{3}\>`, `\<[A-Za-z_]+\>`, `\<[[:alpha:]][[:alnum:]]{2,}\>`}
+	for _, p := range good {
+		if _, err := CompileERE(p, false); err != nil {
+			t.Errorf("%q: 받아야 할 꼴을 거절: %v", p, err)
+		}
 	}
 }
 

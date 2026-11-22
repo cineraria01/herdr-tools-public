@@ -28,6 +28,7 @@ func lockMerge(ST string) {
 	if err := os.MkdirAll(ST, 0o777); err != nil {
 		fail("%s 를 만들지 못함", ST)
 	}
+	said := false
 	for end := time.Now().Add(60 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		f, busy, err := lockx.TryLock(ST + "/" + lockName)
 		if err != nil {
@@ -36,6 +37,10 @@ func lockMerge(ST string) {
 		if !busy {
 			held = f
 			return
+		}
+		if !said { // 한 번 알린다 — 시험도 이 줄로 병합기가 잠금 앞에 왔음을 안다(R-30)
+			fmt.Fprintf(os.Stderr, "%s: 다른 병합이 잠금(%s)을 쥐고 있어 기다린다\n", me, lockName)
+			said = true
 		}
 		if time.Now().After(end) {
 			fail("다른 병합이 60초 넘게 잠금(%s)을 쥐고 있음", lockName)

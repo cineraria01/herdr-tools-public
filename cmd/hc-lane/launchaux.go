@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"herdr-tools/internal/proc"
@@ -53,15 +52,18 @@ func runRefused(out string) bool {
 	return k == "name_taken" || k == "spawn_failed"
 }
 
-var addrRe = regexp.MustCompile(`.*"address":"([^"]*)".*`)
-
+// firstAddr: hc run 표준 출력이 JSON 객체 정확히 하나이고 맨 위 address가 비어 있지 않은 문자열일 때 그 주소, 아니면 ""(잘린 응답에서
+// 주소를 뽑아 등록하지 않는다 — 재감사 R-17)
 func firstAddr(out string) string {
-	for _, ln := range strings.Split(out, "\n") {
-		if m := addrRe.FindStringSubmatch(ln); m != nil {
-			return m[1]
-		}
+	m := jone(out)
+	if m == nil {
+		return ""
 	}
-	return ""
+	a, ok := m["address"].(string)
+	if !ok || strings.ContainsAny(a, " \t\n") {
+		return ""
+	}
+	return a
 }
 
 // rollback: 띄우기 전에 실패하면 방금 만든 작업 트리·가지를 지운다 — 고유 커밋이 없을 때만. 돌려준 값은 die에 붙일 한 줄

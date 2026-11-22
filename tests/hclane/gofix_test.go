@@ -132,11 +132,12 @@ func gfLongKey(k *K) {
 	evf := filepath.Join(k.T, ".local/state/hc-lane/events.tsv")
 	before := read(evf)
 	long := strings.Repeat("k", 1100)
-	k.runE([]string{"HC_LANE=gf13"}, "report", "중간", "-", "확인", "--key", long)
-	k.check("L13 report --key 1100자: 종료 2, 사건 안 씀", k.rc == 2 && read(evf) == before)
-	k.runE([]string{"HC_LANE=gf13"}, "report", "중간", "-", "확인", "--to", long)
-	k.check("L13 report --to 1100자: 종료 2, 사건 안 씀", k.rc == 2 && read(evf) == before)
-	k.check("L13 report: panic 없음", !strings.Contains(k.errf(), "panic"))
+	// R-31: 입력마다 바로 종료값·진단·panic 없음·사건 파일을 따로 본다(Go panic도 2라 종료값만으로는 못 가른다)
+	for _, opt := range []string{"--key", "--to"} {
+		k.runE([]string{"HC_LANE=gf13"}, "report", "중간", "-", "확인", opt, long)
+		k.check("L13 report "+opt+" 1100자: 종료 2, 인자 오류 진단, panic 없음, 사건 안 씀", k.rc == 2 && read(evf) == before &&
+			!strings.Contains(k.errf(), "panic") && !strings.Contains(k.errf(), "goroutine ") && strings.Contains(k.errf(), opt))
+	}
 	k.runE([]string{"HC_LANE=gf13"}, "report", "중간", "-", strings.Repeat("가", 600), "--key", "k1")
 	ln := lastLine(strings.TrimRight(read(evf), "\n"))
 	k.check("L13 report: 긴 한 줄 칸은 잘라도 12칸·키 그대로", k.rc == 0 && len(strings.Split(ln, "\t")) == 12 && strings.HasSuffix(ln, "\tk1"))
@@ -149,8 +150,12 @@ func gfGcTruncLs(k *K) {
 	p := k.gfBin(map[string]string{"hc": `[ "$1" = ls ] && { printf '{"terminals":['; exit 0; }; exit 3`})
 	k.runE([]string{p}, "gc", "--repo", k.R, "--dry-run", "--min-age", "0")
 	k.check("E01 gc: 잘린 hc ls면 종료 1, 아무것도 안 고름", k.rc == 1 && !strings.Contains(k.out, "지움 "))
+	// R-30: 정상 목록이면 정리할 수 있는 깨끗한 작업 트리인지 먼저 보고(무관한 사유로 멈춘 것을 통과로 읽지 않게), 실패는 목록 오류 때문인지 본다
+	os.Remove(k.wt + "/.omc/state/s.json")
+	k.run("clean", "--repo", k.R, "--branch", "gfe1l", "--dry-run")
+	k.check("E01 준비: 정상 목록이면 clean --dry-run이 정리할 수 있다", k.rc == 0 && k.kept("gfe1l"))
 	k.runE([]string{p}, "clean", "--repo", k.R, "--branch", "gfe1l", "--dry-run")
-	k.check("E01 clean: 잘린 hc ls면 지우지 않고 멈춘다", k.rc != 0 && k.kept("gfe1l"))
+	k.check("E01 clean: 잘린 hc ls면 지우지 않고 멈춘다(목록 오류로)", k.rc != 0 && k.kept("gfe1l") && strings.Contains(k.errf(), "hc ls --json 출력을 읽지 못했다"))
 }
 
 // L12: 제출 전 사전 검사는 제출 커밋 속 판만 돌린다 — 무시된(추적 안 된) 로컬 .claude/herdr-precheck.sh는 돌리지 않고 제출도 안 한다
@@ -192,6 +197,11 @@ func gfStartScreen(k *K) {
 	write(k.t, sc, "Login expired · Please run /login token="+tok+" https://auth.example/cb?code="+tok+"\n")
 	k.runE([]string{"HC_FAKE_SCREEN=" + sc, "HC_FAKE_NOSTATUS=1"}, "--name", "lane-e8", "--repo", k.R, "--", "claude")
 	k.check("E08 막힘 줄: 종류·글은 남기고 비밀 꼴 값은 가림", k.rc == 6 && strings.Contains(k.errf(), "Login expired") && !strings.Contains(k.errf(), tok))
+	// R-21: 짧은 합성 인증 값(긴 토큰 꼴·키=값 꼴이 아님)도 진단에 남지 않는다 — 막힘 줄은 판정 구절만
+	short := "zq" + "9X4"
+	write(k.t, sc, "Login expired for "+short+" · run /login\n")
+	k.runE([]string{"HC_FAKE_SCREEN=" + sc, "HC_FAKE_NOSTATUS=1"}, "--name", "lane-r21", "--repo", k.R, "--", "claude")
+	k.check("R-21 막힘 줄: 짧은 합성 값도 남지 않고 종류는 남음", k.rc == 6 && strings.Contains(k.errf(), "로그인·인증") && !strings.Contains(k.errf(), short))
 	// E09: hc run이 0으로 끝났는데 주소가 없으면 실행을 모른다 — 성공(0)이 아니다
 	p = k.gfBin(map[string]string{"hc": `[ "$1" = run ] && exit 0; exec ` + sq(real) + ` "$@"`})
 	k.runE([]string{p}, "--read", "--name", "lane-e9", "--repo", k.R, "--", "true")

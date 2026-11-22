@@ -18,17 +18,17 @@ import (
 
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/gitx"
-	"herdr-tools/internal/proc"
 )
 
 // 판정 파일 값(셸 vf va vr vs vv vp vb vo, 표시 vx·끝 vdn, 이 실행 vme)
 var lvf, lva, lvr, lvs, lvv, lvb, lvx, lvdn, lvd0, lvme string
 
 // lpatch: 두 커밋 사이 변경의 patch-id(--stable). 변경이 없으면 「-」 — 병합기 묶음의 구성원별 승인 확인과 같은 함수
-// 상한에 걸리면 lastTimeout — 뒤따르는 die가 land에서 75(다시)로 끝나 병합기가 반송하지 않는다(gofix M01)
+// 못 구하면(상한·git 오류·잘린 결과 — 모두 모름) lastTimeout — 뒤따르는 die가 land에서 75(다시)로 끝나 병합기가 반송하지 않는다
+// (gofix M01, R-H02: 일반 git 오류 128도 모름이다 — 실제 불일치만 종료 2)
 func lpatch(a, b string) (string, bool) {
 	p, rc := gitx.PatchID(os.Stderr, a, b)
-	lastTimeout = rc == proc.TimeoutCode
+	lastTimeout = rc != 0
 	return p, rc == 0
 }
 

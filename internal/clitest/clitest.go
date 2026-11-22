@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"hash/crc32"
 	"io/fs"
@@ -178,6 +179,39 @@ func TempDir(t *testing.T) string {
 // DefaultMax: Cmd.Max가 0일 때 명령 하나의 상한 — go test 기본 마감(10분)보다 짧게
 var DefaultMax = 60 * time.Second
 
+// stopReserve: 상한을 넘긴 무리를 끄는 데 드는 여유(TERM → 2초 → KILL과 기다림)
+const stopReserve = 3 * time.Second
+
+// binStart: 시험 바이너리 시작(이 꾸러미 init) — testing이 -test.timeout 시계를 거는 m.Run보다 먼저라 마감을 조금 이르게 본다(안전한 쪽)
+var binStart = time.Now()
+
+// Budget: 명령 하나의 상한 max를 시험 바이너리의 바깥 마감(-test.timeout, t.Deadline()과 같은 시계) 안으로 줄인다.
+// 상한 넘김 뒤 끄기(stopReserve)와 출력 관 기다림(같은 상한)까지 마감 전에 끝나게 — 남은 시간에서 여유를 빼고 반으로.
+// 마감이 없거나(-test.timeout=0) 시험 바이너리 밖이면 max 그대로(재감사 base R-15)
+func Budget(max time.Duration) time.Duration {
+	f := flag.Lookup("test.timeout")
+	if f == nil {
+		return max
+	}
+	g, ok := f.Value.(flag.Getter)
+	if !ok {
+		return max
+	}
+	to, ok := g.Get().(time.Duration)
+	if !ok || to <= 0 {
+		return max
+	}
+	rem := time.Until(binStart.Add(to))
+	if 2*max+stopReserve <= rem {
+		return max
+	}
+	b := (rem - stopReserve) / 2
+	if b < 10*time.Millisecond {
+		b = 10 * time.Millisecond
+	}
+	return b
+}
+
 // Cmd: 한 번 부르기. Env는 os.Environ() 위에 덧씌운다("K=" 빈 값, "K" 혼자는 지움)
 type Cmd struct {
 	Dir      string
@@ -202,6 +236,7 @@ func (c Cmd) Run(name string, args ...string) Res {
 	if max <= 0 {
 		max = DefaultMax
 	}
+	max = Budget(max)
 	ctx, cancel := context.WithTimeout(context.Background(), max)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)

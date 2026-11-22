@@ -31,7 +31,7 @@ func testHcSweepAudit(t *testing.T, T string, e Env) {
 case $1 in
   ls) exec cat "@T@/ls.json" ;;
   get) if [ -e "@T@/killed-$2" ]; then
-         [ -f "@T@/after-kill" ] || { echo "{\"address\":\"$2\",\"state\":\"finished\"}"; exit 0; }
+         [ -f "@T@/after-kill" ] || exec sed 's/"state":"live"/"state":"finished"/' "@T@/get-$2.json"
          sed -n 2p "@T@/after-kill" >&2; exit "$(sed -n 1p "@T@/after-kill")"
        fi
        n=$(( $(cat "@T@/getn-$2" 2>/dev/null || echo 0) + 1 )); echo $n >"@T@/getn-$2"
@@ -170,9 +170,9 @@ git -C "$R" push -q origin "HEAD:refs/hc-landed/land-x/1600000000" && git -C "$R
 	write(t, EVT, "2026-11-21T10:00:00Z\tm\tt81\tland-x\t제출\tabc1234\t-\t3\t-\tt81@1700000000000\n")
 	sweep("--dry-run", "--min-age", "0")
 	c.ok("[B03] 이 실행 키의 제출 사건은 증거", has("(닫은 뒤 hc-lane clean land-x)"))
-	// 이 터미널이 생긴 뒤 원격 표식(UTC 초 ≥ created)이면 증거
+	// 이 터미널이 생긴 뒤 원격 표식(UTC 초 > created의 초)이고 그 커밋이 main에 든 이 가지의 착지면 증거(R-01)
 	os.Remove(EVT)
-	bash(t, T, e, `git -C "$1" push -q origin "HEAD:refs/hc-landed/land-x/1800000000"`, R)
+	bash(t, T, e, `git -C "$1" push -q origin "HEAD:refs/hc-landed/land-x/1800000000"`, R+".wt/land-x")
 	sweep("--dry-run", "--min-age", "0")
 	c.ok("[B03] 이 터미널 뒤의 원격 표식은 증거", has("(닫은 뒤 hc-lane clean land-x)"))
 

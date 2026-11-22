@@ -236,8 +236,10 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if on == "" && bco != "" {
 		if _, err := exec.LookPath("herdr-balance"); err == nil {
 			for i := 0; ; {
-				// 상한 안에서만(proc.Limit이 모르는 명령 — Fable F3·아스트라 E01: 멈추면 run.lock을 쥔 채 끝없이 기다렸다)
-				if proc.WaitMax(exec.Command("herdr-balance", "--main", bco, "--add", ADDR), "", balanceMax()) == 0 {
+				// 상한 안에서만(proc.Limit이 모르는 명령 — Fable F3·아스트라 E01: 멈추면 run.lock을 쥔 채 끝없이 기다렸다).
+				// RunMax: 고아 기록이 쓰인 뒤에야 시작해 이 바퀴가 SIGKILL로 죽어도 다음 바퀴가 거둔다(재감사 fill R-06)
+				bc := exec.Command("herdr-balance", "--main", bco, "--add", ADDR)
+				if proc.Code(proc.RunMax(bc, balanceMax())) == 0 {
 					break
 				}
 				if i++; i >= 5 {

@@ -122,7 +122,7 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 // specWrite: 결과를 원격에. spec 참조가 그대로일 때만
 func specWrite(top string, r specRow, res specResult, lg string) int {
 	ref := specRefs + r.id
-	now, rc := outQ("ls-remote", "origin", ref)
+	now, rc := lsRemote("origin", ref) // 잘린 줄은 모름(1) — 「병합기가 버렸다」로 읽지 않는다(재감사 R-H03과 같은 꼴, 작업 중 발견)
 	if rc != 0 {
 		return 1
 	}

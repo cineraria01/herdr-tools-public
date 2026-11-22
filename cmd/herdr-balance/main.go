@@ -19,6 +19,8 @@
 // --watch: 2초마다 화면을 보고, 이 기계 탭과 설정 balance.remote(빈칸으로 나눈 원격 탭 이름 앞부분, 예 `w1/ w2/`, 없으면 원격 탭은
 // 맞추지 않음 — herdr-tools-config) 탭 가운데 첫 터미널이 에이전트(지휘)이고 이름 붙은 worker 목록이 바뀌어 4초 동안 그대로면
 // 그 탭을 맞춘다. 마지막으로 맞춘 목록은 ~/.local/state/herdr-balance/<탭>.json에 남겨 같은 목록이면 다시 하지 않는다.
+// gofix2: worker를 떼기 전에 목표를 <탭>.pending.json(pid·시작 시각)에 적고 저장 뒤 지운다 — 남아 있고 그 실행이 끝났으면 다음 맞춤이
+// 떼인 채 남은 worker를 되붙인다(R-26, 셸 판에는 없음). 원래 탭이 빠진 목록(원격 공간 끊김)으로는 「worker 없음」을 확정하지 않는다(R-07).
 package main
 
 import (
@@ -172,6 +174,12 @@ func runLim(ctx context.Context, d time.Duration, name string, args ...string) (
 	if err != nil && lctx.Err() != nil {
 		return "", "", 0, fmt.Errorf("시간 넘김 %d초: %s", int(d/time.Second), filepath.Base(name))
 	}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// 우두머리는 0으로 끝났는데 출력 관을 쥔 자손이 남았다(R-12) — 그 무리를 거둔다. 무리가 남아 있는 동안 그 번호는
+		// 다른 무리에 다시 쓰이지 않으니 우리 무리다(POSIX). 출력이 덜 왔을 수 있어 결과는 모름
+		proc.StopGroup(c.Process.Pid, 2*time.Second)
+		return "", "", 0, fmt.Errorf("끝났는데 출력 관을 쥔 자손이 남음(거둠): %s", filepath.Base(name))
+	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return o.String(), e.String(), ee.ExitCode(), nil
@@ -290,18 +298,29 @@ func tabs(ctx context.Context) ([]tab, error) {
 
 // where: term이 있는 탭과 그 터미널(없으면 nil)
 func where(ctx context.Context, t string) (*tab, *term, error) {
+	x, y, _, err := locate(ctx, t, "")
+	return x, y, err
+}
+
+// locate: where에 더해 탭 tabID가 목록에 있었는가. 탭이 빠진 목록(원격 공간 연결이 끊김)에서는 터미널이 없어도 「없음」을
+// 확정하지 못한다(R-07 — 떼야 할 worker를 「이미 없음」으로 읽고 맞춤을 마쳤다)
+func locate(ctx context.Context, t, tabID string) (*tab, *term, bool, error) {
 	ts, err := tabs(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
+	}
+	seen := false
+	for i := range ts {
+		seen = seen || ts[i].ID == tabID
 	}
 	for i := range ts {
 		for j := range ts[i].Terminals {
 			if ts[i].Terminals[j].Terminal == t {
-				return &ts[i], &ts[i].Terminals[j], nil
+				return &ts[i], &ts[i].Terminals[j], seen, nil
 			}
 		}
 	}
-	return nil, nil, nil
+	return nil, nil, seen, nil
 }
 
 const pollEvery, waitLimit = 200 * time.Millisecond, 10 * time.Second
@@ -413,6 +432,33 @@ func balance(ctx context.Context, main string, add, drop []string) (pyjson.Obj, 
 		return nil, fmt.Errorf("%s이(가) 화면의 어느 탭에도 없음", main)
 	}
 	tabID, mainPane := t.ID, m.Pane
+	// 앞 실행이 떼다 만 worker(화면 어느 탭에도 없는 것 — 떼인 채)는 --add처럼 다시 붙인다(R-26). 드롭한 것은 빼고
+	left, err := leftover(tabID)
+	if err != nil {
+		return nil, err
+	}
+	if len(left) > 0 {
+		ts, err := tabs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var shown, ids []string
+		for _, x := range ts {
+			ids = append(ids, x.ID)
+			for _, y := range x.Terminals {
+				shown = append(shown, y.Terminal)
+			}
+		}
+		if !contains(ids, tabID) { // 탭이 빠진 목록으로는 「떼인 채」를 확정하지 않는다(R-07)
+			return nil, fmt.Errorf("탭 %s이 목록에서 빠짐 — 떼다 만 worker를 확인하지 못함", tabID)
+		}
+		add = append([]string(nil), add...)
+		for _, w := range left {
+			if !contains(drop, w) && !contains(add, w) && !contains(shown, w) {
+				add = append(add, w)
+			}
+		}
+	}
 	var workers []string
 	for _, w := range workersOf(*t, main) {
 		if !contains(drop, w) {
@@ -447,20 +493,33 @@ func balance(ctx context.Context, main string, add, drop []string) (pyjson.Obj, 
 	}
 
 	// 여기부터 worker를 뗀다 — 신호가 와도 이 맞춤은 마친다(떼인 채 남지 않게. 호출마다 상한·기다림 10초는 그대로).
-	// ponytail: 그 사이 KILL·기계 재시작이면 떼인 채 남는다(E09, 기존) — 떼기 전에 목표를 적고 다음 시작에 살아 있는 것만 되붙이는 복구가 그 길
+	// 그 사이 KILL·기계 재시작이면 떼인 채 남으니 떼기 전에 목표를 적어 두고(pending) 다음 맞춤이 되붙인다(R-26).
+	// ponytail: 떼인 채 닫힌 worker가 목표에 남으면 그 탭 맞춤은 keep 실패로 멈춘다(--watch는 다른 탭은 계속 맞춘다) —
+	// <탭>.pending.json을 지우면 풀림, herdr-app이 떼인 터미널 목록을 주면 그걸로 거른다
+	if err := savePending(tabID, workers); err != nil {
+		return nil, err
+	}
 	crit := context.WithoutCancel(ctx)
 	for _, w := range append(append([]string(nil), workers...), drop...) {
-		wt, _, err := where(crit, w)
-		if err != nil {
+		// 원래 탭이 목록에 보일 때만 「없음」을 확정한다 — 탭이 빠진 목록이면 다시 본다(R-07)
+		found := false
+		if err := waitFor(func() (bool, error) {
+			x, _, seen, err := locate(crit, w, tabID)
+			found = x != nil
+			return found || seen, err
+		}, w+" 찾기(탭 "+tabID+"이 목록에 없음)"); err != nil {
 			return nil, err
 		}
-		if wt == nil {
+		if !found {
 			continue
 		}
 		if err := do(crit, "terminal.park", pyjson.Obj{{K: "terminal", V: w}}); err != nil {
 			return nil, err
 		}
-		if err := waitFor(func() (bool, error) { x, _, err := where(crit, w); return x == nil, err }, w+" park"); err != nil {
+		if err := waitFor(func() (bool, error) {
+			x, _, seen, err := locate(crit, w, tabID)
+			return x == nil && seen, err
+		}, w+" park"); err != nil {
 			return nil, err
 		}
 	}
@@ -505,6 +564,9 @@ func balance(ctx context.Context, main string, add, drop []string) (pyjson.Obj, 
 	}
 	if err := save(tabID, workers); err != nil {
 		return nil, err
+	}
+	if err := os.Remove(pendingPath(tabID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("미완료 배치 지우기: %w", err)
 	}
 	if workers == nil {
 		workers = []string{}

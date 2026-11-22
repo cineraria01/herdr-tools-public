@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- herdr-balance 자동 맞춤(watch) 상주(예시 — 깔지 않는다. 맥만. 쓰는 법은 README 「launchd 작업」). 지킴이가 Herdr 터미널 herdr-balance에서 돌리고,
+<!-- herdr-balance 자동 맞춤(watch) 상주(예시 — 깔지 않는다. 맥만. 쓰는 법은 docs/hc-launchd-guard/guard.md). 지킴이가 Herdr 터미널 herdr-balance에서 돌리고,
      KeepAlive라 60초마다 다시 불려 터미널이 죽었으면 다시 띄운다. 기록 ~/Library/Logs/herdr-balance.log
      herdr-balance는 Go 바이너리라 python3로 넘기지 않는다(hc-fill 꼴). 옛 plist(python3 …)는 지킴이가 해석기를 빼고 돌린다.
      sh -c는 $HOME을 펼치려고만 쓴다(launchd는 ProgramArguments를 펼치지 않는다) -->

@@ -5,7 +5,8 @@ const usageText = `사용법: hc-fill add --name <레인> --project <프로젝�
                [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo] [--on-land <이름>]   (우선은 영어 urgent|high|normal|low도 받음, 기본 보통)
         hc-fill add --name <이름> --project <프로젝트> --brief <지시문 경로> --then <대기 중인 선행>
         hc-fill status [--owner <지휘 주소> | --mine]   (Go 판만 — 레인마다 한 줄: 단계·기계·넣은 뒤·예상)
-        hc-fill ls | rm <레인> | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
+        hc-fill edit <레인> [--after <레인>[,…]|-] [--after-any-project] [--priority <우선순위>] [--only <기계>[,…]|-] [--brief <지시문 경로>]
+        hc-fill ls | rm <레인> [--force] | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
          지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
          주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
@@ -28,6 +29,11 @@ const usageText = `사용법: hc-fill add --name <레인> --project <프로젝�
          선행이 없음·떠 있음·받은편지·감사 줄·다른 프로젝트, --after·--only·--priority·--no-early·--no-audit·--coord·--overlap-ok·--solo와 함께면 거절(종료 2).
          도는 run이 끝나기를 기다렸다가(run.lock) 붙인다. 겹치는 파일 때문에 순서만 필요한 일은 그대로 --after
          --after에 대기 중인 같은 프로젝트 레인을 주면 넣기는 그대로 하고 --then을 알리는 한 줄
+         --after에 다른 프로젝트 레인(그 대기열에 있거나 그 main에 착지)을 주면 거절(종료 2 — 착지를 이 프로젝트 main에서만 찾아 영원히
+         「아직」). --after-any-project면 <이름>@<프로젝트>로 적고 그 프로젝트 main에서 찾는다. 어디에도 없는 이름은 알림만
+  edit   대기열 줄의 선행·우선·기계·지시문 칸만 바꾼다(주차·떠 있음·시도 기록·주인·줄 ID 그대로 — rm 뒤 add는 주차한 준비 커밋을 버린다).
+         -는 비우기. --brief는 대기 줄만(새 사본, 「## 이어서:」가 붙은 지시문은 거절), --priority는 prio와 같다. 없는 레인·잘못된 값은 종료 2
+  rm     주차 중인 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 지우지 않는다(종료 2)
   prio   레인의 우선순위를 바꾼다. 띄울 때 레인 환경 HC_LANE_PRIORITY(병합기 제출 우선)로 넘어가고, 떠 있는 레인이 이미 병합기 큐에
          냈으면 큐 메타(refs/merge-queue-meta/<항목>) 제목의 priority=도 lease로 바꾼다(못 바꾸면 경고만)
   ls     레인·프로젝트·상태·주소·주인 지휘(-는 모든 지휘)·우선·선행·비고(이어서 <--then 이름>,…·자동 감사: 감사 중·감사 통과/지적 — 수거 기다림·감사 통과 받음·감사 지적 n번째·지휘로 넘김·

@@ -12,20 +12,38 @@ import (
 	"unicode/utf8"
 )
 
-// byteLocale: 훅 환경의 LC_CTYPE 자리(LC_ALL → LC_CTYPE → LANG 가운데 처음 비지 않은 값)가 UTF-8이 아니다
-func byteLocale() bool {
-	v := ""
+// ctypeLocale: 훅 환경의 LC_CTYPE 자리(LC_ALL → LC_CTYPE → LANG 가운데 처음 비지 않은 값)
+func ctypeLocale() string {
 	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
-		if v = os.Getenv(k); v != "" {
-			break
+		if v := os.Getenv(k); v != "" {
+			return v
 		}
 	}
-	v = strings.ToLower(v)
-	return !strings.Contains(v, "utf-8") && !strings.Contains(v, "utf8")
+	return ""
 }
 
-// patByte: 지금 판정이 바이트 단위인가 — 훅마다 들어올 때 정한다(cotenantGuard)
-var patByte bool
+const (
+	locUTF8  = iota // 글자 = UTF-8 한 글자
+	locByte         // C·POSIX(비었음 포함) — 글자 = 바이트, ASCII 밖은 어느 부류도 아님
+	locOther        // 그 밖(eucKR·ISO8859-1 등) — 글자 폭·부류를 흉내 내지 못한다(재감사 R-M12) → 글롭 판정 보류
+)
+
+func localeKind() int {
+	v := strings.ToLower(ctypeLocale())
+	switch {
+	case strings.Contains(v, "utf-8") || strings.Contains(v, "utf8"):
+		return locUTF8
+	case v == "" || v == "c" || v == "posix":
+		return locByte
+	}
+	return locOther
+}
+
+// patLocale·patByte: 지금 판정의 로캘 — 훅마다 들어올 때 정한다(cotenantGuard)
+var (
+	patLocale int
+	patByte   bool
+)
 
 // dec: 글자 하나(바이트 단위면 바이트 하나 — 그 값을 글자로)
 func dec(s string) (rune, int) {
@@ -33,6 +51,33 @@ func dec(s string) (rune, int) {
 		return rune(s[0]), 1
 	}
 	return utf8.DecodeRuneInString(s)
+}
+
+// widePat: 패턴의 ?·닫힌 […]를 *로 — 어느 로캘의 한 글자에든 맞는, 더 넓은 패턴(로캘을 모를 때 덜 고르지 않게)
+func widePat(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '\\':
+			b.WriteByte('\\')
+			if i+1 < len(p) {
+				i++
+				b.WriteByte(p[i])
+			}
+		case '?':
+			b.WriteByte('*')
+		case '[':
+			if _, n, ok := bracket(p[i:], 0); ok {
+				b.WriteByte('*')
+				i += n - 1
+			} else {
+				b.WriteByte('[')
+			}
+		default:
+			b.WriteByte(p[i])
+		}
+	}
+	return b.String()
 }
 
 // bashMatch: s가 bash 패턴 p에 통째로 맞는가 (* ? [..] [!..] [^..] [:class:] \x)

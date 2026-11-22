@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"herdr-tools/internal/ojson"
+	"herdr-tools/internal/proc"
 	"herdr-tools/internal/toolcfg"
 )
 
@@ -48,38 +49,6 @@ func strList(v any) []string {
 		}
 	}
 	return r
-}
-
-// undo: 모으다 실패하면 이번에 쓴·스테이징한 경로만 되돌린다(다음 실행이 「커밋하지 않은 변경」으로 막히지 않게).
-// 추적 파일은 HEAD 값으로, 새 파일은 지운다. 그 사이 남이 같은 저장소에 쓴 것은 건드리지 않는다
-func undo(repo string, paths []string, name string) {
-	if len(paths) == 0 {
-		return
-	}
-	lf := writeLines(name, paths)
-	gitq("-C", repo, "--literal-pathspecs", "reset", "-q", "--pathspec-from-file="+lf)
-	st, _ := gitq("-C", repo, "status", "--porcelain", "-z", "--untracked-files=all")
-	want := map[string]bool{}
-	for _, p := range paths {
-		want[p] = true
-	}
-	var tracked, untracked []string
-	for _, e := range strings.Split(st, "\x00") {
-		if len(e) < 4 || !want[e[3:]] {
-			continue
-		}
-		if e[:2] == "??" {
-			untracked = append(untracked, e[3:])
-		} else {
-			tracked = append(tracked, e[3:])
-		}
-	}
-	if len(tracked) > 0 {
-		gitq("-C", repo, "--literal-pathspecs", "checkout", "-q", "--pathspec-from-file="+writeLines(name+".t", tracked))
-	}
-	for _, p := range untracked {
-		os.Remove(filepath.Join(repo, p))
-	}
 }
 
 // repoSync: 맥 ↔ 저장소 3-way. 모두 정한 뒤, 충돌이 하나라도 있으면 쓰지 않는다. 저장소는 줄마다 UD(범용 또는 개인)다.
@@ -235,22 +204,40 @@ func repoSync() {
 	mm := map[string][]string{}
 	var ctool, cconf []string
 	utool, uconf := true, true
-	bail := func(f string, a ...any) {
-		if utool {
-			undo(REPO, st["tool"], "st.tool")
-		}
-		if uconf {
-			undo(CONF, st["conf"], "st.conf")
-		}
-		dropJournal()
-		die(f, a...)
-	}
-	// 쓰기 전에 일지(journal.go) — 스테이징과 커밋 사이에 죽어도 다음 실행이 자기 것만 되돌린다
+	// 쓰기 전에 일지(journal.go) — 쓰기와 커밋 사이에 죽어도 다음 실행이 자기 것만 되돌린다. old = 쓰기 전 저장소 서명
 	var jes []jentry
 	for _, i := range idx {
 		if acts[i] == "모음" {
-			jes = append(jes, jentry{U[i].d, "", U[i].r, U[i].k, q.C[i]})
+			jes = append(jes, jentry{U[i].d, "", U[i].r, U[i].k, q.C[i], RS[i]})
 		}
+	}
+	of := func(repo string) []jentry {
+		var r []jentry
+		for _, e := range jes {
+			if e.repo == repo {
+				r = append(r, e)
+			}
+		}
+		return r
+	}
+	bail := func(f string, a ...any) {
+		var bad []string
+		if utool {
+			if err := undo(REPO, of(REPO), "st.tool"); err != nil {
+				bad = append(bad, REPO+": "+err.Error())
+			}
+		}
+		if uconf {
+			if err := undo(CONF, of(CONF), "st.conf"); err != nil {
+				bad = append(bad, CONF+": "+err.Error())
+			}
+		}
+		if len(bad) > 0 { // 되돌림을 확인하지 못했다 — 일지를 남겨 다음 실행이 다시 되돌린다(R-07)
+			die(f+" — 이번 쓰기를 되돌리지 못했다 (%s). 일지 %s를 남긴다: 다음 herdr-sync가 다시 되돌린다",
+				append(a, strings.Join(bad, "; "), journalPath())...)
+		}
+		dropJournal()
+		die(f, a...)
 	}
 	writeJournal(jes)
 	mc := make([][]string, len(TR))
@@ -570,4 +557,38 @@ func macrow() {
 		s = "저장소와 같음"
 	}
 	rows = "맥: " + s + "\n"
+}
+
+// ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only. git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다
+// (gofix-ops B01·O-01·K-01: 실패한 status의 빈 출력을 깨끗함으로 읽어 커밋 안 된 내용을 맥·기계에 깔았다)
+func ready(r string) {
+	if msg := readyState(r); msg != "" {
+		die("%s", msg)
+	}
+	if _, rc := git("-C", r, "pull", "-q", "--ff-only"); rc != 0 {
+		die("git pull --ff-only 실패: %s (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main)", r)
+	}
+}
+
+// readyState: 저장소·main·깨끗함 판정 — 준비됐으면 "", 아니면 멈출 까닭
+func readyState(r string) string {
+	if _, rc := gitq("-C", r, "rev-parse", "--git-dir"); rc == proc.TimeoutCode {
+		return "저장소 상태를 읽지 못했다 (git rev-parse 시간 넘김): " + r
+	} else if rc != 0 {
+		return "저장소가 없다: " + r
+	}
+	// 종료 0일 때만 출력을 브랜치 이름으로 읽는다 — 실패한 조회가 main을 찍었어도 버린다(R-02)
+	if b, rc := gitq("-C", r, "symbolic-ref", "--short", "HEAD"); rc == proc.TimeoutCode {
+		return "저장소 상태를 읽지 못했다 (git symbolic-ref 시간 넘김): " + r
+	} else if rc != 0 {
+		return fmt.Sprintf("저장소 브랜치를 읽지 못했다 (git symbolic-ref 종료 %d — main이 아니거나 모름): %s", rc, r)
+	} else if b != "main" {
+		return "저장소가 main 브랜치가 아니다: " + r
+	}
+	if s, rc := git("-C", r, "status", "--porcelain"); rc != 0 {
+		return fmt.Sprintf("저장소 상태를 읽지 못했다 (git status 종료 %d — 모름): %s", rc, r)
+	} else if s != "" {
+		return "저장소에 커밋하지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시: " + r
+	}
+	return ""
 }

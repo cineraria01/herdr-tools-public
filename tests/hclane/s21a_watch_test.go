@@ -6,6 +6,7 @@ package hclane_test
 
 import (
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,13 @@ func s21aWatch(k *K) {
 	k.s21aRep("lane-w", "중간", "-", "반쯤")
 	k.runE([]string{"HC_TERMINAL_ID=t7cc"}, "wait", "--timeout", "0")
 	k.check("watch 꺼진 사이 사건은 wait가 받음", k.rc == 0 && strings.Contains(k.out, "반쯤"))
-	write(k.t, WD+"/watch.t7cc/pid", "1\n") // 남은 잠금(pid가 hc-lane이 아님)
+	// 남은 잠금(pid가 살아 있지만 hc-lane watch가 아님) — 호스트 PID 1의 정보에 기대지 않게 이 시험이 띄운 다른 명령(R-36)
+	other := exec.Command("sleep", "120")
+	if err := other.Start(); err != nil {
+		k.t.Fatal(err)
+	}
+	defer func() { other.Process.Kill(); other.Wait() }()
+	write(k.t, WD+"/watch.t7cc/pid", strconv.Itoa(other.Process.Pid)+"\n")
 	w2 := k.s21aW(live, "--to", "t7cc")
 	k.s21aRep("lane-w", "착지", "abcd1234", "끝")
 	upto(func() bool { return k.s21aSends() == 3 })

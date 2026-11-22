@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 )
 
@@ -371,6 +372,14 @@ func (e *ev) wcheck() bool {
 // 끝날 때(지휘 사라짐·TERM·INT·HUP) 자기 잠금만 지운다
 func (e *ev) watchLock() {
 	e.lk = e.ed + "/watch." + strings.TrimPrefix(e.cur, e.ed+"/seen.")
+	// 커널 잠금이 먼저: 쥔 watch가 살아 있는 동안 다른 watch는 잠금 폴더를 건드리지 못한다(죽으면 커널이 푼다). 남은 폴더 넘겨받기도
+	// 이 잠금 안에서만 하니 두 watch가 서로의 잠금을 지우지 않는다(재감사 R-20). 쥔 파일은 프로세스가 끝날 때까지 연다
+	lf, busy, err := lockx.TryLock(e.lk + ".lock")
+	if err != nil || busy {
+		fmt.Fprintf(os.Stderr, "hc-lane watch: %s 감시가 이미 돈다(잠금 %s.lock)\n", e.wto, e.lk)
+		exit(75)
+	}
+	watchLockFile = lf
 	if os.Mkdir(e.lk, 0o777) != nil {
 		if op, ok := watchAlive(e.lk); ok {
 			fmt.Fprintf(os.Stderr, "hc-lane watch: %s 감시가 이미 돈다(pid %s)\n", e.wto, op)
@@ -391,6 +400,7 @@ func (e *ev) watchLock() {
 			os.RemoveAll(lk)
 		}
 	})
+	proc.TakeSignals() // 이 처리기 하나만(재감사 R-H04 — proc 처리기가 함께 받아 정리 전에 끝내지 않게)
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
@@ -416,11 +426,15 @@ func watchAlive(lk string) (string, bool) {
 		return op, false
 	}
 	out, rc := capt(0, errDrop, "ps", "-p", op, "-o", "command=")
-	if rc != 0 {
-		// ps를 못 읽음(권한·시간 넘김) — 살아 있는 pid의 소유자를 모르면 잠금을 넘겨받지 않는다(gofix E05). 그사이 끝났으면 넘겨받는다
+	if rc != 0 || strings.TrimSpace(out) == "" {
+		// ps를 못 읽음(권한·시간 넘김·0인데 빈 출력) — 살아 있는 pid의 소유자를 모르면 잠금을 넘겨받지 않는다(gofix E05, 재감사 R-20).
+		// 그사이 끝났으면 넘겨받는다
 		return op, proc.Alive(pid)
 	}
 	return op, reWatchCmd.MatchString(out)
 }
 
-var reWatchCmd = regexp.MustCompile(`hc-lane.*watch`)
+var (
+	reWatchCmd    = regexp.MustCompile(`hc-lane.*watch`)
+	watchLockFile *os.File // watchLock이 쥔 커널 잠금(닫히면 풀리니 프로세스가 끝날 때까지 잡아 둔다)
+)

@@ -150,6 +150,7 @@ type Cmd struct {
 	Unset []string
 	In    io.Reader
 	Err   int
+	Max   time.Duration // 0이 아니면 이 상한(proc.Limit이 모르는 명령 — 로컬 sh 등)
 }
 
 // Run: 표준 출력(그대로 — 끝 줄바꿈 포함)과 셸 종료 코드
@@ -165,7 +166,11 @@ func (c Cmd) Run() (string, int) {
 	case errMerge:
 		x.Stderr = &out
 	}
-	err := proc.Run(x) // git·hc·hc-lane 등은 상한 안에서만 기다린다(proc.Limit) — 넘으면 「시간 넘김」 한 줄과 124(모름)
+	max := c.Max
+	if max <= 0 {
+		max = proc.Limit(x.Args)
+	}
+	err := proc.RunMax(x, max) // git·hc·hc-lane 등은 상한 안에서만 기다린다(proc.Limit) — 넘으면 「시간 넘김」 한 줄과 124(모름)
 	var ee *exec.ExitError
 	var te *proc.TimeoutError
 	if errors.As(err, &te) {

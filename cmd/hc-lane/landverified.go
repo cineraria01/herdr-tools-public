@@ -1,6 +1,6 @@
 package main
 
-// 추측 검증 기록 건너뛰기(merger-spec — README 「추측 검증」). 병합기가 맨 앞 추측이 통과한 트리를 HERDR_SPEC_TREE로 넘기면, 착지가
+// 추측 검증 기록 건너뛰기(merger-spec — docs/hc-lane/merger-spec-verify.md). 병합기가 맨 앞 추측이 통과한 트리를 HERDR_SPEC_TREE로 넘기면, 착지가
 // 그 트리의 원격 기록(refs/herdr/verified/<트리>, 같은 검증 스크립트 blob)이 있을 때만 HERDR_VERIFIED_TREE=<트리>를 검증 스크립트에 넘긴다.
 // 건너뛸지는 검증 스크립트가 정한다(지금 HEAD^{tree}가 그 값이고 작업 트리가 깨끗할 때만). 병합기 밖(HERDR_MERGER≠1)에서는 쓰지 않는다
 

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/atomic"
 )
 
 const gb = 1e9
@@ -80,32 +82,43 @@ func lsofPath() string {
 	return "lsof"
 }
 
-// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패면 nil. 출력이 온전한지 본다(E13): -F 꼴(모든 줄이 필드 글자로 시작)이고
-// lsof를 부른 이 프로세스(pid 줄 뒤 경로 줄 하나 이상 — 적어도 cwd)가 들어 있어야 한다. 아니면 잘렸거나 다른 출력이라 nil(건너뜀)
+// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패면 nil. 출력이 온전한지 본다(E13·R-25): 요청한 -F n 꼴의 레코드만 —
+// 「p<숫자>」로 시작하고 그 뒤 f·n 줄만, 레코드마다 f·n이 하나 이상. 그 밖의 줄(경고·진단·요청 안 한 필드), p 앞 줄, 빈·숫자 아닌 pid,
+// 잘린 레코드가 있거나 lsof를 부른 이 프로세스(적어도 cwd)가 없으면 잘렸거나 다른 출력이라 nil(삭제 보류)
 func openPaths(r runner) map[string]bool {
 	res := r(60*time.Second, nil, lsofPath(), "-n", "-P", "-w", "-F", "n")
 	if res.err != nil || res.rc != 0 || res.out == "" {
 		return nil
 	}
 	m, me, pid, self := map[string]bool{}, strconv.Itoa(os.Getpid()), "", false
+	nf, nn := 0, 0
+	whole := func() bool { return pid == "" || nf > 0 && nn > 0 } // 앞 레코드가 온전한가(첫 레코드 전이면 참)
 	for _, l := range strings.Split(strings.TrimSuffix(res.out, "\n"), "\n") {
 		switch {
 		case l == "":
 			return nil
 		case l[0] == 'p':
-			pid = l[1:]
+			if !whole() || len(l) == 1 || strings.Trim(l[1:], "0123456789") != "" {
+				return nil
+			}
+			pid, nf, nn = l[1:], 0, 0
+		case pid == "": // 첫 p 앞 줄
+			return nil
+		case l[0] == 'f':
+			nf++
 		case l[0] == 'n':
+			nn++
 			if pid == me {
 				self = true
 			}
 			if strings.HasPrefix(l, "n/") {
 				m[l[1:]] = true
 			}
-		case !('a' <= l[0] && l[0] <= 'z' || 'A' <= l[0] && l[0] <= 'Z'):
-			return nil // 필드 글자로 시작하지 않는 줄(오류 문구·잘린 줄)
+		default:
+			return nil // 요청 안 한 필드·오류 문구·잘린 줄
 		}
 	}
-	if !self {
+	if pid == "" || !whole() || !self {
 		return nil
 	}
 	return m
@@ -286,7 +299,8 @@ func du(path string, r runner) string {
 // 중단·실패 뒤 다음 바퀴는 표식의 시각으로 만든 같은 키로 다시 보낸다(hc-lane이 같은 키는 한 번만 적는다 — 두 바퀴 겹쳐도 한 건, B07).
 const pendingMark = "대기"
 
-// readMark: 표식 (있음, 대기 중이면 그 시각). 못 읽으면 있음·대기 아님(다시 보내지 않는 쪽)
+// readMark: 표식 (있음, 대기 중이면 그 시각). 못 읽으면 있음·대기 아님(다시 보내지 않는 쪽). 비었거나 잘린 표식(빈 파일·첫 줄에
+// 탭 없음·「대기」인데 시각 빔 — 쓰다 끊김)은 보냈는지 모르니 없는 것으로 본다(R-21 — 같은 부족을 다시 확인해 보낸다)
 func readMark(state string) (bool, string) {
 	if !lexists(state) {
 		return false, ""
@@ -296,10 +310,13 @@ func readMark(state string) (bool, string) {
 		return true, ""
 	}
 	f := strings.SplitN(strings.SplitN(string(b), "\n", 2)[0], "\t", 3)
-	if len(f) >= 2 && f[0] == pendingMark && f[1] != "" {
+	switch {
+	case len(f) >= 2 && f[0] == pendingMark && f[1] != "":
 		return true, f[1]
+	case len(f) >= 2 && f[0] != "" && f[0] != pendingMark: // 「<시각><탭><글>」 = 보냄(셸 판 표식도 같은 꼴)
+		return true, ""
 	}
-	return true, ""
+	return false, ""
 }
 
 // diskAlert: 부족 알림 한 바퀴(free·used = diskUsage). 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 ""
@@ -341,7 +358,7 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 	if at == "" {
 		// 키 글자(hc-lane report --key: A-Za-z0-9_.:/-). 초 아래까지 — 회복 뒤 같은 초의 새 부족이 같은 키로 걸러지지 않게
 		at = time.Now().Format("2006-01-02T15:04:05.000000")
-		if os.MkdirAll(filepath.Dir(state), 0o755) != nil || os.WriteFile(state, []byte(pendingMark+"\t"+at+"\t"+msg+"\n"), 0o644) != nil {
+		if os.MkdirAll(filepath.Dir(state), 0o755) != nil || atomic.WriteFile(state, []byte(pendingMark+"\t"+at+"\t"+msg+"\n"), 0o644) != nil {
 			at = time.Now().Format("2006-01-02")
 		}
 	}
@@ -349,8 +366,10 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 		fmt.Println("디스크 부족 알림 실패(hc-lane report) — 다음 바퀴에 같은 키로 다시")
 		return ""
 	}
-	if lexists(state) { // 보냄: 대기 표식을 「보냄」으로(못 바꾸면 다음 바퀴가 같은 키로 한 번 더 — hc-lane이 거른다)
-		os.WriteFile(state, []byte(at+"\t"+msg+"\n"), 0o644)
+	if lexists(state) { // 보냄: 대기 표식을 「보냄」으로 원자 저장(못 바꾸면 다음 바퀴가 같은 키로 한 번 더 — hc-lane이 거른다)
+		if err := atomic.WriteFile(state, []byte(at+"\t"+msg+"\n"), 0o644); err != nil {
+			fmt.Println("디스크 부족 표식을 「보냄」으로 못 바꿈 — 다음 바퀴에 같은 키로 한 번 더:", err)
+		}
 	}
 	return msg
 }

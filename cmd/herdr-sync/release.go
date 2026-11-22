@@ -3,7 +3,7 @@ package main
 // 바이너리: herdr-tools 도구는 Go 바이너리 하나다(2026-11-22 사용자 「셸 판 그냥 지금 즉시 지우고 go 로 된것만 집중 개선 수정하자」 — go-shell-remove).
 // sync.list 바이너리 줄(`<묶음> .local/bin/<도구> tools:cmd/<도구> <대상>`)마다 그 대상 기계의 ~/.local/bin/<도구>에 원자 교체로 깐다.
 //   - 짓기·올리기(release — 2026-11-21 사용자 「각 컴퓨터 마다 빌드 하지말고 github 에다가 빌드 한것도 처리해서 … 각 컴퓨터에서는 받아서」):
-//     herdr-tools-publish가 개인 값·비밀 꼴을 검사하고 내보낸 바로 그 비공개 커밋(HERDR_TOOLS_PUBLISH_RESULT)을 git archive로 꺼내
+//     herdr-tools-publish가 개인 값·비밀 꼴을 검사하고 내보낸 바로 그 비공개 커밋(HERDR_TOOLS_PUBLISH_RESULT)을 원본 blob 그대로(exportTree) 꺼내
 //     바이너리 줄의 도구를 darwin/arm64로, 리눅스 기계에 가는 도구는 linux/amd64로도 짓는다(-trimpath, CGO_ENABLED=0, GOTOOLCHAIN=local,
 //     커밋을 -ldflags -X로 새김, 상한 HERDR_TIMEOUT_BUILD 600초). 그 커밋의 트리가 범용 저장소 HEAD와 다르면 올리지 않는다(gofix-ops A02).
 //     publish.repo 릴리스 bin-<커밋 12자>에 <도구>·<도구>-linux-amd64·SHA256SUMS. 이미 올린 자산은 덮지 않는다(A05)
@@ -19,21 +19,16 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/proc"
 )
 
@@ -200,7 +195,7 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 	c.Stderr = &errb
 	out, rc := output(c)
 	ok := rc == 0
-	for _, p := range installReport(m, tools, out) {
+	for _, p := range putNotes(m, tools, out, rc, errb.String()) {
 		switch {
 		case p.bad:
 			ok = false
@@ -214,9 +209,6 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 			ok = false
 		}
 	}
-	if rc != 0 {
-		fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s 바이너리 깔기 실패 (종료 %d) %s !!!\n", m, rc, strings.TrimSpace(errb.String()))
-	}
 	if !ok {
 		if !check {
 			fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s 바이너리를 다 깔지 못했다 — 그 기계의 설정·지움은 미룬다(옛 도구가 남아 있게). 다음 herdr-sync에서 !!!\n", m)
@@ -224,6 +216,15 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 		return []string{"바이너리"}, false
 	}
 	return nil, true
+}
+
+// putNotes: 깔기 한 번(맥·기계)의 알릴 줄. 전송이 0으로 끝나지 않았으면 응답 줄은 잘렸거나 끝나지 않은 것일 수 있어 확정(받음)으로
+// 찍지 않는다 — 깔렸는지 모른다는 못 깖 한 줄만(다음 herdr-sync가 판을 보고 다시 깔거나 같음으로 넘어간다, R-19)
+func putNotes(m string, tools []string, out string, rc int, errs string) []note {
+	if rc != 0 {
+		return []note{{s: fmt.Sprintf("%s 바이너리 깔기 실패 (종료 %d — 깔렸는지 모름, 다음 herdr-sync에서 확인) %s", m, rc, strings.TrimSpace(errs)), bad: true}}
+	}
+	return installReport(m, tools, out)
 }
 
 type note struct {
@@ -285,77 +286,6 @@ func githubSlug(url string) string {
 		return m[1]
 	}
 	return ""
-}
-
-// srcDigest: 모듈 소스 판 — go.mod·cmd/**·internal/** 의 일반 파일 전부(go:embed 글 포함 — 임베드만 바뀐 판도 알아보게, gofix-core B10·M4)를
-// 상대 경로 바이트 순으로 「crc 크기 경로」 줄로 적은 목록의 cksum(crc.크기). 숨김 파일·숨김 폴더 아래는 뺀다(herdr-sync 나무 줄이 걷지 않아 기계에 없다).
-// installSh의 cur(`find … ! -path '*/.*' | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
-func srcDigest(dir string) (string, error) {
-	var files []string
-	for _, top := range []string{"go.mod", "cmd", "internal"} {
-		err := filepath.WalkDir(filepath.Join(dir, top), func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
-				return err
-			}
-			if strings.HasPrefix(d.Name(), ".") {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.Type().IsRegular() {
-				rel, _ := filepath.Rel(dir, p)
-				files = append(files, rel)
-			}
-			return nil
-		})
-		if err != nil {
-			return "", fmt.Errorf("소스 걷기 %s: %w", top, err)
-		}
-	}
-	sort.Strings(files)
-	var b bytes.Buffer
-	for _, f := range files {
-		fh, err := os.Open(filepath.Join(dir, f))
-		if err != nil {
-			return "", fmt.Errorf("소스 읽기 %s: %w", f, err)
-		}
-		c, n, err := cksum.Reader(fh)
-		fh.Close()
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&b, "%d %d %s\n", c, n, f)
-	}
-	return cksum.Dot(b.Bytes()), nil
-}
-
-func goBin() string {
-	if p, err := exec.LookPath("go"); err == nil {
-		return p
-	}
-	for _, p := range []string{"/opt/homebrew/bin/go", "/usr/local/go/bin/go", "/usr/local/bin/go"} {
-		if isFile(p) {
-			return p
-		}
-	}
-	return ""
-}
-
-func sha256File(p string) (string, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // gh: 표준 출력·종료 코드·표준 오류(그대로도 흘린다). 상한(proc.Limit — gh는 HERDR_TIMEOUT_REMOTE)에 걸리면 124 = 모름
@@ -435,14 +365,8 @@ func release(rel *relInfo, pub, checked string, pubwarn func(string)) {
 		pubwarn("릴리스 건너뜀 — 임시 폴더")
 		return
 	}
-	if _, rc := git("-C", REPO, "archive", "--format=tar", "-o", TMP+"/relsrc.tar", checked); rc != 0 {
-		pubwarn("릴리스 건너뜀 — 검사한 커밋을 꺼내지 못했다(git archive)")
-		return
-	}
-	x := exec.Command("tar", "-xf", TMP+"/relsrc.tar", "-C", srcd)
-	x.Stderr = os.Stderr
-	if run(x) != 0 {
-		pubwarn("릴리스 건너뜀 — 검사한 커밋을 풀지 못했다(tar)")
+	if err := exportTree(REPO, checked, srcd); err != nil {
+		pubwarn("릴리스 건너뜀 — 검사한 커밋을 꺼내지 못했다 (" + err.Error() + ")")
 		return
 	}
 	var tools []string
@@ -529,7 +453,9 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 	all := append(append([]string(nil), tools...), "SHA256SUMS")
 	names, rc, errs := gh("release", "view", tag, "--repo", slug, "--json", "assets", "--jq", ".assets[].name")
 	if rc != 0 {
-		if rc != proc.TimeoutCode && strings.Contains(strings.ToLower(errs), "not found") { // gh: 「release not found」 — 없음이 확인됨
+		// gh가 그 태그의 릴리스가 없다고 한 줄로 답했을 때(「release not found」)만 없음이 확인됨 — 「proxy host not found」·저장소 404 같은
+		// 연결·인증·이름 풀기 오류는 조회 실패(모름)다(R-12)
+		if rc != proc.TimeoutCode && strings.TrimSpace(errs) == "release not found" {
 			args := append([]string{"release", "create", tag, "--repo", slug, "--title", tag,
 				"--notes", "herdr-tools " + c12 + " Go 도구 바이너리(<도구> darwin/arm64, <도구>-linux-amd64) — herdr-sync가 맥에서 지어 올림, 기계는 SHA256SUMS로 확인해 받는다"}, files(all)...)
 			if _, rc, _ := gh(args...); rc != 0 {
@@ -561,6 +487,32 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 		if string(b) != sums {
 			pubwarn("릴리스 " + tag + "의 SHA256SUMS가 이번 빌드와 다르다 — 덮지 않는다(올린 자산을 지우지 않게). 기계는 각자 짓는다")
 			return false
+		}
+	} else { // 명세 없이 자산만 남은 반쪽 릴리스: 남은 자산의 바이트가 이번 빌드와 같을 때만 명세를 올린다(R-13)
+		if err := os.MkdirAll(TMP+"/relold", 0o700); err != nil {
+			pubwarn("릴리스 확인 실패 " + tag + " (임시 폴더)")
+			return false
+		}
+		for _, n := range tools {
+			if !have[n] {
+				continue
+			}
+			got := TMP + "/relold/" + n
+			os.Remove(got)
+			if _, rc, _ := gh("release", "download", tag, "--repo", slug, "--pattern", n, "--dir", TMP+"/relold", "--clobber"); rc != 0 {
+				pubwarn("릴리스 확인 실패 " + tag + " (gh release download " + n + ") — 이번에는 올리지도 받지도 않는다, 다음 herdr-sync에서")
+				return false
+			}
+			a, err1 := sha256File(got)
+			w, err2 := sha256File(out + "/" + n)
+			if err1 != nil || err2 != nil {
+				pubwarn("릴리스 확인 실패 " + tag + " (받은 " + n + "의 sha256)")
+				return false
+			}
+			if a != w {
+				pubwarn("릴리스 " + tag + "에 남은 " + n + "이 이번 빌드와 다르다 — 명세를 올리지 않는다(맞지 않는 명세를 공개하지 않게). 기계는 각자 빌드한다")
+				return false
+			}
 		}
 	}
 	var miss []string

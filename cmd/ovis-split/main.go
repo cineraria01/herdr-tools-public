@@ -198,13 +198,24 @@ func droppable(target obj, mainAddress string) bool {
 	return str(target, "address") == mainAddress || str(target, "parent") == mainAddress
 }
 
-func terminals(m obj) []obj {
-	l, _ := m["terminals"].([]any)
+// terminals: hc ls 목록. terminals가 배열이 아니거나(빈 응답 {}도) 원소가 객체가 아니거나 주소·state(문자열)가 없으면 목록을
+// 모르는 것이라 종료 1 — 두 목록 다 라벨을 붙이기 전에 받으니 하나라도 어긋나면 라벨 0회다(R-08: 어긋난 원소를 건너뛰고 붙였다)
+func terminals(m obj, what string) []obj {
+	l, ok := m["terminals"].([]any)
+	if !ok {
+		die("%s 응답에 terminals(배열)가 없다", what)
+	}
 	var out []obj
 	for _, x := range l {
-		if t, ok := x.(map[string]any); ok {
-			out = append(out, t)
+		t, ok := x.(map[string]any)
+		if !ok {
+			die("%s 응답의 터미널이 객체가 아니다", what)
 		}
+		addrOf(t, what)
+		if _, ok := t["state"].(string); !ok {
+			die("%s 응답의 %s에 state(문자열)가 없다", what, str(t, "address"))
+		}
+		out = append(out, t)
 	}
 	return out
 }
@@ -246,7 +257,7 @@ func main() {
 		return
 	}
 	var live []obj
-	for _, t := range terminals(hc("ls", "--json")) {
+	for _, t := range terminals(hc("ls", "--json"), "hc ls") {
 		if str(t, "state") == "live" {
 			live = append(live, t)
 		}
@@ -257,14 +268,12 @@ func main() {
 	}
 	var candidates []obj
 	for _, t := range live {
-		addrOf(t, "hc ls") // 셸 판은 살아 있는 터미널 주소로 표를 만들다 KeyError — 여기서는 라벨 전에
 		if str(t, "where") != "" {
 			candidates = append(candidates, t)
 		}
 	}
-	for _, t := range terminals(hc("ls", "--json", "--label", wsName+"="+folder)) {
+	for _, t := range terminals(hc("ls", "--json", "--label", wsName+"="+folder), "hc ls --label") {
 		if str(t, "state") == "live" {
-			addrOf(t, "hc ls --label")
 			candidates = append(candidates, t)
 		}
 	}

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/atomic"
 )
 
 // tsCands: PATH에 없을 때 볼 자리(앱 묶음·Homebrew·tailscaled 깔린 곳)
@@ -82,15 +84,26 @@ func tsBrief(r result) string {
 	return cutRunes(dash(first), 200)
 }
 
-// tsTake: 한 시간 한도 안이면 이번 시도를 적고 true. 기록은 시각(유닉스 초) 한 줄씩. 못 읽거나 못 쓰면 false(모름이면 안 함)
+// tsTake: 한 시간 한도 안이면 이번 시도를 적고 true. 기록은 시각(유닉스 초, 10자리 이상) 한 줄씩 — 쓸기 잠금(sweep.lock) 안에서
+// 읽고 원자 저장한다. 못 읽거나 못 쓰거나, 비었거나·잘렸거나(줄 끝 없음)·손상된(숫자 아님·앞날) 기록이면 한도를 모르니 false(R-30)
 func tsTake(state string, perHour int, now time.Time) bool {
 	b, err := os.ReadFile(state)
 	if err != nil && !os.IsNotExist(err) {
 		return false
 	}
+	if err == nil && (len(b) == 0 || b[len(b)-1] != '\n') {
+		return false
+	}
 	var keep []string
-	for _, l := range strings.Fields(string(b)) {
-		if t, err := strconv.ParseInt(l, 10, 64); err == nil && now.Unix()-t < 3600 {
+	for _, l := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+		if l == "" && len(b) == 0 {
+			break // 파일 없음
+		}
+		t, err := strconv.ParseInt(l, 10, 64)
+		if err != nil || len(l) < 10 || t > now.Unix()+60 {
+			return false
+		}
+		if now.Unix()-t < 3600 {
 			keep = append(keep, l)
 		}
 	}
@@ -101,7 +114,7 @@ func tsTake(state string, perHour int, now time.Time) bool {
 	if os.MkdirAll(filepath.Dir(state), 0o755) != nil {
 		return false
 	}
-	return os.WriteFile(state, []byte(strings.Join(keep, "\n")+"\n"), 0o644) == nil
+	return atomic.WriteFile(state, []byte(strings.Join(keep, "\n")+"\n"), 0o644) == nil
 }
 
 // tailscaleCheck: 한 바퀴. report(msg, key)는 사건 한 줄(key 빈 값이면 키 없이). 찍을 줄들을 돌려준다
@@ -118,6 +131,9 @@ func tailscaleCheck(ts, machine string, perHour int, state string, dry bool, r r
 		lines = append(lines, "Tailscale: "+msg)
 	}
 	st := r(30*time.Second, nil, ts, "status")
+	if st.err != nil { // 끝나지 못한 조회(시간 초과·출력 관)는 「꺼짐」 문구가 찍혀 있어도 모름 — up을 부르지 않는다(R-29)
+		return append(lines, "Tailscale 점검: 상태 모름("+cutRunes(st.err.Error(), 200)+") — 다음 바퀴에")
+	}
 	all := st.out + "\n" + st.errs
 	if m := tsVerRe.FindStringSubmatch(all); m != nil {
 		say(fmt.Sprintf("Tailscale 앱과 연결부 판이 다름(%s): client %s != tailscaled %s — 사람이 앱을 열어야 할 수 있음", machine, m[1], m[2]),
@@ -146,6 +162,10 @@ func tailscaleCheck(ts, machine string, perHour int, state string, dry bool, r r
 		return lines
 	}
 	flags, ok := tsUpFlags(up.out + "\n" + up.errs)
+	if up.err != nil { // 끝나지 못한 up(시간 초과 등)의 남은 출력으로는 다시 부르지 않는다(R-29)
+		say(head+" — tailscale up이 끝나지 못함, 더 손대지 않음: "+tsBrief(up), "")
+		return lines
+	}
 	if !ok {
 		say(head+" — tailscale up 실패, 알려 준 줄 꼴이 아니라 더 손대지 않음: "+tsBrief(up), "")
 		return lines

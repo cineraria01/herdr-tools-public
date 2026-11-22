@@ -460,8 +460,8 @@ func secF2k(k *K) {
 		return false
 	}())
 	if isDir(repo + "/config.example") {
-		rd := repo + "/README.md"
-		k.check("README(2차 낮음 2): --then 병용 금지 목록에 --overlap-ok, 한 값 키 목록에 overlap", fBoth(rd, "--no-audit`·`--coord", "--overlap-ok") && fBoth(rd, "한 값 키(", "`overlap`"))
+		then, conf := repo+"/docs/hc-fill/then.md", repo+"/docs/hc-fill/config.md"
+		k.check("문서(2차 낮음 2): --then 병용 금지 목록에 --overlap-ok, 한 값 키 목록에 overlap", fBoth(then, "--no-audit`·`--coord", "--overlap-ok") && fBoth(conf, "한 값 키(", "`overlap`"))
 	}
 
 	// 10l. 단독: add --solo 줄은 그 프로젝트에 다른 쓰기 소유 레인이 있으면 기다리고, 단독이 떠 있으면 그 프로젝트의 다른 쓰기 줄을 띄우지 않는다

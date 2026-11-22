@@ -167,19 +167,20 @@ func startCheck(a string) int {
 	start = "no_status"
 	for _, ln := range ls {
 		if keychainRe.MatchString(ln) {
-			start, r, k, hit = "keychain", 7, "키체인", ln
+			start, r, k, hit = "keychain", 7, "키체인", keychainRe.FindString(ln)
 			break
 		}
 	}
 	if k == "" {
 		for _, ln := range ls {
 			if loginRe.MatchString(ln) {
-				start, r, k, hit = "login", 6, "로그인·인증", ln
+				start, r, k, hit = "login", 6, "로그인·인증", loginRe.FindString(ln)
 				break
 			}
 		}
 	}
-	hit = redactHit(strings.TrimLeft(hit, " \t"))
+	// 막힘 줄에는 화면 원문 대신 판정 무늬에 맞은 고정 구절만 — 자유 형식 인증 화면(짧은 비밀값 포함)을 사건·바퀴 기록에 넣지 않는다(R-21)
+	hit = redactHit(strings.TrimSpace(hit))
 	if rs := []rune(hit); len(rs) > 160 {
 		hit = string(rs[:160])
 	}

@@ -119,19 +119,22 @@ func machineKnown(ctx context.Context, m string) (bool, error) {
 		return false, fmt.Errorf("종료 %d", rc)
 	}
 	var v struct {
-		Machines []struct {
-			Name string `json:"name"`
+		Machines []*struct {
+			Name *string `json:"name"`
 		} `json:"machines"`
 	}
 	if err := json.Unmarshal([]byte(out), &v); err != nil || v.Machines == nil {
 		return false, fmt.Errorf("JSON 목록이 아님")
 	}
+	// 행이 null이거나 이름(문자열)이 없거나 비면 그 행이 m인지 모른다 — 「없음」을 확정하지 않는다(R-17)
+	found := false
 	for _, x := range v.Machines {
-		if x.Name == m {
-			return true, nil
+		if x == nil || x.Name == nil || *x.Name == "" {
+			return false, fmt.Errorf("이름 없는 행이 든 목록")
 		}
+		found = found || *x.Name == m
 	}
-	return false, nil
+	return found, nil
 }
 
 // addMachine: hc machine add <m> --install --name <m>(addSec 상한). 넘기면 등록됐는지 모른다 — 목록을 다시 보고 알리되 실패로 끝낸다(E11)

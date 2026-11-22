@@ -13,14 +13,17 @@ import (
 
 func addCmd(args []string) {
 	name, prj, brief, after, only, coord := "", "", "", "-", "-", ""
-	cx, prio, early, aud, ovk, thn, xo, onl := false, "normal", "-", "-", "-", "", "", ""
+	cx, prio, early, aud, ovk, thn, xo, onl, anyp := false, "normal", "-", "-", "-", "", "", "", false
 	for len(args) > 0 {
 		a := args[0]
 		switch a {
-		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land":
+		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land", "--after-any-project":
 			xo += " " + a // --then과 함께 못 씀
 		}
 		switch a {
+		case "--after-any-project":
+			anyp, args = true, args[1:]
+			continue
 		case "--no-early":
 			early, args = "no-early", args[1:]
 			continue
@@ -112,15 +115,11 @@ func addCmd(args []string) {
 	if x := thenof(name); x != "" {
 		die("%s은 이미 %s에 이어 붙였다(--then) — 다른 이름으로", name, x)
 	}
+	if anyp && after == "-" {
+		die("--after-any-project는 --after와 함께 쓴다")
+	}
 	if after != "-" {
-		for _, a := range words(after) {
-			if !okname(a) {
-				die("--after 레인 이름: %s", a)
-			}
-			if w, k := kindwhy(a); k {
-				die("--after: %s", w)
-			}
-		}
+		after = afterFix(name, prj, after, anyp) // 잘못된 이름 종료 1, 다른 프로젝트 선행 거절 종료 2
 	}
 	if onl != "" {
 		onlandCheck(onl, prj)

@@ -58,7 +58,7 @@ func sendCmd(a []string) int {
 		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 실패 — 아무에게도 안 보냈다")
 		return 1
 	}
-	if !jlistOK(tl, "terminals") {
+	if !jlistOK(tl, "terminals", "address", "state") {
 		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 출력을 읽지 못했다(잘림·형식) — 아무에게도 안 보냈다")
 		return 1
 	}

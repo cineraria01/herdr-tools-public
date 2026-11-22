@@ -24,9 +24,17 @@ var (
 func gcKeepf(t, why string) { fmt.Printf("%s남김 %s %s\n", gcP, t, why); gcKn++ }
 func gcGone(t, what string) { fmt.Printf("%s지움 %s %s\n", gcP, t, what); gcDn++ }
 
-const ginScript = `cd "$1" || exit 2; c=$(git rev-list --no-merges "$2..$3") || exit 2
-    git log -p --no-merges --no-color --no-ext-diff "$3..$2" | git patch-id --verbatim | sed "s/^/U /"
-    git log -p --no-merges --no-color --no-ext-diff "$2..$3" | git patch-id --verbatim | sed "s/^/B /"
+// ginScript: 비조상·병합 커밋 없는 가지의 고유 커밋(C)과 양쪽 패치 id(U 기준 쪽, B 가지 쪽). git 명령마다 종료값을 본다 — 파이프가
+// 앞 명령의 실패를 삼키지 않게 임시 파일을 거친다. 고유 커밋이 없으면(비조상과 모순) 확인 못 함 2(R-09)
+const ginScript = `cd "$1" || exit 2; c=$(git rev-list --no-merges "$2..$3") || exit 2; [ -n "$c" ] || exit 2
+    t=$(mktemp "${TMPDIR:-/tmp}/hc-lane-gin.XXXXXX") || exit 2
+    trap 'rm -f "$t" "$t.p"' EXIT
+    git log -p --no-merges --no-color --no-ext-diff "$3..$2" >"$t" || exit 2
+    git patch-id --verbatim <"$t" >"$t.p" || exit 2
+    sed "s/^/U /" "$t.p" || exit 2
+    git log -p --no-merges --no-color --no-ext-diff "$2..$3" >"$t" || exit 2
+    git patch-id --verbatim <"$t" >"$t.p" || exit 2
+    sed "s/^/B /" "$t.p" || exit 2
     printf "%s\n" "$c" | sed "/^$/d; s/^/C /"`
 
 // gin: 그 커밋이 기준에 다 들어갔나. 0 들어감(조상, 또는 병합 커밋 없이 커밋마다 공백까지 같은 패치가 있음), 1 아님(안 들어간 수), 2 확인 못 함
@@ -66,6 +74,9 @@ func gin(c string) (string, int) {
 			cs = append(cs, f[1])
 		}
 	}
+	if len(cs) == 0 { // 비조상인데 고유 커밋을 하나도 못 읽음 — 「모두 들어감」이 아니다(R-09)
+		return "0", 2
+	}
 	m := 0
 	for _, x := range cs {
 		if p, ok := b[x]; !ok || !u[p] {
@@ -102,9 +113,16 @@ func jdg(t, c string, ts int64) bool {
 var posixClass = map[string]bool{"alnum": true, "alpha": true, "blank": true, "cntrl": true, "digit": true, "graph": true,
 	"lower": true, "print": true, "punct": true, "space": true, "upper": true, "xdigit": true}
 
+// uniClass: UTF-8 로캘 셸이 보는 묶음(한글 등 ASCII 밖 글자 포함). digit·xdigit·blank·cntrl은 로캘과 상관없이 ASCII 그대로
+var uniClass = map[string]string{"alpha": `\p{L}\p{M}`, "alnum": `\p{L}\p{M}\p{N}`, "upper": `\p{Lu}`, "lower": `\p{Ll}`,
+	"punct": `\p{P}\p{S}`, "graph": `\p{L}\p{M}\p{N}\p{P}\p{S}`, "print": `\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}`, "space": `\s\p{Z}`}
+
 // globRe: 셸 case 무늬(* ? [..] \)를 정규식으로 — 글자(룬) 단위, * 는 / 도 맞는다. [ ] 안은 ! ^ 부정, 맨 앞 ] 는 글자,
-// [:digit:] 같은 묶음. 해석할 수 없는 무늬(닫히지 않은 [·모르는 묶음)는 오류 — 부르는 쪽은 지우지 않고 멈춘다(gofix L02)
-func globRe(p string) (*regexp.Regexp, error) {
+// [:digit:] 같은 묶음(C 로캘 꼴, ASCII). 해석할 수 없는 무늬(닫히지 않은 [·모르는 묶음)는 오류 — 부르는 쪽은 지우지 않고 멈춘다(gofix L02)
+func globRe(p string) (*regexp.Regexp, error) { return globRex(p, false) }
+
+// globRex: uni면 [:alpha:] 같은 묶음을 UTF-8 로캘 꼴(유니코드)로
+func globRex(p string, uni bool) (*regexp.Regexp, error) {
 	var b strings.Builder
 	b.WriteString("^")
 	rs := []rune(p)
@@ -141,7 +159,11 @@ func globRe(p string) (*regexp.Regexp, error) {
 					if k+1 >= len(rs) || !posixClass[string(rs[j+2:k])] {
 						return nil, fmt.Errorf("모르는 문자 묶음: %s", p)
 					}
-					b.WriteString("[:" + string(rs[j+2:k]) + ":]")
+					if u, ok := uniClass[string(rs[j+2:k])]; uni && ok {
+						b.WriteString(u)
+					} else {
+						b.WriteString("[:" + string(rs[j+2:k]) + ":]")
+					}
 					j = k + 1
 					continue
 				}
@@ -163,6 +185,7 @@ func globRe(p string) (*regexp.Regexp, error) {
 	return regexp.Compile(b.String())
 }
 
+// gcKeepRe: 무늬마다 C 로캘 꼴과 UTF-8 로캘 꼴 둘 — 기준 셸의 로캘을 모르니 어느 쪽이든 맞으면 남긴다(보호 쪽으로, R-05)
 var gcKeepRe []*regexp.Regexp
 
 func kept(br string) bool {
@@ -243,7 +266,10 @@ const gcProgScript = `for s in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_
 const gcAttScript = `c=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir) || exit 0
     cat "$c"/rebase-*/head-name "$c"/worktrees/*/rebase-*/head-name 2>/dev/null; exit 0`
 
-var qaPathRe = regexp.MustCompile(`(^|/)\.qa(/|$)`)
+var (
+	qaPathRe = regexp.MustCompile(`(^|/)\.qa(/|$)`)
+	reflogTS = regexp.MustCompile(`\A[^\n]*@\{([0-9]+)\}\z`) // reflog -1 --date=unix --format=%gd 한 줄
+)
 
 func short12(s string) string { return s[:min(12, len(s))] }
 
@@ -257,18 +283,17 @@ func gcMain(args []string) int {
 	gcKeep = strings.Fields(cfg("gc.keep_branches", ""))
 	gcKeepRe = nil
 	for _, p := range gcKeep {
-		re, err := globRe(p)
-		if err != nil {
-			die("gc: 설정 gc.keep_branches 무늬를 읽지 못했다(%v) — 아무것도 지우지 않았다", err)
+		for _, uni := range []bool{false, true} {
+			re, err := globRex(p, uni)
+			if err != nil {
+				die("gc: 설정 gc.keep_branches 무늬를 읽지 못했다(%v) — 아무것도 지우지 않았다", err)
+			}
+			gcKeepRe = append(gcKeepRe, re)
 		}
-		gcKeepRe = append(gcKeepRe, re)
 	}
 	ps, r := termPairs()
-	switch r {
-	case 1:
-		die("gc: hc ls 실패 — 작업 폴더를 쓰는 터미널을 확인하지 못해 아무것도 지우지 않았다")
-	case 2:
-		die("gc: hc ls --json 출력을 읽지 못했다(형식이 바뀌었나?) — 아무것도 지우지 않았다")
+	if r != 0 {
+		die("gc: %s — 작업 폴더를 쓰는 터미널을 확인하지 못해 아무것도 지우지 않았다", termWhy(r))
 	}
 	if remote {
 		if dry {
@@ -429,6 +454,17 @@ func gcMain(args []string) int {
 				errf("hc-lane gc: herdr-teardown.sh 실패(정리는 계속): %s\n", wt)
 			}
 		}
+		// 지우기 직전 대상 기계의 사용 여부를 다시 본다 — 그사이 붙은 터미널·끊긴 기계는 남긴다(R-07)
+		if dir {
+			if ps2, r := termPairs(); r != 0 {
+				gcKeepf(wt, "지우기 직전 터미널 재확인 실패("+termWhy(r)+")")
+				gcErr = true
+				continue
+			} else if len(busyTerms(ps2, false)) > 0 {
+				gcKeepf(wt, "지우기 직전 살아 있는 터미널")
+				continue
+			}
+		}
 		// 셋(들어감·깨끗함·쓰는 터미널 없음)을 다 본 뒤라 강제로 지운다
 		if xrun(os.Stderr, os.Stderr, "git", "-C", repo, "worktree", "remove", "--force", wt) != 0 {
 			gcKeepf(wt, "git worktree remove 실패")
@@ -436,7 +472,10 @@ func gcMain(args []string) int {
 			continue
 		}
 		if branch != "" {
-			if v, _ := xout("git", "-C", repo, "rev-parse", "-q", "--verify", "refs/heads/"+branch); v == h {
+			if v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", "refs/heads/"+branch); r != 0 && r != 1 {
+				errf("hc-lane gc: 가지 %s 를 다시 확인하지 못해 남겼다(git rev-parse 종료 %d)\n", branch, r)
+				gcErr = true
+			} else if r == 0 && v == h {
 				if xrun(os.Stderr, os.Stderr, "git", "-C", repo, "branch", "-q", "-D", branch) != 0 {
 					errf("hc-lane gc: 가지 %s 를 지우지 못했다\n", branch)
 					gcErr = true
@@ -477,18 +516,32 @@ func gcMain(args []string) int {
 			gcKeepf("가지 "+b, "남길 목록(gc.keep_branches)")
 			continue
 		}
+		if !isDigits(f[2]) {
+			gcKeepf("가지 "+b, "커밋 시각을 읽지 못함")
+			gcErr = true
+			continue
+		}
 		rl, r := xoutQ("git", "-C", repo, "reflog", "-1", "--date=unix", "--format=%gd", rf)
 		if r != 0 { // 조회 실패(시간 넘김 포함)는 「기록 없음」(종료 0·빈 출력)이 아니다 — 나이를 모르니 남긴다(gofix E03)
 			gcKeepf("가지 "+b, "가지 기록(reflog)을 읽지 못함")
 			gcErr = true
 			continue
 		}
-		if i := strings.LastIndex(rl, "@{"); i >= 0 {
-			rl = rl[i+2:]
-		}
-		rl = strings.TrimSuffix(rl, "}")
-		if n, err := strconv.ParseInt(rl, 10, 64); err == nil && isDigits(rl) && n > ct {
-			ct = n
+		// 빈 출력만 「기록 없음」(커밋 시각으로). 비어 있지 않으면 한 줄 「…@{<초>}」여야 한다 — 깨졌으면 나이를 모르니 남긴다(R-08)
+		if rl != "" {
+			m := reflogTS.FindStringSubmatch(rl)
+			if m == nil {
+				gcKeepf("가지 "+b, "가지 기록(reflog) 꼴을 읽지 못함")
+				gcErr = true
+				continue
+			}
+			if n, err := strconv.ParseInt(m[1], 10, 64); err == nil && n > ct {
+				ct = n
+			} else if err != nil {
+				gcKeepf("가지 "+b, "가지 기록(reflog) 시각을 읽지 못함")
+				gcErr = true
+				continue
+			}
 		}
 		if !jdg("가지 "+b, s, ct) {
 			continue
@@ -498,7 +551,12 @@ func gcMain(args []string) int {
 			continue
 		}
 		// 판정한 값 그대로일 때만 지운다. 되돌리기: git branch <가지> <sha>
-		if v, _ := xout("git", "-C", repo, "rev-parse", "-q", "--verify", rf); v != s {
+		// 종료 0과 같은 SHA가 함께 확인된 때만(실패한 조회의 출력을 믿지 않는다, R-10)
+		if v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", rf); r != 0 {
+			gcKeepf("가지 "+b, "지우기 직전 재조회 실패")
+			gcErr = true
+			continue
+		} else if v != s {
 			gcKeepf("가지 "+b, "그사이 움직임")
 			continue
 		}

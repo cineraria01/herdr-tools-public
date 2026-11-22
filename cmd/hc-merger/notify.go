@@ -4,10 +4,10 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -37,6 +37,7 @@ func (m *M) outbox(mt meta, n, st, sha, msg, ln string) bool {
 func (m *M) flush() {
 	des, err := os.ReadDir(m.mj + "/out")
 	if err != nil {
+		m.listFail("보낼 함", err)
 		return
 	}
 	names := []string{}
@@ -84,24 +85,18 @@ func haveEvent(ln, st, key, msg string) (bool, error) {
 const reportMax = 60 * time.Second
 
 // boundedRun: 명령을 새 무리로 띄워 limit 안에서 기다린다(E05·F9) — 넘거나 자식이 끝났는데 출력 관이 안 닫히면 그 무리째 거두고 142
-// (bash 판 perl alarm과 같은 종료, 결과는 모름). 표준 출력·종료 코드·표준 오류. env는 os.Environ() 뒤에 더할 것
+// (bash 판 perl alarm과 같은 종료, 결과는 모름). 표준 출력·종료 코드·표준 오류. env는 os.Environ() 뒤에 더할 것.
+// proc.RunMax라 자식은 고아 기록이 쓰인 뒤에야 시작하고(일꾼이 SIGKILL로 죽어도 다음 실행이 거둔다 — 재감사 R-C04), 종료 코드와
+// 출력 끝을 따로 확인한다(0이 아닌 종료와 관을 쥔 손자가 겹쳐도 반쪽 결과로 정하지 않는다 — R-H09)
 func boundedRun(limit time.Duration, name string, env []string, args ...string) (string, int, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
-	defer cancel()
 	var o, e bytes.Buffer
-	c := exec.CommandContext(ctx, name, args...)
+	c := exec.Command(name, args...)
 	c.Stdout, c.Stderr = &o, &e
 	if env != nil {
 		c.Env = append(os.Environ(), env...)
 	}
-	proc.Group(c)
-	c.Cancel = func() error { proc.StopGroup(c.Process.Pid, time.Second); return nil }
-	c.WaitDelay = time.Second
-	err := c.Run()
-	if errors.Is(err, exec.ErrWaitDelay) && c.Process != nil {
-		proc.StopGroup(c.Process.Pid, time.Second) // 관을 쥔 손자
-	}
-	if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+	err := proc.RunMax(c, limit)
+	if errors.Is(err, proc.ErrTimeout) {
 		return "", 142, e.String()
 	}
 	return o.String(), proc.Code(err), e.String()
@@ -118,13 +113,24 @@ func addrOK(s string) bool {
 }
 
 // sameRun: hc get 결과가 그 레인의 같은 실행인가 — 최상위 state live·name = 레인·created_ms = 제출 때 적은 값.
-// ok 거짓 = 응답을 해석하지 못함(잘린 JSON 등 — 다른 실행이라는 근거가 아니다, E06)
+// ok 거짓 = 응답을 해석하지 못함(잘린 JSON 등 — 다른 실행이라는 근거가 아니다, E06). 응답은 정확히 JSON 객체 하나여야 하고(뒤에 글이
+// 붙으면 모름), live면 이름(글자)·시작 시각이 있어야 「다른 실행」으로 확정한다(R-H07 — 칸이 빠진 live로 보낼 함을 지웠다)
 func sameRun(js, ln, born string) (same, ok bool) {
 	d := json.NewDecoder(strings.NewReader(js))
 	d.UseNumber()
 	var v map[string]any
-	if err := d.Decode(&v); err != nil {
+	if err := d.Decode(&v); err != nil || v == nil {
 		return false, false
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return false, false
+	}
+	st, isStr := v["state"].(string)
+	if !isStr {
+		return false, false
+	}
+	if st != "live" {
+		return false, true
 	}
 	cm := ""
 	switch x := v["created_ms"].(type) {
@@ -133,10 +139,11 @@ func sameRun(js, ln, born string) (same, ok bool) {
 	case string:
 		cm = x
 	}
-	if _, has := v["state"]; !has {
+	name, isStr := v["name"].(string)
+	if !isStr || name == "" || cm == "" {
 		return false, false
 	}
-	return v["state"] == "live" && v["name"] == ln && cm == born, true
+	return name == ln && cm == born, true
 }
 
 // send: 사건(--name <레인>, 제출 때 적은 지휘가 있으면 --to)을 — 같은 열쇠의 사건이 아직 없을 때만 — 적고, 제출한 레인 터미널이

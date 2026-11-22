@@ -323,8 +323,13 @@ func killTree(pids []int, procs map[int]procInfo, seenAt time.Time, wait time.Du
 		born[p] = st
 		todo = append(todo, p)
 	}
+	if _, ok := born[pids[0]]; !ok { // 루트가 처음 본 그 실행이 아니거나 모름: 그 트리의 자손도 우리가 본 것인지 모른다(R-19)
+		return 0, false, nil
+	}
 	for _, p := range todo {
-		term(p)
+		if st, err := startOf(p); err == nil && st.Equal(born[p]) { // 신호 직전에 그 pid가 아직 그 실행인지 다시(R-19)
+			term(p)
+		}
 	}
 	end := time.Now().Add(wait)
 	for time.Now().Before(end) {
@@ -403,7 +408,13 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) (int, err
 	var local []map[string]any
 	var liveCwds []string
 	for _, t := range terms {
-		if str(t, "state") != "live" {
+		st, isStr := t["state"].(string)
+		if !strings.Contains(str(t, "address"), "/") && (!isStr || st != "live" && st != "finished") {
+			// 이 기계 터미널이 살아 있는지 모르면 그 cwd를 「쓰는 터미널 없음」으로 볼 수 없다(R-16)
+			fmt.Println("고아 쓸기 건너뜀: 상태를 모르는 이 기계 터미널이 있다")
+			return 0, nil
+		}
+		if st != "live" {
 			continue
 		}
 		_, hasCwd := t["cwd"].(string)

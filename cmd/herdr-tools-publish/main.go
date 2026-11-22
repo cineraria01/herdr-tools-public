@@ -43,6 +43,37 @@ func exit(code int) {
 	os.Exit(code)
 }
 
+// sweepStaleTmp: 앞 실행이 SIGKILL로 죽으며 남긴 임시 폴더(<TMPDIR>/herdr-tools-publish.*)를 지운다 — owner의 실행이 끝났다고 확정될 때만
+// (pid가 없거나 같은 pid의 시작 시각이 다름). owner가 없거나 모르면(ps 실패) 두고 넘어간다
+func sweepStaleTmp() {
+	base := os.Getenv("TMPDIR")
+	if base == "" {
+		base = os.TempDir()
+	}
+	ds, err := filepath.Glob(filepath.Join(base, me+".*"))
+	if err != nil {
+		return
+	}
+	for _, d := range ds {
+		b, err := os.ReadFile(d + "/owner")
+		if err != nil {
+			continue
+		}
+		f := strings.SplitN(strings.TrimRight(string(b), "\n"), "\t", 2)
+		pid, err := strconv.Atoi(f[0])
+		if err != nil || len(f) != 2 || pid <= 1 || pid == os.Getpid() {
+			continue
+		}
+		if proc.Alive(pid) {
+			st, err := proc.StartTime(pid)
+			if err != nil || st == f[1] {
+				continue // 도는 중이거나 모름
+			}
+		}
+		os.RemoveAll(d)
+	}
+}
+
 func die(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
 	exit(1)
@@ -137,8 +168,18 @@ func main() {
 	}
 	short, _ := git("-C", repo, "rev-parse", "--short", src)
 	var err error
+	sweepStaleTmp()
 	if tmp, err = os.MkdirTemp(os.Getenv("TMPDIR"), me+"."); err != nil {
 		die("임시 폴더를 만들지 못했다: %v", err)
+	}
+	// 신호로 끝날 때도 자식 무리를 거둔 뒤 이 임시 폴더를 지운다(재감사 ops R-10 — 옛 판은 TERM이면 남겼다). SIGKILL로 남은 것은
+	// 다음 실행이 owner(pid·시작 시각)로 소유를 확인해 지운다(sweepStaleTmp)
+	t0 := tmp
+	proc.OnStop(func() { os.RemoveAll(t0) })
+	if st, err := proc.StartTime(os.Getpid()); err == nil {
+		if err := os.WriteFile(tmp+"/owner", []byte(fmt.Sprintf("%d\t%s\n", os.Getpid(), st)), 0o600); err != nil {
+			die("임시 폴더에 쓰지 못했다: %v", err)
+		}
 	}
 
 	// 트리의 블롭마다 검사한다. 경로대로 디스크에 꺼내지 않는다(macOS 디스크는 대소문자·정규화를 구분하지 않아 경로가 겹치고 링크를 따라

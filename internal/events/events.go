@@ -86,7 +86,7 @@ func (e Event) Check() error {
 	}
 	head, tail := e.cols()
 	if n := len(head) + len(tail); n >= MaxLine {
-		return fmt.Errorf("사건 줄이 한 줄 칸 없이 %d바이트(상한 %d) — --to·키·실행 칸이 너무 길다", n, MaxLine)
+		return fmt.Errorf("사건 줄이 한 줄 칸 없이 %d바이트(상한 %d) — --to·--key·실행 칸이 너무 길다", n, MaxLine)
 	}
 	return nil
 }

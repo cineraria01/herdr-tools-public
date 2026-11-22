@@ -421,7 +421,7 @@ func TestRecoveryEventID(t *testing.T) {
 	k.check("box-123 사건 하나", bcount(rows(events), func(r []string) bool { return col(r, 7) == "완료 — 제출 ID box-123" }) == 1, read(events))
 }
 
-// parked_branch: 주차 가지가 없으면 --resume이 띄우지 않고, 있으면 다른 가지 이름으로 그 커밋에서 띄운다
+// parked_branch: 주차 가지가 없으면 --resume이 띄우지 않고, 있으면(refs/park/<레인>) 다른 가지 이름으로 그 커밋에서 띄운다
 func TestRecoveryParkedBranch(t *testing.T) {
 	k := newRK(t)
 	f := k.fixture("parked")
@@ -435,7 +435,8 @@ case $1 in run) touch "$HOME/launched"; echo '{"address":"t11"}';; ls) echo '{"t
 	k.check("없음: 띄우기 실패", r.RC != 0, r.Out, r.Err)
 	k.check("없음: hc run 안 함", !exists(f.home+"/launched"))
 	k.check("없음: 작업 트리 없음", !exists(f.writer+".wt/parked"))
-	f.w(`git push -q origin HEAD:refs/heads/lane/parked`)
+	// 지금 park 꼴(refs/park/<레인>)로 둔다 — 주차 사건 없는 맨 lane/<레인>은 남의 제출 가지라 재개하지 않는다(재감사 R-15)
+	f.w(`git push -q origin HEAD:refs/park/parked`)
 	r = f.lane(f.writer, []string{f.stubPath()}, "--resume", "--name", "parked", "--branch", "alt", "--repo", f.writer, "--start-wait", "0", "--", "true")
 	f.bok("resume --branch alt", r)
 	k.check("있음: hc run", exists(f.home+"/launched"), r.Out, r.Err)

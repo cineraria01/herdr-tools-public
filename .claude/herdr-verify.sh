@@ -5,7 +5,7 @@
 # HERDR_VERIFY_JOBS·HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·tests/repo/secrets_test.go 머리말.
 set -u
 cd "$(dirname "$0")/.." || exit 1
-# 추측 검증 기록(README 「추측 검증」): hc-lane land는 같은 트리·같은 이 스크립트 blob의 원격 기록 refs/herdr/verified/<트리>가 있을 때만
+# 추측 검증 기록(docs/hc-lane/merger-spec-verify.md): hc-lane land는 같은 트리·같은 이 스크립트 blob의 원격 기록 refs/herdr/verified/<트리>가 있을 때만
 # HERDR_VERIFIED_TREE=<트리>를 넘긴다. 지금 HEAD^{tree}가 그 값이고, 추적 파일이 깨끗하고, 원격에 그 기록이 아직 있을 때만 건너뛴다
 # (--cheap-only는 늘 돈다). 하나라도 아니거나 조회가 실패하면 그대로 검증한다
 if [ -n "${HERDR_VERIFIED_TREE-}" ] && [ "${1-}" != --cheap-only ]; then

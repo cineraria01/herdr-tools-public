@@ -47,7 +47,7 @@
 - 빠르기: 기계마다 나무 상태 읽기는 조회 hc 호출 한 번(그 기계에서 `find`·`cksum` 목록)이다. 쓰기(tar, `hc exec -i`)와 충돌 줄 수를 셀 내용 읽기·`--pull` 받기(tar)는 파일 크기와 tar 머리 합이 7MB 아래인 묶음마다 한 번이다. 기계당 hc 호출 수는 파일 수가 아니라 보낼 바이트/7MB에 비례한다(평소 한 번, 맥 스킬 첫 맞추기는 약 18번). 맥에서도 맥·저장소 나무를 폴더마다 한 번에 걷고, 저장소로 모으는 것은 나무마다 tar 한 묶음·`git add`·`git rm` 한 번씩이다.
 - tar는 맥(bsdtar)에서 확장 속성·ACL·맥 메타데이터를 빼고 이름을 바이트 그대로(`--format=pax --options=hdrcharset=BINARY`) 묶는다. 받는 쪽은 같은 파일 시스템의 임시 폴더(`~/.local/state/herdr-sync/w.<pid>`)에 풀고 파일마다 cksum을 맞춘 것만 백업 뒤 바꿔 넣는다. 시작할 때 그 pid가 살아 있지 않은 `w.*` 폴더(hc `--timeout`이 끊은 지난 쓰기)를 지운다.
 - 이름에 탭·줄바꿈이 든 파일과 제외 경로의 glob 글자(`[*?`)는 다루지 않는다.
-- **맞추지 않는 것**(기계마다 다른 것)은 README 「맞추지 않는 것」.
+- **맞추지 않는 것**(기계마다 다른 것)은 `docs/herdr-sync/not-synced.md`.
 
 ## 3-way 규칙 (충돌 없음)
 - 각 대상 기계는 `~/.local/state/herdr-sync/base.tsv`를 가진다. 내용은 경로(또는 구역·설정 키)와, herdr-sync가 마지막으로 써 준 값의 cksum이다.
@@ -88,7 +88,7 @@
 ## 시험·착지
 - 시험은 모두 Go(`go test -race ./...`)이고 네트워크와 실제 기계 없이 돈다. 임시 HOME·임시 저장소와 가짜 `hc`·`ssh`·`git`(PATH 앞), 설정은 `config.example`. 계약 시험은 시험 프로세스에서 지은 바이너리(`internal/clitest`)를 부른다. 셸 시험(`*.test.sh`)은 두지 않는다.
 - 검증은 `bash .claude/herdr-verify.sh`(저장소 간 계약이라 셸 몇 줄로 남김 — 본문은 Go `tests/repo/verify`: `go vet` + `tests/repo` 싼 검사(줄 수 예산·개인 값·비밀 꼴·gofmt 등) + `go test -race ./...`), 착지는 `hc-lane land main`이다.
-- 병합기가 켜진 저장소(원격 `refs/herdr/merger/<기계>`)에서 `hc-lane land`는 제출(`lane/<레인>` + `refs/merge-queue/<UTC초>-<레인>`)이고, 기본 브랜치에 쓰는 것은 그 기계의 `hc-lane merger` 하나다(README 「hc-lane 병합기」). 지시문·자동 감사의 「hc-lane land」 안내는 그대로다.
+- 병합기가 켜진 저장소(원격 `refs/herdr/merger/<기계>`)에서 `hc-lane land`는 제출(`lane/<레인>` + `refs/merge-queue/<UTC초>-<레인>`)이고, 기본 브랜치에 쓰는 것은 그 기계의 `hc-lane merger` 하나다(`docs/hc-lane/merger.md`). 지시문·자동 감사의 「hc-lane land」 안내는 그대로다.
 - 쓰기 레인은 대기열(`hc-fill add`)로 넣는다. 지휘 터미널이 `hc-lane`으로 쓰기 레인을 직접 띄우면(`HC_LANE_FILL=1`·`--direct`·`--read`·`--print-steps`·`--dry-run` 없이) 아무것도 만들지 않고 종료 2다. 꼭 그 자리에 띄울 때만 `--direct`(레인 기록 종류 `direct`). 레인 안·터미널 밖·판정 못 함은 막지 않는다.
 - 끝난 레인 정리는 `hc-lane gc`(main에 다 들어갔고 깨끗하고 쓰는 터미널이 없는 작업 폴더·가지, `--integ`면 들어갔고 하루 지난 `refs/integ/*`만 지운다)이고, hc-fill이 설정 `gc` 분마다 부른다.
 - 레인 폴더의 무시된 보관물 `.qa/`는 손으로 지우지 않는다. `hc-lane clean`이 메인 폴더의 같은 자리로 복사(덮지 않음)하고 모두 같을 때만 지운다(같은 이름의 다른 파일·복사 실패면 멈춤).

@@ -19,9 +19,16 @@ func xattrOf(p string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// aclOf: ls -led의 ACL 항목(「N: 」 번호를 뺀 줄들). 주체는 macOS가 이름이나 UUID로 보이니 글자를 박지 않고 붙인 직후 값과 견준다(R-29)
 func aclOf(p string) string {
-	out, _ := exec.Command("/bin/ls", "-le", p).Output()
-	return string(out)
+	out, _ := exec.Command("/bin/ls", "-led", p).Output()
+	var r []string
+	for _, l := range strings.Split(string(out), "\n")[1:] {
+		if _, e, ok := strings.Cut(strings.TrimSpace(l), ": "); ok {
+			r = append(r, e)
+		}
+	}
+	return strings.Join(r, "\n")
 }
 
 func TestMetadataKept(t *testing.T) {
@@ -33,8 +40,9 @@ func TestMetadataKept(t *testing.T) {
 	if out, err := exec.Command("/bin/chmod", "+a", "everyone allow read", e.S()).CombinedOutput(); err != nil {
 		t.Fatalf("chmod +a: %v %s", err, out)
 	}
-	if !strings.Contains(aclOf(e.S()), "everyone allow read") {
-		t.Fatalf("시험 준비: ACL이 붙지 않았다: %s", aclOf(e.S()))
+	acl := aclOf(e.S())
+	if acl == "" || !strings.Contains(acl, "allow read") {
+		t.Fatalf("시험 준비: ACL이 붙지 않았다: %q", acl)
 	}
 	r := e.run(`{"values":{".model":"new"}}`, "", "--take", ".model")
 	if r.RC != 0 || r.Out != "씀 .model" {
@@ -48,8 +56,8 @@ func TestMetadataKept(t *testing.T) {
 		if xattrOf(p) != "t1" {
 			t.Errorf("확장 속성을 잃었다: %s", p)
 		}
-		if !strings.Contains(aclOf(p), "everyone allow read") {
-			t.Errorf("ACL을 잃었다: %s\n%s", p, aclOf(p))
+		if got := aclOf(p); got != acl {
+			t.Errorf("ACL이 바뀌었다: %s\n%q, 붙인 값 %q", p, got, acl)
 		}
 	}
 }

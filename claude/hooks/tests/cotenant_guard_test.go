@@ -281,15 +281,17 @@ var calmWaited int
 // 시간 시험은 맥 부하에 기대지 않게: calm이 1분 부하가 CPU 수 아래로 내리기를 10초마다 기다린다(합쳐 최대
 // COTENANT_CALM_MAX초, 기본 600 — 단 go test 기한까지 남은 시간의 절반까지: 기다린 뒤 나머지가 부하 속에서도 기한 안에
 // 끝나게. 2026-11-22 verify-go-timeout — 묶음 전체를 한 번에 돌리면 다른 꾸러미가 만든 부하로 기한 앞 90초까지 기다리다 10분을
-// 넘겼다). 그래도 높으면 시간 검사만 건너뛴다.
+// 넘겼다). 그래도 높으면 시간 검사만 건너뛴다. 한 번에 자는 시간은 남은 상한까지 — 상한과 기한은 잘 때마다 다시 읽는다
+// (재감사 R-M10: 상한 1초·기한 4초에도 10초를 자 시험 기한을 넘겼다).
 func (c *cg) calm() {
 	mx := 600
 	if v, err := strconv.Atoi(os.Getenv("COTENANT_CALM_MAX")); err == nil {
 		mx = v
 	}
+	until := time.Now().Add(time.Duration(mx) * time.Second) // 이번 calm이 기다릴 수 있는 끝
 	if dl, ok := c.t.Deadline(); ok {
-		if left := int(time.Until(dl).Seconds()) / 2; left < mx {
-			mx = left
+		if half := time.Now().Add(time.Until(dl) / 2); half.Before(until) {
+			until = half
 		}
 	}
 	nc := 4
@@ -311,13 +313,14 @@ func (c *cg) calm() {
 			c.busy = ""
 			return
 		}
-		if calmWaited >= mx {
+		nap := min(10*time.Second, time.Duration(mx-calmWaited)*time.Second, time.Until(until))
+		if nap <= 0 {
 			c.busy = fmt.Sprintf("1분 부하 %d ≥ CPU %d", l, nc)
 			c.t.Logf("calm: %s — 합쳐 %d초 기다려도 안 내려 그대로 잰다", c.busy, calmWaited)
 			return
 		}
-		time.Sleep(10 * time.Second)
-		calmWaited += 10
+		time.Sleep(nap)
+		calmWaited += int((nap + time.Second - 1) / time.Second)
 	}
 }
 

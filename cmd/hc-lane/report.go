@@ -133,11 +133,6 @@ func reportMain(a []string) int {
 		fmt.Fprintf(os.Stderr, "hc-lane report: --key 글자(A-Za-z0-9_.:/-): %s\n", key)
 		return 2
 	}
-	// 식별자 칸은 자르지 않으니 쓰기 전에 길이를 막는다 — 줄 예산(1000바이트)을 넘겨 12칸이 깨지지 않게(gofix L13)
-	if len(key) > 200 || len(to) > 200 {
-		fmt.Fprintln(os.Stderr, "hc-lane report: --key·--to는 200자까지")
-		return 2
-	}
 	// 대문자 sha도 sha로(소문자로 적음). 7~40자가 아닌 16진 낱말(DB·CAFE)은 한 줄 칸으로 그대로
 	join := func(s string) string {
 		if msg == "" {
@@ -219,6 +214,11 @@ func reportMain(a []string) int {
 	}
 	e := events.Event{Time: utcNow(), Machine: m, Term: tid, Lane: lane, State: st, SHA: sha, Msg: msg,
 		Turn: tn, To: to, Run: rk, Owner: ow, Key: key}
+	// 식별자 칸은 자르지 않으니 쓰기 전에 사건 전체를 공통 검사로 — 줄 예산(1000바이트)을 넘기면 입력 오류, 사건 안 씀(재감사 R-27·R-C03)
+	if err := e.Check(); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane report: %v\n", err)
+		return 2
+	}
 	line := e.Line()
 	ed := evdir()
 	if err := os.MkdirAll(ed, 0o777); err != nil {

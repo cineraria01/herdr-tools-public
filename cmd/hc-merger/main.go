@@ -92,7 +92,9 @@ func reportBlocked(msg string) {
 }
 
 // onSignals: TERM·INT·HUP이면 지금 기다리는 자식 무리를 끄고(유예 뒤 KILL) 128+신호로 끝낸다
+// 이 처리기 하나가 맡는다(proc.TakeSignals) — proc 처리기(유예 2초)가 함께 받아 먼저 끝내면 상주가 일꾼이 거두는 중에 끝났다(재감사 R-H04)
 func onSignals(grace time.Duration) {
+	proc.TakeSignals()
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
@@ -162,30 +164,106 @@ func machine() string {
 	return strings.SplitN(h, ".", 2)[0]
 }
 
-// originBase: 원격 기본 가지(bash repo_defaults와 같은 조회). 실패면 빈 값
-func originBase() string {
-	switch runQ("-C", ".", "remote", "get-url", "origin") {
+// originBase: 원격 기본 가지(bash repo_defaults와 같은 조회)와 git 종료 코드(0이 아니면 빈 값 — gitUnknown이면 모름)
+func originBase() (string, int) {
+	switch rc := runQ("-C", ".", "remote", "get-url", "origin"); rc {
 	case 0:
 		refs, rc := out("-C", ".", "for-each-ref", "--format=%(symref)", "refs/remotes/origin/HEAD")
 		if rc != 0 {
-			return ""
+			return "", rc
 		}
 		if b := strings.TrimPrefix(refs, "refs/remotes/origin/"); b != "" {
-			return b
+			return b, 0
 		}
-		return "main"
+		return "main", 0
 	case 2:
 		refs, rc := out("-C", ".", "for-each-ref", "--format=%(refname)", "refs/heads/main", "refs/heads/master")
 		if rc != 0 {
-			return ""
+			return "", rc
 		}
 		l := "\n" + refs + "\n"
 		if !strings.Contains(l, "\nrefs/heads/main\n") && strings.Contains(l, "\nrefs/heads/master\n") {
-			return "master"
+			return "master", 0
 		}
-		return "main"
+		return "main", 0
+	default:
+		return "", rc
 	}
-	return ""
+}
+
+// gitUnknown: 시작 단계 git 종료 코드가 「모름」인가 — 시간 넘김(proc.TimeoutCode)·신호로 끝남(128 넘음). 확인된 부재·오류가 아니다(R-H08)
+func gitUnknown(rc int) bool { return rc == proc.TimeoutCode || rc > 128 }
+
+// startRepo: 시작 단계 — 클론·origin·기본 브랜치 확인. 0 됨 · 75 모름(git 시간 넘김 등 — 바꾼 것 없음). 확인된 부재는 die
+func startRepo(repo, base string) (top, b string, rc int) {
+	if err := os.Chdir(repo); err != nil {
+		die("merger: git 저장소가 아니다: %s", repo)
+	}
+	top, rc = outQ("rev-parse", "--show-toplevel")
+	if gitUnknown(rc) {
+		return "", "", 75
+	}
+	if rc != 0 || top == "" || os.Chdir(top) != nil {
+		die("merger: git 저장소가 아니다: %s", repo)
+	}
+	switch rc := runQ("remote", "get-url", "origin"); {
+	case rc == 0:
+	case gitUnknown(rc):
+		return "", "", 75
+	default:
+		die("merger: origin이 없다: %s", top)
+	}
+	if base == "" {
+		var rc int
+		if base, rc = originBase(); gitUnknown(rc) {
+			return "", "", 75
+		}
+		if base == "" {
+			die("merger: 기본 브랜치 조회 실패")
+		}
+	}
+	return top, base, 0
+}
+
+// detachClone: 클론 작업 트리를 분리 HEAD로(가지를 체크아웃해 두면 착지 뒤 메인 폴더 맞추기가 클론 작업 트리를 바꾼다). 깨끗할 때만.
+// 0 됨 · 75 모름(바꾼 것 없음 — 다시) · 커밋 안 된 변경이 확인되면 die
+func detachClone(top string) int {
+	switch rc := runO("symbolic-ref", "-q", "HEAD"); rc {
+	case 0:
+		st, rc := out("status", "--porcelain", "--untracked-files=all")
+		if gitUnknown(rc) {
+			return 75
+		}
+		if rc != 0 || st != "" {
+			die("merger: 병합기 클론을 분리 HEAD로 두지 못했다(커밋 안 된 변경?): %s", top)
+		}
+		if rc := run("checkout", "-q", "--detach"); rc != 0 {
+			if gitUnknown(rc) {
+				return 75
+			}
+			die("merger: 병합기 클론을 분리 HEAD로 두지 못했다(git checkout 종료 %d): %s", rc, top)
+		}
+	case 1:
+	default:
+		fmt.Fprintf(os.Stderr, "hc-lane merger: HEAD의 가지 조회 실패(종료 %d)\n", rc)
+		return 75
+	}
+	return 0
+}
+
+// startWait: 시작 단계 git이 모름이면 — 단발(--once)은 바꾼 것 없이 75, 상주는 tick초 뒤 다시(R-H08 — 잠시 느린 로컬 git으로 상주가 서지
+// 않게). 같은 자리에서 deferAlarm번 이어지면 막힘 사건을 한 번(지휘가 받을 진단)
+func startWait(once bool, tick int, what string, n *int) {
+	if once {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 시작 단계 %s 결과 모름(git 시간 넘김 등) — 바꾼 것 없이 쉰다\n", what)
+		os.Exit(75)
+	}
+	*n++
+	fmt.Fprintf(os.Stderr, "hc-lane merger: 시작 단계 %s 결과 모름(git 시간 넘김 등) — %d초 뒤 다시(%d번째)\n", what, max(tick, 1), *n)
+	if *n == deferAlarm {
+		reportBlocked(fmt.Sprintf("병합기 시작 단계 %s 가 %d번 이어 모름(git 시간 넘김 등) — 다시 하는 중", what, *n))
+	}
+	time.Sleep(time.Duration(max(tick, 1)) * time.Second)
 }
 
 func physical(p string) (string, error) {
@@ -235,20 +313,14 @@ func residentMain(args []string) {
 	if os.Getenv("GOCACHE") == "" {
 		os.Setenv("GOCACHE", os.Getenv("HOME")+"/.cache/go-build")
 	}
-	if err := os.Chdir(repo); err != nil {
-		die("merger: git 저장소가 아니다: %s", repo)
-	}
-	top, rc := outQ("rev-parse", "--show-toplevel")
-	if rc != 0 || top == "" || os.Chdir(top) != nil {
-		die("merger: git 저장소가 아니다: %s", repo)
-	}
-	if runQ("remote", "get-url", "origin") != 0 {
-		die("merger: origin이 없다: %s", top)
-	}
-	if base == "" {
-		if base = originBase(); base == "" {
-			die("merger: 기본 브랜치 조회 실패")
+	var top string
+	for tries := 0; ; {
+		t, b, rc := startRepo(repo, base)
+		if rc == 0 {
+			top, base = t, b
+			break
 		}
+		startWait(once, tick, "클론·origin 확인", &tries)
 	}
 	if !plain(base) {
 		die("merger: 기본 브랜치 이름에 쓸 수 없는 글자가 있다: %s", base)
@@ -277,8 +349,15 @@ func residentMain(args []string) {
 	gRun, gTop = true, top
 	onSignals(roundGrace)
 	var err error
-	mj, rc := out("rev-parse", "--git-path", "hc-merger")
-	if rc != 0 || mj == "" || os.MkdirAll(mj+"/out", 0o777) != nil || os.MkdirAll(mj+"/fail", 0o777) != nil {
+	var mj string
+	for tries := 0; ; {
+		var rc int
+		if mj, rc = out("rev-parse", "--git-path", "hc-merger"); !gitUnknown(rc) {
+			break
+		}
+		startWait(once, tick, "일지 폴더 조회", &tries)
+	}
+	if mj == "" || os.MkdirAll(mj+"/out", 0o777) != nil || os.MkdirAll(mj+"/fail", 0o777) != nil {
 		die("merger: 일지 폴더를 만들지 못했다")
 	}
 	if mj, err = physical(mj); err != nil {
@@ -293,16 +372,12 @@ func residentMain(args []string) {
 		die("merger: 후보 작업 트리 폴더를 만들지 못했다: %s.merger-wt", top)
 	}
 	// 클론 작업 트리는 분리 HEAD로(가지를 체크아웃해 두면 착지 뒤 메인 폴더 맞추기가 클론 작업 트리를 바꾼다). 깨끗할 때만, 한 번
-	switch runO("symbolic-ref", "-q", "HEAD") {
-	case 0:
-		st, rc := out("status", "--porcelain", "--untracked-files=all")
-		if rc != 0 || st != "" || run("checkout", "-q", "--detach") != 0 {
-			die("merger: 병합기 클론을 분리 HEAD로 두지 못했다(커밋 안 된 변경?): %s", top)
+	for tries := 0; ; {
+		rc := detachClone(top)
+		if rc == 0 {
+			break
 		}
-	case 1:
-	default:
-		fmt.Fprintln(os.Stderr, "hc-lane merger: HEAD의 가지 조회 실패")
-		os.Exit(75)
+		startWait(once, tick, "클론 HEAD 분리", &tries)
 	}
 	ml := gEvdir + "/merger-logs"
 	if err := os.MkdirAll(ml, 0o777); err != nil {
@@ -314,29 +389,64 @@ func residentMain(args []string) {
 	} else {
 		fmt.Printf("hc-lane merger: %s (%s) 큐를 본다 — 빈 바퀴 %d초\n", top, base, tick)
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		die("merger: 자기 실행 파일을 찾지 못했다: %v", err)
-	}
-	for {
-		c := exec.Command(exe, "--round", strconv.Itoa(os.Getpid()), top, base, mj, mwr, ml, mme, strconv.Itoa(batch))
-		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		switch rc := proc.Wait(c, ""); rc {
+	for fails := 0; ; {
+		pause, rc := tick, 127
+		if exe := workerExe(); exe != "" {
+			c := exec.Command(exe, "--round", strconv.Itoa(os.Getpid()), top, base, mj, mwr, ml, mme, strconv.Itoa(batch))
+			c.Stdout, c.Stderr = os.Stdout, os.Stderr
+			rc = proc.Wait(c, "")
+		} else {
+			fmt.Fprintln(os.Stderr, "hc-lane merger: 바퀴 일꾼 hc-merger를 찾지 못했다(자기 자리에도 PATH에도 없음)")
+		}
+		switch rc {
 		case 76:
+			fails = 0
 			continue
 		case 0, 75:
+			fails = 0
 			if once {
 				os.Exit(rc)
 			}
 		case 1: // 일꾼이 멈추며 막힘 사건을 이미 냈다
 			os.Exit(rc)
-		default: // 신호·패닉 등으로 일꾼이 사건 없이 끝났다(G2) — 상주가 막힘 사건을 내고 멈춘다
-			die("merger: 바퀴 일꾼이 뜻밖에 끝났다(종료 %d)", rc)
+		default: // 못 떴거나(127 — 바이너리를 치움) 신호·패닉으로 사건 없이 끝났다(G2). 바퀴 도중이었으면 다음 바퀴가 일지로 잇는다
+			if fails++; fails >= workerMaxFails {
+				die("merger: 바퀴 일꾼이 뜻밖에 끝났다(종료 %d, 연속 %d번)", rc, fails)
+			}
+			msg := fmt.Sprintf("병합기 일꾼 다시: 바퀴 일꾼이 뜻밖에 끝났다(종료 %d, 연속 %d/%d번) — %d초 뒤 다시 (클론 %s)",
+				rc, fails, workerMaxFails, workerRetryWait, top)
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 경고 — %s\n", msg)
+			reportMid(msg)
+			pause = workerRetryWait
 		}
 		// 빈 바퀴 쉼은 sleep 명령으로(bash 판과 같은 자리 — 시험이 PATH의 sleep으로 쉼 값을 본다). 멈추면 무리째 끈다
-		s := exec.Command("sleep", strconv.Itoa(tick))
+		s := exec.Command("sleep", strconv.Itoa(pause))
 		s.Stdout, s.Stderr = os.Stdout, os.Stderr
 		proc.Wait(s, "")
+	}
+}
+
+const (
+	workerMaxFails  = 5  // 바퀴 일꾼이 이만큼 이어서 뜻밖에 끝나면 막힘·멈춤
+	workerRetryWait = 30 // 그 전까지는 이만큼 쉬고 다시(초)
+)
+
+// workerExe: 바퀴마다 일꾼 경로를 새로 찾는다 — 자기 실행 파일 자리(herdr-sync가 rename으로 바꿔 넣으면 다음 바퀴가 새 판), 없으면
+// PATH의 hc-merger. 시작 때 잡은 경로만 쓰면 그 자리를 치운 뒤 매 바퀴 127로 섰다(2026-11-22). 둘 다 없으면 빈 값
+func workerExe() string {
+	if p, err := os.Executable(); err == nil {
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	p, _ := exec.LookPath("hc-merger")
+	return p
+}
+
+// reportMid: 중간 사건(--name merger)을 상한 안에서 — 못 적어도 경고만
+func reportMid(msg string) {
+	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "중간", "-", msg, "--name", "merger"); rc != 0 {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 중간 사건을 적지 못했다(종료 %d): %s\n", rc, strings.TrimSpace(e))
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 func init() { register("launch", launchMain, nil) }
@@ -213,13 +215,27 @@ func launchMain(args []string) int {
 		if r != 0 {
 			die("--resume: 원격을 읽지 못했다(git ls-remote) — 주차한 가지 refs/park/%s 를 모른다: %s", name, repo)
 		}
-		src, ssha := "", ""
-		for _, want := range []string{"refs/park/" + name, "refs/heads/lane/" + name} {
-			for _, ln := range strings.Split(ls, "\n") {
-				if f := strings.Fields(ln); src == "" && len(f) == 2 && f[1] == want {
-					src, ssha = want, f[0]
-				}
+		// 응답 줄은 「<40자 SHA><탭><참조>」만 받는다 — 깨진 줄은 주차 SHA가 아니다(R-15)
+		got := map[string]string{}
+		for _, ln := range strings.Split(ls, "\n") {
+			if ln == "" {
+				continue
 			}
+			s, rf, ok := strings.Cut(ln, "\t")
+			if !ok || !sha40.MatchString(s) || strings.ContainsAny(rf, " \t") {
+				die("--resume: 원격 응답을 읽지 못했다(git ls-remote 줄 꼴: %q) — 주차한 가지를 모른다: %s", cut(ln, 80), repo)
+			}
+			got[rf] = s
+		}
+		src, ssha := "", ""
+		if s, ok := got["refs/park/"+name]; ok {
+			src, ssha = "refs/park/"+name, s
+		} else if s, ok := got["refs/heads/lane/"+name]; ok {
+			// 옛 판 주차: 같은 레인·SHA의 마지막 주차·제출 사건이 「주차」일 때만 — 반송된 옛 제출 가지에서 재개하지 않는다(R-15)
+			if !legacyParked(name, s) {
+				die("--resume: refs/park/%s 가 없고 lane/%s(%s)는 주차 사건이 없는 제출 가지다 — 재개하지 않는다: %s", name, name, cut(s, 12), repo)
+			}
+			src, ssha = "refs/heads/lane/"+name, s
 		}
 		switch {
 		case src == "":
@@ -228,8 +244,11 @@ func launchMain(args []string) int {
 			fmt.Printf("[dry-run] 주차한 가지 %s (%s) 에서 시작\n", src, cut(ssha, 12))
 		case xfetch(repo, "-q", "origin", "+"+src+":"+wfrom) != 0:
 			die("--resume: 주차한 가지 refs/park/%s 를 받지 못했다: %s", name, repo)
-		case xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", wfrom+"^{commit}") != 0:
-			die("--resume: 주차한 가지 refs/park/%s 가 없다: %s", name, repo)
+		default:
+			// 받은 것이 판정한 그 SHA여야 한다(그사이 움직였으면 판정이 맞지 않는다)
+			if v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", wfrom+"^{commit}"); r != 0 || v != ssha {
+				die("--resume: 받은 주차 가지 %s 가 판정한 %s 와 다르거나 없다 — 같은 줄을 다시: %s", src, cut(ssha, 12), repo)
+			}
 		}
 	}
 
@@ -435,12 +454,13 @@ func launchMain(args []string) int {
 			envs = append([]string{"HC_LANE_LEASE=" + lsha}, envs...)
 		}
 		argv := append(append(append(runArgs(), "env"), envs...), rest...)
-		var ob bytes.Buffer
+		var ob, eb bytes.Buffer
 		c := exec.Command(argv[0], argv[1:]...)
-		c.Stdout, c.Stderr = &ob, &ob
-		out := trim(ob.String())
-		if err := c.Run(); err != nil {
-			out = trim(ob.String())
+		c.Stdout, c.Stderr = &ob, &eb
+		// 배경 시작(hc run --bg)도 상한 안에서(proc.Limit — 재감사 R-19: c.Run()이라 hc가 멈추면 끝없이 기다렸다). 넘기면 시작했을 수
+		// 있어 미확정 — 아래 실패 갈래가 임대·롤백 안내를 그대로 낸다
+		if err := proc.Run(c); err != nil {
+			out := trim(ob.String() + "\n" + eb.String())
 			errf("%s\n", out)
 			leaseNote := ""
 			if lsha != "" {
@@ -460,9 +480,14 @@ func launchMain(args []string) int {
 			if lsha != "" {
 				kept += " 임대 refs/hc-lanes/" + name + " 도 보존했다."
 			}
-			die("hc run 결과를 확인하지 못했다.%s hc ls --json으로 실행을 확인한다", kept)
+			// 거절이 확인되지 않은 실패는 실행됐을 수 있다 — 확정 실패(1)가 아니라 미확정(5): hc-fill이 그 기계·시도 기록을 지킨다(R-18)
+			errf("hc-lane: hc run 결과를 확인하지 못했다(실행 미확정).%s hc ls --json으로 실행을 확인한다\n", kept)
+			exit(5)
 		}
-		out = trim(ob.String())
+		if s := trim(eb.String()); s != "" {
+			errf("%s\n", s)
+		}
+		out := trim(ob.String())
 		addr = firstAddr(out)
 		if addr == "" {
 			// 실행됐는지 모른다 — 성공(0)으로 끝내지 않는다. 임대·작업 트리는 그대로 둔다(gofix E09: hc-fill 밖에서 부른 쪽도 실패를 본다)

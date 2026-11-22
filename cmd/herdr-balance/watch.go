@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ type seenAt struct {
 // round: --watch 한 회차. 맞춘 탭마다 「맞춤 {…}」 한 줄. 오류면 그 회차를 거기서 멈춘다(셸 판과 같다)
 func round(ctx context.Context, remote []string, seen map[string]seenAt) error {
 	now := time.Now
+	var pendErr error
 	ts, err := tabs(ctx)
 	if err != nil {
 		return err
@@ -46,6 +48,18 @@ func round(ctx context.Context, remote []string, seen map[string]seenAt) error {
 			continue // 첫 터미널이 에이전트(지휘)인 탭만
 		}
 		ws := workersOf(t, main.Terminal)
+		if _, err := os.Stat(pendingPath(tid)); err == nil { // 떼다 만 맞춤이 남았다(R-26) — 목록이 같아도 바로 되붙인다
+			delete(seen, tid)
+			r, err := balance(ctx, main.Terminal, nil, nil)
+			if err != nil { // 되붙이기가 계속 실패해도(떼인 채 닫힌 worker 등) 다른 탭은 이 회차에 맞춘다 — 오류는 끝에 돌려준다
+				if pendErr == nil {
+					pendErr = err
+				}
+				continue
+			}
+			fmt.Println(stamp(), "맞춤", pyjson.Dumps(r, false))
+			continue
+		}
 		last, ok := saved(tid)
 		if !ok {
 			if err := save(tid, ws); err != nil { // 처음 보는 탭은 지금 배치를 기준으로 삼는다
@@ -72,7 +86,7 @@ func round(ctx context.Context, remote []string, seen map[string]seenAt) error {
 		}
 		fmt.Println(stamp(), "맞춤", pyjson.Dumps(r, false))
 	}
-	return nil
+	return pendErr
 }
 
 func hasPrefix(s string, ps []string) bool {

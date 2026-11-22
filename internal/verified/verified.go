@@ -4,7 +4,7 @@
 // 제목은 「herdr-verified tree=<트리> script=<검증 스크립트 blob> machine=<기계> at=<유닉스 초>」. 부모는 없다.
 // 병합기의 추측 검증(cmd/hc-merger spec*.go)이 검증 기계에서 통과하면 쓰고, 착지(hc-lane land, HERDR_MERGER=1)가 같은 트리·같은 검증
 // 스크립트 blob의 기록이 있을 때만 HERDR_VERIFIED_TREE=<트리>를 검증에 넘긴다. 건너뛸지는 저장소 검증 스크립트가 정한다 —
-// 그 스크립트가 지금 HEAD^{tree}가 그 값과 같고 작업 트리가 깨끗할 때만 건너뛴다(README 「추측 검증」).
+// 그 스크립트가 지금 HEAD^{tree}가 그 값과 같고 작업 트리가 깨끗할 때만 건너뛴다(docs/hc-lane/merger-spec-verify.md).
 // 결과는 셋(gitx.State): 있음 · 없음 · 모름(git 실패 — 모름이면 건너뛰지 않는다).
 package verified
 

@@ -89,7 +89,7 @@ func (m *M) judge() {
 	case "0":
 		m.lr = "0(그런데 " + m.base + " 에 없음)"
 	case "6":
-		fmt.Fprintln(os.Stderr, "hc-lane merger: 함께 실은 lease 참조가 바뀜(그새 다시 제출함) — 후보를 버리고 다음 바퀴에")
+		fmt.Fprintln(os.Stderr, "hc-lane merger: 함께 실은 lease 참조가 바뀜(그새 다시 제출함, 또는 승인 묶음의 기준이 움직임) — 후보를 버리고 다음 바퀴에")
 		m.fin()
 		return
 	}
@@ -126,16 +126,17 @@ func (m *M) judge() {
 }
 
 // conflicts: 제출을 기준(m.B)과 합칠 때 충돌하는 파일(git merge-tree --name-only, 종료 1) — 빈칸으로 잇고 200바이트 안.
-// 3자 합침은 깨끗한데 rebase 중간 커밋만 부딪혔거나 못 보면 「파일 모름(로그)」
+// 3자 합침은 깨끗한데 rebase 중간 커밋만 부딪혔거나 못 보면 「파일 모름(로그)」. 이름은 -z(NUL 구분)로 읽어 git 따옴표·팔진 이스케이프
+// 없이 실제 이름 그대로(R-L01 — 다시 맞춤 지시문에 간다)
 func (m *M) conflicts(s string) string {
 	var o bytes.Buffer
-	if gitx.Run("", &o, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", m.B, s) != 1 {
+	if gitx.Run("", &o, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", m.B, s) != 1 {
 		return "파일 모름(로그)"
 	}
 	var fs []string
 	seen := map[string]bool{}
-	for i, l := range strings.Split(strings.TrimSpace(o.String()), "\n") {
-		if l = flat(l); i > 0 && l != "" && !seen[l] { // 첫 줄은 트리
+	for i, l := range strings.Split(o.String(), "\x00") {
+		if l = flat(l); i > 0 && l != "" && !seen[l] { // 첫 칸은 트리
 			seen[l] = true
 			fs = append(fs, l)
 		}
@@ -177,7 +178,7 @@ func (m *M) proofload(ids []string) bool {
 		return true
 	}
 	var rc int
-	if m.lk2, rc = out(append([]string{"ls-remote", "origin"}, refs...)...); rc != 0 {
+	if m.lk2, rc = lsRemote(append([]string{"origin"}, refs...)...); rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 제출 ID 표식을 읽지 못했다 — 일지를 보존한다")
 		return false
 	}
@@ -232,8 +233,16 @@ func (m *M) recover() bool {
 			m.mer = true
 			return false
 		}
-		e.d = mt.id
+		e.d, e.v, e.p = mt.id, mt.verdict, mt.patch // 일지(cur)에 없는 판정·patch-id는 제출 기록에서 되살린다(R-C06 — 옛 cur 꼴 그대로)
 		m.b = append(m.b, e)
+	}
+	why := "앞 병합기 실행이 넣었음"
+	if len(m.b) > 1 {
+		labs := make([]string, len(m.b))
+		for i, e := range m.b {
+			labs[i] = e.l
+		}
+		why += fmt.Sprintf("(묶음 %d: %s)", len(m.b), strings.Join(labs, "+"))
 	}
 	m.mbn = fmt.Sprint(len(m.b))
 	if !m.proofload(ids(m.b)) {
@@ -277,7 +286,11 @@ func (m *M) recover() bool {
 			m.hs = C
 		}
 		fmt.Printf("hc-lane merger: 끊긴 앞 실행의 %s 가 %s 에 있다(%s) — 완료 처리\n", e.l, m.base, first8(m.hs))
-		if m.done(e.q, e.s, e.l, e.m, m.hs, "앞 병합기 실행이 넣었음", false) != 0 {
+		w := why
+		if len(m.b) > 1 && e.v != "" { // 정상 완료(doneAll)와 같은 구성원별 승인 기록
+			w += fmt.Sprintf(", 승인 확인 판정 %s patch-id %s", e.v, e.p)
+		}
+		if m.done(e.q, e.s, e.l, e.m, m.hs, w, false) != 0 {
 			m.mer = true
 			return false
 		}

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -403,12 +402,19 @@ func loopNoQuestion(_ []byte, _, stderr io.Writer) int {
 			"- 사람에게 꼭 물어야 하면 잠시 뒤 다시 시도한다(hc가 답하면 루프가 아닌 터미널에서는 질문 창이 열린다).\n", id)
 		return 2
 	}
-	if rc != 0 {
-		return 0
+	// 실패·판독 불가도 모름(재감사 R-H01: 종료 7·빈 성공·깨진 JSON·빈 객체를 「사람 있는 터미널」로 읽어 질문을 허용했다).
+	// 정상 응답은 address가 있는 객체 하나 — name·labels.job은 없거나 null이거나 문자열, labels는 없거나 null이거나 객체
+	name, job, ok := hcTerminal(out)
+	if rc != 0 || !ok {
+		why := fmt.Sprintf("종료 %d", rc)
+		if rc == 0 {
+			why = "응답을 읽지 못함"
+		}
+		fmt.Fprintf(stderr, "hc get %s 이 실패해(%s) 무인 루프인지 모른다 — 질문 창을 띄우지 않는다. 답할 사람이 없으면 루프 전체가 멈춘다.\n"+
+			"- 되돌릴 수 있는 판단은 추천안으로 정해 상태 파일에 「가정/결정」으로 적고 진행한다.\n"+
+			"- 사람에게 꼭 물어야 하면 잠시 뒤 다시 시도한다(hc가 답하면 루프가 아닌 터미널에서는 질문 창이 열린다).\n", id, why)
+		return 2
 	}
-	j := capture(out)
-	name := plutilRaw(j, "name")
-	job := plutilRaw(j, "labels", "job")
 	if !strings.Contains(asciiLower(name+" "+job), "loop") {
 		return 0
 	}
@@ -422,50 +428,40 @@ func loopNoQuestion(_ []byte, _, stderr io.Writer) int {
 	return 2
 }
 
-// plutilRaw: $(printf '%s' "$j" | plutil -extract <a.b> raw -o - -) — JSON 한 값만(뒤에 다른 글이 있으면 실패),
-// 문자열 그대로 · 정수 · 실수 %f · true/false · 사전은 열쇠를 정렬해 줄마다 · 배열은 개수 · 없거나 못 읽으면 ""
-func plutilRaw(j string, keys ...string) string {
-	var v any
-	dec := json.NewDecoder(strings.NewReader(j))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil || dec.More() {
-		return ""
+// hcTerminal: hc get --json 응답에서 이름·job 라벨 — 꼴이 정상 응답(JSON 값 하나인 객체, 비지 않은 문자열 address,
+// name·labels.job은 없음·null·문자열, labels는 없음·null·객체)이 아니면 ok=false(모름)
+func hcTerminal(out string) (name, job string, ok bool) {
+	dec := json.NewDecoder(strings.NewReader(out))
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil || m == nil {
+		return "", "", false
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return ""
+		return "", "", false
 	}
-	for _, k := range keys {
-		m, ok := v.(map[string]any)
-		if !ok {
-			return ""
-		}
-		if v, ok = m[k]; !ok {
-			return ""
-		}
+	if a, ok := m["address"].(string); !ok || a == "" {
+		return "", "", false
 	}
-	switch x := v.(type) {
-	case string:
-		return capture(x)
-	case bool:
-		return fmt.Sprint(x)
-	case json.Number:
-		if i, err := x.Int64(); err == nil && !strings.ContainsAny(x.String(), ".eE") {
-			return fmt.Sprint(i)
+	str := func(v any) (string, bool) {
+		switch x := v.(type) {
+		case nil:
+			return "", true
+		case string:
+			return x, true
 		}
-		f, err := x.Float64()
-		if err != nil {
-			return ""
-		}
-		return fmt.Sprintf("%f", f)
+		return "", false
+	}
+	if name, ok = str(m["name"]); !ok {
+		return "", "", false
+	}
+	switch l := m["labels"].(type) {
+	case nil:
 	case map[string]any:
-		ks := make([]string, 0, len(x))
-		for k := range x {
-			ks = append(ks, k)
+		if job, ok = str(l["job"]); !ok {
+			return "", "", false
 		}
-		sort.Strings(ks)
-		return capture(strings.Join(ks, "\n"))
-	case []any:
-		return fmt.Sprint(len(x))
+	default:
+		return "", "", false
 	}
-	return "" // null
+	return name, job, true
 }
