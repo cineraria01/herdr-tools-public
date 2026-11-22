@@ -19,8 +19,13 @@ func TestStallMergerHandled(t *testing.T) {
 		name, lane, hcl, mq, mf, reland string
 		log, cfg                        string // 기본 브랜치 커밋 「sha 초 제목」 · 가지 설정 branch.<레인>.hcLane
 		cfgBad, mfBad                   bool
+		aud, done                       string // 대기열 감사 칸(빈 값 = auto) · 완료 sha(빈 값 = sha)
 		want                            string // "" = 알리지 않음
 	}{
+		// 2026-11-23 stall-no-sha: 감사·조사 레인의 「완료 -」는 감사할 것도 착지할 것도 없다 · 자동 감사 끈 레인은 착지만 기다린다
+		{name: "자동 감사 끈 레인 — 착지 없음", lane: "w11", aud: "no-audit",
+			want: "w11 완료 뒤 멈춤 — 120분째 착지 없음 (m/w11, 완료 e4e507b4) --name w11"},
+		{name: "커밋 없는 완료 — 완료 -", lane: "w10", done: "-"}, // 이름에 괄호를 넣지 않는다(임시 폴더 경로가 가짜 hc-lane 셸 줄에 그대로 든다)
 		// 2026-11-22 지휘(23:20): 병합기·이름 바꿔 낸 제출로 착지한 레인에도 경보 — 기본 브랜치의 접수 뒤 커밋 제목 머리 「<이름>:」도 착지
 		{name: "커밋 제목으로 착지", lane: "clean-renamed-submit",
 			log: fmt.Sprintf("%s %d clean-renamed-submit: 이름을 바꿔 낸 제출\n", cand, after)},
@@ -95,9 +100,16 @@ func TestStallMergerHandled(t *testing.T) {
 			if c.reland != "" {
 				wr("reland.tsv", c.reland)
 			}
-			wr("queue.tsv", strings.Join([]string{n, "app", "b", "-", "m", "up", "m", "m/" + n, "-", "t", "-", "-", "normal", "-", "-", "-", "r1"}, "\t")+"\n")
+			aud, ds := c.aud, c.done
+			if aud == "" {
+				aud = "auto"
+			}
+			if ds == "" {
+				ds = sha
+			}
+			wr("queue.tsv", strings.Join([]string{n, "app", "b", "-", "m", "up", "m", "m/" + n, "-", "t", "-", "-", "normal", "-", aud, "-", "r1"}, "\t")+"\n")
 			wr("try.tsv", n+"\tr1\tm\t-\t-\tm/"+n+"\t"+n+"@1700000000000\n")
-			EV = []string{auTEv(done.UTC().Format("2006-01-02T15:04:05Z"), "m/"+n, n, "완료", sha, "끝", n+"@1700000000000")}
+			EV = []string{auTEv(done.UTC().Format("2006-01-02T15:04:05Z"), "m/"+n, n, "완료", ds, "끝", n+"@1700000000000")}
 			stallTick()
 			b, err := os.ReadFile(log)
 			if c.want == "" {

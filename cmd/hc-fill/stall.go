@@ -136,7 +136,7 @@ func uniqOK(a []string) []string {
 }
 
 // stallTick(Go 판에서 더함 — 받은편지 레인이 「완료 — 감사 기다림」으로 9시간 멈춘 일 뒤): up 줄(감사 줄 빼고)의 그 실행 마지막
-// 사건이 「완료」이고 그 시각 뒤로 감사·착지·제출 없이 설정 done_stall분(기본 60, 0이면 끔) 지났으면 그 레인 주인 지휘에 한 번(키
+// 사건이 「완료 <sha>」(sha 없음·「-」은 뺀다)이고 그 시각 뒤로 감사·착지·제출 없이 설정 done_stall분(기본 60, 0이면 끔) 지났으면 그 레인 주인 지휘에 한 번(키
 // hf:<레인>:stall:<완료 sha> — hc-lane이 한 번만 보낸다). 그 sha 차수가 끝 상태가 아니면 알리지 않는다. 끝난 레인·병합기가 맡은 레인(stallDone)도 알리지 않는다. 끝난 차수(수거됨 등)가 있으면
 // 그 차수의 마지막 수거 확인·깨운 시각(13·14칸)부터 센다(감사가 오래 걸려 수거 직후 착지 중인 레인을 멈춤으로 보지 않게).
 // dry-run·사건 못 읽음·끊긴 기계는 건너뜀. run 바퀴가 audit_tick 다음에 부른다
@@ -165,6 +165,9 @@ func stallTick() {
 			continue
 		}
 		s, open := evF(l, 6), false
+		if s == "" || s == "-" { // 커밋 없는 완료(감사·조사 레인의 「완료 -」) — 감사할 것도 착지할 것도 없다(2026-11-23 stall-no-sha)
+			continue
+		}
 		for _, r := range at {
 			if r.NF() < 17 || r.F(2) != n || !auSameRound(r, s) {
 				continue
@@ -197,6 +200,10 @@ func stallTick() {
 		if _, _, inbox := replyOf(q.F(11)); inbox {
 			own = "-"
 		}
-		aesc(n, own, fmt.Sprintf("%s 완료 뒤 멈춤 — %d분째 감사·착지 없음 (%s, 완료 %s)%s", n, mins, a, head(s, 8), tail), "hf:"+n+":stall:"+s)
+		what := "감사·착지" // 자동 감사 줄(감사 칸 auto)만 감사를 기다린다 — 그 밖(no-audit·감사 꺼짐·받은편지)은 착지만
+		if q.F(15) != "auto" {
+			what = "착지"
+		}
+		aesc(n, own, fmt.Sprintf("%s 완료 뒤 멈춤 — %d분째 %s 없음 (%s, 완료 %s)%s", n, mins, what, a, head(s, 8), tail), "hf:"+n+":stall:"+s)
 	}
 }
