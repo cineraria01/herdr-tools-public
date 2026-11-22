@@ -102,6 +102,9 @@ func (e *ev) stopped(evl, mu []string) []string {
 	km := e.lkinds()
 	var out []string
 	for _, t := range e.tls.Terminals { // lsok — hcjson.ParseList로 통째 검증된 목록(watch.go lsLanes)
+		if t.Unknown != "" { // 모름 항목(R-3M01) — 살아 있고 무엇을 하는지 모른다: 멈춤으로 알리지 않는다
+			continue
+		}
 		a, nm, s, ss, tn, pa, rs, cw := t.Address, orHyph(t.Name), t.State, orHyph(t.Status), rawCell(t, "turn"), orHyph(t.Parent), rawCell(t, "reason"), orHyph(t.Cwd)
 		if !e.mineOf(pa) {
 			continue

@@ -1,7 +1,8 @@
 // Package hcjson: hc ls·get·machine ls --json 응답의 엄격 판독. hc를 부르지 않는다(실행은 부르는 쪽이 proc 상한 안에서).
 //
-// 계약: 입력 전체가 JSON 값 정확히 하나, 목록은 항목 하나라도 어기면 전체 오류(부분 목록 없음), 칸의 형이 틀리면 오류
-// (null·없음만 「없음」), state·status는 아는 값만, live 항목의 cwd는 절대 경로. 오류 = 모름 — 부르는 쪽은 상태·큐·사건·기록을
+// 계약: 입력 전체가 JSON 값 정확히 하나, 목록은 주소를 읽을 수 없는 항목이 하나라도 있으면 전체 오류, 주소는 읽히는데 다른 칸이
+// 계약을 어긴 항목은 그 항목만 Unknown(살아 있고 무엇을 하는지 모름 — R-3M01), 칸의 형이 틀리면 오류
+// (null·없음만 「없음」), state·status는 아는 값만, live 항목의 cwd는 절대 경로(유닉스, 또는 Windows 드라이브·UNC). 오류 = 모름 — 부르는 쪽은 상태·큐·사건·기록을
 // 바꾸지 않는다. 서로 다른 시각의 두 조회가 어긋나면 「없음」이 아니라 모름이고, 같은 주소라도 Created·Parent·Name이 기록과
 // 다르면 다른 실행(주소 재사용)이다 — 그 기록으로 발송·소유를 정하지 않는다.
 package hcjson
@@ -29,6 +30,9 @@ type Terminal struct {
 	Created int64                      // (get) created_ms, 없음·null → 0
 	Labels  map[string]string          // 없음·null → 빈 맵
 	Raw     map[string]json.RawMessage // 항목의 칸 원문 그대로(turn·where·exit_code … 도구 고유 칸은 여기서)
+	// Unknown: (ls) 이 항목만 계약을 어김 — 까닭. 주소만 믿을 수 있고 State는 "live", 나머지 칸은 비운다.
+	// 부르는 쪽은 그 터미널을 「살아 있고 무엇을 하는지 모름」으로 본다: 자리 셈·정리·발송에서 건드리지 않는다(R-3M01)
+	Unknown string
 }
 
 // Machine: hc ls·machine ls의 기계 한 항목. 둘 다 필수 · 비지 않은 문자열
@@ -162,6 +166,8 @@ func terminal(r json.RawMessage) (Terminal, error) {
 	}
 	if filepath.IsAbs(t.Cwd) {
 		t.Cwd = filepath.Clean(t.Cwd)
+	} else if winAbs(t.Cwd) {
+		// 다른 기계(Windows)의 터미널 — 이 기계 경로와 겹칠 수 없으니 그대로 둔다(R-3M01)
 	} else if t.State == "live" {
 		return t, fmt.Errorf("%s: live인데 cwd가 절대 경로가 아님(%q)", t.Address, t.Cwd)
 	}
@@ -187,6 +193,15 @@ func terminal(r json.RawMessage) (Terminal, error) {
 		}
 	}
 	return t, nil
+}
+
+// winAbs: Windows 절대 경로 — 드라이브(`C:\`·`C:/`) 또는 UNC(`\\서버\공유`)
+func winAbs(p string) bool {
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		c := p[0] | 0x20
+		return c >= 'a' && c <= 'z'
+	}
+	return len(p) >= 3 && p[0] == '\\' && p[1] == '\\' && p[2] != '\\'
 }
 
 // status: ls는 문자열, get은 {"state":…} 객체. 없음·null → ""
@@ -258,7 +273,16 @@ func ParseList(b []byte) (List, error) {
 	for _, x := range ta {
 		t, err := terminal(x)
 		if err != nil {
-			return List{}, err
+			// 주소를 읽을 수 있으면 그 항목만 모름 — 한 줄로 목록 전체를 버리지 않는다(R-3M01). 주소조차 없으면 전체 오류
+			m, oerr := obj(x)
+			if oerr != nil {
+				return List{}, err
+			}
+			a, aerr := need(m, "address")
+			if aerr != nil {
+				return List{}, err
+			}
+			t = Terminal{Address: a, State: "live", Labels: map[string]string{}, Raw: m, Unknown: err.Error()}
 		}
 		l.Terminals = append(l.Terminals, t)
 	}

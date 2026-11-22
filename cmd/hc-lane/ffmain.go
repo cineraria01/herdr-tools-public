@@ -49,7 +49,7 @@ func mainbusy(dir string) (string, bool) {
 	if runCmd(cmdOpt{stdout: &b}, "hc", "ls", "--json") != 0 {
 		return "", false
 	}
-	l, err := hcjson.ParseList(b.Bytes()) // 항목 하나라도 계약을 어기면 못 읽음(부분 목록으로 「아무도 안 씀」을 정하지 않는다)
+	l, err := hcjson.ParseList(b.Bytes()) // 주소 없는 항목이 있으면 못 읽음, 모름 항목은 일하는 것으로(부분 목록으로 「아무도 안 씀」을 정하지 않는다)
 	if err != nil {
 		return "", false
 	}
@@ -68,6 +68,10 @@ func mainbusy(dir string) (string, bool) {
 			continue
 		}
 		if on == "" && a == os.Getenv("HC_TERMINAL_ID") {
+			continue
+		}
+		if t.Unknown != "" { // 그 기계의 모름 항목(R-3M01) — cwd를 몰라 그 폴더를 쓴다고 본다
+			out.WriteString(pre + a + " ")
 			continue
 		}
 		if s != "live" || !strings.HasPrefix(c+"/", dir+"/") {

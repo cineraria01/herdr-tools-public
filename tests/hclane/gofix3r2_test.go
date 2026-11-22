@@ -38,7 +38,8 @@ func g3LiveCwd(k *K) {
 	for _, c := range []string{`""`, `"."`, `"rel/x"`} {
 		ls := `{"terminals":[{"address":"t5","agent":"claude-code","cwd":` + c + `,"state":"live"}]}`
 		k.runE([]string{"HC_FAKE_LS=" + ls}, "gc", "--repo", k.R, "--dry-run", "--min-age", "0")
-		k.check("R-202 gc: live cwd "+c+" 이면 종료 1, 아무것도 안 고름", k.rc == 1 && !strings.Contains(k.out, "지움 /"))
+		// 그 항목만 모름(R-3M01) — 목록은 쓰되 이 기계의 작업 트리는 하나도 고르지 않는다
+		k.check("R-202 gc: live cwd "+c+" 이면 모름 때문에 건너뜀, 아무것도 안 고름", k.rc == 0 && strings.Contains(k.out, "모름 때문에 건너뜀") && !strings.Contains(k.out, "지움 /"))
 		k.runE([]string{"HC_FAKE_LS=" + ls}, "clean", "--repo", k.R, "--branch", "g3202l", "--dry-run")
 		k.check("R-202 clean: live cwd "+c+" 이면 멈추고 작업 트리를 남긴다", k.rc != 0 && k.kept("g3202l") && !strings.Contains(k.out, "정리됨"))
 	}

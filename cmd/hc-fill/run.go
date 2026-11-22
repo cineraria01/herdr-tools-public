@@ -426,6 +426,10 @@ func countSeats() {
 		tw := "작업 트리 확인 못 함"
 		switch wtThere(tm, tc) {
 		case "yes":
+			if detachedClean(tm, tc) {
+				say("%s%s, 읽기 전용(분리·깨끗) → 안 셈", pre, ts)
+				continue
+			}
 			tw = "작업 트리 있음"
 		case "no":
 			say("%s%s, 작업 트리 없음 → 안 셈", pre, ts)

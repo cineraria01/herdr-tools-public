@@ -307,6 +307,7 @@ func gcMain(args []string) int {
 	if r != 0 {
 		die("gc: %s — 작업 폴더를 쓰는 터미널을 확인하지 못해 아무것도 지우지 않았다", termWhy(r))
 	}
+	gcNoteUnk(ps)
 	if remote {
 		if dry {
 			fmt.Printf("[dry-run] git fetch 건너뜀: 지금 있는 origin/%s 로 판정\n", base)

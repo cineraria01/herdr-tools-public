@@ -41,6 +41,7 @@ type facts struct {
 	fill               string
 	submitted          bool
 	wtwhy              string
+	detached           bool // 분리·깨끗한 읽기 전용 작업 트리(detachedClean) — worker가 아니어도 R2로 본다
 }
 
 // isWorker: 지휘가 띄운 worker(parent 있음) 또는 hc-lane 레인(라벨 hc-lane=1 — hc-fill 레인은 parent가 없다)
@@ -96,7 +97,7 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 	}
 	idle := int((now - changed) / minute)
 	why := "worker 아님"
-	if worker {
+	if worker || f.detached {
 		wait := 30 * minute
 		if f.submitted {
 			wait = 0

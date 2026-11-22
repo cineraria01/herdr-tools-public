@@ -44,8 +44,15 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 				f.worktree, f.unlanded = no, no
 			}
 		}
-		if isWorker(t) && f.worktree == no { // R2 보호에만 쓴다
-			if wtRepo == "" {
+		var dtRepo string
+		if f.worktree == yes && now-orNow(t, now) >= 30*minute {
+			// 분리·깨끗한 읽기 전용 작업 트리(감사 스크립트의 worktree add --detach): 닫고 git worktree remove
+			if dtRepo = detachedClean(str(t, "cwd"), run); dtRepo != "" {
+				f.worktree, f.unlanded, f.detached = no, no, true
+			}
+		}
+		if (isWorker(t) || f.detached) && f.worktree == no { // R2 보호에만 쓴다
+			if wtRepo == "" && !f.detached {
 				f.unlanded = triOf(unlanded(str(t, "cwd"), run))
 			}
 			tail := screenTail(str(t, "address"), run)
@@ -69,6 +76,9 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			if wtRepo != "" {
 				line += " (닫은 뒤 hc-lane clean " + wtBranch + ")"
 			}
+			if dtRepo != "" {
+				line += " (닫은 뒤 git worktree remove)"
+			}
 			fmt.Println("닫을 것:", line)
 			continue
 		}
@@ -88,6 +98,15 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			}
 			record(str(t, "address"), str(t, "name"), "작업 트리 정리(hc-lane clean "+wtBranch+")"+fail, wtRepo, "-", msg)
 			fmt.Printf("작업 트리 정리%s: %s %s — %s\n", fail, wtRepo, wtBranch, msg)
+		}
+		if dtRepo != "" && strings.HasPrefix(res, "닫힘") {
+			ok, msg := worktreeRemove(dtRepo, str(t, "cwd"), run)
+			fail := ""
+			if !ok {
+				fail = " 실패"
+			}
+			record(str(t, "address"), str(t, "name"), "작업 트리 정리(분리·깨끗, git worktree remove)"+fail, dtRepo, "-", msg)
+			fmt.Printf("작업 트리 정리%s: %s — %s\n", fail, dtRepo, msg)
 		}
 	}
 	word, n := "닫음", closed

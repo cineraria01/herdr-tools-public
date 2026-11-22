@@ -72,6 +72,19 @@ func TestParseListCases(t *testing.T) {
 		"address 없음":     ls(live(map[string]string{"address": ""})),
 		"address 빈 글":    ls(live(map[string]string{"address": `""`})),
 		"address 숫자":     ls(live(map[string]string{"address": `42`})),
+		"정상+주소 없음":       ls(live(nil), live(map[string]string{"address": ""})),
+		"기계 이름 빈 글":      `{"terminals":[],"machines":[{"name":"","state":"connected"}]}`,
+		"기계 이름 숫자":       `{"terminals":[],"machines":[{"name":42,"state":"connected"}]}`,
+		"기계 state 없음":    `{"terminals":[],"machines":[{"name":"m1"}]}`,
+		"machines null":  `{"terminals":[],"machines":null}`,
+	}
+	for name, in := range bad {
+		if l, err := ParseList([]byte(in)); err == nil {
+			t.Errorf("%s: 오류여야 한다, 받음 %+v", name, l)
+		}
+	}
+	// R-3M01: 주소는 읽히는데 다른 칸이 어긋난 항목은 그 항목만 Unknown(살아 있음·나머지 칸 빔) — 목록의 다른 항목은 그대로 쓴다
+	unk := map[string]string{
 		"state 없음":       ls(live(map[string]string{"state": ""})),
 		"state 빈 글":      ls(live(map[string]string{"state": `""`})),
 		"state starting": ls(live(map[string]string{"state": `"starting"`})),
@@ -87,16 +100,24 @@ func TestParseListCases(t *testing.T) {
 		"name 객체":        ls(live(map[string]string{"name": `{}`})),
 		"name 배열":        ls(live(map[string]string{"name": `[]`})),
 		"labels 숫자 값":    ls(live(map[string]string{"labels": `{"hc-lane":1}`})),
-		"정상+깨짐":          ls(live(nil), live(map[string]string{"address": `"t2"`, "cwd": `"."`})),
-		"기계 이름 빈 글":      `{"terminals":[],"machines":[{"name":"","state":"connected"}]}`,
-		"기계 이름 숫자":       `{"terminals":[],"machines":[{"name":42,"state":"connected"}]}`,
-		"기계 state 없음":    `{"terminals":[],"machines":[{"name":"m1"}]}`,
-		"machines null":  `{"terminals":[],"machines":null}`,
 	}
-	for name, in := range bad {
-		if l, err := ParseList([]byte(in)); err == nil {
-			t.Errorf("%s: 오류여야 한다, 받음 %+v", name, l)
+	for name, in := range unk {
+		l, err := ParseList([]byte(in))
+		if err != nil || len(l.Terminals) != 1 {
+			t.Errorf("%s: 항목 하나(모름)여야 한다, 받음 %+v %v", name, l, err)
+			continue
 		}
+		x := l.Terminals[0]
+		if x.Unknown == "" || x.Address != "t1" || x.State != "live" || x.Cwd != "" || x.Status != "" || x.Agent != "" || x.Name != "" {
+			t.Errorf("%s: 모름 항목 꼴이 아님 %+v", name, x)
+		}
+	}
+	// 정상 줄 + 이상한 한 줄(알 수 없는 꼴) + Windows 줄: 목록을 버리지 않고 이상한 줄만 모름
+	l, err := ParseList([]byte(ls(live(nil), live(map[string]string{"address": `"t2"`, "cwd": `"."`}),
+		live(map[string]string{"address": `"w/t3"`, "cwd": `"C:\\Users\\u"`}))))
+	if err != nil || len(l.Terminals) != 3 || l.Terminals[0].Unknown != "" || l.Terminals[1].Unknown == "" || l.Terminals[1].Address != "t2" ||
+		l.Terminals[2].Unknown != "" || l.Terminals[2].Cwd != `C:\Users\u` {
+		t.Errorf("섞인 목록: %+v %v", l, err)
 	}
 	good := map[string]func(Terminal) bool{
 		ls(live(map[string]string{"status": `null`})):            func(x Terminal) bool { return x.Status == "" },
@@ -107,6 +128,10 @@ func TestParseListCases(t *testing.T) {
 		ls(live(map[string]string{"labels": `null`})):            func(x Terminal) bool { return x.Labels != nil && len(x.Labels) == 0 },
 		ls(live(map[string]string{"labels": `{"hc-lane":"1"}`})): func(x Terminal) bool { return x.Labels["hc-lane"] == "1" },
 		ls(`{"address":"t3","state":"finished","cwd":null}`):     func(x Terminal) bool { return x.State == "finished" && x.Cwd == "" },
+		// R-3M01: Windows 기계 터미널의 cwd(드라이브·UNC)도 절대 경로다 — 한 줄로 목록 전체를 거절하면 hc-fill이 아무것도 못 띄운다
+		ls(live(map[string]string{"cwd": `"C:\\Users\\u"`})):   func(x Terminal) bool { return x.Cwd == `C:\Users\u` },
+		ls(live(map[string]string{"cwd": `"d:/w"`})):           func(x Terminal) bool { return x.Cwd == "d:/w" },
+		ls(live(map[string]string{"cwd": `"\\\\srv\\share"`})): func(x Terminal) bool { return x.Cwd == `\\srv\share` },
 	}
 	for in, ok := range good {
 		l, err := ParseList([]byte(in))

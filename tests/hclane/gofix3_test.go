@@ -63,7 +63,12 @@ func g2LsShape(k *K) {
 	k.check("R-06 준비: 올바른 빈 목록이면 지울 후보", k.rc == 0 && s19lineHas(k, k.wt, "지움"))
 	for _, ls := range []string{`{}`, `{"terminals":null}`, `{"terminals":[{"address":"t5"}]}`, `{"terminals":[{"address":"t5","cwd":null}]}`} {
 		k.runE([]string{"HC_FAKE_LS=" + ls}, "gc", "--repo", k.R, "--dry-run", "--min-age", "0")
-		k.check("R-06 gc: "+ls+" 이면 종료 1, 아무것도 안 고름", k.rc == 1 && !strings.Contains(k.out, "지움 /"))
+		if strings.Contains(ls, `"address"`) {
+			// 주소는 읽히는 항목 — 그 항목만 모름(R-3M01): 목록은 쓰되 이 기계의 작업 트리는 하나도 고르지 않는다
+			k.check("R-06 gc: "+ls+" 이면 모름 때문에 건너뜀, 아무것도 안 고름", k.rc == 0 && strings.Contains(k.out, "모름 때문에 건너뜀") && !strings.Contains(k.out, "지움 /"))
+		} else {
+			k.check("R-06 gc: "+ls+" 이면 종료 1, 아무것도 안 고름", k.rc == 1 && !strings.Contains(k.out, "지움 /"))
+		}
 		k.runE([]string{"HC_FAKE_LS=" + ls}, "clean", "--repo", k.R, "--branch", "g206l", "--dry-run")
 		k.check("R-06 clean: "+ls+" 이면 멈추고 작업 트리를 남긴다", k.rc != 0 && k.kept("g206l") && !strings.Contains(k.out, "정리됨"))
 	}

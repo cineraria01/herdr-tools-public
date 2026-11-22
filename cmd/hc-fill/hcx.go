@@ -77,7 +77,7 @@ func tsvEsc(s string) string {
 	return strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r").Replace(s)
 }
 
-// parseTerms: hc ls --json → 터미널 표(hcjson.ParseList — 항목 하나라도 계약을 어기면 목록 전체를 못 읽음, 부분 표 없음).
+// parseTerms: hc ls --json → 터미널 표(hcjson.ParseList — 주소 없는 항목이 있으면 목록 전체를 못 읽음, 주소만 읽히는 항목은 모름으로 남김).
 // 없음·null 칸은 「-」(agent 「-」는 유형 모름 — countSeats가 그 기계에 새 일을 놓지 않는다). ok=false면 못 읽음(모름)
 func parseTerms(raw string) ([]Term, bool) {
 	l, err := hcjson.ParseList([]byte(raw))
@@ -90,6 +90,7 @@ func parseTerms(raw string) ([]Term, bool) {
 		if i := strings.IndexByte(t.Address, '/'); i >= 0 {
 			m = t.Address[:i]
 		}
+		// 모름 항목(R-3M01)은 칸이 비어 「-」 — agent 「-」라 countSeats가 그 기계에 새 일을 놓지 않고, 주소는 남아 「없음」으로 읽히지 않는다
 		ts = append(ts, Term{tsvEsc(m), tsvEsc(t.Address), tsvEsc(orDash(t.Agent)), tsvEsc(orDash(t.Name)), tsvEsc(orDash(t.Status)), tsvEsc(orDash(t.Cwd))})
 	}
 	return ts, true

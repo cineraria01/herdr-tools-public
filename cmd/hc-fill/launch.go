@@ -274,6 +274,16 @@ func wtThere(m, dir string) string {
 	return "?"
 }
 
+// detachedClean: 그 기계 작업 트리 dir가 분리 HEAD이고 변경 0(추적 안 된 파일 포함)이고 HEAD가 어느 가지(로컬·원격)에든 들었나 —
+// 감사 스크립트가 `git worktree add --detach`로 직접 만든 읽기 전용 작업 트리(2026-11-23 fable-audit 여섯이 다섯 시간 자리를 셌다).
+// 가지 위·git 실패·시간 넘김은 false(지금처럼 센다)
+func detachedClean(m, dir string) bool {
+	v, rc := onm(nil, m, `git -C "$d" symbolic-ref -q HEAD >/dev/null; [ $? = 1 ] || exit 0
+s=$(git -C "$d" status --porcelain --untracked-files=all) && [ -z "$s" ] || exit 0
+u=$(git -C "$d" rev-list -n 1 HEAD --not --branches --remotes) && [ -z "$u" ] && echo CLEAN`, dir)
+	return rc == 0 && sub(v) == "CLEAN"
+}
+
 func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) }
 
 // lanes_on: hc-fill이 그 기계에 띄워 살아 있는 레인 수. 자동 감사 줄은 빼고 센다. 감사를 기다리는 쓰기 레인은 센다

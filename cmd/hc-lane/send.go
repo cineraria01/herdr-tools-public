@@ -67,6 +67,9 @@ func sendCmd(a []string) int {
 	}
 	// 발송·감사 제외에 쓰는 칸(이름)과 주소 하나에 한 항목을 목록 전체에서 먼저 — 하나라도 어긋나면 어디에도 보내기 전에 실패(재감사2 lane/R-210)
 	for _, t := range l.Terminals {
+		if t.Unknown != "" { // 모름 항목(R-3M01)은 아래에서 보류 — 목록 전체를 버리지 않는다
+			continue
+		}
 		if t.State == "live" && (!t.HasName || t.Name == "") {
 			fmt.Fprintf(os.Stderr, "hc-lane send: 살아 있는 레인 %s 의 이름(name)이 hc ls에 없다 — 감사·읽기 전용을 가를 수 없어 아무에게도 안 보냈다\n", t.Address)
 			return 1
@@ -84,6 +87,11 @@ func sendCmd(a []string) int {
 	for _, t := range l.Terminals {
 		ad, n := t.Address, t.Name
 		if t.State != "live" {
+			continue
+		}
+		if t.Unknown != "" { // 이름·주인을 믿을 수 없다 — 보내지 않고 보류(R-3M01)
+			fmt.Printf("보류 %s - — hc ls 항목을 못 읽음(%s)\n", ad, flat(t.Unknown))
+			held++
 			continue
 		}
 		switch r, why := sendOwner(recs, t, me); r {

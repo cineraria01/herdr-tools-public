@@ -173,8 +173,11 @@ func jstr(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
-// parsePairs: hcjson.ParseList — 입력 전체가 JSON 값 하나, 항목 하나라도 계약을 어기면(살아 있는 터미널의 cwd가 절대 경로가 아님 포함 —
-// 재감사2 lane/R-202) 2. 끝난 터미널은 cwd가 없어도 되고(빈 글 — 작업 폴더를 쓰지 않는다). mach가 있으면 machines에 그 기계가 connected로
+// unkCwd: 모름 항목의 cwd 자리 표시 — 절대 경로가 아니라 실제 cwd와 겹치지 않는다
+const unkCwd = "?(hc ls 항목을 못 읽음)"
+
+// parsePairs: hcjson.ParseList — 입력 전체가 JSON 값 하나, 주소 없는 항목이 있으면 2. 주소는 읽히는데 다른 칸이 계약을 어긴 항목
+// (살아 있는 터미널의 cwd가 절대 경로가 아님 포함 — 재감사2 lane/R-202)은 cwd를 unkCwd로 — 쓰는 중으로 본다(R-3M01). 끝난 터미널은 cwd가 없어도 되고(빈 글 — 작업 폴더를 쓰지 않는다). mach가 있으면 machines에 그 기계가 connected로
 // 있어야 한다(목록에 그 기계 터미널이 빠진 것을 「아무도 안 씀」으로 읽지 않게) — 아니면 3
 func parsePairs(out, mach string) ([][2]string, int) {
 	l, err := hcjson.ParseList([]byte(out))
@@ -183,7 +186,11 @@ func parsePairs(out, mach string) ([][2]string, int) {
 	}
 	ps := make([][2]string, 0, len(l.Terminals))
 	for _, t := range l.Terminals {
-		ps = append(ps, [2]string{t.Address, t.Cwd})
+		c := t.Cwd
+		if t.Unknown != "" {
+			c = unkCwd // 모름 항목(R-3M01): cwd를 몰라 busyTerms가 어느 작업 폴더든 쓰는 것으로 본다
+		}
+		ps = append(ps, [2]string{t.Address, c})
 	}
 	if mach != "" {
 		if m, ok := l.Machine(mach); !ok || m.State != "connected" {
@@ -204,6 +211,25 @@ func termWhy(r int) string {
 	return "hc ls --json 출력을 읽지 못했다(잘림·형식 — 터미널마다 address·cwd가 있어야 한다)"
 }
 
+// unkTerms: 대상 기계의 모름 항목 주소들(R-3M01)
+func unkTerms(ps [][2]string) []string {
+	var u []string
+	for _, p := range ps {
+		if a, ok := localAddr(p[0]); ok && p[1] == unkCwd {
+			u = append(u, onp(a))
+		}
+	}
+	return u
+}
+
+// gcNoteUnk: 대상 기계에 읽지 못한 항목(R-3M01 모름)이 있으면 그 터미널이 어느 작업 트리를 쓰는지 모른다 — busyTerms가 모든
+// 작업 트리를 남기니 까닭을 한 줄로 찍는다(gc)
+func gcNoteUnk(ps [][2]string) {
+	if u := unkTerms(ps); len(u) > 0 {
+		fmt.Printf("hc-lane gc: hc ls에 읽지 못한 터미널 항목(%s) — 어느 작업 트리를 쓰는지 몰라 이 기계의 작업 트리는 고르지 않는다(모름 때문에 건너뜀)\n", strings.Join(u, " "))
+	}
+}
+
 // busyTerms: 대상 기계의 터미널이고 cwd가 작업 폴더(wt) 안인 것 「<주소> <cwd>」. skipSelf면 부른 터미널 자신은 뺀다(clean)
 func busyTerms(ps [][2]string, skipSelf bool) []string {
 	var b []string
@@ -212,7 +238,7 @@ func busyTerms(ps [][2]string, skipSelf bool) []string {
 		if !ok || (skipSelf && on == "" && a == selfTerm) {
 			continue
 		}
-		if strings.HasPrefix(p[1]+"/", wt+"/") {
+		if p[1] == unkCwd || strings.HasPrefix(p[1]+"/", wt+"/") {
 			b = append(b, onp(a)+" "+p[1])
 		}
 	}
