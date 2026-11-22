@@ -3,6 +3,7 @@ package main
 // 분리·깨끗한 읽기 전용 작업 트리: 판정(detachedClean)과 닫은 뒤 지우기(worktreeRemove) — docs/hc-sweep/orphans.md
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,4 +88,21 @@ func worktreeRemove(mainRepo, cwd, self string, r runner) (bool, string) {
 		return false, cutRunes(strings.TrimSpace(res.errs+res.out), 200)
 	}
 	return true, "git worktree remove " + cwd
+}
+
+// detachedRemoveOn: 분리 작업 트리 지우기는 HC_SWEEP_DETACHED_REMOVE=1일 때만(2026-11-23 sweep-detached-off — 4바퀴 감사
+// R-4A02·03·04·08이 무시된 보관물·--only-under 밖·멈춘 rebase·정규화 다른 cwd를 지울 수 있다고 짚어 고칠 때까지 기본 끔). 닫기는 그대로
+func detachedRemoveOn() bool { return os.Getenv("HC_SWEEP_DETACHED_REMOVE") == "1" }
+
+// detachedAfterClose: 닫은 터미널의 분리·깨끗 작업 트리 처리. (화면 한 줄, closed.log 까닭 — 빈 글이면 적지 않음, closed.log 끝 칸)
+func detachedAfterClose(mainRepo, cwd, self string, r runner) (line, why, msg string) {
+	if !detachedRemoveOn() {
+		return "작업 트리 남김(분리 지우기 꺼짐): " + cwd, "", ""
+	}
+	ok, msg := worktreeRemove(mainRepo, cwd, self, r)
+	fail := ""
+	if !ok {
+		fail = " 실패"
+	}
+	return "작업 트리 정리" + fail + ": " + mainRepo + " — " + msg, "작업 트리 정리(분리·깨끗, git worktree remove)" + fail, msg
 }

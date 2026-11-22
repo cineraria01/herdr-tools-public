@@ -140,3 +140,28 @@ func TestDetachedInUse(t *testing.T) {
 		}
 	}
 }
+
+// sweep-detached-off(2026-11-23): 기본은 닫기만 하고 작업 트리를 남긴다. HC_SWEEP_DETACHED_REMOVE=1이면 지금처럼 지운다
+func TestDetachedRemoveOff(t *testing.T) {
+	G, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	R, W := G+"/repo", G+"/repo.wt/aud"
+	j2Git(t, G, "init", "-q", "-b", "main", R)
+	j2Git(t, R, "commit", "-q", "--allow-empty", "-m", "base")
+	j2Git(t, R, "worktree", "add", "-q", "--detach", W)
+
+	for _, v := range []string{"", "0", "true", "yes"} {
+		t.Setenv("HC_SWEEP_DETACHED_REMOVE", v)
+		line, why, _ := detachedAfterClose(R, W, "t1", withLs(noTerms))
+		if !strings.Contains(line, "작업 트리 남김(분리 지우기 꺼짐)") || why != "" || !isDir(W) {
+			t.Fatalf("HC_SWEEP_DETACHED_REMOVE=%q인데 지움·기록함(%q %q, 남음 %v)", v, line, why, isDir(W))
+		}
+	}
+	t.Setenv("HC_SWEEP_DETACHED_REMOVE", "1")
+	line, why, msg := detachedAfterClose(R, W, "t1", withLs(noTerms))
+	if isDir(W) || why != "작업 트리 정리(분리·깨끗, git worktree remove)" || !strings.Contains(msg, W) {
+		t.Fatalf("=1인데 못 지움(%q %q %q)", line, why, msg)
+	}
+}
