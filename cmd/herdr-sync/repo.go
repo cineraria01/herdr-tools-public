@@ -322,13 +322,12 @@ func repoSync() {
 		st[g] = append(append(st[g], ma...), mr[j]...)
 		if len(mc[j]) > 0 {
 			dst := t.d + "/" + t.r
-			if os.MkdirAll(dst, 0o755) != nil {
-				bail("저장소에 쓰지 못했다: %s", dst)
+			want := map[string]string{} // 나무 안 상대 경로 → 쓸 값의 서명(일지와 같은 값)
+			for _, e := range of(t.d) {
+				want[strings.TrimPrefix(e.path, t.r+"/")] = e.want
 			}
-			x := exec.Command("tar", "-xf", "-")
-			x.Dir, x.Stderr = dst, os.Stderr
-			if p, c := pipeline(nil, tarCreate(home+"/"+t.k, writeLines(fmt.Sprintf("mc%d", j), mc[j])), x, nil); p != 0 || c != 0 {
-				bail("저장소에 쓰지 못했다: %s", dst)
+			if err := collectTree(t.d, dst, t.k, mc[j], want, tarCreate(home+"/"+t.k, writeLines(fmt.Sprintf("mc%d", j), mc[j]))); err != nil { // 준비 폴더 → 확인 → 교체(R-202)
+				bail("저장소에 쓰지 못했다: %s (%v)", dst, err)
 			}
 			if _, rc := git("-C", t.d, "--literal-pathspecs", "add", "--pathspec-from-file="+writeLines(fmt.Sprintf("ma%d", j), ma)); rc != 0 {
 				bail("git add 실패: %s", dst)

@@ -188,7 +188,7 @@ func secF2(k *K) {
 	k.check("겹침 block: 대기열 주소를 다른 이름 터미널이 쓰면(주소 재사용) 그 레인은 끝남 — 소유 풂", fCut(k.where("o1"), 3) == "box-1/o1" && k.up("o2"), read(k.Q))
 	k.fOfresh("block")
 	k.lj("box-2/w1:claude-code:w1:working:/home/me/src/app.wt/w1")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-2/w1"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-2/w1","state":"live","cwd":"/"}]}`)
 	k.fOadd("w1", "파일: bin/tool")
 	k.fOadd("w2", "파일: bin/tool")
 	k.run("run")
@@ -388,7 +388,7 @@ func secF2k(k *K) {
 	k.fOfresh("block")
 	write(k.t, k.LT, "box-2/w1\tw1\t-\tread\n")
 	k.lj("box-2/w1:claude-code:w1:working:/home/me/src/app.wt/w1")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-2/w1"}]}`) // 채택은 hc-lane 레인·프로젝트 폴더일 때만
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-2/w1","state":"live","cwd":"/"}]}`) // 채택은 hc-lane 레인·프로젝트 폴더일 때만
 	k.fOadd("w1", "파일: bin/tool", "--only", "slow")
 	k.fOadd("w2", "파일: bin/tool", "--only", "box-1")
 	k.run("run")

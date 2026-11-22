@@ -6,7 +6,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"regexp"
@@ -222,30 +221,13 @@ func (g *cg) own(ld, rel string) string {
 	line := strings.Join([]string{g.sid, g.mypid, g.mystart, g.aid, g.myname, time.Now().Format("2006-01-02 15:04:05"), rel}, us) + "\n"
 	// 파일 fsync·닫기·rename·폴더 fsync의 오류까지 본다 — 디스크에 남기 전에 편집을 허용하지 않게(재감사 R-M03)
 	if err := atomic.WriteFile(ld+"/owner", []byte(line), 0o666); err != nil { // 임대를 남기지 못한 채 허용하면 다음 에이전트가 이 편집을 모른다(아스트라 E06 — 셸 판은 통과)
+		var ce *atomic.CommitError
+		if errors.As(err, &ce) { // 주인 줄은 이미 보인다 — 같은 주인의 재시도는 lease의 mine 갈래에서 폴더 동기화를 마친 뒤 허용(R-M202)
+			g.block(rel + ": 임대를 바꿔 넣었지만 폴더 동기화를 마치지 못했다(" + err.Error() + "). 다시 시도하면 동기화를 마친 뒤 이어 간다. 계속 막히면 디스크·권한을 사람에게 알려라.")
+		}
 		g.block(rel + ": 임대를 기록하지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
 	}
 	return line
-}
-
-// madeLease: 이번 호출이 새로 만든 임대 — 폴더와 거기 쓴 주인 줄
-type madeLease struct{ ld, line string }
-
-// undoMade: 이번 호출이 새로 만든 임대를 되돌린다 — 폴더에 주인 파일 하나뿐이고 그 줄이 이번에 쓴 그대로일 때만
-// (넘겨받기는 claim 파일을 먼저 만든다 — 남이 손댄 세대는 건드리지 않는다)
-func (g *cg) undoMade() {
-	for _, m := range g.made {
-		ents, err := os.ReadDir(m.ld)
-		if err != nil || len(ents) != 1 || ents[0].Name() != "owner" {
-			continue
-		}
-		if b, err := os.ReadFile(m.ld + "/owner"); err != nil || string(b) != m.line {
-			continue
-		}
-		if os.Remove(m.ld+"/owner") == nil {
-			os.Remove(m.ld) //nolint:errcheck // 그 사이 누가 넣었으면 남긴다
-		}
-	}
-	g.made = nil
 }
 
 // claim: 파일을 배타로 만든다(O_EXCL). 있으면(폴더여도) 실패
@@ -284,35 +266,6 @@ func touch(p string) {
 	}
 }
 
-// claimgen: 주인 한 세대를 잡는다 — 60초 넘은 claim은 남은 찌꺼기라, 먼저 다시 무장(mtime = 지금)한 뒤
-// FILE.steal-<묵은 mtime>을 만든 한 쪽만 가진다(셸 판 S3·R1 설명 그대로)
-func (g *cg) claimgen(p string) bool {
-	if claim(p) {
-		return true
-	}
-	m, ok := lmtime(p)
-	if !ok {
-		g.claimAge = 0
-		return false
-	}
-	g.claimAge = g.nowT() - m
-	if g.claimAge < 60 {
-		return false
-	}
-	if exists(p) {
-		if f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666); err == nil {
-			f.Close()
-		} else {
-			touch(p)
-		}
-	}
-	if !claim(p + ".steal-" + strconv.FormatInt(m, 10)) {
-		g.claimAge = 0
-		return false
-	}
-	return true
-}
-
 func digitsOnly(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -321,17 +274,6 @@ func digitsOnly(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func (g *cg) takeover(ld, rel string) {
-	c := ld + "/claim-" + g.oPID + "-" + digitsOnly(g.oSince)
-	if g.oPID+g.oSince == "" {
-		c = ld + "/claim-orphan"
-	}
-	if !g.claimgen(c) {
-		g.block(fmt.Sprintf("%s: 다른 에이전트가 %d초 전 이 파일 임대를 넘겨받기 시작했다. 같은 편집을 곧바로 되풀이하지 말고 다른 일을 먼저 하라. 그 넘겨받기가 끝나지 않았다면 60초가 지나면 저절로 풀린다. 그 뒤에도 막히면 지휘에 알려라.", rel, g.claimAge))
-	}
-	g.own(ld, rel)
 }
 
 func baseName(p string) string { return p[strings.LastIndexByte(p, '/')+1:] }
@@ -422,7 +364,7 @@ func (g *cg) lease(rel, mode string) {
 		if !g.firstOK(rel, mode) {
 			return
 		}
-		g.made = append(g.made, madeLease{ld, g.own(ld, rel)})
+		g.made = append(g.made, madeLease{ld: ld, line: g.own(ld, rel), newDir: true})
 		kept = true
 		return
 	} else if !errors.Is(err, fs.ErrExist) { // 임대 없이 허용하지 않는다(아스트라 E06) — 「있음」으로 읽어 시각 오류로 빠지지 않게(R-M06)
@@ -446,6 +388,11 @@ func (g *cg) lease(rel, mode string) {
 		return
 	}
 	if g.mine() {
+		// R-M202: 앞 호출이 rename 뒤 폴더 동기화에서 막혔으면(*atomic.CommitError) 주인 줄은 이미 자기 것 — 그 동기화를 마친 뒤에만 허용.
+		// ponytail: 표식 없이 자기 임대 재편집마다 폴더 fsync 한 번 — 느려지면 CommitError 표식을 둔다
+		if err := atomic.SyncDir(ld); err != nil {
+			g.block(rel + ": 자기 임대의 폴더 동기화를 마치지 못했다(" + err.Error() + "). 판정을 남길 수 없어 막았다. 디스크·권한을 사람에게 알려라.")
+		}
 		touch(ld + "/owner")
 		if g.oAID != g.aid {
 			aid := g.oAID

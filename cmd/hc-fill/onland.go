@@ -6,11 +6,17 @@ package main
 //
 //   DATA/onland.tsv          「레인 이름 프로젝트 주인 접수초」 — add가 쓰고 바퀴(onlandTick)가 착지를 보면 지운다
 //   DATA/onland/<이름>.pending  「레인 주인 sha」 줄(착지마다 하나) — 실행기가 한 번에 걷는다(돌고 있는 동안 쌓인 것은 끝난 뒤 한 번 더)
-//   DATA/onland/<이름>.lock     같은 이름 명령은 하나씩(flock)
+//   DATA/onland/<이름>.running  실행기가 걷은 묶음(pending을 rename) — 명령과 사건이 끝난 뒤에만 지운다. 실행기가 그 사이 죽으면
+//                               다음 실행기가 이 묶음부터 다시 돌린다. 바퀴는 남은 pending·running마다 실행기를 띄운다(재감사 2바퀴 fill R-212)
+//   DATA/onland/<이름>.lock    같은 이름 명령은 하나씩(flock)
+//   DATA/onland/<이름>.child    도는 명령의 「pid 시작 시각」(proc 자식 기록) — 실행기가 죽어 잠금이 풀려도 다음 실행기가 앞 명령이
+//                               끝났는지 본다(재감사 2바퀴 fill R-213)
 //   DATA/onland/<이름>-<시각>.log 명령 출력 · <이름>.out 실행기 자신의 결과 줄·오류
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 )
@@ -29,6 +36,21 @@ const (
 )
 
 func onlandDir() string { return DATA + "/onland" }
+
+// onlandPoll: 앞 실행기의 명령이 끝나기를 볼 때 쉬는 틈(시험이 줄인다)
+var onlandPoll = time.Second
+
+// onlandPrevDone: 앞 실행기(죽어 잠금을 놓은 것)가 띄운 같은 이름 명령이 끝났는가 — 기록한 그 프로세스가 돌거나, 우두머리가 끝났는데
+// 무리가 남았거나, 모르면(proc.ChildBusy) 명령 상한만큼 기다린다. 그래도 남으면 거짓(pending은 그대로 — 다음 착지 때 다시)
+func onlandPrevDone(name string) bool {
+	rec := onlandDir() + "/" + name + ".child"
+	for end := time.Now().Add(onlandMax); proc.ChildBusy(rec, proc.Grace); time.Sleep(onlandPoll) {
+		if !time.Now().Before(end) {
+			return false
+		}
+	}
+	return true
+}
 
 // onlandConf <이름>: 설정 on-land 줄의 프로젝트·명령(없으면 빈 값)
 func onlandConf(name string) (string, string) {
@@ -95,8 +117,41 @@ func onlandHit(lane string, since int64) (string, int) {
 	return "", 1
 }
 
-// onlandTick: 바퀴마다 — 착지한 줄을 그 이름 pending에 넣고 실행기(<SELF> _onland <이름>)를 배경으로 띄운다
+// onlandLeft: 걷지 못한 차례(남은 pending·running)가 있는 이름들 — 실행기를 못 띄웠거나 실행기가 죽은 뒤(fill R-212).
+// 폴더를 못 읽으면(없음 말고) 빈 목록(모름 — 다음 바퀴에)
+func onlandLeft() []string {
+	es, err := os.ReadDir(onlandDir())
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			say("착지 뒤 명령: 차례 폴더를 못 읽음(%v) — 다음 바퀴에", err)
+		}
+		return nil
+	}
+	var out []string
+	for _, e := range es {
+		for _, ext := range []string{".pending", ".running"} {
+			if b, ok := strings.CutSuffix(e.Name(), ext); ok && okname(b) && nonEmpty(onlandDir()+"/"+e.Name()) {
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
+// onlandTick: 바퀴마다 — 착지한 줄을 그 이름 pending에 넣고 실행기(<SELF> _onland <이름>)를 배경으로 띄운다. 남은 차례도 다시 띄운다
+// (실행기가 이미 돌면 새 실행기는 잠금을 못 잡아 바로 끝 — 도는 쪽이 걷는다)
 func onlandTick() {
+	fire := map[string]bool{}
+	if !dry {
+		for _, n := range onlandLeft() {
+			fire[n] = true
+		}
+	}
+	defer func() {
+		for name := range fire {
+			onlandSpawn(name)
+		}
+	}()
 	f := DATA + "/onland.tsv"
 	rows := readRows(f)
 	if len(rows) == 0 {
@@ -104,7 +159,6 @@ func onlandTick() {
 	}
 	now := nowUnix()
 	drop := map[string]bool{} // 「레인 접수초」
-	fire := map[string]bool{}
 	for _, r := range rows {
 		lane, name, p, own, ts := r.F(1), r.F(2), r.F(3), r.F(4), int64(num(r.F(5)))
 		if now-ts > onlandKeep {
@@ -149,9 +203,6 @@ func onlandTick() {
 			say("착지 뒤 명령 기록: 대기열 잠금을 못 잡음 — 다음 바퀴에")
 		}
 	}
-	for name := range fire {
-		onlandSpawn(name)
-	}
 }
 
 // onlandPend: pending에 한 줄(짧은 잠금 — 실행기가 걷는 중에 끼어 잃지 않게)
@@ -168,7 +219,8 @@ func onlandPend(name, lane, own, sha string) error {
 	return appendLine(d+"/"+name+".pending", strings.Join([]string{lane, dash(own), sha}, "\t"))
 }
 
-// onlandTake: pending을 걷는다(비우고 그 줄들)
+// onlandTake: 다음 묶음 — 앞 실행기가 끝내지 못한 running이 있으면 그것, 없으면 pending을 running으로 옮겨(rename) 그 줄들.
+// 묶음은 onlandDone이 지운다. 읽기 오류(없음 말고)는 오류(모름 — 아무것도 옮기지 않는다)
 func onlandTake(name string) ([]Row, error) {
 	d := onlandDir()
 	l, err := lockx.Lock(d + "/" + name + ".plock")
@@ -176,15 +228,51 @@ func onlandTake(name string) ([]Row, error) {
 		return nil, err
 	}
 	defer l.Close()
-	p := d + "/" + name + ".pending"
-	rs := readRows(p)
-	if len(rs) == 0 {
-		return nil, nil
+	r := d + "/" + name + ".running"
+	for moved := false; ; moved = true {
+		b, ok, err := atomic.Read(r)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			var rs []Row
+			for _, l := range lines(string(b)) {
+				rs = append(rs, splitRow(l))
+			}
+			if len(rs) > 0 {
+				return rs, nil
+			}
+			if err := os.Remove(r); err != nil { // 빈 묶음
+				return nil, err
+			}
+		}
+		if moved {
+			return nil, nil
+		}
+		if err := os.Rename(d+"/"+name+".pending", r); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if err := atomic.SyncDir(d); err != nil {
+			return nil, err
+		}
 	}
-	if err := os.Remove(p); err != nil {
-		return nil, err
+}
+
+// onlandDone: 걷은 묶음의 명령·사건이 끝났다 — running을 지운다
+func onlandDone(name string) error {
+	d := onlandDir()
+	l, err := lockx.Lock(d + "/" + name + ".plock")
+	if err != nil {
+		return err
 	}
-	return rs, nil
+	defer l.Close()
+	if err := os.Remove(d + "/" + name + ".running"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func onlandSpawn(name string) {
@@ -207,7 +295,7 @@ func onlandSpawn(name string) {
 }
 
 // onlandRun <이름>: 실행기 — 잠금을 쥐고 pending이 빌 때까지 한 번씩(쌓인 착지는 한 번으로). 이미 도는 실행기가 있으면 그쪽이 걷는다.
-// 잠금을 놓은 뒤에도 다시 본다(놓기 직전에 들어온 줄을 잃지 않게). 종료 0 · 1 잠금 오류
+// 잠금을 놓은 뒤에도 다시 본다(놓기 직전에 들어온 줄을 잃지 않게). 종료 0 · 1 잠금 오류 · 75 앞 실행기의 명령이 아직 돎(모름)
 func onlandRun(name string) int {
 	d := onlandDir()
 	if err := os.MkdirAll(d, 0o755); err != nil {
@@ -223,6 +311,12 @@ func onlandRun(name string) int {
 		if busy {
 			return 0
 		}
+		// 잠금은 실행기가 죽으면 풀리지만 그 명령은 살아 있을 수 있다 — 같은 이름을 겹쳐 돌리지 않게 앞 명령이 끝난 뒤에만(fill R-213)
+		if !onlandPrevDone(name) {
+			fmt.Fprintf(os.Stderr, "hc-fill: 착지 뒤 %s: 앞 실행기의 명령이 아직 돈다(또는 모름) — pending은 남아 다음 착지 때 함께\n", name)
+			f.Close()
+			return 75
+		}
 		for {
 			rs, err := onlandTake(name)
 			if err != nil {
@@ -234,9 +328,14 @@ func onlandRun(name string) int {
 				break
 			}
 			onlandOnce(name, rs)
+			if err := onlandDone(name); err != nil {
+				fmt.Fprintf(os.Stderr, "hc-fill: 착지 뒤 %s 묶음을 끝냄으로 못 적음(%v) — 다음 실행기가 한 번 더 돌릴 수 있다\n", name, err)
+				f.Close()
+				return 1
+			}
 		}
 		f.Close()
-		if !nonEmpty(d + "/" + name + ".pending") {
+		if !nonEmpty(d+"/"+name+".pending") && !nonEmpty(d+"/"+name+".running") {
 			return 0
 		}
 	}
@@ -270,7 +369,7 @@ func onlandOnce(name string, rs []Row) {
 		c.Dir = repo
 		c.Stdout, c.Stderr = out, out
 		c.Env = append(os.Environ(), "HC_ONLAND_NAME="+name, "HC_ONLAND_LANES="+strings.Join(lanes, ","), "HC_ONLAND_SHA="+sha)
-		rc = proc.WaitMax(c, "", onlandMax)
+		rc = proc.WaitMax(c, onlandDir()+"/"+name+".child", onlandMax) // 명령 무리를 자식 기록에(다음 실행기가 본다)
 		fmt.Fprintf(out, "--- 종료 %d\n", rc)
 		out.Close()
 		if rc == proc.TimeoutCode {

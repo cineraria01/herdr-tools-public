@@ -65,11 +65,11 @@ func s21aHold(k *K) {
 		}
 	}
 	// 레인이 다 끝나고 lane.watch_idle분(시험은 초) 동안 사건도 없으면 watch가 스스로 끝남
-	write(k.t, k.HCLOG+".lsfile", `{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","state":"live","status":"working","turn":1}]}`+"\n")
+	write(k.t, k.HCLOG+".lsfile", `{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","cwd":"/","state":"live","status":"working","turn":1}]}`+"\n")
 	w6 := k.s21aW(append([]string{"HC_LANE_WATCH_IDLE=2"}, live...), "--to", "t7cc")
 	time.Sleep(3500 * time.Millisecond)
 	k.check("watch: 이 지휘의 살아 있는 레인이 있으면 쉬어도 안 끝남", !w6.Done())
-	write(k.t, k.HCLOG+".lsfile", `{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","state":"finished","turn":1},{"address":"t61","name":"lane-o","parent":"mac/t7","state":"live","status":"working","turn":1}]}`+"\n")
+	write(k.t, k.HCLOG+".lsfile", `{"terminals":[{"address":"t60","name":"lane-z","parent":"mac/t7cc","state":"finished","turn":1},{"address":"t61","name":"lane-o","parent":"mac/t7","cwd":"/","state":"live","status":"working","turn":1}]}`+"\n")
 	upto(w6.Done)
 	wrc := w6.Wait()
 	k.check("watch: 이 지휘의 레인이 다 끝나고 그 시간이 지나면 종료 0(남의 지휘 레인은 안 셈), 잠금 지움", wrc == 0 && strings.Contains(we(), "끝낸다") && !exists(WD+"/watch.t7cc"))

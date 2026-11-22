@@ -90,21 +90,21 @@ func lsFirst(path, n string) Row {
 
 // els <프로젝트> <선행>: 먼저 띄움 레인의 선행을 local 저장소의 지금 있는 origin/<기본>으로(fetch 없이). ok=false면 판정 못 함
 func lsEls(p, after string) (string, bool) {
-	FR = repoOf(p, LOCAL)
-	if FR == "" {
-		return "", false
-	}
-	var ok bool
-	if FB, ok = projectRef(FR); !ok {
-		return "", false
-	}
 	ew, ed := "", ""
 	for _, x := range words(after) {
-		eh, ok := landed(x)
+		n, op := afterAt(x, p) // <이름>@<프로젝트>는 그 프로젝트 저장소에서(일반 배치와 같은 해석 — 재감사2 fill/R-217)
+		if FR = repoOf(op, LOCAL); FR == "" {
+			return "", false
+		}
+		var ok bool
+		if FB, ok = projectRef(FR); !ok {
+			return "", false
+		}
+		eh, ok := landed(n)
 		if !ok {
 			return "", false
 		}
-		if eh != "" || cachedMark(p, x) {
+		if eh != "" || cachedMark(op, n) {
 			ed += "," + x
 		} else {
 			ew += "," + x

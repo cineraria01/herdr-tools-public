@@ -8,31 +8,39 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/clitest"
 )
 
-// R-M01: 기한에 걸리거나 직접 자식이 먼저 끝나도 그 손자까지 거둔다 — 돌아온 뒤 손자가 완료 표식을 쓰면 안 된다
+// R-M01: 기한에 걸리거나 직접 자식이 먼저 끝나도 그 손자까지 거둔다 — 돌아온 뒤 손자가 완료 표식을 쓰면 안 된다.
+// 재감사 R-M207: 표식 경로는 셸 글에 잇지 않고 따로 된 인자로($1·$2 — 공백 든 GOTMPDIR·TMPDIR에서도 같은 경로), 손자 시작 표식을 먼저 보고,
+// 부재는 ENOENT만(clitest.Absent — 다른 오류는 모름이라 멈춘다)
 func TestHookRunReapsGrandchildren(t *testing.T) {
-	d := t.TempDir()
+	d := clitest.TempDir(t)
 	for _, x := range []struct {
 		name   string
 		budget time.Duration
 		script string
 	}{
-		{"기한", 500 * time.Millisecond, "(sleep 1; : > " + d + "/a) & sleep 5"},
-		{"자식 먼저 끝남", 4 * time.Second, "(sleep 1; : > " + d + "/b) &"},
+		{"기한", 500 * time.Millisecond, `(: >"$1"; sleep 1; : >"$2") & sleep 5`},
+		{"자식 먼저 끝남", 4 * time.Second, `(: >"$1"; sleep 1; : >"$2") &`},
 	} {
 		hookBudget(x.budget)
 		t0 := time.Now()
-		_, _, rc := hookRun([]string{"sh"}, 0, nil, "", "/bin/sh", "-c", x.script)
+		_, _, rc := hookRun([]string{"sh"}, 0, nil, "", "/bin/sh", "-c", x.script, "sh", d+"/"+x.name+" 시작", d+"/"+x.name+" 끝")
 		if rc != timeoutRC || time.Since(t0) > 900*time.Millisecond {
 			t.Errorf("%s: rc=%d(want %d 모름), %v(want 기한·관 기다림 안)", x.name, rc, timeoutRC, time.Since(t0))
 		}
+		clitest.WaitFile(t, d+"/"+x.name+" 시작", 2*time.Second) // 원인(손자)이 실제로 떴다
 	}
 	time.Sleep(2 * time.Second) // 손자가 살아 있었다면 1초 뒤 표식을 썼다
-	for _, m := range []string{"a", "b"} {
-		if _, err := os.Stat(d + "/" + m); err == nil {
-			t.Errorf("훅이 돌아온 뒤 손자가 표식 %s를 썼다", m)
+	for _, m := range []string{"기한", "자식 먼저 끝남"} {
+		if !clitest.Absent(t, d+"/"+m+" 끝") {
+			t.Errorf("훅이 돌아온 뒤 손자가 표식 %q를 썼다", m+" 끝")
 		}
+	}
+	if es, err := os.ReadDir(d); err != nil || len(es) != 2 {
+		t.Errorf("표식은 예상 경로(시작 둘)에만 생겨야: %v %v", es, err)
 	}
 	hookBudget(4 * time.Second)
 	if out, _, rc := hookRun([]string{"sh"}, 0, nil, "", "/bin/sh", "-c", "echo ok"); rc != 0 || out != "ok\n" {

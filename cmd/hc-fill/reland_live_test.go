@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -137,8 +138,8 @@ func TestRelandLiveLane(t *testing.T) {
 
 	// l-back은 보낸 뒤 다시 냄(제출 사건), 둘 다 보낸 지 30분 넘음
 	EV = append(EV, strings.Join([]string{"2099-01-01T00:00:00Z", "here", "-", "l-back", "제출", "-", "1700-l-back", "-", "t9", "-", "-", "-"}, "\t"))
-	rl = strings.ReplaceAll(rl, "\t보냄\there/t1\t"+lastF(rl, "100-l-live"), "\t보냄\there/t1\t2026-11-22T00:00:00Z")
-	rl = strings.ReplaceAll(rl, "\t보냄\there/t5\t"+lastF(rl, "500-l-back"), "\t보냄\there/t5\t2026-11-22T00:00:00Z")
+	// 보냄 줄은 보내기 전 시도 줄과 보낸 뒤 알림글 줄 둘(재감사2 fill/R-215) — 둘 다 옛 시각으로
+	rl = regexp.MustCompile(`(\t보냄\there/t[15]\t)[0-9TZ:-]+`).ReplaceAllString(rl, "${1}2026-11-22T00:00:00Z")
 	os.WriteFile(DATA+"/reland.tsv", []byte(rl), 0o644)
 	tick()
 	if !inQ("l-live-reland") {
@@ -185,14 +186,4 @@ func TestRelandRenamedSubmit(t *testing.T) {
 	if rl, _ := readFile(DATA + "/reland.tsv"); !strings.Contains(rl, "100-l-orig\tl-orig\tl-orig\t보냄\tt7\t") {
 		t.Fatalf("기록 보냄: %q", rl)
 	}
-}
-
-// lastF: reland.tsv에서 그 큐 이름 첫 줄의 시각(6칸 — 넣음·보냄 줄은 뒤에 주인·알림글이 붙는다)
-func lastF(text, n string) string {
-	for _, l := range lines(text) {
-		if f := strings.Split(l, "\t"); f[0] == n && len(f) >= 6 {
-			return f[5]
-		}
-	}
-	return ""
 }

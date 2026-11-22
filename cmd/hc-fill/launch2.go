@@ -15,7 +15,7 @@ import (
 )
 
 // launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
-// 5 띄웠지만 시작 확인 실패(터미널은 남음)
+// 3 미확정(주소 모름) · 5 띄웠지만 시작 확인 실패(터미널은 남음) · 6 띄웠고 주소는 있으나 시작 확인 미확정(hc-lane 종료 8)
 func launch(lane, brief, m, repo, dest, owner string) int {
 	// 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다
 	raw, err := os.ReadFile(brief)
@@ -94,6 +94,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		return 1
 	}
 	runmd := body + "\n\n" + steps + "\n" + rsec + asec + ESEC + RSEC + paste
+	if AK == "no-audit" { // 2026-11-22 지휘 — 감사 없는 레인이 「감사 판정」을 기다리며 멈춘 일 넷. 새로·먼저·이어·다시 맞춤 모두 여기를 지난다
+		runmd = strings.TrimRight(runmd, "\n") + "\n\n자동 감사 없음 — 완료 뒤 감사 판정을 기다리지 말고 바로 착지(hc-lane land)한다\n"
+	}
 	sz := strconv.Itoa(len(runmd)) // 쓴 run 지시문의 크기가 이것과 같아야 한다(본문이 다 들어갔는지)
 	var rf string
 	if on == "" {
@@ -186,10 +189,10 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	out, lr := Cmd{Name: "hc-lane", Args: la, Err: errMerge, Env: env}.Run()
 	out = sub(out)
 	crash("after-launch")
-	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로.
-	// 시간 넘김은 모름 — 이미 시작했을 수 있다: 다른 기계에 또 띄우지 않고 시도 기록(?)·pending 소유를 남긴다(gofix-fill F01·F2)
+	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로. 8: 시작 확인 미확정 → 주소를 받아 미확정 길로(startState 2와 같게).
+	// 시간 넘김은 모름 — 이미 시작했을 수 있다: 다른 기계에 또 띄우지 않고 시도 기록(?)·pending 소유를 남긴다(gofix-fill F01·F2, 재감사2 fill/R-201)
 	switch lr {
-	case 0, 5, 6, 7:
+	case 0, 5, 6, 7, 8:
 	case proc.TimeoutCode:
 		say("모름 %s @%s: hc-lane 띄우기 시간 넘김 — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, mm)
 		return 3
@@ -250,10 +253,13 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 			}
 		}
 	}
-	if lr != 0 {
-		return 5
+	switch lr {
+	case 0:
+		return 0
+	case 8:
+		return 6 // 띄운 주소는 있고 시작 확인이 미확정
 	}
-	return 0
+	return 5
 }
 
 // launchUnsure: hc-lane 띄우기의 실패 종료 가운데 발사가 나갔을 수 있는 것(참). 확정 실패는 hc run 전의 거절·실패
@@ -365,6 +371,9 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			}
 			continue
 		}
+		if has(AGUNK, m) { // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
+			continue
+		}
 		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m) >= c {
 			continue
 		}
@@ -402,12 +411,15 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			bad = true
 			break
 		}
-		if lr != 0 && lr != 5 {
+		if lr != 0 && lr != 5 && lr != 6 {
 			continue
 		}
 		ss := 1
-		if lr == 0 {
+		switch lr {
+		case 0:
 			ss = startState(ADDR, lane)
+		case 6: // 안쪽 hc-lane이 시작 확인 미확정(종료 8) — 확인된 시작 실패가 아니다(재감사2 fill/R-201)
+			ss = 2
 		}
 		if ss == 2 { // 시작 확인(hc get)을 못 함 — 띄운 주소가 있으니 시작했을 수 있다: 미확정(?)으로 두고 다른 기계에 또 띄우지 않는다(재감사 R-01·R-05)
 			say("모름 %s @%s %s: 시작 확인(hc get)을 못 함 — 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, m, ADDR)
@@ -481,6 +493,12 @@ func earlySec(after, base string) string {
 	}
 	w := "until " + fetch + "subjects=$(git log " + base + " --format=%s)"
 	for _, a := range words(after) {
+		if _, op, at := strings.Cut(a, "@"); at && op != "" {
+			// 다른 프로젝트 선행(<이름>@<프로젝트>, afterAt): 이 레인 저장소 이력에는 없다 — hc-fill이 일반 배치와 같은 해석으로 판정해
+			// 이 기계에 써 주는 after.tsv의 「go 들어감」을 본다(재감사2 fill/R-217 — 이 저장소 기본 가지만 보아 영영 기다렸다)
+			w += " &&\n  awk -F'\\t' '$1 == \"" + a + "\" && $2 == \"go\" && index($3, \"들어감(\") == 1 { f = 1 } END { exit !f }' \"$HOME/.local/share/hc-fill/after.tsv\""
+			continue
+		}
 		st, ok := "", false
 		if fetch != "" {
 			st, ok = since(a)

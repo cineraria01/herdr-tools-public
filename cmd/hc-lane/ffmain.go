@@ -7,13 +7,17 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+
+	"herdr-tools/internal/hcjson"
 )
 
-// jrec: JSON을 { 마다(와 줄마다) 끊어 조각마다 키의 문자열·정수 값(없으면 -)을 — 첫 키가 없는 조각은 버린다(셸 jrec, jq 없이)
+// jrec: JSON을 { 마다(와 줄마다) 끊어 조각마다 키의 문자열·정수 값(없으면 -)을 — 첫 키가 없는 조각은 버린다(셸 jrec, jq 없이).
+// 판정(있음·없음)에는 쓰지 않는다 — hc 응답은 internal/hcjson으로(남은 쓰임은 시험)
 func jrec(js string, keys ...string) [][]string {
 	var o [][]string
 	for _, frag := range strings.FieldsFunc(js, func(r rune) bool { return r == '{' || r == '\n' }) {
@@ -38,11 +42,6 @@ func jrec(js string, keys ...string) [][]string {
 	return o
 }
 
-var (
-	fgPidRe  = regexp.MustCompile(`.*"foreground" *: *\{[^}]*"pid" *: *([0-9]+)`)
-	topPidRe = regexp.MustCompile(`.*"pid" *: *([0-9]+)`)
-)
-
 // mainbusy: 그 기계에서 그 폴더(아래)를 cwd로 쓰는 일하는 터미널 주소들(끝에 빈칸). hc ls 실패·꼴을 못 읽으면 false.
 // 일하는 터미널: status가 working·blocked, 또는 status가 없는데 hc get의 foreground pid가 터미널 pid와 다름(셸 위에 무엇이 돎)
 func mainbusy(dir string) (string, bool) {
@@ -50,8 +49,8 @@ func mainbusy(dir string) (string, bool) {
 	if runCmd(cmdOpt{stdout: &b}, "hc", "ls", "--json") != 0 {
 		return "", false
 	}
-	js := trim(b.String())
-	if !strings.Contains(js, `"terminals"`) {
+	l, err := hcjson.ParseList(b.Bytes()) // 항목 하나라도 계약을 어기면 못 읽음(부분 목록으로 「아무도 안 씀」을 정하지 않는다)
+	if err != nil {
 		return "", false
 	}
 	pre := ""
@@ -59,8 +58,8 @@ func mainbusy(dir string) (string, bool) {
 		pre = on + "/"
 	}
 	var out strings.Builder
-	for _, r := range jrec(js, "address", "state", "status", "cwd") {
-		a, s, ss, c := r[0], r[1], r[2], r[3]
+	for _, t := range l.Terminals {
+		a, s, ss, c := t.Address, t.State, orHyph(t.Status), t.Cwd
 		if !strings.HasPrefix(a, pre) {
 			continue
 		}
@@ -77,11 +76,14 @@ func mainbusy(dir string) (string, bool) {
 		switch ss {
 		case "working", "blocked":
 		case "-":
-			var g bytes.Buffer
-			runCmd(cmdOpt{stdout: &g}, "hc", "get", pre+a, "--json")
-			fp, tp := lastMatch(fgPidRe, g.String()), lastMatch(topPidRe, g.String())
-			if fp != "" && fp == tp {
-				continue
+			// 셸만 떠 있음(foreground pid = 터미널 pid)이 확인될 때만 안 바쁨 — 조회 실패·잘림은 바쁨으로 둔다(앞당기지 않는 쪽)
+			if gt, found, err := hcGet(10, pre+a); err == nil && found && gt.PID > 0 {
+				var fg struct {
+					PID int `json:"pid"`
+				}
+				if json.Unmarshal(gt.Raw["foreground"], &fg) == nil && fg.PID == gt.PID {
+					continue
+				}
 			}
 		default:
 			continue
@@ -89,17 +91,6 @@ func mainbusy(dir string) (string, bool) {
 		out.WriteString(pre + a + " ")
 	}
 	return out.String(), true
-}
-
-// lastMatch: sed -n 's/<re>.*/\1/p' | (줄마다) — 마지막 줄의 값
-func lastMatch(re *regexp.Regexp, s string) string {
-	v := ""
-	for _, l := range strings.Split(s, "\n") {
-		if m := re.FindStringSubmatch(l); m != nil {
-			v = m[1]
-		}
-	}
-	return v
 }
 
 func ffmain(dir, b string) {

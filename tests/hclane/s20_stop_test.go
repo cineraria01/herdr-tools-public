@@ -41,7 +41,7 @@ func s20Stop(k *K) {
 	GS := filepath.Join(k.T, "gscreen")
 	scr := func(l ...string) { write(k.t, GS, strings.Join(l, "\n")+"\n") }
 	lsG := func(a, s string, n int) string {
-		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"%s","name":"lane-g","state":"live","status":"%s","turn":%d}]}`, a, s, n)
+		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"%s","name":"lane-g","cwd":"/","state":"live","status":"%s","turn":%d}]}`, a, s, n)
 	}
 	// g: HC_FAKE_SCREEN=$GS [HC_FAKE_STATUS_AGE=<초>] HC_FAKE_LS=$(lsG …) [더…] run wait --timeout 0
 	g := func(age, a, s string, n int, more ...string) {
@@ -136,7 +136,7 @@ func s20Stop(k *K) {
 	k.check("프로세스 상한: 배경 셸이 살아 있어도 30분 넘게 쉬면 멈춤", k.rc == 0 && has("\ttp5\tlane-g\t멈춤"))
 	k.s20rm(".exec", ".ps")
 	k.runE(append([]string{`HC_FAKE_MACHINES={"machines":[{"name":"m1","state":"connected"}]}`, "HC_FAKE_SCREEN=" + GS, "HC_FAKE_STATUS_AGE=660",
-		`HC_FAKE_LS={"terminals":[{"address":"m1/tq1","name":"lane-q1","state":"live","status":"done","turn":2},{"address":"m1/tq2","name":"lane-q2","state":"live","status":"idle","turn":2}]}`}, pe...),
+		`HC_FAKE_LS={"terminals":[{"address":"m1/tq1","name":"lane-q1","cwd":"/","state":"live","status":"done","turn":2},{"address":"m1/tq2","name":"lane-q2","cwd":"/","state":"live","status":"idle","turn":2}]}`}, pe...),
 		"wait", "--all", "--timeout", "0")
 	nps := 0
 	for _, l := range strings.Split(read(k.HCLOG+".exec"), "\n") {
@@ -178,7 +178,7 @@ func s20Stop(k *K) {
 	k.check("정리됨: 판정 뒤 정리됨은 안 알림, 정리됨 줄 그대로는 안 찍음", !has("lane-f4\t멈춤") && !has("\t정리됨\t"))
 	k.run("events")
 	k.check("정리됨: hc-lane events에는 보임", has("lane-f3\t정리됨"))
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf5","name":"lane-f5","state":"live","status":"done","turn":3}]}`}, wt0...)
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf5","name":"lane-f5","cwd":"/","state":"live","status":"done","turn":3}]}`}, wt0...)
 	// 감사 [높음] 2 재현 꼴: wait가 안 도는 사이에 report 없이 쉬던 레인을 hc-sweep이 닫고 지움(hc ls에 없음) → 다음 wait --state 멈춤에서 나옴
 	empty := `HC_FAKE_LS={"terminals":[]}`
 	appendf(k.t, EV, ev(s20now(), "here", "tf9", "lane-f9", "중간", "-", "반"))
@@ -190,7 +190,7 @@ func s20Stop(k *K) {
 	appendf(k.t, EV, ev(s20now(), "here", "tf6", "lane-f6", "완료", "abcd1234", "끝"))
 	appendf(k.t, EV, ev(s20now(), "here", "tf6", "lane-f6", "정리됨", "-", "hc-sweep R2"))
 	k.run(wt0...)
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf6","name":"lane-f6","state":"live","status":"done","turn":1}]}`}, wt0...)
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf6","name":"lane-f6","cwd":"/","state":"live","status":"done","turn":1}]}`}, wt0...)
 	k.check("정리됨: 쉬는 레인은 정리됨 앞의 마지막 report(완료)로 판정(닫기 실패해도 거짓 멈춤 없음)", k.rc == 75)
 	// 재감사 [높음] 1: 착지·판정 뒤 이어 받은 일(turn이 오름)에서 끝나거나 정리되면 알린다 — 쉼 판정과 같은 turn 규칙(report turn+1 이하만 조용)
 	nw := s20now()
@@ -204,7 +204,7 @@ func s20Stop(k *K) {
 	k.check("turn: 착지 뒤 turn이 오른 정리됨은 알림", has("\ttb1\tlane-tb1\t멈춤\t-\t뜻밖의 종료(정리됨)"))
 	k.check("turn: 판정 그 턴(turn+1)의 끝남·정리됨은 조용", !grep(k.out, `lane-t[ab]2`+"\t멈춤"))
 	// 재감사 [낮음] 2: 쉼(done turn n)으로 이미 알린 레인을 hc-sweep이 같은 turn에 닫으면 다시 알리지 않음
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tc1","name":"lane-tc1","state":"live","status":"done","turn":5}]}`}, "wait", "--state", "멈춤", "--timeout", "0")
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tc1","name":"lane-tc1","cwd":"/","state":"live","status":"done","turn":5}]}`}, "wait", "--state", "멈춤", "--timeout", "0")
 	k.check("쉼 알림 먼저(준비)", k.rc == 0 && has("lane-tc1\t멈춤\t-\tdone turn 5"))
 	appendf(k.t, EV, ev(s20now(), "here", "tc1", "lane-tc1", "정리됨", "-", "hc-sweep R2", "5"))
 	k.runE([]string{empty}, "wait", "--state", "멈춤", "--timeout", "0")
@@ -240,7 +240,7 @@ func s20Stop(k *K) {
 	nw = s20now()
 	appendf(k.t, EV, ev(nw, "here", "tw1", "lane-own", "완료", "abcd1234", "내것", "1")+ev(nw, "m1", "m1/tw2", "lane-own2", "완료", "abcd1234", "내것원격", "1")+
 		ev(nw, "here", "tw3", "lane-other", "완료", "abcd1234", "남의것", "1")+ev(nw, "here", "tw4", "lane-gone", "완료", "abcd1234", "모름", "1"))
-	lsP := `HC_FAKE_LS={"terminals":[{"address":"tw1","name":"lane-own","parent":"tW","state":"live","status":"working","turn":1},{"address":"m1/tw2","name":"lane-own2","parent":"mac/tW","state":"live","status":"working","turn":1},{"address":"tw3","name":"lane-other","parent":"mac/tX","state":"live","status":"working","turn":1}]}`
+	lsP := `HC_FAKE_LS={"terminals":[{"address":"tw1","name":"lane-own","parent":"tW","cwd":"/","state":"live","status":"working","turn":1},{"address":"m1/tw2","name":"lane-own2","parent":"mac/tW","cwd":"/","state":"live","status":"working","turn":1},{"address":"tw3","name":"lane-other","parent":"mac/tX","cwd":"/","state":"live","status":"working","turn":1}]}`
 	k.runE([]string{"HC_TERMINAL_ID=tNEW", lsP}, "wait", "--state", "완료", "--timeout", "0")
 	k.check("parent 기본: 거르지 않음 — 다른(옛) 지휘가 parent인 레인 사건도 보임", k.rc == 0 && has("lane-own\t완료") && has("lane-other\t완료"))
 	k.runE([]string{"HC_TERMINAL_ID=tW", lsP}, "wait", "--mine", "--state", "완료", "--timeout", "0")

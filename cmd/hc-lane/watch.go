@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 func init() {
@@ -43,9 +46,46 @@ type ev struct {
 	whLogged     bool
 	wpar         bool
 	tl           string
+	tls          hcjson.List // tl을 hcjson.ParseList로 읽은 것(lsok일 때만)
 	lsok         bool
 	pmap         [][]string
 	lk           string
+}
+
+// orHyph: 빈 칸은 「-」(옛 jlist 칸 꼴)
+func orHyph(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// rawCell: 항목의 그 칸 원문을 옛 jlist 칸 꼴로 — 없음·null은 「-」, 문자열은 그 글, 그 밖(숫자 등)은 JSON 그대로
+func rawCell(t hcjson.Terminal, k string) string {
+	r, ok := t.Raw[k]
+	if !ok || string(r) == "null" {
+		return "-"
+	}
+	var s string
+	if json.Unmarshal(r, &s) == nil {
+		return s
+	}
+	return string(r)
+}
+
+// lsLanes: hc ls --all --json --label hc-lane=1 을 엄격히 읽는다(hcjson.ParseList) — 실패·꼴이 아님이면 lsok 거짓(「레인 없음」이 아니다, gofix K2·R-14)
+func (e *ev) lsLanes() {
+	var rc int
+	e.tl, rc = hcRun(0, errDrop, "ls", "--all", "--json", "--label", "hc-lane=1")
+	l, err := hcjson.ParseList([]byte(e.tl))
+	e.tls, e.lsok, e.pmap = l, rc == 0 && err == nil, nil
+	if !e.lsok {
+		e.tls = hcjson.List{}
+		return
+	}
+	for _, t := range l.Terminals {
+		e.pmap = append(e.pmap, []string{t.Address, orHyph(t.Parent)})
+	}
 }
 
 func evCmd(ec string, a []string) int {
@@ -183,19 +223,20 @@ func (e *ev) pick() {
 		return
 	}
 	js, rc := hcRun(0, errDrop, "machine", "ls", "--json")
-	if rc != 0 || !jlistOK(js, "machines", "name", "state") {
+	ms, err := hcjson.ParseMachines([]byte(js))
+	if rc != 0 || err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane %s: hc machine ls 실패 — 이 기계만 본다\n", e.ec)
 		e.pbad = true
 		return
 	}
-	for _, r := range jlist(js, "machines", "name", "state") {
-		if has(e.ems, r[0]) {
+	for _, m := range ms {
+		if has(e.ems, m.Name) {
 			continue
 		}
-		if r[1] == "connected" {
-			e.ems = append(e.ems, r[0])
+		if m.State == "connected" {
+			e.ems = append(e.ems, m.Name)
 		} else {
-			e.unk = append(e.unk, r[0])
+			e.unk = append(e.unk, m.Name)
 		}
 	}
 }
@@ -300,9 +341,8 @@ func (e *ev) loop(to int64) int {
 		if e.ec == "wait" {
 			coordSet(tid, false)
 		} else {
-			out, _ := hcRun(10, errDrop, "get", tid, "--json")
-			pa, _ := jget(jparse(out), "parent")
-			if pa != "" && (pa == e.wto || strings.HasSuffix(pa, "/"+e.wto)) {
+			t, found, err := hcGet(10, tid)
+			if pa := t.Parent; err == nil && found && pa != "" && (pa == e.wto || strings.HasSuffix(pa, "/"+e.wto)) {
 				e.wpar = true
 				coordSet(e.wto, false)
 			}
@@ -366,9 +406,8 @@ func (e *ev) loop(to int64) int {
 	wsleep := func() { time.Sleep(tk) }
 	for {
 		if e.ec == "watch" {
-			g, hrc := hcRun(10, errMerge, "get", e.wto, "--json")
-			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13)
-			if _, st := getState(g, hrc); st == 0 {
+			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13, hcjson.ParseGet)
+			if st := getState(hcGet(10, e.wto)); st == 0 {
 				gone = 0
 				if !e.wcheck() {
 					wsleep()
@@ -414,15 +453,10 @@ func (e *ev) loop(to int64) int {
 		}
 		cand := append([]string(nil), evl...)
 		var st []string
-		e.tl, e.lsok, e.pmap = "", true, nil
+		e.tl, e.tls, e.lsok, e.pmap = "", hcjson.List{}, true, nil
 		wantStop := strings.Contains(","+orDefault(e.sts, "멈춤")+",", ",멈춤,")
 		if e.myp != "" || e.ec == "watch" || wantStop {
-			var rc int
-			e.tl, rc = hcRun(0, errDrop, "ls", "--all", "--json", "--label", "hc-lane=1")
-			e.lsok = rc == 0 && jlistOK(e.tl, "terminals", "address", "state") // 부실한 목록은 「레인 없음」이 아니라 실패(gofix K2, R-14)
-			if e.myp != "" || e.ec == "watch" {
-				e.pmap = jlist(e.tl, "terminals", "address", "parent")
-			}
+			e.lsLanes()
 		}
 		if wantStop {
 			st = e.stopped(evl, mu)
@@ -484,8 +518,8 @@ func orDefault(s, d string) string {
 
 // myLaneLive: 이 지휘의 살아 있는 레인(parent가 --to, 모르면 이 지휘 것으로 침)이 있나
 func (e *ev) myLaneLive() bool {
-	for _, r := range jlist(e.tl, "terminals", "address", "state", "parent") {
-		if r[1] == "live" && (r[2] == "-" || r[2] == e.wto || strings.HasSuffix(r[2], "/"+e.wto)) {
+	for _, t := range e.tls.Terminals {
+		if t.State == "live" && (t.Parent == "" || t.Parent == e.wto || strings.HasSuffix(t.Parent, "/"+e.wto)) {
 			return true
 		}
 	}

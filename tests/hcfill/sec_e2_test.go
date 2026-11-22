@@ -347,6 +347,9 @@ func secE2(k *K) {
 	k.run("run")
 	k.check("--no-audit 줄: 감사·착지 절 없음, 완료해도 감사 줄 없음",
 		!hasF(k.DATA+"/runs/na-run.md", "감사·착지") && k.aidof("na") == "" && k.col15("na") == "no-audit")
+	// 2026-11-22 지휘(23:58): --no-audit 레인이 「감사 판정」을 기다리며 멈춘 일 넷 — 지시문 끝에 바로 착지하라는 고정 한 줄
+	k.check("--no-audit 줄: run 지시문 끝 줄이 「자동 감사 없음 — … 바로 착지(hc-lane land)한다」",
+		strings.HasSuffix(read(k.DATA+"/runs/na-run.md"), "\n자동 감사 없음 — 완료 뒤 감사 판정을 기다리지 말고 바로 착지(hc-lane land)한다\n"), read(k.DATA+"/runs/na-run.md"))
 	k.ifresh()
 	k.confAppend("audit    " + k.EXA)
 	rm(k.T + "/events")

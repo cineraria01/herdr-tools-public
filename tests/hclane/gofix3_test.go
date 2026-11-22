@@ -131,7 +131,7 @@ esac`)
 
 // R-13: 잘린 not_found(3)·상태 없는 주소 객체는 「없음」이 아니라 모름(2). 기본 선택은 확인 못 한 후보가 있으면 2
 func g2CoordUnknown(k *K) {
-	full := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t1","name":"boss","pid":4242,"state":"live"}'; exit 0; }; exit 3`})
+	full := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t1","cwd":"/","name":"boss","pid":4242,"state":"live"}'; exit 0; }; exit 3`})
 	k.runE([]string{full}, "coord", "--set", "t1")
 	k.check("R-13 준비: coord --set t1", k.rc == 0)
 	cut := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { printf '{"error":{"kind":"not_found"' >&2; exit 3; }; exit 3`})
@@ -258,14 +258,29 @@ func g2RebaseLock(k *K) {
 func g2WatchGarbledGone(k *K) {
 	st := filepath.Join(k.T, "wst-r13w")
 	write(k.t, st+"/hc-lane/coord.t7gw", "t7gw\t4242\tt7gw\t0\n")
+	// 대역은 답을 다 낸 뒤 t7gw 조회마다 한 줄(완료한 조회 수) — 시간이 아니라 이 수로 「구판이 끝낼 만큼 돌았다」를 정한다(재감사2 lane/R-223)
+	done := filepath.Join(k.T, "r13w-gets")
 	p := k.gfBin(map[string]string{"hc": `case $1 in
-get) printf '{"error":{"kind":"not_found"' >&2; exit 3 ;;
+get) printf '{"error":{"kind":"not_found"' >&2; [ "$2" != t7gw ] || echo "$2 잘린 not_found" >>` + sq(done) + `; exit 3 ;;
 ls) echo '{"machines":[],"terminals":[]}'; exit 0 ;;
 machine) echo '{"machines":[]}'; exit 0 ;;
 esac; exit 3`})
 	b := k.bg(k.T, filepath.Join(k.T, "r13wo"), filepath.Join(k.T, "r13we"), []string{p, "XDG_STATE_HOME=" + st, "HC_LANE_WAIT_TICK=1"}, k.LANE, "watch", "--to", "t7gw")
-	ended := upto(b.Done) // 고치기 전 판은 세 바퀴(약 3초) 뒤 0으로 끝난다
-	k.check("R-13 watch: 잘린 not_found가 되풀이돼도 끝내지 않는다", !ended)
+	gets := func() int { return strings.Count(read(done), "잘린 not_found") }
+	// 구판은 「없음」 세 바퀴째에 끝낸다 — 바퀴마다 t7gw 조회가 한 번 이상이니 5번이면 구판은 이미 끝냈을 수(60초 기한, 부하에도 넉넉히)
+	for i := 0; i < 600 && gets() < 5; i++ {
+		select {
+		case <-b.done:
+			i = 600
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	n := gets()
+	k.check("R-223 준비: 대역이 잘린 not_found 조회를 5번 이상 끝냈다("+strconv.Itoa(n)+"번)", n >= 5)
+	k.check("R-13 watch: 잘린 not_found 5번 뒤에도 살아 있다", !b.Done())
+	k.runE([]string{p, "XDG_STATE_HOME=" + st}, "watch", "--to", "t7gw")
+	k.check("R-223 watch: 감시 잠금을 그대로 쥐고 있다(둘째 watch는 「이미 돈다」로 끝)", k.rc != 0 && strings.Contains(k.errf(), "감시가 이미 돈다"))
 	b.stop()
 }
 

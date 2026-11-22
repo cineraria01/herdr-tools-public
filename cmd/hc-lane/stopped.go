@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 // round: 한 바퀴(stopped 한 번) 동안의 ps·hc get 기억
@@ -99,8 +101,8 @@ func (e *ev) stopped(evl, mu []string) []string {
 	me := machineName()
 	km := e.lkinds()
 	var out []string
-	for _, r := range jlist(e.tl, "terminals", "address", "name", "state", "status", "turn", "parent", "reason", "cwd") {
-		a, nm, s, ss, tn, pa, rs, cw := r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]
+	for _, t := range e.tls.Terminals { // lsok — hcjson.ParseList로 통째 검증된 목록(watch.go lsLanes)
+		a, nm, s, ss, tn, pa, rs, cw := t.Address, orHyph(t.Name), t.State, orHyph(t.Status), rawCell(t, "turn"), orHyph(t.Parent), rawCell(t, "reason"), orHyph(t.Cwd)
 		if !e.mineOf(pa) {
 			continue
 		}
@@ -122,6 +124,7 @@ func (e *ev) stopped(evl, mu []string) []string {
 			// killed가 지휘의 hc kill인지: parent가 없거나 아직 살아 있을 때만 조용히 넘긴다
 			kq := false
 			if why != "" && rs == "killed" {
+				// 지휘가 살아 있음이 확인될 때만 조용히(그 지휘의 hc kill) — 모름(2·3)은 알린다(숨기지 않는 쪽)
 				kq = pa == "" || pa == "-" || rd.palive(pa) == 0
 			}
 			if kq {
@@ -261,8 +264,12 @@ func (rd *round) procbusy(a, pid string) int {
 // resting: 쉬는 레인이 정말 멈췄나(유예·배경 작업·화면 표시)
 func (rd *round) resting(a, k, cw string) bool {
 	e := rd.e
-	g, _ := hcRun(10, errDrop, "get", a, "--json")
-	m := jparse(g)
+	g, rc := hcGetRaw(10, a)
+	var m map[string]any
+	if _, found, err := hcjson.ParseGet([]byte(g), rc, a); err == nil && found {
+		m = jparse(g) // ParseGet이 통째 검증한 응답에서만 칸을 꺼낸다
+	}
+	// 조회를 못 하면(status_ms 모름) 바로 멈춤으로 알린다 — 알림을 숨기지 않는 쪽(지휘가 본다)
 	sm := topNum(m, "status_ms", "")
 	if sm == "" {
 		return true
@@ -320,10 +327,10 @@ func (rd *round) pnorm(pa string) string {
 	}
 	if rd.mls == "" {
 		mj, rc := hcRun(20, errDrop, "machine", "ls", "--json")
-		if rc == 0 && strings.Contains(mj, `"machines"`) {
+		if ms, err := hcjson.ParseMachines([]byte(mj)); rc == 0 && err == nil {
 			var ns []string
-			for _, r := range jlist(mj, "machines", "name", "state") {
-				ns = append(ns, r[0])
+			for _, m := range ms {
+				ns = append(ns, m.Name)
 			}
 			rd.mls = " " + strings.Join(ns, " ") + " "
 		} else {
@@ -336,16 +343,18 @@ func (rd *round) pnorm(pa string) string {
 	return pa
 }
 
-// plive: 그 터미널이 지금 살아 있나. 0 살아 있음, 3 그 주소의 기계를 모름(machine_unknown), 1 그 밖
+// plive: 그 터미널이 지금 살아 있나(hcjson.ParseGet). 0 살아 있음, 1 확인된 없음·끝남, 3 그 주소의 기계를 모름(machine_unknown), 2 모름
 func (rd *round) plive(a string) int {
 	if r, ok := rd.pl[a]; ok {
 		return r
 	}
-	g, _ := hcRun(10, errMerge, "get", a, "--json")
-	r := 1
-	if m := jparse(g); m != nil && m["state"] == "live" {
-		r = 0
-	} else if strings.Contains(g, "machine_unknown") {
+	g, rc := hcGetRaw(10, a)
+	t, found, err := hcjson.ParseGet([]byte(g), rc, a)
+	r := 2
+	switch {
+	case err == nil:
+		r = getState(t, found, nil)
+	case strings.Contains(g, `"machine_unknown"`):
 		r = 3
 	}
 	rd.pl[a] = r
@@ -360,7 +369,7 @@ func (rd *round) palive(pa string) int {
 	}
 	q := rd.pnorm(pa)
 	if q == pa {
-		return 1
+		return 2 // 기계 목록으로 떼지 못했다 — 그 지휘가 사는지 모른다
 	}
 	return rd.plive(q)
 }

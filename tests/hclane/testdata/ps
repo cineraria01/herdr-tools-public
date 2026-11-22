@@ -1,4 +1,18 @@
 #!/bin/bash
 [ -z "${HC_FAKE_PS_FAIL-}" ] || exit 1
+# $HC_FAKE_PS_REG: 시험이 만든 프로세스 등록부(줄: pid<TAB>ppid<TAB>alive|exited<TAB>명령) — 호스트 ps를 보지 않는다(재감사 lane R-222).
+# -p <pid> -o command=: 살아 있음이면 그 명령, 끝남·없음이면 출력 없이 1(진짜 ps 꼴). -A: 살아 있는 줄만(pid ppid [명령]). 조회 실패는 위 HC_FAKE_PS_FAIL
+if [ -n "${HC_FAKE_PS_REG-}" ]; then
+  echo "$*" >>"$HCLOG.ps"
+  case "$1" in
+    -p) awk -F'\t' -v p="$2" '$1==p && $3=="alive" {print $4; f=1} END {exit !f}' "$HC_FAKE_PS_REG" ;;
+    -A) case "$*" in
+          *command=*) awk -F'\t' '$3=="alive" {print $1, $2, $4}' "$HC_FAKE_PS_REG" ;;
+          *) awk -F'\t' '$3=="alive" {print $1, $2}' "$HC_FAKE_PS_REG" ;;
+        esac ;;
+    *) echo "가짜 ps: 모르는 인자 $*" >&2; exit 2 ;;
+  esac
+  exit
+fi
 [ -n "${HC_FAKE_PS-}" ] || exec /bin/ps "$@"
 echo "$*" >>"$HCLOG.ps"; cat "$HC_FAKE_PS"

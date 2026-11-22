@@ -84,10 +84,10 @@ func gfMinAge(k *K) {
 
 // L04: hc get이 실패하며 잘린 응답 — 끝났다(1)가 아니라 모름(2)
 func gfCoordPartial(k *K) {
-	full := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t1","name":"boss","pid":4242,"state":"live"}'; exit 0; }; exit 3`})
+	full := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t1","name":"boss","pid":4242,"cwd":"/","state":"live"}'; exit 0; }; exit 3`})
 	k.runE([]string{full}, "coord", "--set", "t1")
 	k.check("L04 준비: coord --set t1", k.rc == 0)
-	cut := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { printf '{"address":"t1","name":"boss","pid":4242,"state":"live"'; exit 1; }; exit 3`})
+	cut := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { printf '{"address":"t1","name":"boss","pid":4242,"cwd":"/","state":"live"'; exit 1; }; exit 3`})
 	k.runE([]string{cut}, "coord", "--check", "t1")
 	k.check("L04 coord --check: 실패한 hc get의 잘린 응답은 모름(2)", k.rc == 2)
 	gone := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"error":{"kind":"not_found"}}' >&2; exit 3; }; exit 3`})
@@ -98,7 +98,7 @@ func gfCoordPartial(k *K) {
 // L05: hc ls가 0으로 끝났는데 목록이 잘림 — 보낸 척(0) 하지 않는다
 func gfSendTrunc(k *K) {
 	p := k.gfBin(map[string]string{"hc": `case $1 in
-ls) printf '{"terminals":[{"address":"t2","state":"live","name":"lane-a","parent":"boss"},'; exit 0 ;;
+ls) printf '{"terminals":[{"address":"t2","cwd":"/","state":"live","name":"lane-a","parent":"boss"},'; exit 0 ;;
 send) echo "$*" >>"$HCLOG.send"; exit 0 ;;
 esac; exit 3`})
 	os.Remove(k.HCLOG + ".send")
@@ -111,7 +111,7 @@ esac; exit 3`})
 
 // L06: umask 077이면 지휘 기록은 0600(셸 판과 같게 — 마스크를 무시하지 않는다)
 func gfCoordPerm(k *K) {
-	p := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t6","name":"boss","pid":4242,"state":"live"}'; exit 0; }; exit 3`})
+	p := k.gfBin(map[string]string{"hc": `[ "$1" = get ] && { echo '{"address":"t6","name":"boss","pid":4242,"cwd":"/","state":"live"}'; exit 0; }; exit 3`})
 	k.out, k.rc = k.exe(k.T, filepath.Join(k.T, "err"), []string{p}, "bash", "-c", `umask 077; exec "$0" "$@"`, k.LANE, "coord", "--set", "t6")
 	fi, err := os.Stat(filepath.Join(k.T, ".local/state/hc-lane/coord.t6"))
 	k.check("L06 coord --set: umask 077이면 coord 파일 0600", k.rc == 0 && err == nil && fi.Mode().Perm() == 0o600)

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"herdr-tools/internal/shx"
 )
 
 // ACT: 이번 바퀴에 읽은 실제 변경 「프로젝트<TAB>레인」 → 파일(overlap_ignore 뺌). 키가 없으면 못 읽음(빈 목록은 바꾼 것 없음)
@@ -20,8 +22,10 @@ var ACTPARK map[string]bool
 const actNS = "refs/hc-fill/act/"
 
 // actScript: 인자 「프로젝트 레인 작업트리 기준」 넷씩. 읽은 레인마다 「p<TAB>n<TAB>+」, 파일마다 「p<TAB>n<TAB>=파일」(못 읽은 레인은 줄 없음).
-// 바꾼 파일 = 기준과의 merge-base부터 작업 트리까지(커밋·스테이지·안 올린 것) + 추적 안 하는 새 파일
-const actScript = `while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
+// 바꾼 파일 = 기준과의 merge-base부터 작업 트리까지(커밋·스테이지·안 올린 것) + 추적 안 하는 새 파일.
+// shx.Script로 감싼다 — 끝 표식이 성공을 정하므로 마지막 빈 줄 건너뛰기의 1이 조각 전체를 실패로 만들지 않고(fill/R-216:
+// 추적 파일만 고친 작업 트리가 「못 읽음」이 돼 겹침을 놓쳤다), 잘린 출력은 표식이 없어 못 읽음이 된다
+var actScript = shx.Script(`while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
 case $w in "~/"*) w=$HOME/${w#"~/"} ;; esac
 mb=$(git -C "$w" merge-base HEAD "$b" 2>/dev/null) || continue
 o=$(git -C "$w" -c core.quotepath=off diff --no-renames --name-only "$mb" 2>/dev/null) || continue
@@ -29,7 +33,7 @@ u=$(git -C "$w" -c core.quotepath=off ls-files --others --exclude-standard 2>/de
 printf '%s\t%s\t+\n' "$p" "$n"
 printf '%s\n%s\n' "$o" "$u" | while IFS= read -r f; do [ -n "$f" ] && printf '%s\t%s\t=%s\n' "$p" "$n" "$f"; done
 done
-`
+`)
 
 // actParse: actScript 출력 → 「p<TAB>n」 → 파일(읽은 레인만)
 func actParse(out string) map[string][]string {
@@ -147,9 +151,10 @@ func actTick(rows []Row) {
 		go func(m string, args []string) {
 			defer wg.Done()
 			out, rc := onm(nil, m, actScript, append([]string{"-"}, args...)...)
+			out, ok := shx.Cut(out, rc)
 			mu.Lock()
 			defer mu.Unlock()
-			if rc != 0 {
+			if !ok {
 				say("실제 변경 못 읽음 @%s: 작업 트리 조회 실패 — 원격 가지나 예약만으로 판정", m)
 				return
 			}

@@ -6,11 +6,11 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
   [ -z "${HC_FAKE_GET_ADDR-}" ] || [ "$2" != "$HC_FAKE_GET_ADDR" ] || { printf '%s\n' "$HC_FAKE_GET_BODY"; exit 0; }
   # $HC_FAKE_STATUS_AGE초 전에 status가 바뀐 쉬는 터미널(wait 유예 시험)
   # $HC_FAKE_PID가 있으면 그 터미널 프로그램 pid도(배경 작업 프로세스 판정 시험). 앞의 foreground pid는 다른 값
-  [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
+  [ -z "${HC_FAKE_STATUS_AGE-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"pid\":1},\"cwd\":\"/\",\"state\":\"live\",\"status\":{\"state\":\"done\"},\"status_ms\":$((($(date +%s) - HC_FAKE_STATUS_AGE) * 1000)),\"turn\":1${HC_FAKE_PID:+,\"pid\":$HC_FAKE_PID}}"; exit 0; }
   [ -z "${HC_FAKE_GET_SLEEP-}" ] || exec sleep "$HC_FAKE_GET_SLEEP"   # 응답 없는 코어(alarm이 이 프로세스를 끝내 고아가 안 남게 exec)
   # $HC_FAKE_GET_NAME이면 맨 위 name도(앞의 foreground.name은 다른 값 — 진짜 hc 꼴)
   # $HC_FAKE_GET_CREATED면 created_ms도(report 10칸 발행 실행·verdict의 실행 키)
-  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"}${HC_FAKE_GET_CREATED:+,\"created_ms\":$HC_FAKE_GET_CREATED},\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
+  [ -z "${HC_FAKE_GET_TURN-}" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":1}${HC_FAKE_GET_NAME:+,\"name\":\"$HC_FAKE_GET_NAME\"}${HC_FAKE_GET_CREATED:+,\"created_ms\":$HC_FAKE_GET_CREATED},\"cwd\":\"/\",\"state\":\"live\",\"status\":{\"app\":\"x\",\"msg\":\"m\",\"state\":\"working\"},\"turn\":$HC_FAKE_GET_TURN}"; exit 0; }
   # 띄운 터미널(t9zz): 기본은 status가 잡힘. HC_FAKE_NOSTATUS=1 늘 null, =untilkeys 키를 받기 전까지 null, =finished 끝남,
   # =idle 늘 idle·turn 0(첫 지시가 입력칸에 남은 꼴). 아래 둘은 이 주소 get이 $HC_FAKE_IDLE_GETS번(기본 5)이 될 때까지 idle·turn 0이고 그 뒤
   # =idleuntil working·turn 0(첫 턴 진행 중 — 실측: 첫 턴 동안 working·turn 0, 턴이 끝나야 turn 1), =idleturn idle·turn 1(working을 못 본 채 첫 턴이 끝난 꼴)
@@ -28,20 +28,21 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
       idleturn) s='{"app":"claude-code","state":"idle"}'; [ "$k9" -lt "${HC_FAKE_IDLE_GETS:-5}" ] || tn=1 ;;
       *) s=null ;;
     esac
-    echo "{\"address\":\"$2\",\"name\":\"x\",\"state\":\"live\",\"status\":$s,\"turn\":$tn}"; exit 0 ;;
+    n9=$(cat "$HCLOG.runname" 2>/dev/null) || n9=x   # 띄울 때 받은 --name(진짜 hc처럼 그 이름으로 답한다)
+    echo "{\"address\":\"$2\",\"cwd\":\"/\",\"name\":\"$n9\",\"state\":\"live\",\"status\":$s,\"turn\":$tn}"; exit 0 ;;
   esac
   # 살아 있는 지휘 여럿: $HCLOG.live 파일의 「주소 pid」 줄(배경 watch가 도중에 바뀌게 파일로). 이름은 주소와 같게
-  if [ -f "$HCLOG.live" ]; then p_=$(awk -v a="$2" '$1 == a { print $2 }' "$HCLOG.live"); [ -z "$p_" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":$p_,\"state\":\"live\"}"; exit 0; }; fi
+  if [ -f "$HCLOG.live" ]; then p_=$(awk -v a="$2" '$1 == a { print $2 }' "$HCLOG.live"); [ -z "$p_" ] || { echo "{\"address\":\"$2\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"cwd\":\"/\",\"name\":\"$2\",\"pid\":$p_,\"state\":\"live\"}"; exit 0; }; fi
   # 「mac/…」는 이 기계 자신의 이름이 붙은 주소 꼴: 진짜 hc처럼 machine_unknown
   case $2 in mac/*) echo "{\"error\":{\"kind\":\"machine_unknown\",\"message\":\"unknown machine \\\"mac\\\"\"}}" >&2; exit 4 ;; esac
   # 살아 있는 터미널(앞의 foreground pid·name은 다른 값 — 진짜 hc 꼴). pid는 $HC_FAKE_LIVE_PID(기본 4242).
   # status는 $HCLOG.cstat 파일의 JSON 값(배경 watch가 도중에 바뀌게 파일로 — watch-hold), 없으면 idle
-  [ "$2" = "${HC_FAKE_LIVE-}" ] && { s_=$(cat "$HCLOG.cstat" 2>/dev/null) || s_='{"state":"idle"}'; echo "{\"address\":\"t1aa\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":${HC_FAKE_LIVE_PID:-4242},\"state\":\"live\",\"status\":$s_}"; exit 0; }
+  [ "$2" = "${HC_FAKE_LIVE-}" ] && { s_=$(cat "$HCLOG.cstat" 2>/dev/null) || s_='{"state":"idle"}'; echo "{\"address\":\"$2\",\"cwd\":\"/\",\"foreground\":{\"name\":\"node\",\"pid\":7},\"name\":\"$2\",\"pid\":${HC_FAKE_LIVE_PID:-4242},\"state\":\"live\",\"status\":$s_}"; exit 0; }
   # 레인 터미널(라벨 hc-lane=1): 지휘 정보로 적지 않아야 한다
-  [ "$2" = "${HC_FAKE_LANETERM-}" ] && { echo "{\"address\":\"$2\",\"labels\":{\"hc-lane\":\"1\"},\"name\":\"lane-x\",\"pid\":5555,\"state\":\"live\"}"; exit 0; }
+  [ "$2" = "${HC_FAKE_LANETERM-}" ] && { echo "{\"address\":\"$2\",\"cwd\":\"/\",\"labels\":{\"hc-lane\":\"1\"},\"name\":\"lane-x\",\"pid\":5555,\"state\":\"live\"}"; exit 0; }
   # 감시 터미널(라벨 hc-lane-watch=1): 지휘로 보지 않아야 한다
-  [ "$2" = "${HC_FAKE_WATCHTERM-}" ] && { echo "{\"address\":\"$2\",\"labels\":{\"hc-lane-watch\":\"1\"},\"name\":\"lane-watch-x\",\"pid\":5556,\"state\":\"live\"}"; exit 0; }
-  [ "$2" = "${HC_FAKE_ID-}" ] && { echo "{\"address\":\"$2\",\"name\":\"other\",\"state\":\"live\"}"; exit 0; }
+  [ "$2" = "${HC_FAKE_WATCHTERM-}" ] && { echo "{\"address\":\"$2\",\"cwd\":\"/\",\"labels\":{\"hc-lane-watch\":\"1\"},\"name\":\"lane-watch-x\",\"pid\":5556,\"state\":\"live\"}"; exit 0; }
+  [ "$2" = "${HC_FAKE_ID-}" ] && { echo "{\"address\":\"$2\",\"cwd\":\"/\",\"name\":\"other\",\"state\":\"live\"}"; exit 0; }
   echo '{"error":{"kind":"not_found"}}' >&2; exit 3
 fi
 if [ "$1" = ls ]; then   # $HC_FAKE_LS(JSON)를 답한다. $HC_FAKE_LS_FAIL이면 실패. 인자는 $HCLOG.ls에 한 줄로
@@ -68,7 +69,9 @@ fi
 f=$HCLOG; [ "$1" = exec ] && f=$HCLOG.exec
 { echo "--- $PWD"; for a in "$@"; do echo "$a"; done; } >>"$f"
 case $1 in
-  run) [ -n "${HC_FAKE_RUN_FAIL-}" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; }
+  run) n_=; l_=; p_=; for a_ in "$@"; do [ "$p_" != --name ] || n_=$a_; [ "$p_ $a_" != "--label hc-lane=1" ] || l_=1; p_=$a_; done   # 레인 run(라벨 hc-lane=1)의 이름만
+       [ -z "$n_" ] || [ -z "$l_" ] || printf '%s' "$n_" >"$HCLOG.runname"
+       [ -n "${HC_FAKE_RUN_FAIL-}" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; }
        echo "{\"address\":\"${HC_FAKE_RUN_ADDR:-t9zz}\",\"agent\":\"x\",\"state\":\"live\"}" ;;
   exec) on=; while [ "$1" != -- ]; do [ "$1" != --on ] || on=$2; shift; done; shift
         # $HC_FAKE_LEASE_EXEC4: 임대 호출(hc-lane-lease)만 코어가 종료 4(machine_unknown) — 원격 없음(no-origin)과 가름

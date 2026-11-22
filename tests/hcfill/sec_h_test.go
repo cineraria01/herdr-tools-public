@@ -84,7 +84,7 @@ func secH(k *K) {
 	k.fresh()
 	k.add("hold1", "--after", "zz9", "--no-early") // 대기열이 비어 바퀴가 일찍 끝나지 않게
 	k.lj("box-1/k9:claude-code:dx:working:/home/me/src/app.wt/dx")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/k9"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/k9","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.add("dx")
 	k.mj("box-2", "shared", "slow")
@@ -106,7 +106,7 @@ func secH(k *K) {
 		k.where("rr") == "wait - -" && hasF(k.qcol("rr", 3), "# 지시문 rr2"), read(Q))
 	k.check("줄 ID: add마다 17칸에 새 값(같은 이름 다시 add해도 다름)", k.qcol("rr", 17) != "" && grep(k.out, `줄 바뀜 rr`), read(Q))
 	k.lj("box-1/rr:claude-code:rr:working:/home/me/src/app.wt/rr")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/rr"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/rr","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.check("다음 바퀴에도 교체된 줄은 이전 시도의 터미널을 채택하지 않음", k.where("rr") == "wait - -")
 	k.lj()
@@ -116,7 +116,7 @@ func secH(k *K) {
 	k.run("rm", "rr")
 	k.add("rr")
 	k.lj("box-1/rr:claude-code:rr:working:/home/me/src/app.wt/rr")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/rr"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/rr","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.check("띄우기를 마친 뒤 rm·add해도 옛 주소를 새 줄에 채택하지 않음", k.where("rr") == "wait - -")
 	k.unset("HC_FAKE_LS_LANE")
@@ -141,7 +141,7 @@ func secH(k *K) {
 	mkdirs(k.t, snap)
 	k.runE([]string{"TMPDIR=" + snap, "HC_FILL_CRASH_AT=after-launch"}, "run")
 	k.lj("box-1/snap-cut:claude-code:snap-cut:working:/home/me/src/app.wt/snap-cut")
-	k.runE([]string{`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/snap-cut"}]}`, "TMPDIR=" + snap}, "run")
+	k.runE([]string{`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/snap-cut","state":"live","cwd":"/"}]}`, "TMPDIR=" + snap}, "run")
 	left := false
 	filepath.WalkDir(snap, func(p string, d fs.DirEntry, err error) error {
 		if err == nil && d.Name() == "snap-cut.md" {
@@ -161,7 +161,7 @@ func secH(k *K) {
 	k.check("준비: 띄운 뒤 up 전에 run이 죽음 — 줄은 대기, 시도 기록이 남음", k.where("ck") == "wait - -" && hasE(try, "^ck\t"), read(Q))
 	write(k.t, k.DATA+"/reports/ck.md", "결과: 고침 abc1234\n") // 그 실행이 쓴 결과
 	k.lj("box-1/ck:claude-code:ck:working:/home/me/src/app.wt/ck")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/ck"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/ck","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.unset("HC_FAKE_LS_LANE")
 	k.check("복구: 채택이 시도 기록의 먼저 띄움 표시(early)를 쓰고 실행 주소를 확정",
@@ -212,7 +212,7 @@ func secHPark(k *K) {
 	k.check("먼저 띄움 절: 준비 뒤 hc-lane park → clean → 턴 끝(기다리지 않음), 기다림 블록은 원격 없을 때만",
 		k.where("pk") == "up box-1 box-1/pk" && hasF(rf, "hc-lane park") && hasF(rf, "park가 종료 3(원격 없는 저장소)일 때만"), read(rf))
 	k.lj("box-1/pk:claude-code:pk:working:/home/me/src/app.wt/pk")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pk"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pk","state":"live","cwd":"/"}]}`)
 	write(k.t, k.T+"/events", "2026-11-20T01:00:00Z\tm\tbox-1/pk\tpk\t주차\tabcdef12\tlane/pk 준비\t1\n")
 	k.run("run")
 	k.check("주차 사건: 원래 터미널이 아직 정리 중이어도 parked를 유지",
@@ -237,7 +237,7 @@ func secHPark(k *K) {
 	k.check("이어 띄운 작업 지시문에도 자동 감사와 최종 감사 조건이 있음", hasF(rf, "## 감사·착지 (hc-fill 자동)") && hasF(rf, "최종 감사(최종 확인)"))
 	k.cpConf()
 	k.lj("box-1/pk:claude-code:pk:working:/home/me/src/app.wt/pk")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pk"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pk","state":"live","cwd":"/"}]}`)
 	appendFile(k.t, k.T+"/events", "2026-11-20T03:00:00Z\tm\tbox-1/pk\tpk\t중간\tabcdef12\t이어 가는 중\t1\n")
 	k.run("run")
 	k.check("resumed 줄: 이어 띄운 터미널(마지막 사건 주차 아님)은 지금처럼 떠 있음 그대로", k.where("pk") == "up box-1 box-1/pk" && k.col14("pk") == "resumed", read(Q))
@@ -248,7 +248,7 @@ func secHPark(k *K) {
 	k.add("pq", "--after", "pz", "--only", "box-1")
 	k.run("run")
 	k.lj("box-1/pq:claude-code:pq:working:/home/me/src/app.wt/pq")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pq"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pq","state":"live","cwd":"/"}]}`)
 	write(k.t, k.T+"/events", "2026-11-20T01:00:00Z\tm\tbox-1/pq\tpq\t주차\tabcdef12\tlane/pq 준비\t1\n")
 	k.run("run")
 	k.check("주차 사건 + 그 터미널이 아직 working: 채택하지 않고 대기·parked",
@@ -276,7 +276,7 @@ func secHPark(k *K) {
 	write(k.t, k.T+"/commits", "")
 	k.hSetQ("pq", map[int]string{14: "parked"})
 	k.lj("box-1/pq:claude-code:pq:working:/home/me/src/app.wt/pq")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pq"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/pq","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.check("up+parked·터미널 working·마지막 주차: 대기·parked, 채택 안 함",
 		k.where("pq") == "wait - -" && k.col14("pq") == "parked" && !grep(k.out, `이미 떠 있음 pq`), read(Q))

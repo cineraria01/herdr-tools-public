@@ -10,9 +10,11 @@ case $1 in
        case " ${HC_FAKE_FINISHED-} " in *" $2 "*) echo "{\"address\":\"$2\",\"state\":\"finished\",\"status\":null}"; exit 0 ;; esac
        # 실행 키: created_ms는 $HC_FAKE_CREATED(「<주소>=<ms>」 공백 목록)에 있으면 그 값, 없으면 1700000000000. name은 주소 끝 낱말
        c=1700000000000; for x in ${HC_FAKE_CREATED-}; do case $x in "$2="*) c=${x#*=} ;; esac; done
+       # NOSTATUSKEY: status 칸 자체가 없는 부분 응답(null과 다르다 — 재감사2 fill/R-201)
+       case " ${HC_FAKE_NOSTATUSKEY-} " in *" $2 "*) echo "{\"address\":\"$2\",\"created_ms\":$c,\"cwd\":\"/\",\"name\":\"${2##*/}\",\"state\":\"live\"}"; exit 0 ;; esac
        case " ${HC_FAKE_NOSTATUS-} " in
-         *" $2 "*) echo "{\"address\":\"$2\",\"created_ms\":$c,\"name\":\"${2##*/}\",\"state\":\"live\",\"status\":null}" ;;
-         *) echo "{\"address\":\"$2\",\"created_ms\":$c,\"name\":\"${HC_FAKE_GET_NAME:-${2##*/}}\",\"state\":\"live\",\"status\":{\"app\":\"claude-code\",\"state\":\"working\"}}" ;;
+         *" $2 "*) echo "{\"address\":\"$2\",\"created_ms\":$c,\"cwd\":\"/\",\"name\":\"${2##*/}\",\"state\":\"live\",\"status\":null}" ;;
+         *) echo "{\"address\":\"$2\",\"created_ms\":$c,\"cwd\":\"/\",\"name\":\"${HC_FAKE_GET_NAME:-${2##*/}}\",\"state\":\"live\",\"status\":{\"app\":\"claude-code\",\"state\":\"working\"}}" ;;
        esac ;;
   exec) echo "$*" >>"$T_LOG/hc.log"; case "$*" in *"${HC_FAKE_EXEC_FAIL:-@@없음@@}"*) exit 255 ;; esac
         case "$*" in *"${HC_FAKE_EXEC_NO:-@@없음@@}"*) echo no; exit 255 ;; esac   # EXEC_NO: 「no」를 찍고 실패 종료(출력은 믿으면 안 됨)

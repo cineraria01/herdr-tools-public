@@ -21,12 +21,12 @@ func s21b3(k *K) {
 	os.Remove(send)
 	os.Remove(L + ".sendfail")
 	write(k.t, SD+"/lanes.tsv", "tA1\timpl-a\ttC\nmini/tA2\timpl-remote\ttC\ntA3\taudit-x\ttC\tread\ntA4\tother-lane\ttO\n"+
-		"tA5\tdead-lane\ttC\ntA6\tfill-lane\t-\tfill\ntA8\tmoved\ttC\ntA8\tmoved\ttO\n")
-	lsS := `{"terminals":[{"address":"tA1","name":"impl-a","parent":"mac/tC","state":"live"},{"address":"mini/tA2","name":"impl-remote","parent":"mac/tC","state":"live"},
-{"address":"tA3","name":"audit-x","parent":"mac/tC","state":"live"},{"address":"tA4","name":"other-lane","parent":"mac/tO","state":"live"},
-{"address":"tA5","name":"dead-lane","parent":"mac/tC","state":"finished"},{"address":"tA6","name":"fill-lane","parent":"mac/tC","state":"live"},
-{"address":"mini/tA7","name":"audit-y","parent":"mac/tC","state":"live"},{"address":"tA8","name":"moved","parent":"mac/tC","state":"live"},
-{"address":"tA9","name":"no-rec","parent":"tC","state":"live"}]}`
+		"tA5\tdead-lane\ttC\ntA6\tfill-lane\t-\tfill\n")
+	lsS := `{"terminals":[{"address":"tA1","cwd":"/","name":"impl-a","parent":"mac/tC","state":"live"},{"address":"mini/tA2","cwd":"/","name":"impl-remote","parent":"mac/tC","state":"live"},
+{"address":"tA3","cwd":"/","name":"audit-x","parent":"mac/tC","state":"live"},{"address":"tA4","cwd":"/","name":"other-lane","parent":"mac/tO","state":"live"},
+{"address":"tA5","name":"dead-lane","parent":"mac/tC","state":"finished"},{"address":"tA6","cwd":"/","name":"fill-lane","parent":"mac/tC","state":"live"},
+{"address":"mini/tA7","cwd":"/","name":"audit-y","parent":"mac/tC","state":"live"},
+{"address":"tA9","cwd":"/","name":"no-rec","parent":"tC","state":"live"}]}`
 	tc := []string{"HC_TERMINAL_ID=tC", "HC_FAKE_LS=" + lsS}
 	k.runE(tc, "send", "--all", "마감 07:30으로 연장")
 	sent := func() string { // cut -f1 | sort | tr '\n' ' '
@@ -60,7 +60,7 @@ func s21b3(k *K) {
 	k.runE([]string{"HC_FAKE_LS=" + lsS}, "send", "--all", "x")
 	k.check("send --all: 지휘 주소(HC_TERMINAL_ID·--from)가 없으면 종료 2", k.rc == 2 && !s21bS(send))
 	k.runE([]string{"HC_FAKE_LS=" + lsS}, "send", "--all", "--from", "tO", "x")
-	k.check("send --all --from: 그 지휘의 레인에만", k.rc == 0 && sent() == "tA4 tA8 ")
+	k.check("send --all --from: 그 지휘의 레인에만", k.rc == 0 && sent() == "tA4 ")
 	os.Remove(send)
 	k.runE(tc, "send", "--all", "--", "--all", "--audits", "끝")
 	tA3 := false
@@ -69,6 +69,13 @@ func s21b3(k *K) {
 	}
 	k.check("send --all --: 뒤 낱말은 옵션 꼴이어도 글(감사 L4)", k.rc == 0 && contains(s21bLines(send), "tA1\t--all --audits 끝") && !tA3)
 	os.Remove(send)
+	// 같은 주소·이름의 기록이 두 지휘(tC 다음 tO)이고 지금 부모는 tC — 소유 충돌이라 어느 쪽도 보내지 않고 보류(재감사2 lane/R-209: 마지막 기록이 이기던 것)
+	write(k.t, SD+"/lanes.tsv", "tA8\tmoved\ttC\ntA8\tmoved\ttO\n")
+	lsM := `{"terminals":[{"address":"tA8","cwd":"/","name":"moved","parent":"mac/tC","state":"live"}]}`
+	for _, from := range []string{"tC", "tO"} {
+		k.runE([]string{"HC_FAKE_LS=" + lsM}, "send", "--all", "--from", from, "x")
+		k.check("send --all --from "+from+": 주인이 엇갈린 tA8은 보류(종료 1, 안 보냄)", k.rc == 1 && !s21bS(send) && strings.Contains(k.out, "보류 tA8 moved"))
+	}
 	os.Remove(SD + "/lanes.tsv")
 
 	// lane-fetch-race: git fetch가 참조 잠금 경합으로 실패하면 짧게 쉬고 최대 3번 다시 한다(2026-11-18 워커 기계 실측)

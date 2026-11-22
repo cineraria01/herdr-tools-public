@@ -20,7 +20,7 @@ func secR(k *K) {
 	k.add("ea", "--after", "pz", "--only", "box-1")
 	k.run("run")
 	k.lj("box-1/ea:claude-code:ea:idle:/home/me/src/app.wt/ea")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/ea"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/ea","state":"live","cwd":"/"}]}`)
 	write(k.t, k.T+"/events", "2026-11-20T01:00:00Z\tm\tbox-1/ea\tea\t주차\tabcdef12\tlane/ea 준비\t1\n")
 	k.run("run")
 	rid := k.qcol("ea", 17)

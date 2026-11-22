@@ -16,8 +16,6 @@ import (
 )
 
 var (
-	statusObj  = regexp.MustCompile(`"status" *: *\{`)
-	stFinished = regexp.MustCompile(`"state" *: *"finished"`)
 	trustQ     = regexp.MustCompile(`(?m)^ *(❯ | +)No, exit *$`)
 	trustY     = regexp.MustCompile(`(?m)^ *(❯ | +)Yes, I trust this folder *$`)
 	trustCurN  = regexp.MustCompile(`(?m)^ *❯ No, exit *$`)
@@ -30,12 +28,33 @@ var (
 	loginRe    = regexp.MustCompile(`(?i)login expired|/login|not logged in|log ?in again|invalid api key|oauth token|authentication_error|unauthorized|(^|[^0-9])401([^0-9]|$)`)
 )
 
-func hcGet(a string) string {
-	out, r := outOf(nil, []string{"hc", "get", a, "--json"})
-	if r != 0 {
-		return ""
+// startUnsure: 시작 확인 미확정 — 마감까지 hc get으로 시작도 확인된 실패도 못 정했다(조회 실패·잘린 응답·status 칸 없음·주소·이름 다름·
+// not_found). 시작했을 수 있다 — hc-fill은 다른 기계에 또 띄우지 않고 그 시도·주소를 남긴다(재감사2 lane/R-211, fill/R-201)
+const startUnsure = 8
+
+// startPoll: 시작 확인 hc get 한 번. 0 status 잡힘(g는 그 응답 JSON), 1 확인된 안 잡힘(살아 있고 status null), 3 확인된 끝남, 2 모름
+func startPoll(a string) (int, string) {
+	t, found, err := hcGet(10, a)
+	if err != nil || !found {
+		return 2, ""
 	}
-	return out
+	if t.HasName && t.Name != name {
+		return 2, "" // 그 주소가 다른 터미널이다
+	}
+	if t.State == "finished" {
+		return 3, ""
+	}
+	if _, ok := t.Raw["status"]; !ok {
+		return 2, "" // 칸 자체가 없는 부분 응답 — null(아직 안 잡힘)과 다르다
+	}
+	if t.Status == "" {
+		return 1, ""
+	}
+	g, err := json.Marshal(t.Raw)
+	if err != nil {
+		return 2, ""
+	}
+	return 0, string(g)
 }
 
 // hcRead: 실패한(시간 넘김 포함) hc read의 반쪽 화면은 빈 화면으로 — 그것으로 신뢰·가져오기 키를 보내지 않는다(gofix E07)
@@ -73,16 +92,20 @@ func anyLine(re *regexp.Regexp, s string) bool {
 	return false
 }
 
-// startCheck: Claude 폴더 신뢰 질문을 넘기고 hc get status가 잡히는지 본다. start=ok|no_status|login|keychain, 종료 0·5·6·7.
-// 실패여도 터미널은 남긴다
+// startCheck: Claude 폴더 신뢰 질문을 넘기고 hc get status가 잡히는지 본다. start=ok|no_status|unknown|login|keychain, 종료 0·5·6·7·8.
+// 응답은 hcjson.ParseGet으로 통째 검증(주소·live·status) — 여는 괄호만 보고 성공으로 읽지 않는다. 마감까지 한 번이라도 모름이었고
+// 확인된 끝남이 아니면 미확정(8). 실패여도 터미널은 남긴다
 func startCheck(a string) int {
 	sw, _ := strconv.ParseInt(swait, 10, 64)
 	end := now() + sw
 	tr, im, ik, itopSet = "", "", 0, false
-	why, last := "", false
+	why, last, unk := "", false, false
 	for {
-		g := hcGet(a)
-		if statusObj.MatchString(g) {
+		pr, g := startPoll(a)
+		if pr == 2 {
+			unk = true
+		}
+		if pr == 0 {
 			start = "ok"
 			if _, err := exec.LookPath("jq"); fwait == 0 || err != nil {
 				return 0
@@ -95,8 +118,8 @@ func startCheck(a string) int {
 			}
 			return 0
 		}
-		if stFinished.MatchString(g) {
-			why = "터미널이 끝났다"
+		if pr == 3 {
+			why, unk = "터미널이 끝났다", false
 			break
 		}
 		scr := hcRead(a)
@@ -141,6 +164,9 @@ func startCheck(a string) int {
 	}
 	if why == "" {
 		why = swait + "초 안에 hc get status가 안 잡혔다"
+		if unk {
+			why += "(hc get 응답을 확인 못 한 바퀴가 있다 — 시작했을 수 있어 미확정)"
+		}
 	}
 	switch tr {
 	case "unknown":
@@ -165,6 +191,9 @@ func startCheck(a string) int {
 	}
 	r, k, hit := 5, "", ""
 	start = "no_status"
+	if unk {
+		r, start = startUnsure, "unknown"
+	}
 	for _, ln := range ls {
 		if keychainRe.MatchString(ln) {
 			start, r, k, hit = "keychain", 7, "키체인", keychainRe.FindString(ln)

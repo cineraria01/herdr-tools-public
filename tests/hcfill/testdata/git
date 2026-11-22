@@ -15,8 +15,11 @@ for a in "$@"; do case $a in
   ls-remote) case ${!#} in refs/hc-landed/*)
       [ -z "${HC_FAKE_LSREMOTE_FAIL-}" ] || exit 128; r_=${!#}; r_=${r_#refs/hc-landed/}; cat "$T_LOG/landed/${r_%/\*}" 2>/dev/null; exit 0 ;; esac
     [ -z "${HC_FAKE_MQ_FAIL-}${HC_FAKE_NOORIGIN-}" ] || exit 128   # 병합기 큐·켬 표식: 큐에 든 레인 · 켜진 병합기 기계
-    [ -z "${HC_FAKE_MQ-}" ] || printf '0123abcd\trefs/merge-queue/1700000000-%s\n' "$HC_FAKE_MQ"
-    [ -z "${HC_FAKE_MGM-}" ] || printf '0123abcd\trefs/herdr/merger/%s\n' "$HC_FAKE_MGM"; exit 0 ;;
+    # 진짜 git처럼 40자 SHA, --exit-code면 맞는 참조가 없을 때 종료 2(gitx.LsRemote는 빈 출력·0을 모름으로 본다)
+    z_=0123abcd$(printf '%032d' 0); n_=0
+    [ -z "${HC_FAKE_MQ-}" ] || { printf '%s\trefs/merge-queue/1700000000-%s\n' "$z_" "$HC_FAKE_MQ"; n_=1; }
+    [ -z "${HC_FAKE_MGM-}" ] || { printf '%s\trefs/herdr/merger/%s\n' "$z_" "$HC_FAKE_MGM"; n_=1; }
+    case "$n_ $* " in "0 "*" --exit-code "*) exit 2 ;; esac; exit 0 ;;
   symbolic-ref) echo origin/main; exit 0 ;;
   # 완료 sha를 40자로: <sha>^{commit} → 뒤를 0으로 채운 40자($HC_FAKE_SHA40이면 그 값). $HC_FAKE_REVNONE과 같은 sha는 없음(종료 1, 출력 없음)
   *'^{commit}') s_=${a%'^{commit}'}; [ "$s_" != "${HC_FAKE_REVNONE-}" ] || exit 1

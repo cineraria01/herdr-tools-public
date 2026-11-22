@@ -89,20 +89,6 @@ func hasBranch() bool {
 	return false
 }
 
-// leftoverScript: 등록이 지워진 폴더에서 메인 폴더의 무시 규칙으로 무시되지 않는 것(추적 파일 포함)을 찍는다. 검사 오류는 종료 2
-const leftoverScript = `
-    cd "$2" || exit 2
-    t=$(mktemp "${TMPDIR:-/tmp}/hc-lane-left.XXXXXX") || exit 2
-    trap "rm -f \"\$t\" \"\$t.i\"" EXIT
-    if [ -f .git ] && [ ! -L .git ]; then
-      g=$(sed -n "s/^gitdir: //p" .git)
-      case $g in "$3"/worktrees/?*) [ ! -e "$g" ] || echo .git ;; *) echo .git ;; esac
-    elif [ -e .git ] || [ -L .git ]; then echo .git
-    fi
-    find . -mindepth 1 -path ./.git -prune -o ! -type d -print | sed "s|^\./||" >"$t" || exit 2
-    git -c core.quotePath=false -C "$1" check-ignore --stdin <"$t" >"$t.i"; [ $? -le 1 ] || exit 2
-    grep -vxF -f "$t.i" "$t"; [ $? -le 1 ] || exit 2`
-
 func leftCheck(what, common string) {
 	g, r := xout("git", "-C", repo, "status", "--porcelain", "--untracked-files=all", "--", ":(glob)**/.gitignore")
 	if r != 0 {
@@ -111,8 +97,8 @@ func leftCheck(what, common string) {
 	if g != "" {
 		stop("메인 폴더의 .gitignore에 커밋 안 된 변경이 있어 "+what+" 폴더의 무시 판정을 믿을 수 없다: "+repo, g)
 	}
-	left, r := xout("sh", "-c", leftoverScript, "hc-lane", repo, wt, common)
-	if r != 0 {
+	left, ok := leftover(repo, wt, common)
+	if !ok {
 		stop(what + " 폴더를 검사하지 못했다: " + wt)
 	}
 	if left != "" {

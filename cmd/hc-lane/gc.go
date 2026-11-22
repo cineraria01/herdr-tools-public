@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 func init() { register("gc", gcMain, nil) }
@@ -57,8 +59,18 @@ func gin(c string) (string, int) {
 		}
 		return n, 1
 	}
-	out, r := xout("sh", "-c", ginScript, "hc-lane", repo, bref, c)
-	if r != 0 {
+	// sh -c 안의 git은 proc.Limit 표에 안 보인다(sh는 상한 없음) — 조각 전체에 로컬 git 상한을 건다. 넘으면 무리째(안쪽 git까지)
+	// 거두고 확인 못 함 2 — 후보는 남긴다(lane/R-217). hc exec로 가면 그 상한(proc.Limit)이 그대로 덮는다
+	argv := xargv([]string{"sh", "-c", ginScript, "hc-lane", repo, bref, c})
+	lim := proc.Limit(argv)
+	if lim == 0 {
+		lim = proc.Limit([]string{"git"})
+	}
+	sc := command(argv)
+	sc.Stderr = os.Stderr
+	ob, err := proc.OutputMax(sc, lim)
+	out := trim(string(ob))
+	if r := code(err); r != 0 {
 		return "0", 2
 	}
 	u, b := map[string]bool{}, map[string]string{}

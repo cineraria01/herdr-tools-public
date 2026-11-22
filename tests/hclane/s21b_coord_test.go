@@ -216,7 +216,7 @@ func s21b1(k *K) {
 	write(k.t, live, "ta1 1111\ntb2 2222\n")
 	os.Remove(send)
 	appendf(k.t, lanes, "t9dd\tlane-md\t-\n")
-	write(k.t, L+".lsfile", `{"terminals":[{"address":"t9dd","name":"lane-md","parent":"mac/ta1","state":"live","status":"working","turn":1}]}`+"\n")
+	write(k.t, L+".lsfile", `{"terminals":[{"address":"t9dd","name":"lane-md","parent":"mac/ta1","cwd":"/","state":"live","status":"working","turn":1}]}`+"\n")
 	wa, wb = watch("ta1", "a"), watch("tb2", "b")
 	rep("t9dd", "lane-md", "완료", "dddd4444", "디것")
 	upto(sub("디것"))

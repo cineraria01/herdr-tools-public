@@ -8,11 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/clitest"
 )
 
 // b2Go: 시험 폴더·격리 환경
@@ -22,7 +21,8 @@ func b2Go(t *testing.T) (string, Env) {
 }
 
 // b2Balance: 가짜 herdr-app 앞에 포장 — B2_LS_GONE_FROM..B2_LS_GONE_TO번째 ls는 공간이 빠진 목록({"spaces": []}),
-// B2_PARK_HANG=1이면 terminal.park을 마친 뒤 park.pid·park.done을 적고 멈춘다(그 사이 KILL하려고)
+// B2_PARK_HANG=1이면 terminal.park을 마친 뒤 park.done을 적고, 시험이 hold를 지울 때까지(최대 60초) 멈췄다가 park.exit을 적고 끝난다
+// (그 사이 KILL하려고). 멈춘 herdr-app은 시험이 번호로 끄지 않고 스스로 끝난다(재감사 base R-213 — 파일의 PID에 신호 금지)
 func b2Balance(t *testing.T) (T string, env func(kv ...string) Env, HB string) {
 	T, _ = b2Go(t)
 	mkdirs(t, T+"/bin", T+"/home", T+"/py", T+"/fake")
@@ -43,15 +43,13 @@ if [ "$1" = ls ]; then
 fi
 if [ "$1 $2" = "do terminal.park" ] && [ -n "$B2_PARK_HANG" ]; then
   "@T@/fake/herdr-app.py" "$@" || exit
-  echo $$ >"@T@/park.pid"; : >"@T@/park.done"; exec sleep 60
+  : >"@T@/park.done"; i=0
+  while [ -e "@T@/hold" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+  : >"@T@/park.exit"; exit 0
 fi
 exec "@T@/fake/herdr-app.py" "$@"
 `)
-	t.Cleanup(func() {
-		if p, err := strconv.Atoi(strings.TrimSpace(read(T + "/park.pid"))); err == nil && p > 0 {
-			syscall.Kill(-p, syscall.SIGKILL)
-		}
-	})
+	t.Cleanup(func() { os.Remove(T + "/hold") }) // 멈춘 가짜 herdr-app이 스스로 끝나게
 	P := T + "/fake:" + T + "/py:" + T + "/bin:/usr/bin:/bin"
 	env = func(kv ...string) Env {
 		return Env{"HOME": T + "/home", "PATH": P, "HERDR_TOOLS_CONFIG": filepath.Join(repo, "config.example"),
@@ -142,28 +140,17 @@ func TestB2R26ResumesAfterKill(t *testing.T) {
 	T, env, HB := b2Balance(t)
 	stf := T + "/home/.local/state/herdr-balance/tab1.json"
 	b2HaState(t, T, "tab1", `{"terminal": "t0", "pane": "p0", "name": "lead", "app": "claude"}, {"terminal": "t1", "pane": "p1", "name": "lane-a", "app": "claude"}`)
-	cmd, _, cancel := start(T, env("B2_PARK_HANG=1"), HB, "--main", "t0")
-	defer cancel()
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	wdone := make(chan error, 1)
-	go func() { wdone <- cmd.Wait() }()
-	deadline := time.Now().Add(60 * time.Second) // 첫 실행은 Go 판 빌드까지 — 넉넉히
-	for time.Now().Before(deadline) && !exists(T+"/park.done") {
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !exists(T + "/park.done") {
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		t.Fatalf("park이 돌지 않음 — 시험 준비 실패\n%s", read(T+"/ha.log"))
-	}
-	// park 직후 KILL — 그 실행의 무리와, 멈춰 있는 herdr-app 무리(runLim이 따로 띄움)
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	if p, err := strconv.Atoi(strings.TrimSpace(read(T + "/park.pid"))); err == nil && p > 0 {
-		syscall.Kill(-p, syscall.SIGKILL)
-	}
+	write(t, T+"/hold", "")
+	cmd := exec.Command(HB, "--main", "t0")
+	cmd.Dir, cmd.Env = T, env("B2_PARK_HANG=1").list()
+	ch := clitest.Spawn(t, cmd)                         // 시험이 소유 — Cleanup·마감에 무리째 거둔다
+	clitest.WaitFile(t, T+"/park.done", 60*time.Second) // 첫 실행은 Go 판 빌드까지 — 넉넉히
+	// park 직후 KILL — 그 실행의 무리(시험이 띄운 것). 멈춰 있는 herdr-app(runLim이 따로 띄운 무리)은 hold를 지워 스스로 끝낸다
+	ch.Kill()
+	os.Remove(T + "/hold")
+	clitest.WaitFile(t, T+"/park.exit", 10*time.Second)
 	select {
-	case <-wdone:
+	case <-ch.Done():
 	case <-time.After(20 * time.Second):
 		t.Fatal("KILL한 실행이 끝나지 않음")
 	}

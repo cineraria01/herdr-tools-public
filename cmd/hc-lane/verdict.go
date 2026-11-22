@@ -451,11 +451,12 @@ func lverdictRecover() {
 			kind = strings.Join(f[1:], " ")
 		}
 		if kind == "hook" && remote {
-			refs, rc := gitOut("ls-remote", "origin", ref)
-			if rc != 0 {
-				die("land: 전용 훅의 착지 표식 조회 실패")
+			refs, st := gitx.LsRemote("", "origin", os.Stderr, ref)
+			if st == gitx.Unknown { // 실패·잘린 줄·요청 밖 이름 — 「표식 없음」으로 읽지 않고 75(다시)
+				lastTimeout = true
+				die("land: 전용 훅의 착지 표식 조회 실패(git ls-remote 응답 모름)")
 			}
-			marker = field2(refs, ref)
+			marker = refs[ref]
 			if marker != "" && fetchr(os.Stdout, os.Stderr, "fetch", "-q", "origin") != 0 {
 				die("land: 전용 훅 착지 뒤 git fetch 실패")
 			}

@@ -7,11 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/clitest"
 )
 
 type sec struct {
@@ -135,8 +138,8 @@ func upto(f func() bool) bool {
 // alive: 그 pid가 살아 있다(kill -0).
 func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
 
-// Bg: 배경으로 띄운 명령(셸 `… &`). 감독 프로세스(sleep)가 우두머리인 무리에 넣고, 절이 끝나면(Cleanup) 무리째 끈다.
-// 감독은 Cleanup에서만 거두니 명령이 먼저 끝나 거둬진 뒤에도 무리 번호가 다른 무리에 다시 쓰이지 않는다 — 명령의 남은 손자까지
+// Bg: 배경으로 띄운 명령(셸 `… &`). 감독 프로세스(superv)가 우두머리인 무리에 넣고, 절이 끝나면(Cleanup) 무리째 끈다.
+// 시험 프로세스가 Cleanup 없이 죽어도 감독이 관 EOF로 무리째 끝낸다(R-224). 감독은 Cleanup에서만 거두니 명령이 먼저 끝나 거둬진 뒤에도 무리 번호가 다른 무리에 다시 쓰이지 않는다 — 명령의 남은 손자까지
 // 끈다(재감사 R-35, 숫자 PGID 재사용 방지 gofix L18은 그대로)
 type Bg struct {
 	Pid    int
@@ -147,14 +150,64 @@ type Bg struct {
 	reaped bool
 }
 
+// superv: 감독 — 새 무리의 우두머리 sh. 시험 프로세스가 쥔 관의 쓰기 끝이 닫히면(시험이 끝나거나 KILL로 죽음 — Cleanup이 못 돌아도)
+// 자기 무리를 KILL하고, 아니어도 시험 마감(없으면 1시간) 뒤 스스로 그렇게 한다 — 수명이 유한하다(재감사 lane R-224)
+func superv(t *testing.T) (*exec.Cmd, *os.File) {
+	t.Helper()
+	life := time.Hour
+	if dl, ok := t.Deadline(); ok {
+		life = time.Until(dl) + 5*time.Second
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup := exec.Command("/bin/sh", "-c", `(sleep "$1"; kill -9 0) & read _; kill -9 0`, "sh", strconv.Itoa(int(life/time.Second)+1))
+	sup.Stdin = r
+	sup.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	err = sup.Start()
+	r.Close()
+	if err != nil {
+		w.Close()
+		t.Fatal(err)
+	}
+	return sup, w
+}
+
+// R-224: 시험 실행기가 Cleanup 없이 KILL되면(go test 마감·강제 종료) 감독 무리에 남은 명령도 끝나야 한다 — 전에는 감독(sleep 86400)이
+// PPID 1로 남았다. 안쪽 시험이 감독과 그 무리의 명령(2초 뒤 늦은 표식)을 띄우고, 바깥이 안쪽 시험 프로세스를 KILL한다
+func TestBgSupervisorParentKilled(t *testing.T) {
+	if d := os.Getenv("HCLANE_SUPERV_DIR"); d != "" {
+		sup, _ := superv(t)
+		c := exec.Command("/bin/sh", "-c", `: >"$1"; sleep 2; : >"$2"`, "sh", d+"/start", d+"/late")
+		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: sup.Process.Pid}
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Minute) // 바깥이 KILL한다
+		return
+	}
+	d := clitest.TempDir(t)
+	c := exec.Command(os.Args[0], "-test.run=^TestBgSupervisorParentKilled$", "-test.count=1", "-test.timeout=2m")
+	c.Env = append(os.Environ(), "HCLANE_SUPERV_DIR="+d)
+	ch := clitest.Spawn(t, c)
+	clitest.WaitFile(t, d+"/start", 30*time.Second)
+	ch.Kill() // 시험 실행기 무리만 — 감독은 따로 된 무리라 남는다
+	time.Sleep(3 * time.Second)
+	if !clitest.Absent(t, d+"/late") {
+		t.Error("시험 실행기가 죽은 뒤에도 감독 무리의 명령이 살아남아 늦은 표식을 썼다")
+	}
+}
+
+// psReg: 가짜 ps 등록부($T/ps.reg — HC_FAKE_PS_REG)에 시험이 만든 프로세스 한 줄(상태 alive|exited) — 호스트 ps 가시성과 무관하게(R-222)
+func (k *K) psReg(pid, ppid int, state, command string) {
+	appendf(k.t, k.T+"/ps.reg", strconv.Itoa(pid)+"\t"+strconv.Itoa(ppid)+"\t"+state+"\t"+command+"\n")
+}
+
 // bg: dir에서 이름을 배경으로. stdout·stderr는 파일 경로(빈 값이면 버림). `VAR=값`은 extra.
 func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args ...string) *Bg {
 	k.t.Helper()
-	sup := exec.Command("sleep", "86400")
-	sup.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := sup.Start(); err != nil {
-		k.t.Fatal(err)
-	}
+	sup, hold := superv(k.t)
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env = dir, k.environ(extra)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: sup.Process.Pid}
@@ -175,7 +228,8 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 		cmd.Stderr = f
 	}
 	if err := cmd.Start(); err != nil {
-		syscall.Kill(-sup.Process.Pid, syscall.SIGKILL)
+		syscall.Kill(-sup.Process.Pid, syscall.SIGKILL) // 감독은 거두기 전이라 그 번호는 이 무리다
+		hold.Close()
 		sup.Wait()
 		k.t.Fatal(err)
 	}
@@ -205,6 +259,7 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 	// 무리 번호는 감독이 쥐고 있어 명령을 거둔 뒤에도 안전하다 — 남은 손자까지 끄고 나서 감독을 거둔다
 	k.t.Cleanup(func() {
 		syscall.Kill(-b.pg, syscall.SIGKILL)
+		hold.Close()
 		b.Wait()
 		sup.Wait()
 	})

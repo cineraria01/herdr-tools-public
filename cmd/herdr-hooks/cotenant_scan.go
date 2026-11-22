@@ -30,14 +30,16 @@ func (g *cg) scanForeign() {
 	var ci []int
 	hit := map[int]bool{}
 	part := false
-	if !g.claimgen(g.leases + "/.cleaning") {
-		g.changedLeases()
-		return
-	}
+	cleaning := g.leases + "/.cleaning"
+	// 정리자를 못 잡으면 읽고 맞추기만 한다(지우지 않는다) — 바뀐 경로의 git 철자 열쇠(md5)만 보면 옛 판이 다른 철자로 적은
+	// 임대를 놓친다(재감사 R-H203)
+	clean := g.claimgen(cleaning)
 	var owners, stale []string
 	ents, err := os.ReadDir(g.leases)
 	if err != nil { // 목록을 못 읽음은 「임대 없음」이 아니다(모름) — 정리 없이 바뀐 경로만(작업 중 발견해 함께 고침)
-		rmF(g.leases + "/.cleaning")
+		if clean {
+			rmF(cleaning)
+		}
 		g.changedLeases()
 		return
 	}
@@ -52,7 +54,7 @@ func (g *cg) scanForeign() {
 			}
 		}
 	}
-	if len(stale) > 0 { // 지금 정리자는 이 실행(.cleaning) — 그 pid가 끝난 휴지통만 뒤에서 지운다
+	if clean && len(stale) > 0 { // 지금 정리자는 이 실행(.cleaning) — 그 pid가 끝난 휴지통만 뒤에서 지운다
 		bgRm(stale...)
 	}
 	sort.Strings(owners)
@@ -81,9 +83,10 @@ func (g *cg) scanForeign() {
 		ld = append(ld, g.leases+"/"+n)
 		lp = append(lp, g.oPID+us+g.oSince)
 	}
-	cleaning := g.leases + "/.cleaning"
 	if len(lr) == 0 {
-		rmF(cleaning)
+		if clean {
+			rmF(cleaning)
+		}
 		if part {
 			g.changedLeases()
 		}
@@ -99,37 +102,45 @@ func (g *cg) scanForeign() {
 	dirty, ok := g.statusZ(pathspecs)
 	keys, nok := g.foldKeys(lr)
 	if !ok || !nok { // 실패한 출력은 파싱하지 않는다(아스트라 E02·R-H05) — 정리 없이 바뀐 경로만 다시(그 status도 실패면 막힘)
-		rmF(cleaning)
+		if clean {
+			rmF(cleaning)
+		}
 		g.changedLeases()
 		return
 	}
-	if len(dirty) > 0 {
-		// awk 한 번: 바뀐 경로와 그 위 폴더 모두를 모으고, 임대 경로(줄)마다 맞으면 그 줄 번호
-		d := map[string]bool{}
-		for _, r := range strings.Split(strings.ToLower(strings.Join(dirty, "\n")), "\n") {
-			d[r] = true
-			for x := r; ; {
-				i := strings.LastIndexByte(x, '/')
-				if i < 0 {
-					break
-				}
-				x = x[:i]
-				d[x] = true
+	// 바뀐 경로와 그 위 폴더 모두 — 소문자 열쇠 → git 철자. 임대 경로(줄)마다 맞으면 FDIRTY에는 git 철자로 적는다(재감사 R-H203:
+	// 옛 철자 SUB/C.TXT를 그대로 내 foreignUnder의 접두 비교 git add sub가 놓쳤다)
+	d := map[string]string{}
+	for _, r := range dirty {
+		for x := r; ; {
+			if _, seen := d[strings.ToLower(x)]; !seen {
+				d[strings.ToLower(x)] = x
 			}
+			i := strings.LastIndexByte(x, '/')
+			if i < 0 {
+				break
+			}
+			x = x[:i]
 		}
-		for i, r := range keys {
-			if d[r] {
-				hit[i] = true
-				if i < len(lw) && lw[i] != "" {
-					fd = append(fd, lr[i]+us+lw[i])
-				}
+	}
+	for i, r := range keys {
+		if p, ok := d[r]; ok {
+			hit[i] = true
+			if lw[i] != "" {
+				fd = append(fd, p+us+lw[i])
 			}
 		}
 	}
-	if part {
+	if part { // 상한에 걸려 못 읽은 나머지는 바뀐 경로의 임대로 — 읽은 몫의 판정도 남긴다
 		g.changedLeases()
+		if len(fd) > 0 {
+			g.fdirty = strings.Join(fd, "\n") + "\n" + g.fdirty
+		}
 	} else if len(fd) > 0 {
 		g.fdirty = strings.Join(fd, "\n") + "\n"
+	}
+	if !clean {
+		return
 	}
 	idle := g.leases + "/.idle"
 	if f, err := os.OpenFile(idle, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666); err == nil {

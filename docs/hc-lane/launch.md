@@ -16,9 +16,10 @@ hc-lane fetch --on <기계> --repo <그 기계 저장소> [<참조…>]         
   질문 글자가 다르거나 커서(`❯`)가 어느 줄에도 안 보이면 건드리지 않고 `모름 — 시작 화면 확인`. 외부 가져오기 질문(`Allow external CLAUDE.md file imports?` — 작업 폴더 밖 파일을 `@`로 가져오는 CLAUDE.md)은 `External imports:` 목록 경로가 모두 작업 폴더의 git 저장소(`git -C <작업 폴더> rev-parse --show-toplevel`) 안일 때만 그 터미널에 `Yes, allow external imports`를 고른다(`lane.auto_trust off`면 안 함).
   밖이거나 읽을 수 없는 줄(가운데 `…` 생략·`… +N imports not shown.`)이 하나라도 있으면 고르지 않고 `모름 — 외부 가져오기 질문(<경로>)`, 종료 5. 커밋하지 않는 일을 저장소 안 하위 폴더(`.qa/…`)나 저장소가 아닌 폴더에서 띄울 때도 맨 `hc run` 대신 `hc-lane --read --repo <그 폴더>`를 쓰면 이 시작 확인을 받는다(`--read`는 준 폴더 그대로에서 띄우고, 저장소가 아니면 `LANE_BASE`가 빈 값).
 - 시작 확인: `--start-wait <초>`(이 호출만) 또는 `lane.start_wait`초(기본 60, `0`이면 신뢰 질문·시작 확인 끔) 안에 `hc get` status가 안 잡히면 화면 끝 15줄에서 막힘 낱말을 찾아 한 줄로 알린다.
-  종료 5 시작 안 됨(원인 모름·신뢰 질문·터미널 끝남), 6 로그인·인증(`Login expired`·`/login` 등), 7 키체인. 터미널은 남기고, 마지막 JSON 줄에 `lane` 주소와 `start`(`ok`·`off`·`no_status`·`login`·`keychain`·`noturn`)가 있다.
+  종료 5 시작 안 됨(원인 모름·신뢰 질문·터미널 끝남), 6 로그인·인증(`Login expired`·`/login` 등), 7 키체인, 8 시작 미확정. 터미널은 남기고, 마지막 JSON 줄에 `lane` 주소와 `start`(`ok`·`off`·`no_status`·`unknown`·`login`·`keychain`·`noturn`)가 있다.
+  `hc get` 응답은 통째 검증한다(`internal/hcjson` — JSON 값 하나·주소가 띄운 주소·state·status 칸). 마감까지 응답을 확인 못 한 바퀴(조회 실패·잘림·status 칸 없음·다른 이름·not_found)가 있었고 끝남이 확인되지 않았으면 8이다 — 시작했을 수 있다.
   hc status를 내는 에이전트(Claude 등)용이다 — status를 내지 않는 명령·CLI는 `--start-wait 0`으로 띄운다.
-  hc-fill은 5·6·7을 「상태 안 잡힘」으로 받아 그 터미널을 남긴 것으로 적고 그 기계를 빼고 다음 기계로 간다.
+  hc-fill은 5·6·7을 「상태 안 잡힘」으로 받아 그 터미널을 남긴 것으로 적고 그 기계를 빼고 다음 기계로 간다. 8은 미확정 — 그 기계 자리를 찬 것으로 보고 시도 기록(`?`)을 남겨 다른 기계에 또 띄우지 않는다.
 - 첫 턴 확인(2026-11-20 launch-submit-check — 원격 워커의 자동 감사가 시작 훅 안내 뒤 첫 지시를 입력칸에 둔 채 idle로 멈춰 4분 뒤 지휘가 Enter를 쳤다.
   세션 기록에 사용자 줄이 그때까지 없었다): 첫 지시는 입력칸에 넣지 않고 **실행 인자**로 넘긴다(hc-fill 설정 `launch` 틀의 `{task}`, `--brief`의 `{brief}`, 직접 띄울 때 실행 명령의 위치 인자 — Claude 위치 인자 프롬프트, `hc send`로 나중에 넣지 않는다).
   그 길로 넘겼는데도 Claude가 스스로 제출하지 않은 드문 경합이라 감시는 **알림 전용**이다 — 놓치거나 늦게 알려도 띄우기에는 영향 없음(종료 코드·`lane` 주소 그대로, 키를 보내지 않고 화면도 읽지 않는다).

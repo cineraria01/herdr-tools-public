@@ -123,7 +123,7 @@ func s20Wait(k *K) {
 	// 멈춤: report 없이 끝났거나 막힌 레인 터미널(hc-lane이 띄운 것 = 라벨 hc-lane=1)
 	appendf(k.t, EV, ev("2026-11-16T02:10:00Z", "here", "t43", "lane-landed", "착지", "eeee5555", "끝", "3"))
 	k.run("wait", "--timeout", "0") // 위 착지 줄을 먼저 본다
-	k.set(`HC_FAKE_LS={"terminals":[{"address":"t40","name":"lane-dead","state":"finished"},{"address":"m1/t41","name":"lane-blk","state":"live","status":"blocked"},{"address":"t42","name":"lane-ok","state":"live","status":"working"},{"address":"t43","name":"lane-landed","state":"finished","turn":4}]}`)
+	k.set(`HC_FAKE_LS={"terminals":[{"address":"t40","name":"lane-dead","state":"finished"},{"address":"m1/t41","name":"lane-blk","cwd":"/","state":"live","status":"blocked"},{"address":"t42","name":"lane-ok","cwd":"/","state":"live","status":"working"},{"address":"t43","name":"lane-landed","state":"finished","turn":4}]}`)
 	k.run("wait", "--timeout", "0")
 	k.check("wait 멈춤: --all 없으면 이 기계 레인만", k.rc == 0 && has("\tt40\tlane-dead\t멈춤\t-\t뜻밖의 종료(finished)") && !has("lane-blk"))
 	k.check("wait 멈춤: 일하는 레인·착지를 알린 레인은 아님", !has("lane-ok") && !has("lane-landed\t멈춤"))
@@ -138,7 +138,7 @@ func s20Wait(k *K) {
 	appendf(k.t, EV, ev("2026-11-16T02:20:01Z", "here", "t52", "lane-mid", "중간", "-", "반"))
 	appendf(k.t, EV, ev("2026-11-16T02:20:02Z", "here", "t60", "old-lane", "착지", "abcd7777", "옛"))
 	lsI := func(a, b int) string {
-		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"t50","name":"lane-idle","state":"live","status":"done","turn":%d},{"address":"t51","name":"lane-fin","state":"live","status":"done","turn":2},{"address":"t52","name":"lane-mid","state":"live","status":"idle","turn":1},{"address":"t60","name":"new-lane","state":"finished"},{"address":"t70","name":"lane-b2","state":"live","status":"blocked","turn":%d}]}`, a, b)
+		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"t50","name":"lane-idle","cwd":"/","state":"live","status":"done","turn":%d},{"address":"t51","name":"lane-fin","cwd":"/","state":"live","status":"done","turn":2},{"address":"t52","name":"lane-mid","cwd":"/","state":"live","status":"idle","turn":1},{"address":"t60","name":"new-lane","state":"finished"},{"address":"t70","name":"lane-b2","cwd":"/","state":"live","status":"blocked","turn":%d}]}`, a, b)
 	}
 	k.runE([]string{lsI(3, 1)}, "wait", "--timeout", "0")
 	k.check("멈춤: report 없이 done으로 쉬는 레인(turn 포함)", k.rc == 0 && has("\tt50\tlane-idle\t멈춤\t-\tdone turn 3"))
@@ -156,7 +156,7 @@ func s20Wait(k *K) {
 	k.exe(k.T, "", []string{"HC_LANE=x"}, k.LANE, "report", "중간")
 	k.check("report: 터미널 밖이면 turn -", s20fld(k.s20tail(), 8) == "-")
 	lsT := func(s string, n int) string {
-		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"t80","name":"lane-t","state":"live","status":"%s","turn":%d}]}`, s, n)
+		return fmt.Sprintf(`HC_FAKE_LS={"terminals":[{"address":"t80","name":"lane-t","cwd":"/","state":"live","status":"%s","turn":%d}]}`, s, n)
 	}
 	k.runE([]string{lsT("done", 6)}, "wait", "--timeout", "0")
 	k.check("멈춤 turn: 완료 report한 그 턴이 끝나 쉬는 것(turn+1)은 아님", !has("lane-t\t멈춤"))
@@ -164,9 +164,9 @@ func s20Wait(k *K) {
 	k.check("멈춤 turn: 완료 뒤 turn이 오른 done은 멈춤", k.rc == 0 && has("\tt80\tlane-t\t멈춤\t-\tdone turn 8"))
 	k.runE([]string{lsT("idle", 8)}, "wait", "--timeout", "0")
 	k.check("멈춤 turn: 같은 turn에서 done→idle은 다시 안 알림(쉼으로 묶음)", k.rc == 75)
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"t81","name":"lane-nr","state":"live","status":"done","turn":3}]}`}, "wait", "--timeout", "0")
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"t81","name":"lane-nr","cwd":"/","state":"live","status":"done","turn":3}]}`}, "wait", "--timeout", "0")
 	k.check("멈춤 쉼: report 없는 레인 done turn 3은 알림", k.rc == 0 && has("lane-nr\t멈춤\t-\tdone turn 3"))
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"t81","name":"lane-nr","state":"live","status":"idle","turn":3}]}`}, "wait", "--timeout", "0")
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"t81","name":"lane-nr","cwd":"/","state":"live","status":"idle","turn":3}]}`}, "wait", "--timeout", "0")
 	k.check("멈춤 쉼: 같은 turn에서 idle로 바뀌어도 다시 안 알림", k.rc == 75)
 	k.runE([]string{"HC_FAKE_GET_TURN=7", "HC_FAKE_GET_SLEEP=10.4258", "HC_TERMINAL_ID=t82", "HC_LANE=lane-slow"}, "report", "중간", "-", "느린", "코어")
 	k.check("report: hc get이 응답하지 않으면 3초 안에 turn -로 적음", k.rc == 0 && s20fld(k.s20tail(), 4)+"\t"+s20fld(k.s20tail(), 8) == "lane-slow\t-")
@@ -175,7 +175,7 @@ func s20Wait(k *K) {
 	// 재감사 낮음 2: 이번 바퀴에 못 읽은 기계의 레인은 멈춤으로 보지 않는다(그 기계 사건을 모르니)
 	mkdirs(k.t, k.T+"/mh2/m1")
 	k.runE([]string{"HC_FAKE_MACH_HOME=" + k.T + "/mh2", `HC_FAKE_MACHINES={"machines":[{"name":"m1","state":"connected"},{"name":"m3","state":"connected"},{"name":"m4","state":"disconnected"}]}`,
-		`HC_FAKE_LS={"terminals":[{"address":"m1/t91","name":"lane-r1","state":"live","status":"done","turn":2},{"address":"m3/t92","name":"lane-r3","state":"live","status":"done","turn":2},{"address":"m4/t93","name":"lane-r4","state":"finished"},{"address":"m3/t94","name":"lane-r5","state":"live","status":"blocked","turn":3}]}`},
+		`HC_FAKE_LS={"terminals":[{"address":"m1/t91","name":"lane-r1","cwd":"/","state":"live","status":"done","turn":2},{"address":"m3/t92","name":"lane-r3","cwd":"/","state":"live","status":"done","turn":2},{"address":"m4/t93","name":"lane-r4","state":"finished"},{"address":"m3/t94","name":"lane-r5","cwd":"/","state":"live","status":"blocked","turn":3}]}`},
 		"wait", "--all", "--timeout", "0")
 	k.check("멈춤: 읽은 기계 레인은 알리고, 모름 기계 레인은 판정 대신 「연결 안 됨」(하루 한 번)", k.rc == 0 && has("m1/t91\tlane-r1\t멈춤") && has("m3/t92\tlane-r3\t멈춤\t-\t연결 안 됨 m3") &&
 		has("m4/t93\tlane-r4\t멈춤\t-\t연결 안 됨 m4") && !grep(k.out, "lane-r[34]\t멈춤\t-\t(done|뜻밖)"))
@@ -183,7 +183,7 @@ func s20Wait(k *K) {
 	// lane-nosh: sh·ps를 못 띄우는 기계는 「모름」이 아니라 사건 없는 기계 — 그 기계 레인은 「연결 안 됨」 대신 정상 판정
 	write(k.t, k.T+"/mh3/m5/.nosh", "")
 	k.runE([]string{"HC_FAKE_MACH_HOME=" + k.T + "/mh3", `HC_FAKE_MACHINES={"machines":[{"name":"m5","state":"connected"}]}`,
-		`HC_FAKE_LS={"terminals":[{"address":"m5/t95","name":"lane-r6","state":"live","status":"done","turn":2}]}`},
+		`HC_FAKE_LS={"terminals":[{"address":"m5/t95","name":"lane-r6","cwd":"/","state":"live","status":"done","turn":2}]}`},
 		"wait", "--all", "--timeout", "0")
 	k.check("멈춤: sh 없는 기계 레인은 「연결 안 됨」 없이 정상 판정(lane-nosh)", k.rc == 0 && has("m5/t95\tlane-r6\t멈춤\t-\tdone turn 2") && !has("연결 안 됨") && !strings.Contains(k.errf(), "모름 m5"))
 

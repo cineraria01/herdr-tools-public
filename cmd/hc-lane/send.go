@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/hcjson"
 )
 
 func init() {
@@ -19,7 +21,7 @@ func init() {
 }
 
 // sendCmd: send --all [--audits] [--from <지휘>] <글…> — 이 지휘가 띄운 살아 있는 레인 전부에 hc send.
-// 종료 0 다 보냄(대상 없음 포함), 1 보내기·hc ls 실패, 2 인자
+// 종료 0 다 보냄(대상 없음 포함), 1 보내기·hc ls 실패·보류, 2 인자
 func sendCmd(a []string) int {
 	all, aud := false, false
 	from := os.Getenv("HC_TERMINAL_ID")
@@ -58,16 +60,38 @@ func sendCmd(a []string) int {
 		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 실패 — 아무에게도 안 보냈다")
 		return 1
 	}
-	if !jlistOK(tl, "terminals", "address", "state") {
-		fmt.Fprintln(os.Stderr, "hc-lane send: hc ls 출력을 읽지 못했다(잘림·형식) — 아무에게도 안 보냈다")
+	l, err := hcjson.ParseList([]byte(tl))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane send: hc ls 출력을 읽지 못했다(잘림·형식: %v) — 아무에게도 안 보냈다\n", err)
 		return 1
 	}
-	e := &ev{ed: evdir(), pmap: jlist(tl, "terminals", "address", "parent")}
+	// 발송·감사 제외에 쓰는 칸(이름)과 주소 하나에 한 항목을 목록 전체에서 먼저 — 하나라도 어긋나면 어디에도 보내기 전에 실패(재감사2 lane/R-210)
+	for _, t := range l.Terminals {
+		if t.State == "live" && (!t.HasName || t.Name == "") {
+			fmt.Fprintf(os.Stderr, "hc-lane send: 살아 있는 레인 %s 의 이름(name)이 hc ls에 없다 — 감사·읽기 전용을 가를 수 없어 아무에게도 안 보냈다\n", t.Address)
+			return 1
+		}
+		if len(l.ByAddress(t.Address)) != 1 {
+			fmt.Fprintf(os.Stderr, "hc-lane send: hc ls에 주소 %s 가 둘 이상이다 — 아무에게도 안 보냈다\n", t.Address)
+			return 1
+		}
+	}
+	e := &ev{ed: evdir()}
 	km := e.lkinds()
-	ok, bad := 0, 0
-	for _, r := range jlist(tl, "terminals", "address", "state", "name") {
-		ad, n := r[0], r[2]
-		if r[1] != "live" || e.owner(ad) != lastSeg(from) {
+	recs, _ := readLines(e.ed + "/lanes.tsv")
+	me := lastSeg(from)
+	ok, bad, held := 0, 0, 0
+	for _, t := range l.Terminals {
+		ad, n := t.Address, t.Name
+		if t.State != "live" {
+			continue
+		}
+		switch r, why := sendOwner(recs, t, me); r {
+		case 1:
+			continue
+		case 2:
+			fmt.Printf("보류 %s %s — %s\n", ad, n, why)
+			held++
 			continue
 		}
 		if !aud && (strings.HasPrefix(n, "audit-") || km[[2]string{lastSeg(ad), n}] == "read") {
@@ -86,11 +110,50 @@ func sendCmd(a []string) int {
 			bad++
 		}
 	}
-	fmt.Printf("보냄 %d · 실패 %d\n", ok, bad)
-	if bad != 0 {
+	if held != 0 {
+		fmt.Printf("보냄 %d · 실패 %d · 보류 %d\n", ok, bad, held)
+	} else {
+		fmt.Printf("보냄 %d · 실패 %d\n", ok, bad)
+	}
+	if bad != 0 || held != 0 {
 		return 1
 	}
 	return 0
+}
+
+// sendOwner: 살아 있는 레인 t가 지휘 me의 것인가. 0 이 지휘의 것, 1 남의 것·주인 모름, 2 보류(소유 충돌 — 보내지 않는다).
+// 레인 기록(lanes.tsv 「주소 이름 주인 [종류]」)은 주소와 이름이 지금 터미널과 같은 줄만 쓴다 — 이름이 다른 줄은 그 주소의 옛 실행이다(주소 재사용).
+// 그 줄들의 주인이 둘 이상이거나, 주인이 지금 hc 부모와 다르면 충돌이다. 맞는 줄이 없거나 주인이 「-」면 지금 부모로(재감사2 lane/R-209).
+// ponytail: 기록에 실행 신원(created_ms)이 없어 같은 이름으로 같은 주소를 다시 쓴 실행은 이름·부모로만 가른다 — 기록에 created_ms를 더하면 그것도 맞춘다
+func sendOwner(recs []string, t hcjson.Terminal, me string) (int, string) {
+	par := ""
+	if t.Parent != "" {
+		par = lastSeg(t.Parent)
+	}
+	own := map[string]bool{}
+	for _, x := range recs {
+		f := strings.Split(x, tab)
+		if f[0] != t.Address || fld(f, 2) != t.Name {
+			continue
+		}
+		if o := fld(f, 3); o != "" && o != "-" {
+			own[lastSeg(o)] = true
+		}
+	}
+	if len(own) > 1 {
+		return 2, "레인 기록에 주인이 둘 이상이다"
+	}
+	o := par
+	for k := range own {
+		if par != "" && k != par {
+			return 2, fmt.Sprintf("레인 기록의 주인 %s 와 지금 부모 %s 가 다르다", k, par)
+		}
+		o = k
+	}
+	if o == "" || o != me {
+		return 1, ""
+	}
+	return 0, ""
 }
 
 // earlyWaitCmd: early-wait <선행…> — hc-fill이 써 주는 선행 상태(after.tsv)로 먼저 띄움 레인이 계속 기다릴지
@@ -241,15 +304,11 @@ func myRun() (string, bool) {
 	if tid == "" {
 		return "", false
 	}
-	out, rc := hcRun(10, errDrop, "get", tid, "--json")
-	if rc != 0 {
+	t, found, err := hcGet(10, tid)
+	if err != nil || !found || t.State != "live" || t.Created <= 0 {
 		return "", false
 	}
-	c, ok := liveCreatedMs(out)
-	if !ok {
-		return "", false
-	}
-	return lastSeg(tid) + "@" + c, true
+	return lastSeg(tid) + "@" + strconv.FormatInt(t.Created, 10), true
 }
 
 func verdictCmd(a []string) int {

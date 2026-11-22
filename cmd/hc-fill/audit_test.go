@@ -93,7 +93,8 @@ func TestAuditStallTick(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 가짜 git: 원격 있음·기본 origin/main, 완료 sha는 이 클론에 있고 기본 브랜치에는 없음(merge-base 1)
-	gitf := "#!/bin/sh\ncase \" $* \" in *\" symbolic-ref \"*) echo origin/main;; *\" merge-base \"*) exit 1;; esac\nexit 0\n"
+	// 큐 ls-remote --exit-code는 진짜 git처럼 맞는 참조 없음 = 종료 2(빈 출력에 0이면 gitx.LsRemote가 모름으로 읽는다), config --get 값 없음 = 종료 1
+	gitf := "#!/bin/sh\ncase \" $* \" in *\" symbolic-ref \"*) echo origin/main;; *\" merge-base \"*) exit 1;; *\" ls-remote --exit-code \"*) exit 2;; *\" config --get \"*) exit 1;; esac\nexit 0\n"
 	if err := os.WriteFile(DATA+"/git", []byte(gitf), 0o755); err != nil {
 		t.Fatal(err)
 	}

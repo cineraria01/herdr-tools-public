@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	repo = filepath.Clean(filepath.Join(wd, "..", ".."))
-	os.Exit(m.Run())
+	clitest.Main(m) // 끝나면 Bin 폴더를 지운다(재감사 base R-225)
 }
 
 // laneBin: 시험할 hc-lane — 이 시험 프로세스에서 지은 Go 바이너리. 곁 도구(병합기 hc-merger·설정 herdr-tools-config)도 같은 폴더에

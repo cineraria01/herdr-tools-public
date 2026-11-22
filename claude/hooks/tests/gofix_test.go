@@ -6,9 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -148,21 +146,19 @@ func TestCotenantGofix(t *testing.T) {
 		c := newCG(t)
 		R, _, _ := repoAB(c)
 		c.appendf(R+"/a.txt", "y\n")
-		// 손자가 9초 쥔다 — 훅은 기한(2초·예산 4초) 안에 끊는다. 부하에 흔들리지 않게 상한은 넉넉히 7초
-		// 손자 pid를 적어 두고 하위 시험이 끝나면 끈다 — 안 끄면 9초 동안 시험 무리에 고아로 남는다(검증의 고아 검사가 잡음,
-		// 2026-11-22 verify-parallel이 훅 꾸러미를 따로 돌리며 드러남 — 작업 중 발견해 함께 고침)
-		c.write(c.T+"/bin/hc", "#!/bin/sh\n/bin/sleep 9 &\necho $! >\""+c.T+"/hc-sleep.pid\"\necho '{\"terminals\":[]}'\n")
-		t.Cleanup(func() {
-			if b, err := os.ReadFile(c.T + "/hc-sleep.pid"); err == nil {
-				if p, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && p > 1 {
-					syscall.Kill(p, syscall.SIGKILL) //nolint:errcheck // 이미 끝났으면 그만
-				}
-			}
-		})
+		// 손자가 hc-hold가 있는 동안(최대 9초) 관을 쥔다 — 훅은 기한(2초·예산 4초) 안에 끊는다. 부하에 흔들리지 않게 상한은 넉넉히 7초.
+		// 하위 시험이 끝나면 hc-hold를 지워 손자가 스스로 끝난다 — 파일에 적은 숫자 PID에 신호를 보내지 않는다(재감사 hooks R-M208:
+		// 끝난 뒤 그 번호가 다른 프로세스에 다시 쓰일 수 있다). 경로는 스크립트 자리($0) 기준이라 셸 글에 잇지 않는다
+		c.write(c.T+"/hc-hold", "")
+		c.write(c.T+"/bin/hc", "#!/bin/sh\nd=$(dirname \"$0\")/..\n"+
+			"( : >\"$d/hc-gc-start\"; i=0; while [ -e \"$d/hc-hold\" ] && [ $i -lt 90 ]; do /bin/sleep 0.1; i=$((i+1)); done ) &\n"+
+			"echo '{\"terminals\":[]}'\n")
+		t.Cleanup(func() { os.Remove(c.T + "/hc-hold") }) //nolint:errcheck // 손자가 스스로 끝나게
 		t0 := time.Now()
 		c.run("sb", "Edit", R+"/a.txt")
-		if d := time.Since(t0); c.RC != 2 || d > 7*time.Second {
-			t.Errorf("rc=%d(want 2), %v(want 7초 안 — 손자 9초를 기다리지 않음) err=[%s]", c.RC, d, c.ERR)
+		if d := time.Since(t0); !exists(c.T+"/hc-gc-start") || c.RC != 2 || d > 7*time.Second {
+			t.Errorf("관을 쥔 손자가 떴고(%v) rc=%d(want 2), %v(want 7초 안 — 손자 9초를 기다리지 않음) err=[%s]",
+				exists(c.T+"/hc-gc-start"), c.RC, d, c.ERR)
 		}
 	})
 	// E06(아스트라): 임대 폴더를 만들 수 없으면 기록 없이 허용하지 않는다
@@ -251,6 +247,7 @@ func TestCotenantNFDFolder(t *testing.T) {
 }
 
 // H02(아스트라): hc get이 상한을 넘기면 루프인지 모른다 — 무인 루프일 수 있으니 질문 창을 막는다.
+// R-M210: 응답은 즉시 오면 허용되는 정상 비루프 작업자 응답이다(대조로 먼저 확인) — 막힌 까닭이 시간 넘김뿐임을 전용 진단으로 본다
 func TestLoopNoQuestionTimeout(t *testing.T) {
 	T := t.TempDir()
 	for _, d := range []string{"bin", "home"} {
@@ -258,12 +255,23 @@ func TestLoopNoQuestionTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fake := "#!/bin/bash\nsleep 2\nprintf '%s' '{\"name\":\"audit-loop\"}'\n"
+	fake := "#!/bin/bash\nsleep \"$FAKE_SLEEP\"\nprintf '%s' '{\"address\":\"audit-term\",\"state\":\"live\",\"cwd\":\"/w\",\"name\":\"worker\"}'\n"
 	if err := os.WriteFile(filepath.Join(T, "bin", "hc"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := envWith(nil, "HOME="+filepath.Join(T, "home"), "PATH="+filepath.Join(T, "bin")+":/usr/bin:/bin",
-		"HC_TERMINAL_ID=audit-term", "HERDR_TIMEOUT_REMOTE=1")
-	rc, _, errOut := runHook(t, "loop-no-question", []byte(`{"tool_name":"AskUserQuestion","tool_input":{}}`), env, "")
-	checkRC(t, rc, 2, errOut, "질문 창을 띄우지 않는다")
+	in := []byte(`{"tool_name":"AskUserQuestion","tool_input":{}}`)
+	env := func(sleep string) []string {
+		return envWith(nil, "HOME="+filepath.Join(T, "home"), "PATH="+filepath.Join(T, "bin")+":/usr/bin:/bin",
+			"HC_TERMINAL_ID=audit-term", "HERDR_TIMEOUT_REMOTE=1", "FAKE_SLEEP="+sleep)
+	}
+	t.Run("대조: 즉시 답하면 허용", func(t *testing.T) {
+		rc, _, errOut := runHook(t, "loop-no-question", in, env("0"), "")
+		checkRC(t, rc, 0, errOut, "")
+	})
+	t.Run("늦으면 시간 넘김으로 막음", func(t *testing.T) {
+		rc, _, errOut := runHook(t, "loop-no-question", in, env("3"), "")
+		if rc != 2 || !strings.Contains(errOut, "시간 안에 답하지 않아") {
+			t.Errorf("rc=%d(want 2·시간 넘김 진단) err=[%s]", rc, errOut)
+		}
+	})
 }

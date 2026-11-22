@@ -3,59 +3,44 @@
 package clitest
 
 import (
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"herdr-tools/internal/proc"
 )
 
-// B29: 상한을 넘긴 명령은 그 무리(손자 포함)째 꺼지고 RC 124·Timeout으로 돌아온다 — 시험 마감까지 매달리지 않는다
+// B29: 상한을 넘긴 명령은 그 무리(손자 포함)째 꺼지고 RC 124·Timeout으로 돌아온다 — 시험 마감까지 매달리지 않는다.
+// 손자는 1초 뒤 늦은 표식을 쓴다 — 시작 표식을 먼저 본 뒤 늦은 표식이 끝까지 없어야(무리째 꺼짐). 바깥 마감 안 회수는 contract_test.go
 func TestRunTimeoutKillsGroup(t *testing.T) {
-	pidf := filepath.Join(t.TempDir(), "pid")
+	d := TempDir(t)
+	S, M := filepath.Join(d, "start"), filepath.Join(d, "late")
 	t0 := time.Now()
-	r := Cmd{Max: 300 * time.Millisecond}.Run("sh", "-c", `sleep 30 & echo $! >"$1"; wait`, "sh", pidf)
+	r := Cmd{Max: 300 * time.Millisecond}.Run("sh", "-c", `(sleep 1; : >"$2") & : >"$1"; wait`, "sh", S, M)
 	if !r.Timeout || r.RC != 124 || !strings.Contains(r.Err, "시간 넘김") {
 		t.Fatalf("시간 넘김이어야: %+v", r)
 	}
 	if d := time.Since(t0); d > 10*time.Second {
 		t.Fatalf("상한 뒤 곧 돌아와야: %v", d)
 	}
-	b, err := os.ReadFile(pidf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if pid <= 0 || proc.Alive(pid) {
-		t.Fatalf("손자(%d)도 꺼져야", pid)
+	WaitFile(t, S, time.Second)
+	time.Sleep(1500 * time.Millisecond)
+	if !Absent(t, M) {
+		t.Fatal("손자도 꺼져야 — 늦은 표식이 생겼다")
 	}
 }
 
-// 재감사 base R-15: 바깥 마감(-test.timeout)이 명령 상한보다 먼저 오면 명령 상한을 남은 시간 안(끄기·기다림 여유 포함)으로 줄여,
-// 시험 바이너리가 마감 panic으로 죽기 전에 그 무리를 거두고 124로 돌아온다. 안쪽 실행은 기본 상한(60초)을 그대로 쓴다
-func TestRunWithinTestDeadline(t *testing.T) {
-	if pidf := os.Getenv("CLITEST_DEADLINE_PIDF"); pidf != "" {
-		r := Cmd{}.Run("sh", "-c", `sleep 60 & echo $! >"$1"; wait`, "sh", pidf)
-		if r.RC != 124 || !r.Timeout {
-			t.Fatalf("바깥 마감 전에 시간 넘김이어야: %+v", r)
-		}
-		return
+// 끝난 뒤 출력 관을 쥔 손자: 우두머리는 0이어도 상한까지 관이 안 닫히면 124·무리째 끈다
+func TestRunPipeHolder(t *testing.T) {
+	d := TempDir(t)
+	S, M := filepath.Join(d, "start"), filepath.Join(d, "late")
+	r := Cmd{Max: 500 * time.Millisecond}.Run("sh", "-c", `(: >"$1"; sleep 1; : >"$2") & exit 0`, "sh", S, M)
+	if !r.Timeout || r.RC != 124 {
+		t.Fatalf("관을 쥔 손자는 시간 넘김이어야: %+v", r)
 	}
-	pidf := filepath.Join(t.TempDir(), "pid")
-	t0 := time.Now()
-	r := Cmd{Env: []string{"CLITEST_DEADLINE_PIDF=" + pidf}, Combined: true, Max: 2 * time.Minute}.
-		Run(os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=8s", "-test.count=1")
-	b, _ := os.ReadFile(pidf)
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if pid > 0 && proc.Alive(pid) {
-		proc.StopGroup(pid, time.Second)
-		t.Errorf("바깥 마감 뒤 손자(%d)가 남았다", pid)
-	}
-	if r.RC != 0 || pid <= 0 {
-		t.Fatalf("안쪽 시험이 마감 전에 끝나야(종료 0): rc %d pid %d %v\n%s", r.RC, pid, time.Since(t0), r.Out)
+	WaitFile(t, S, time.Second)
+	time.Sleep(1500 * time.Millisecond)
+	if !Absent(t, M) {
+		t.Fatal("관을 쥔 손자가 살아남았다")
 	}
 }
 
@@ -63,6 +48,12 @@ func TestRunNormal(t *testing.T) {
 	r := Cmd{}.Run("sh", "-c", `echo out; echo err >&2; exit 3`)
 	if r.Out != "out" || r.Err != "err\n" || r.RC != 3 || r.Timeout {
 		t.Fatalf("%+v", r)
+	}
+	if r := (Cmd{Stdin: "a\nb\n", Combined: true}).Run("sh", "-c", `cat; echo e >&2; kill -TERM $$`); r.Out != "a\nb\ne" || r.RC != 128+15 {
+		t.Fatalf("입력·합친 출력·신호 종료: %+v", r)
+	}
+	if r := (Cmd{Exact: true, Env: []string{"A=1"}}).Run("/usr/bin/env"); r.Out != "A=1" {
+		t.Fatalf("Exact는 Env만: %+v", r)
 	}
 	if r := (Cmd{}).Run("/없는/명령"); r.RC != 127 {
 		t.Fatalf("못 띄우면 127: %+v", r)

@@ -2,7 +2,7 @@ package main
 
 // herdr-sync 계약 시험 17: 실패 주입(Go 판 — 2026-11-22 gofix-ops, 감사 O-06). git·조각이 실패하거나 시간을 넘기거나 파일을 못 읽을 때
 // 그것을 깨끗함·없음·성공으로 읽어 맥·저장소·기계를 바꾸지 않는다. 셸 판도 같은 결함(B01·B02)이 있지만 셸 판은 곧 걷어 알려진 차이로 둔다.
-// 가짜 git(PATH 앞): GIT_FAIL_SUB의 하위 명령이면 출력 없이 128, GIT_SLEEP_SUB면 3초 잔 뒤 진짜 git
+// 가짜 git(PATH 앞): GIT_FAIL_SUB(빈칸으로 여럿)의 하위 명령이면 출력 없이 128, GIT_SLEEP_SUB면 3초 잔 뒤 진짜 git
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ for a; do
   if [ -n "$skip" ]; then skip=; continue; fi
   case $a in -C | -c) skip=1 ;; -*) ;; *) sub=$a; break ;; esac
 done
-[ "$sub" != "${GIT_FAIL_SUB-}" ] || exit 128
+case " ${GIT_FAIL_SUB-} " in *" $sub "*) exit 128 ;; esac
 if [ "$sub" = "${GIT_SLEEP_SUB-}" ]; then
   [ -z "${GIT_PID_FILE-}" ] || echo $$ > "$GIT_PID_FILE"
   sleep "${GIT_SLEEP_SECS:-3}"
@@ -208,6 +208,29 @@ func (s *sx) failures() {
 	os.Remove(M + "/.local/state/herdr-sync/repo-journal.tsv")
 	s.run()
 	s.ok("되돌린 뒤: 깨끗하게 끝남(일지)", s.r.RC == 0 && strings.Contains(s.origin("show", "main:bin/herdr-balance"), "bal 5"))
+
+	// ops/R-215: 실제 진입점에서 commit 실패 뒤 되돌림(reset)까지 실패하면 일지를 남긴다 — 장애를 걷은 다음 실행이 그 일지로 되돌리고 다시 모은다.
+	// 원인 먼저: 첫 실행이 실제로 커밋 단계까지 가 스테이징했는지(색인에 새 값) 본 뒤 일지·성공 줄·대상 파일을 함께 단언한다
+	jp := M + "/.local/state/herdr-sync/repo-journal.tsv"
+	rbal := T + "/repo/bin/herdr-balance"
+	before = s.origin("rev-parse", "main")
+	s.put(bal, "#!/bin/sh\necho bal 6\n")
+	s.runEnv([]string{path, "GIT_FAIL_SUB=commit reset"})
+	s.ok("commit·reset 실패: 커밋 단계까지 갔다(색인에 새 값)", strings.Contains(s.git(T+"/repo", "show", ":bin/herdr-balance"), "bal 6"))
+	s.ok("commit·reset 실패: 종료 1, 일지 남음, 성공 줄 없음, 원격 그대로", s.r.RC != 0 && ct.Exists(jp) &&
+		s.contains("일지") && !s.contains("맥 모음 .local/bin/herdr-balance") && s.origin("rev-parse", "main") == before)
+	s.run()
+	s.ok("장애를 걷은 뒤: 일지로 되돌리고 다시 모아 보낸다, 일지 없음, 저장소 깨끗", s.r.RC == 0 && s.contains("스테이징을 되돌렸다") &&
+		!ct.Exists(jp) && strings.Contains(s.origin("show", "main:bin/herdr-balance"), "bal 6") && s.git(T+"/repo", "status", "--porcelain") == "" &&
+		s.is(rbal, "#!/bin/sh\necho bal 6\n"))
+	// commit만 실패: 되돌림이 되면 일지를 지우고 저장소를 쓰기 전으로(색인·작업 트리 = HEAD)
+	before = s.origin("rev-parse", "main")
+	s.put(bal, "#!/bin/sh\necho bal 7\n")
+	s.runEnv([]string{path, "GIT_FAIL_SUB=commit"})
+	s.ok("commit 실패: 종료 1, 되돌려 일지 없음·저장소 깨끗·원격 그대로", s.r.RC != 0 && !ct.Exists(jp) && s.git(T+"/repo", "status", "--porcelain") == "" &&
+		s.is(rbal, "#!/bin/sh\necho bal 6\n") && s.origin("rev-parse", "main") == before && !s.contains("맥 모음 .local/bin/herdr-balance"))
+	s.run()
+	s.ok("commit 실패 뒤 다시: 모아 보낸다", s.r.RC == 0 && strings.Contains(s.origin("show", "main:bin/herdr-balance"), "bal 7"))
 
 	// C04·O-10: 끝 줄바꿈 없는 마지막 줄(셸 판은 버린다)·CR 줄은 판마다 갈리니 맞추기 전에 멈춘다. B11: 뿌리 밖 경로는 멈춘다
 	orig := ct.Read(T + "/conf/sync.list")

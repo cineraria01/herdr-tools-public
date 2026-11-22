@@ -159,6 +159,25 @@ func linuxTools(tools []string, bins []binUnit, osOf map[string]string) []string
 	return r
 }
 
+// unknownTargets: 바이너리 줄 대상으로 이름을 댄 기계 가운데 이번 실행에서 OS를 모르는 것(이름 순, 겹침 없이)
+func unknownTargets(bins []binUnit, osOf map[string]string) []string {
+	seen := map[string]bool{}
+	var r []string
+	for _, b := range bins {
+		if b.t == "all" || b.t == "macos" || b.t == "local" {
+			continue
+		}
+		for _, m := range strings.Split(b.t, ",") {
+			if osOf[m] == "" && !seen[m] {
+				seen[m] = true
+				r = append(r, m)
+			}
+		}
+	}
+	sort.Strings(r)
+	return r
+}
+
 // installBins: 그 기계(맥은 "맥")에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다)
 func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 	tools := binTools(m, osname)
@@ -185,15 +204,24 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 		}
 	}
 	var c *exec.Cmd
+	var out string
+	var rc int
+	var errb bytes.Buffer
 	if m == "맥" {
-		c = exec.Command("sh", append([]string{"-c", installSh, "_"}, args...)...)
+		// 맥 대체 빌드도 상한·무리 소유(ops/R-205): 조각 전체가 HERDR_TIMEOUT_BUILD 안에(남은 도구는 그 시각부터 E 「시간 상한」), 넘기면
+		// proc가 무리째(짓던 go·컴파일러 자손까지) 거둔 뒤 돌아오고 결과는 모름 — 돌아온 뒤 본체·bin.tsv를 쓰는 자손이 남지 않는다.
+		// herdr-sync가 신호를 받으면 onSignals의 StopCurrent가 이 무리를 다 거둔 뒤에 끝낸다(잠금은 그 뒤에 놓인다)
+		bm := buildMax()
+		c = exec.Command("sh", append([]string{"-c", budgetSh(int(bm / time.Second)), "_"}, args...)...)
+		c.Stderr = &errb
+		b, err := proc.OutputMax(c, bm)
+		out, rc = string(b), proc.Code(err)
 	} else {
 		// 조각이 installBudget 안에 끝내고(남은 도구는 E 「시간 상한」), hc 상한까지 남은 몫은 마지막 짓기·보고 몫
 		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", budgetSh(installBudget), "_"}, args...)...)
+		c.Stderr = &errb
+		out, rc = output(c)
 	}
-	var errb bytes.Buffer
-	c.Stderr = &errb
-	out, rc := output(c)
 	ok := rc == 0
 	for _, p := range putNotes(m, tools, out, rc, errb.String()) {
 		switch {
@@ -357,6 +385,10 @@ func release(rel *relInfo, pub, checked string, pubwarn func(string)) {
 	}
 	if ht != ct {
 		pubwarn("릴리스 건너뜀 — 공개 검사한 커밋이 범용 저장소 HEAD(기계에 깐 소스)와 다르다(그사이 origin/main이 앞섬) — 다음 herdr-sync에서")
+		return
+	}
+	if u := unknownTargets(BINS, machOS); len(u) > 0 { // 자산 목록(리눅스 자산 유무)이 그 기계 접속에 따라 갈리지 않게(R-218)
+		pubwarn("릴리스 보류 — 바이너리 줄 대상 기계의 OS를 모른다(" + strings.Join(u, " ") + " — 연결 안 됨). 다음 herdr-sync에서, 기계는 각자 짓는다")
 		return
 	}
 	c12, tag := checked[:12], "bin-"+checked[:12]

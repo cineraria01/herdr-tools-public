@@ -59,9 +59,13 @@ func TestGofix2ProofTruncLine(t *testing.T) { // 이름이 32자 넘는 대·소
 	if !m.proofload([]string{"box-x"}) || refsha(m.lk2, "refs/hc-landed/box-x") != strings.Repeat("a", 40) {
 		t.Fatalf("온전한 줄은 받아야: %q", m.lk2)
 	}
-	fakeGitIn(t, `[ "$1" = ls-remote ] && exit 0`)
+	fakeGitIn(t, `[ "$1" = ls-remote ] && exit 2`)
 	if !m.proofload([]string{"box-x"}) || m.lk2 != "" {
-		t.Fatalf("정상 빈 출력은 표식 없음: %q", m.lk2)
+		t.Fatalf("--exit-code 종료 2(맞는 참조 없음)는 표식 없음: %q", m.lk2)
+	}
+	fakeGitIn(t, `[ "$1" = ls-remote ] && exit 0`)
+	if m.proofload([]string{"box-x"}) {
+		t.Fatalf("빈 출력·0은 모름(gofix3-gitref 계약): %q", m.lk2)
 	}
 }
 

@@ -25,9 +25,11 @@ func (k *K) s21aRep(lane string, args ...string) {
 	k.exe(k.T, "", []string{"HC_LANE=" + lane}, k.LANE, append([]string{"report"}, args...)...)
 }
 
-// s21aW: `VAR=값 "$LANE" watch … >"$T/wo" 2>"$T/we" &`.
+// s21aW: `VAR=값 "$LANE" watch … >"$T/wo" 2>"$T/we" &`. 가짜 ps 등록부에 그 감시를 살아 있음으로 올린다(R-222)
 func (k *K) s21aW(extra []string, args ...string) *Bg {
-	return k.bg(k.T, k.T+"/wo", k.T+"/we", extra, k.LANE, append([]string{"watch"}, args...)...)
+	b := k.bg(k.T, k.T+"/wo", k.T+"/we", extra, k.LANE, append([]string{"watch"}, args...)...)
+	k.psReg(b.Pid, os.Getpid(), "alive", "hc-lane watch "+strings.Join(args, " "))
+	return b
 }
 
 // s21aUTC: date -u +%Y-%m-%dT%H:%M:%SZ.
@@ -55,6 +57,10 @@ func s21aWatch(k *K) {
 	// watch(lane-push): 늘 도는 감시가 wait와 같은 판정으로 새 사건을 지휘 터미널에 hc send로 밀어 준다. 커서는 wait와 같은 지휘별 커서
 	k.set("XDG_STATE_HOME="+T+"/wst", `HC_FAKE_LS={"terminals":[]}`, "HC_LANE_WAIT_TICK=1")
 	k.unset("HC_FAKE_MACHINES")
+	// 감시 잠금의 주인 판정(ps -p … -o command=)은 시험이 만든 PID만 아는 가짜 ps 등록부로 — 호스트 ps 권한·가시성에 좌우되지 않게(재감사 lane R-222)
+	write(k.t, T+"/ps.reg", "")
+	k.set("HC_FAKE_PS_REG=" + T + "/ps.reg")
+	defer k.unset("HC_FAKE_PS_REG")
 	WD := k.s21aWD()
 	write(k.t, WD+"/coord.t7cc", "t7cc\t4242\tt7cc\t0\n") // 지휘마다 지휘 정보(주소·pid·이름·마지막 레인 띄운 시각)
 	os.Remove(k.HCLOG + ".send")
@@ -95,14 +101,28 @@ func s21aWatch(k *K) {
 	if err := other.Start(); err != nil {
 		k.t.Fatal(err)
 	}
-	defer func() { other.Process.Kill(); other.Wait() }()
-	write(k.t, WD+"/watch.t7cc/pid", strconv.Itoa(other.Process.Pid)+"\n")
+	defer func() { other.Process.Kill(); other.Wait() }() // 시험이 띄운 자식 — 거두기 전 그 번호는 이 프로세스다
+	k.psReg(other.Process.Pid, os.Getpid(), "alive", "sleep 120")
+	opid := strconv.Itoa(other.Process.Pid) + "\n"
+	// 조회 실패: 잠금 pid가 살아 있는데 ps를 못 읽으면 주인을 모름 — 넘겨받지 않고 75(R-20)
+	write(k.t, WD+"/watch.t7cc/pid", opid)
+	k.runE(append([]string{"HC_FAKE_PS_FAIL=1"}, live...), "watch", "--to", "t7cc")
+	k.check("watch: 잠금 pid가 살아 있는데 ps 조회가 실패하면 넘겨받지 않고 75", k.rc == 75 && read(WD+"/watch.t7cc/pid") == opid)
 	w2 := k.s21aW(live, "--to", "t7cc")
 	k.s21aRep("lane-w", "착지", "abcd1234", "끝")
 	upto(func() bool { return k.s21aSends() == 3 })
 	k.check("watch: 남은 잠금은 넘겨받음, wait가 받은 사건은 안 보냄", !w2.Done() && k.s21aSends() == 3 &&
 		strings.Contains(lastLine(strings.TrimRight(send(), "\n")), "lane-w 착지 abcd1234") && !strings.Contains(send(), "반쯤"))
+	k.check("watch: 넘겨받기는 등록부의 그 pid를 ps로 본 뒤에(원인이 일어남)", strings.Contains(read(k.HCLOG+".ps"), "-p "+strconv.Itoa(other.Process.Pid)))
 	w2.stop()
+	// 끝난 잠금 주인(정상 종료 — 시험이 띄우고 거둔 프로세스)은 넘겨받는다
+	ended := exec.Command("true")
+	if err := ended.Run(); err != nil {
+		k.t.Fatal(err)
+	}
+	k.psReg(ended.Process.Pid, os.Getpid(), "exited", "true")
+	mkdirs(k.t, WD+"/watch.t7cc")
+	write(k.t, WD+"/watch.t7cc/pid", strconv.Itoa(ended.Process.Pid)+"\n")
 	// 지휘가 사라지면(hc get 실패 3번) 스스로 끝남
 	w3 := k.s21aW(nil, "--to", "t7cc")
 	upto(w3.Done)

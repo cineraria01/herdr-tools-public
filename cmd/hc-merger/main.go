@@ -443,6 +443,17 @@ func workerExe() string {
 	return p
 }
 
+// orphansDefer: 죽은 앞 실행이 남긴 자식 무리(준비 훅·검증·착지 — proc 고아 기록)를 먼저 거두고, 거두지 못했거나 소유를 모르는 것이
+// 남았으면 그 작업 트리를 쓰지 않고 75로 미룬다(재감사 2바퀴 merger R-209 — 옛 판은 기록 없이 띄워 SIGKILL된 일꾼의 훅이 남아 같은
+// 작업 트리를 함께 썼다). 참이면 부른 쪽은 75로 끝낸다
+func orphansDefer(what string) bool {
+	n := proc.Orphans()
+	if n > 0 {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 앞 실행이 남긴 자식 무리 %d개가 아직 도는지 모른다(%s) — %s를 쓰지 않고 미룸\n", n, proc.RecordDir(), what)
+	}
+	return n > 0
+}
+
 // reportMid: 중간 사건(--name merger)을 상한 안에서 — 못 적어도 경고만
 func reportMid(msg string) {
 	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "중간", "-", msg, "--name", "merger"); rc != 0 {
@@ -476,6 +487,9 @@ func roundMain(a []string) {
 	// 둘 다 죽은 앞 실행의 착지가 아직 돌면(자식 기록의 pid + 시작 시각) 그 후보도 쓰는 중이다
 	if busy || proc.ChildBusy(m.mj+"/child", landGrace) {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 앞 실행이 후보 작업 트리를 쓰고 있다")
+		os.Exit(75)
+	}
+	if orphansDefer("후보 작업 트리") {
 		os.Exit(75)
 	}
 	m.round()

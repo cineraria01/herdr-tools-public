@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/landing"
 )
 
@@ -47,15 +48,15 @@ func mqload(p string) {
 		MQBAD += "," + p
 		return
 	}
-	o, rc := run("git", "-C", r, "ls-remote", "origin", "refs/merge-queue/*", "refs/herdr/merger/*", landing.Prefix+"*")
-	if rc != 0 {
+	// 응답 전체가 온전해야 받는다(gitx.LsRemote) — 잘린 줄 하나라도 있으면 이 프로젝트 큐 전체를 모름으로(재감사 fill/R-214: 잘린 줄을
+	// 건너뛰어 큐·착지에 그 제출이 없다고 확정했다). 「없음」은 --exit-code 종료 2뿐
+	refs, st := gitx.LsRemote(r, "origin", nil, "refs/merge-queue/*", "refs/herdr/merger/*", landing.Prefix+"*")
+	if st == gitx.Unknown {
 		MQBAD += "," + p
 		return
 	}
-	for _, l := range lines(sub(o)) {
-		if f := fields(l); len(f) == 2 {
-			MQS = append(MQS, Row{p, f[1], f[0]})
-		}
+	for _, x := range landing.Refs(refs) {
+		MQS = append(MQS, Row{p, x.Name, x.SHA})
 	}
 }
 

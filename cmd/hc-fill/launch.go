@@ -163,6 +163,16 @@ func landingHit(lane string) int {
 	return 0
 }
 
+// afterAt <선행 항목> <기다리는 줄 프로젝트>: 선행 이름과 착지를 찾을 프로젝트 — <이름>@<프로젝트>(--after-any-project)면 그 프로젝트.
+// 일반 배치(afterOK)·먼저 띄움 판정(afterTick)·ls·실행 지시문(earlySec)이 모두 이것으로 푼다 — 먼저 띄움 쪽이 「spec@tools」를
+// 통째로 이 프로젝트에서 찾아 착지한 선행을 「대기열에 없음」 stop으로 봤다(재감사2 fill/R-217)
+func afterAt(a, p string) (string, string) {
+	if n, op, ok := strings.Cut(a, "@"); ok {
+		return n, op
+	}
+	return a, p
+}
+
 // after_ok <레인> <프로젝트> <쉼표 목록>: 0 다 들어감, 1 아직(기본 가지는 bBranch), 2 판정 못 함
 func afterOK(lane, p, list string) int {
 	switch fetchProj(p) {
@@ -178,7 +188,8 @@ func afterOK(lane, p, list string) int {
 	for _, a := range words(list) {
 		// 들어감 = 커밋 제목 머리 규칙 또는 그 선행 줄을 넣은 뒤의 착지 표식이 origin/<기본>의 조상(대기열에 그 줄이 있을 때)
 		// <이름>@<프로젝트>(--after-any-project)는 그 프로젝트 저장소 기본 가지에서 찾는다(fill-edit-after)
-		n, op, at := strings.Cut(a, "@")
+		n, op := afterAt(a, p)
+		at := op != p
 		if at && fetchProj(op) != 0 {
 			say("선행 %s ← %s: 판정 못 함(%s 저장소 설정·fetch)", lane, a, op)
 			fetchProj(p)

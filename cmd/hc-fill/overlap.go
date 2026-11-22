@@ -50,9 +50,10 @@ func afterTick() {
 					continue
 				}
 				done[x] = true
-				predState(x, ap)
+				n, op := afterAt(x, ap) // 일반 배치와 같은 해석(재감사2 fill/R-217) — after.tsv 키는 줄에 적힌 그대로(x)
+				predState(n, op)
 				if LMS != "" {
-					markers.WriteString(ap + "\t" + x + "\t" + LMFROM + "\t" + LMS + "\n")
+					markers.WriteString(op + "\t" + n + "\t" + LMFROM + "\t" + LMS + "\n")
 				}
 				ab = append(ab, x+"\t"+PSV+"\t"+atn)
 			}

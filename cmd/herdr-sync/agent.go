@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,15 +18,29 @@ import (
 
 	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/shx"
 )
 
 // hcExecMax: hc exec --timeout 상한(초). hc는 1~600만 받고 넘으면 invalid_params·종료 6으로 거절한다(2026-11-22 sync-hc-timeout).
 // 더 오래 걸릴 수 있는 일은 기계 쪽 조각이 스스로 끝 시각을 지킨다(installSh의 budget)
 const hcExecMax = 600
 
+// agentQ: 조회(q)용 조각 — 끝 표식(shx.Tail)이 찍혀야 응답이 온전하다(잘린 응답은 모름, ops/R-207). 엄격 머리(shx.Script)는
+// 쓰지 않는다: 리눅스 기계의 sh(dash 0.5.12)가 pipefail을 받지 않는다 — q는 결과를 바꾸는 단계를 파이프에 두지 않고 || exit 1로 본다.
+// 다른 하위 명령(r·T는 내용·tar 바이트를 그대로 낸다)은 표식 없는 agent 그대로
+var agentQ = shx.Tail(agent)
+
+// script: 하위 명령에 맞는 조각
+func script(args []string) string {
+	if len(args) > 0 && args[0] == "q" {
+		return agentQ
+	}
+	return agent
+}
+
 // macCmd: 맥에서 조각. hsb는 base 파일(HSB) — ""면 조각 기본값(~/.local/state/herdr-sync/base.tsv), "-"면 base를 고치지 않음
 func macCmd(hsb string, args ...string) *exec.Cmd {
-	c := exec.Command("sh", append([]string{"-c", agent, "_"}, args...)...)
+	c := exec.Command("sh", append([]string{"-c", script(args), "_"}, args...)...)
 	if hsb != "" {
 		c.Env = append(os.Environ(), "HSB="+hsb)
 	}
@@ -42,7 +57,7 @@ func on(m string, input bool, args ...string) *exec.Cmd {
 	if input {
 		a = append(a, "-i")
 	}
-	a = append(a, "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", agent, "_")
+	a = append(a, "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", script(args), "_")
 	c := exec.Command("hc", append(a, args...)...)
 	c.Stderr = os.Stderr
 	return c
@@ -243,11 +258,40 @@ func query(where string) (*qres, bool) {
 		return q, false
 	}
 	os.Stderr.Write(qe.Bytes())
+	return parseQ(out)
+}
+
+// qcols: 조회 응답 줄마다 칸 수(B는 base 줄 통째 — 저장소 base는 칸이 더 있다: 그 이상)
+var qcols = map[string]int{"U": 3, "F": 3, "L": 2, "G": 2, "B": 3, "R": 2, "Y": 2, "H": 2, "O": 2}
+
+// parseQ: 조회 응답(q의 출력) → 단위마다 현재·base·덮은 링크. 끝 표식(shx.Cut)이 있고, 줄마다 아는 꼴·칸 수·빈 칸 없음이고,
+// H·O가 한 번씩 O가 맨 끝일 때만 온전하다 — 잘린 응답(「O<TAB>Darw」)을 「비지원 OS 건너뜀」으로 읽지 않는다(ops/R-207)
+func parseQ(out string) (*qres, bool) {
+	q := &qres{RM: map[string]bool{}, Y: map[string]bool{}}
+	body, ok := shx.Cut(out, 0)
+	if !ok {
+		return q, false
+	}
 	type ub struct{ s, b string }
 	var us []ub
 	fs, gs, bs, lk := map[string]string{}, map[string]bool{}, map[string]string{}, map[string]bool{}
-	for _, l := range splitLines(out) {
+	ls := splitLines(body)
+	nh, no := 0, 0
+	for i, l := range ls {
 		a := strings.Split(l, "\t")
+		n, known := qcols[a[0]]
+		if !known || len(a) < n || a[0] != "B" && len(a) != n || slices.Contains(a[1:n], "") {
+			fmt.Fprintf(os.Stderr, "herdr-sync: 조회 응답의 줄이 깨졌다: %q\n", l)
+			return q, false
+		}
+		switch a[0] {
+		case "H":
+			nh++
+		case "O":
+			if no++; i != len(ls)-1 {
+				return q, false
+			}
+		}
 		get := func(i int) string {
 			if i < len(a) {
 				return a[i]
@@ -311,7 +355,7 @@ func query(where string) (*qres, bool) {
 		q.C, q.B, q.L = append(q.C, s), append(q.B, b), append(q.L, w)
 	}
 	// 끝 줄(H·O)까지 와야 온전한 조회다 — 잘린 조회를 「OS 알 수 없음」 건너뜀(종료 0)으로 읽지 않는다(gofix-ops B10)
-	return q, iu == len(us) && q.H != "" && q.O != ""
+	return q, iu == len(us) && nh == 1 && no == 1
 }
 
 // rsig: 저장소 파일 서명(맥 서명과 같은 꼴 crc.크기.x|-), 없으면(일반 파일이 아니면) -.

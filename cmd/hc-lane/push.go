@@ -126,24 +126,15 @@ func (e *ev) wfilter(lines []string) []string {
 		if om != "" {
 			oc, ok := orc[o]
 			if !ok {
-				og, rc := hcRun(10, errMerge, "get", o, "--json")
-				m := jparse(og)
+				// 주인의 지금 실행(created_ms): 확인된 끝남·완전한 not_found만 gone, 모름은 unk(hcjson.ParseGet)
+				t, found, err := hcGet(10, o)
 				oc = "unk"
-				switch rc {
-				case 0:
-					if m != nil && m["state"] == "live" {
-						if c, ok := liveCreatedMs(og); ok {
-							oc = c
-						}
-					} else if _, ok1 := m["address"].(string); ok1 {
-						if _, ok2 := m["state"].(string); ok2 {
-							oc = "gone"
-						}
-					}
-				case 3:
-					if er, ok := m["error"].(map[string]any); ok && er["kind"] == "not_found" {
-						oc = "gone"
-					}
+				switch {
+				case err != nil:
+				case !found || t.State != "live":
+					oc = "gone"
+				case t.Created > 0:
+					oc = strconv.FormatInt(t.Created, 10)
 				}
 				orc[o] = oc
 			}
@@ -273,10 +264,8 @@ func (e *ev) wsend(m string) bool {
 }
 
 var (
-	reBlocked    = regexp.MustCompile(`"state" *: *"blocked"`)
-	reStatusNull = regexp.MustCompile(`"status" *: *null`)
-	reRule       = regexp.MustCompile(`^[ \t]*(─|╌)(─|╌)(─|╌)`)
-	rePrompt     = regexp.MustCompile(`^[ \t]*❯`)
+	reRule   = regexp.MustCompile(`^[ \t]*(─|╌)(─|╌)(─|╌)`)
+	rePrompt = regexp.MustCompile(`^[ \t]*❯`)
 )
 
 // wheld: 지휘가 질문·권한 창을 띄웠으면 참(보내지 않음). status blocked는 lane.watch_hold_max 뒤 보내고, 화면으로 잡은 창은 늘 보류
@@ -284,14 +273,13 @@ func (e *ev) wheld() bool {
 	if e.whmax <= 0 {
 		return false
 	}
-	hg, rc := hcRun(10, errDrop, "get", e.wto, "--json")
-	if rc != 0 {
-		hg = ""
-	}
+	// 조회를 못 하면 보류하지 않는다 — 지휘 확인(wcheck)이 먼저 모름을 막는다
+	t, found, err := hcGet(10, e.wto)
+	_, hasSt := t.Raw["status"]
 	hw := ""
-	if reBlocked.MatchString(hg) {
+	if err == nil && found && t.Status == "blocked" {
 		hw = "blocked"
-	} else if reStatusNull.MatchString(hg) {
+	} else if err == nil && found && hasSt && t.Status == "" {
 		if scr, _ := hcRun(10, errDrop, "read", e.wto); e.wdialog(scr) {
 			hw = "화면"
 		}

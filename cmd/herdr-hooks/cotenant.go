@@ -43,7 +43,8 @@ type cg struct {
 	pd, prest, full, rel string
 	prefix               string // tree가 본 폴더의 ROOT 기준 접두(git 철자, 끝 / 포함 또는 "")
 
-	made []madeLease // 이번 호출이 새로 만든 임대 — Bash 여러 대상이 중간에 막히면 되돌린다(R-M04)
+	made []madeLease // 이번 호출이 만들거나 넘겨받은 임대 — Bash 여러 대상이 중간에 막히면 되돌린다(R-M04·R-M201)
+	got  madeLease   // 마지막 claimgen이 만든 claim(takeover가 made로 옮긴다)
 
 	regDone, meDone        bool
 	reg                    string
@@ -490,13 +491,22 @@ func isASCII(s string) bool {
 	return true
 }
 
-// writtenRel: 옛 판의 임대 열쇠 — 적은 철자 그대로의 FULL이 ROOT 글자로 시작하면 그 나머지, 아니면 "".
+// writtenRel: 옛 판의 임대 열쇠 — 적은 철자 그대로의 FULL에서 ROOT만큼의 폴더 칸을 뗀 나머지(ROOT를 다른 대소문자로 적었어도 —
+// 재감사 R-H203: 글자로 ROOT 접두를 찾아 뿌리 철자가 다르면 옛 열쇠를 못 찾았다), 열쇠가 REL과 같거나 FULL이 ROOT 아래가 아니면 "".
 // 옛 판(재감사 R-H03 전)이 쓴 임대를 고친 판이 놓치지 않게 함께 본다(혼용 기간)
 func (g *cg) writtenRel() string {
-	if r, ok := strings.CutPrefix(g.full, g.root+"/"); ok && r != g.rel {
-		return r
+	n := strings.Count(g.root, "/")
+	parts := strings.SplitN(g.full, "/", n+2)
+	r := ""
+	if len(parts) == n+2 && strings.EqualFold(strings.Join(parts[:n+1], "/"), g.root) {
+		r = parts[n+1]
+	} else if s, ok := strings.CutPrefix(g.full, g.root+"/"); ok {
+		r = s
 	}
-	return ""
+	if r == g.rel {
+		return ""
+	}
+	return r
 }
 
 // checkWritten: 옛 철자 열쇠(writtenRel)에 산 남의 임대가 있으면 그 규칙대로 막는다

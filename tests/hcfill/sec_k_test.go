@@ -76,7 +76,7 @@ func (k *K) kUnsure(name, m string) bool {
 // kAdopt: 다음 바퀴에 box-1의 그 레인 터미널이 보인다(전체·라벨 목록) — 미확정 시도를 채택하는지 본다
 func (k *K) kAdopt(name string) {
 	k.lj("box-1/" + name + ":claude-code:" + name + ":working:/home/me/src/app.wt/" + name)
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/` + name + `"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/` + name + `","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.unset("HC_FAKE_LS_LANE")
 	k.lj()
@@ -130,7 +130,7 @@ func secKReconnect(k *K) {
 	k.wrap("hc", `if [ "$1" = machine ]; then if [ -e "$T_LOG/ls.once" ]; then printf '%s\n' "$HC_FAKE_MACHINES"; else printf '%s\n' '`+off+`'; fi; exit 0; fi
 if [ "$1" = ls ] && [ ! -e "$T_LOG/ls.once" ]; then case " $* " in *" --label "*) ;; *) : >"$T_LOG/ls.once"; printf '%s\n' '{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"}]}'; exit 0 ;; esac; fi`)
 	k.lj("box-1/kr:claude-code:kr:working:/home/me/src/app.wt/kr")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kr"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kr","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.unwrap("hc")
 	k.check("목록을 읽은 뒤 box-1이 다시 붙음: 미확정을 지우지 않고 다시 띄우지 않음", k.kStarts("kr") == 1 && k.where("kr") == "wait - -" && k.kUnsure("kr", "box-1"),
@@ -152,7 +152,7 @@ func secKRidReplace(k *K) {
 	k.fill(nil, "add", "--name", "kd", "--project", "app", "--brief", k.T+"/kd2.md")
 	k.check("줄 교체 준비: 새 줄 ID가 다름·옛 시도 box-1 ?", rid1 != "" && k.qcol("kd", 17) != rid1 && k.kUnsure("kd", "box-1"), rid1, k.qcol("kd", 17), read(k.DATA+"/try.tsv"))
 	k.lj("box-1/kd:claude-code:kd:working:/home/me/src/app.wt/kd")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kd"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kd","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.unset("HC_FAKE_LS_LANE")
 	k.lj()
@@ -216,7 +216,7 @@ func secKRoundNext(k *K) {
 	// 첫 착수: 원래 가짜로 착수한 뒤 그 기계에 터미널이 생긴 것으로 두고 답하지 않는다(바퀴 상한이 끊는다)
 	k.wrap("hc-lane", `case " $* " in *" --name kw "*" -- "*) if [ ! -e "$T_LOG/kw.once" ]; then : >"$T_LOG/kw.once"; "$0.real" "$@" >/dev/null 2>&1
   printf '%s\n' '{"terminals":[{"address":"t0","agent":"claude-code","name":"coord","state":"live","status":"working","cwd":"/"},{"address":"box-1/kw","agent":"claude-code","name":"kw","state":"live","status":"working","cwd":"/home/me/src/app.wt/kw"}]}' >"$T_LOG/ls.json"
-  printf '%s\n' '{"terminals":[{"address":"box-1/kw"}]}' >"$T_LOG/lslane.json"; exec sleep 30; fi ;; esac`)
+  printf '%s\n' '{"terminals":[{"address":"box-1/kw","state":"live","cwd":"/"}]}' >"$T_LOG/lslane.json"; exec sleep 30; fi ;; esac`)
 	k.wrap("hc", `if [ "$1" = ls ]; then case " $* " in *" --label "*) [ ! -e "$T_LOG/lslane.json" ] || { cat "$T_LOG/lslane.json"; exit 0; } ;; *) [ ! -e "$T_LOG/ls.json" ] || { cat "$T_LOG/ls.json"; exit 0; } ;; esac; fi`)
 	defer k.unwrap("hc")
 	defer k.unwrap("hc-lane")
@@ -483,7 +483,7 @@ func secKLaunchTimeout(k *K) {
 	k.add("kl")
 	k.runE([]string{"HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1"}, "run")
 	k.lj("box-1/kl:claude-code:kl:working:/home/me/src/app.wt/kl")
-	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kl"}]}`)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kl","state":"live","cwd":"/"}]}`)
 	k.run("run")
 	k.unset("HC_FAKE_LS_LANE")
 	k.check("띄우기 시간 넘김: 다음 바퀴에 첫 기계의 터미널을 채택(다시 띄우지 않음)", starts() == 1 && k.where("kl") == "up box-1 box-1/kl",

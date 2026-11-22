@@ -721,7 +721,7 @@ func TestRecoveryWaitSubmitOwner(t *testing.T) {
 	cmust(k, "submit lane", f.submit("lane", "HC_LANE_OWNER=box/t1", "HC_LANE_OWNER_RUN=11"))
 	k.stub(f.home+"/stub/hc", `#!/bin/sh
 case $1 in
-  get) echo "{\"address\":\"t1\",\"state\":\"live\",\"pid\":123,\"name\":\"owner\",\"created_ms\":$created}"; test "$fault" = ok ;;
+  get) echo "{\"address\":\"t1\",\"cwd\":\"/\",\"state\":\"live\",\"pid\":123,\"name\":\"owner\",\"created_ms\":$created}"; test "$fault" = ok ;;
   ls) echo '{"terminals":[]}' ;;
   *) exit 3 ;;
 esac
@@ -754,7 +754,7 @@ func TestRecoveryResultOwner(t *testing.T) {
 	// 한 바퀴(HC_LANE_WATCH_IDLE=0)로 밖에서 부른다. 가짜 hc는 지휘 t1(pid·이름은 coord 파일과 같게)과 hc send 받기
 	k.stub(k.T+"/watch-bin/hc", `#!/bin/sh
 case $1 in
-  get) echo "{\"address\":\"t1\",\"state\":\"live\",\"pid\":123,\"name\":\"owner\",\"created_ms\":$watch_created}" ;;
+  get) echo "{\"address\":\"t1\",\"cwd\":\"/\",\"state\":\"live\",\"pid\":123,\"name\":\"owner\",\"created_ms\":$watch_created}" ;;
   ls) echo '{"terminals":[]}' ;;
   send) printf '%s\n' "$3" >>"$HOME/watch-sent" ;;
   *) exit 3 ;;

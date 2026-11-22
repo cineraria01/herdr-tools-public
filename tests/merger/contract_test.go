@@ -286,7 +286,7 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	// 11. git 실패를 「없음」으로 읽지 않는다: 제출 중 ls-remote가 실패하면 멈추고 아무것도 안 보냄
 	m.fake(fmt.Sprintf("#!/bin/sh\ncase \" $* \" in *\" ls-remote \"*merge-queue*) echo \"fatal: unable to access\" >&2; exit 128 ;; esac\nexec %s \"$@\"\n", rg))
 	m.landA("a", append(m.mfail(), "HC_LANE=l-dirty"))
-	k.check("원격 못 읽음: 제출 멈춤", m.rc == 1 && m.qrefs() == "" && strings.Contains(m.errS, "원격을 읽지 못했다"), m.dl())
+	k.check("원격 못 읽음: 제출 멈춤(모름 — 75, 같은 줄을 다시)", m.rc == 75 && m.qrefs() == "" && strings.Contains(m.errS, "원격을 읽지 못했다"), m.dl())
 	// 병합기 바퀴에서 ls-remote가 실패하면 큐가 빈 것으로 읽지 않고 다음 바퀴(아무것도 안 지움)
 	m.land("a", "l-dirty")
 	m.mergeE(m.mfail(), 0)

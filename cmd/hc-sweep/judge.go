@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"herdr-tools/internal/gitx"
 )
 
 func utf8Valid(b []byte) bool { return utf8.Valid(b) }
@@ -322,6 +324,17 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 			return "", "", "착지 전 커밋(git cherry +)"
 		}
 	}
+	// cherry는 병합 커밋을 보지 않는다(R-201): main에 없는 병합이 HEAD에 있으면 그 충돌 풀이가 main에 들었는지 패치로는 모른다 —
+	// 사건·패치 같음은 증거가 아니고, HEAD 자체가 main에 든 표식 커밋의 조상일 때만 착지다
+	merges, err := git(20, "rev-list", "--merges", "-n", "1", "origin/main..HEAD")
+	if err != nil {
+		return "", "", "모름(" + err.Error() + ")"
+	}
+	merges = strings.TrimSpace(merges)
+	if merges != "" && !gitx.ObjID(merges) { // 커밋 이름 하나도 빈 출력도 아닌 꼴 = 모름
+		return "", "", "모름(git rev-list 출력 꼴)"
+	}
+	merged := merges != ""
 	branch, mainRepo := strings.TrimSpace(branch), filepath.Dir(strings.TrimSpace(common))
 	rows, err := eventRows(events)
 	if err != nil && !os.IsNotExist(err) {
@@ -329,7 +342,7 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 	}
 	said := false
 	for _, row := range rows {
-		if len(row) > 4 && row[3] == name && (row[4] == "착지" || row[4] == "제출" || row[4] == "완료" || row[4] == "판정") && thisRun(t, row) {
+		if len(row) > 4 && row[3] == name && (row[4] == "착지" || row[4] == "제출" || row[4] == "완료" || row[4] == "판정") && thisRun(t, row) && !merged {
 			said = true
 		}
 	}
@@ -355,6 +368,17 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 				return "", "", "모름(git merge-base 실패)"
 			}
 			if anc.rc == 1 {
+				continue
+			}
+			head := hcGit(r, cwd, 20, "merge-base", "--is-ancestor", "HEAD", f[0])
+			if head.err != nil || (head.rc != 0 && head.rc != 1) {
+				return "", "", "모름(git merge-base 실패)"
+			}
+			if head.rc == 0 { // HEAD가 그대로 main에 들었다
+				said = true
+				continue
+			}
+			if merged { // 재작성된 병합: 결과 보존을 입증할 자료가 없다
 				continue
 			}
 			in, err := git(20, "cherry", f[0], "HEAD")

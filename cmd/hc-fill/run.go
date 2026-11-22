@@ -186,7 +186,7 @@ func readTables() {
 		if rc != 0 || sub(raw) == "" {
 			die("hc machine ls 실패, 이번 바퀴는 띄우지 않았다")
 		}
-		c, ok := jsonList(raw, "machines", "name", isConnected)
+		c, ok := connectedOf(raw)
 		if !ok {
 			die("hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다")
 		}
@@ -346,6 +346,9 @@ func orderRows() {
 	}
 }
 
+// AGUNK: 이번 바퀴 목록에 유형(agent) 모를 터미널이 있는 기계 — 새 일을 놓지 않는다(countSeats가 채움)
+var AGUNK []string
+
 // countSeats: 자리를 차지한 에이전트(SEATS)와 쉬기 시작한 때(held.tsv)
 func countSeats() {
 	lk := os.Getenv("XDG_STATE_HOME")
@@ -368,10 +371,20 @@ func countSeats() {
 			HELD[r.F(1)] = r.F(2)
 		}
 	}
-	HNEW, HNOW, SEATS = nil, nowUnix(), nil
+	HNEW, HNOW, SEATS, AGUNK = nil, nowUnix(), nil, nil
 	for _, t := range TERMS {
 		tm, ta, tn, ts, tc := t.M, t.Addr, t.Name, t.Status, t.Cwd
 		pre := fmt.Sprintf("자리 %s %s %s: ", tm, ta, tn)
+		if t.Agent == "-" { // agent 칸 없음·null — 유형 모름: 레인 라벨이면 자리를 지키고, 그 기계에는 이번 바퀴 새 일을 놓지 않는다(재감사2 fill/R-203)
+			AGUNK = append(AGUNK, tm)
+			if has(LANEADDR, ta) {
+				say("%s유형 모름(hc-lane 레인) → 셈, 이 기계에 새 일 안 놓음", pre)
+				SEATS = append(SEATS, tm)
+			} else {
+				say("%s유형 모름 → 이 기계에 새 일 안 놓음", pre)
+			}
+			continue
+		}
 		if t.Agent != AGENT { // 상태 모르는 hc-lane 레인(띄운 직후·훅 안 보냄)은 살아 있는 에이전트로 셈
 			if ts == "-" && has(LANEADDR, ta) && laneEnded(t) {
 				say("%s%s, 끝난 레인(hc keep이 셸로 바꿈) → 안 셈", pre, t.Agent)

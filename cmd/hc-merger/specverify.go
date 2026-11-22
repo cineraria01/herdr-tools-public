@@ -3,7 +3,8 @@ package main
 // 추측 병렬 검증 — 검증 기계 일꾼: hc-lane merger --spec-verify <아이디> <기본 브랜치>(병합기가 hc run --on <기계> --cwd <그 기계 클론>으로 띄움).
 // spec 참조를 받아 <클론>.spec-wt/<아이디 8>에 분리 작업 트리 → 준비 훅 → 부하가 높으면 기다림 → 저장소 검증 → 통과면 verified 기록,
 // 실패면 spec-fail 참조, 준비 실패·검증이 트리를 바꿈이면 state=lost(모름) → 작업 트리 정리. 결과를 쓰기 전에 spec 참조가 그대로인지 본다
-// (병합기가 버린 추측에 결과를 남기지 않게). 종료: 0 결과를 씀(또는 버려진 추측) · 1 못 함 · 2 인자 · 75 원격 받기 실패
+// (병합기가 버린 추측에 결과를 남기지 않게). 종료: 0 결과를 씀(또는 버려진 추측) · 1 못 함 · 2 인자 · 75 원격 받기 실패·죽은 앞 일꾼의
+// 자식 무리가 남음(proc.Orphans — 준비 훅·검증 명령은 고아 기록에 올라 다음 일꾼이 거두거나 미룬다)
 
 import (
 	"fmt"
@@ -26,6 +27,9 @@ func specVerifyMain(a []string) int {
 		return 2
 	}
 	id, base := a[0], a[1]
+	if orphansDefer("추측 작업 트리") { // 죽은 앞 일꾼의 준비 훅·검증이 남았으면 그 작업 트리를 지우거나 쓰기 전에(merger R-209)
+		return 75
+	}
 	top, rc := outQ("rev-parse", "--show-toplevel")
 	if rc != 0 || os.Chdir(top) != nil {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-verify — git 클론 안에서 부른다")

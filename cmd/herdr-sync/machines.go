@@ -468,7 +468,9 @@ func publish(pubwarn func(string)) (checked, pub string) {
 	c.Env = append(os.Environ(), "HERDR_TOOLS_CONFIG="+CONF, "HERDR_TOOLS_REPO="+REPO, "HERDR_TOOLS_PUBLISH_RESULT="+res)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	// 게시기의 수명도 sync가 쥔다(재감사 ops R-09): 따로 무리로 기다려 sync가 신호를 받으면 StopCurrent가 게시기에 TERM을 보내고 끝날
-	// 때까지 기다린다(옛 판: 상한 없는 bash라 무리 밖 — sync가 -15로 끝난 뒤에도 게시기 push가 돌았다)
+	// 때까지 기다린다(옛 판: 상한 없는 bash라 무리 밖 — sync가 -15로 끝난 뒤에도 게시기 push가 돌았다). 게시기는 띄우기 전에 고아
+	// 기록(pid·시작 시각·이 실행)에 오른다 — sync가 SIGKILL로 죽으면 다음 실행의 orphansLeft가 그 게시기를 거두거나, 소유를 모르면
+	// 끝날 때까지 75로 미룬다(재감사 2바퀴 ops R-204, proc P3)
 	if proc.WaitMax(c, "", 0) != 0 {
 		pubwarn("공개 저장소 내보내기 실패 — herdr-tools-publish 출력을 보고 고친 뒤 herdr-tools-publish를 다시. 바이너리는 기계마다 짓는다")
 		return "", pub

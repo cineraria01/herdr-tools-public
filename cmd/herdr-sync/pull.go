@@ -4,8 +4,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"herdr-tools/internal/toolcfg"
@@ -88,27 +90,15 @@ func doPulls() {
 			got++
 		}
 		if len(pl) > 0 {
-			var wo bytes.Buffer
-			for _, ch := range chunks(pl, 3) {
-				var keys []string
-				for _, l := range ch {
-					keys = append(keys, field(l, 1))
-				}
-				t := on(m, true, "T")
-				t.Stdin = bytes.NewReader(joinLines(keys))
-				pipeline(append(joinLines(ch), ".\n"...), t, macCmd("-", "W", STAMP), &wo)
+			ok, bad := pullTree(m, pl)
+			for _, k := range ok {
+				say("맥 가져옴 %s (%s)", k, m)
+				got++
 			}
-			bad := false
-			for _, r := range wres(pl, wo.String()) {
-				if r[0] == "ok" {
-					say("맥 가져옴 %s (%s)", r[1], m)
-					got++
-				} else {
-					warn("%s에서 %s를 가져오지 못했다 (%s)", m, r[1], r[2])
-					bad = true
-				}
+			for _, r := range bad {
+				warn("%s에서 %s를 가져오지 못했다 (%s)", m, r[0], r[1])
 			}
-			if bad {
+			if len(bad) > 0 {
 				exit(1)
 			}
 		}
@@ -116,6 +106,50 @@ func doPulls() {
 			warn("%s에 가져올 것이 없다", s)
 		}
 	}
+}
+
+// pullTree: 나무 파일 묶음(pl: 「키 x 서명 키」 줄)을 그 기계에서 받아 맥에 쓴다. 맥에 쓴 키와 (키, 까닭).
+// 두 단계(ops/R-217): 묶음마다 먼저 맥 임시 폴더에 다 받고(원격 T | 로컬 tar -x — 양쪽 종료 0일 때만), 그 뒤에 그 폴더에서 맥 W로 넣는다.
+// 받기가 한쪽이라도 실패면 그 묶음은 맥에 하나도 쓰지 않는다(맥·개인 저장소·base 보존 — 부르는 쪽이 종료 1로 멈춘다)
+func pullTree(m string, pl []string) (ok []string, bad [][2]string) {
+	fail := func(ch []string, why string) {
+		for _, l := range ch {
+			bad = append(bad, [2]string{field(l, 1), why})
+		}
+	}
+	for n, ch := range chunks(pl, 3) {
+		d, err := os.MkdirTemp(TMP, "pull.")
+		if err != nil {
+			fail(ch, "임시 폴더를 만들지 못했다")
+			continue
+		}
+		var keys []string
+		for _, l := range ch {
+			keys = append(keys, field(l, 1))
+		}
+		t := on(m, true, "T")
+		t.Stdin = bytes.NewReader(joinLines(keys))
+		x := exec.Command("tar", "-xf", "-")
+		x.Dir, x.Stderr = d, os.Stderr
+		if p, c := pipeline(nil, t, x, nil); p != 0 || c != 0 {
+			fail(ch, fmt.Sprintf("받기가 실패로 끝났다 — 보냄 %d · 받음 %d", p, c))
+			continue
+		}
+		var wo bytes.Buffer
+		pre, tar := wpack(d, ch, fmt.Sprintf("pull%d.src", n))
+		p, c := pipeline(pre, tar, macCmd("-", "W", STAMP), &wo)
+		for _, r := range wres(ch, wo.String()) {
+			if r[0] == "ok" { // W가 cksum을 맞춘 뒤 넣었다고 알린 것 — 넣은 것은 그대로 알린다
+				ok = append(ok, r[1])
+			} else {
+				bad = append(bad, [2]string{r[1], r[2]})
+			}
+		}
+		if p != 0 || c != 0 { // 다 넣었다고 알렸어도 묶음이 실패로 끝났으면 성공으로 치지 않는다(base를 못 적었을 수 있다)
+			bad = append(bad, [2]string{field(ch[0], 1), fmt.Sprintf("맥 넣기 묶음이 실패로 끝났다 — 보냄 %d · 받음 %d", p, c)})
+		}
+	}
+	return ok, bad
 }
 
 func orUnknown(s string) string {

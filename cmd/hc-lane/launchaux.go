@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"herdr-tools/internal/proc"
 )
@@ -121,14 +122,26 @@ func autoWatch() {
 
 func sleepPoll() { sleepFor(poll) }
 
-// showRemote: 띄운 뒤 그 공간이 이름 없이 생겼으면 기계 이름을 붙인다(창이 터미널을 보는 데 몇 초 — poll초씩 5번까지)
+// uiLimit: 창 조회·이름 붙이기 한 번의 상한 — 원격 상한(HERDR_TIMEOUT_REMOTE)과 10초 가운데 짧은 쪽. 결과가 부수적인 단계라
+// 상한 없음(0)이어도 10초(재감사 2바퀴 P7·lane/R-218)
+func uiLimit() time.Duration {
+	d := proc.Limit([]string{"ssh"}) // = HERDR_TIMEOUT_REMOTE
+	if d <= 0 || d > 10*time.Second {
+		d = 10 * time.Second
+	}
+	return d
+}
+
+// showRemote: 띄운 뒤 그 공간이 이름 없이 생겼으면 기계 이름을 붙인다(창이 터미널을 보는 데 몇 초 — poll초씩 5번까지).
+// 조회·이름 붙이기는 uiLimit 안에서만 — 결과가 모름이어도 이미 받은 터미널 주소(addr)·시작 결과는 그대로다(부른 쪽이 돌려준다)
 func showRemote() {
 	if hsp == "" || addr == "" {
 		return
 	}
 	id := on + "/" + hsp
 	for i := 0; ; {
-		out, r := outOf(nil, []string{"herdr-app", "ls"})
+		ob, err := proc.OutputMax(exec.Command("herdr-app", "ls"), uiLimit())
+		out, r := trim(string(ob)), code(err)
 		if r != 0 {
 			errf("hc-lane: Herdr 창이 없어 %s 공간 이름은 못 붙였다(창을 열면 %s 가 보인다)\n", on, addr)
 			return
@@ -155,7 +168,7 @@ func showRemote() {
 			if nm == on {
 				return
 			}
-			if exec.Command("herdr-app", "do", "space.rename", "--id", id, "--name", on).Run() == nil {
+			if proc.RunMax(exec.Command("herdr-app", "do", "space.rename", "--id", id, "--name", on), uiLimit()) == nil {
 				return
 			}
 			errf("hc-lane: Herdr 창의 %s 공간 이름을 붙이지 못했다(herdr-app do space.rename --id %s --name %s)\n", on, id, on)

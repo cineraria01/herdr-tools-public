@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	repo = filepath.Clean(filepath.Join(wd, "..", ".."))
-	os.Exit(m.Run())
+	clitest.Main(m) // 끝나면 Bin 폴더를 지운다(재감사 base R-225)
 }
 
 type section struct {

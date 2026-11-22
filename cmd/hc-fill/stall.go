@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/atomic"
 )
 
 // stallDone <대기열 줄> <완료 사건> <완료 sha>: 멈춤이 아니라 끝난 레인인가 — (끝남, 모름)(2026-11-21 헛알림 — flaky-land 1420분·
@@ -38,12 +40,15 @@ func stallDone(q Row, ev, sha string) (bool, bool) {
 // *-<레인>이나 그 sha의 큐 항목(착지 중 표식 refs/herdr/landing은 큐 항목이 있을 때만 착지 중 — internal/landing) (c) 반송 뒤
 // 이어받음: refs/merge-failed/<이름>이 그 sha이고 reland.tsv에 그 이름의 「넣음」(다시 맞춤 레인)이나 「보냄」(원래 레인에 보내 다시
 // 내기를 기다림 — 안 내면 reland가 넣는다). 반송 큐 이름의 레인 칸은 다시 맞춤 레인이 아니라 가지 이름일 수 있어 sha로 맞춘다.
-// 원격 없는 저장소(기본이 refs/heads/)에는 병합기가 없다. lcFetch가 FR·FB를 채운 뒤 부른다
+// 원격 없는 저장소(기본이 refs/heads/)에는 병합기가 없다. lcFetch가 FR·FB를 채운 뒤 부른다.
+// (a)는 onlandHit — 표식에 더해 기본 브랜치의 접수 뒤 커밋 제목 머리 「<이름>:」도 착지로 본다(2026-11-22 지휘 — clean-renamed-submit 등
+// 착지한 레인에 경보). 이름은 레인 이름과 그 레인이 낸 이름(stallNames). refs/merge-done/<레인>은 hc-landed 표식과 한 push라 따로 보지
+// 않는다(시각이 없어 같은 이름 옛 기록을 이번 착지로 볼 수 있다)
 func stallMerger(q Row, ev, sha string) (bool, bool) {
 	if !strings.HasPrefix(FB, "origin/") {
 		return false, false
 	}
-	p, n, unk := q.F(2), q.F(1), false
+	p, n := q.F(2), q.F(1)
 	st, ok := since(n)
 	if !ok {
 		t, err := time.Parse("2006-01-02T15:04:05Z", evF(ev, 1))
@@ -52,14 +57,17 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 		}
 		st = fmt.Sprint(t.Unix())
 	}
-	lms, lmf := LMS, LMFROM // lmark는 선행 판정용 전역을 쓴다 — 이 바퀴의 다른 판정을 흐리지 않게 되돌린다
-	rc := lmark(n, st)
-	LMS, LMFROM = lms, lmf
-	switch rc {
-	case 0:
-		return true, false
-	case 2:
-		unk = true
+	lns, unk := stallNames(q)
+	for _, ln := range lns {
+		lms, lmf := LMS, LMFROM // lmark(onlandHit 안)는 선행 판정용 전역을 쓴다 — 이 바퀴의 다른 판정을 흐리지 않게 되돌린다
+		_, rc := onlandHit(ln, int64(num(st)))
+		LMS, LMFROM = lms, lmf
+		switch rc {
+		case 0:
+			return true, false
+		case 2:
+			unk = true
+		}
 	}
 	same := func(full string) bool { return len(sha) >= 7 && strings.HasPrefix(full, sha) }
 	switch mqueued(p, n) {
@@ -92,6 +100,39 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 		}
 	}
 	return false, unk
+}
+
+// stallNames <대기열 줄>: 그 레인이 착지에 쓸 수 있는 이름들 — 레인 이름, 다시 맞춤 레인이면 reland.tsv의 원래 레인·바탕(HC_LANE=<원래>로
+// 낸다), 이 클론의 가지 설정 branch.<레인>.hcLane(hc-lane이 이름 바꿔 낸 제출에 남김 — 이 기계 레인만 보인다). 설정 조회가 「없음」(종료 1)
+// 말고 실패하면 모름
+func stallNames(q Row) ([]string, bool) {
+	n := q.F(1)
+	names := []string{n}
+	b, _, err := atomic.Read(DATA + "/reland.tsv")
+	for _, l := range lines(string(b)) {
+		if r := splitRow(l); r.F(5) == n && r.F(4) == "넣음" {
+			names = append(names, r.F(2), r.F(3))
+		}
+	}
+	o, rc := run("git", "-C", FR, "config", "--get", "branch."+n+".hcLane")
+	switch v := strings.TrimSpace(o); {
+	case rc == 0 && okname(v):
+		names = append(names, v)
+	case rc != 1:
+		return uniqOK(names), true
+	}
+	return uniqOK(names), err != nil
+}
+
+// uniqOK: 겹침·빈 값·이름 꼴이 아닌 것을 뺀다
+func uniqOK(a []string) []string {
+	var out []string
+	for _, s := range uniq(a) {
+		if okname(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // stallTick(Go 판에서 더함 — 받은편지 레인이 「완료 — 감사 기다림」으로 9시간 멈춘 일 뒤): up 줄(감사 줄 빼고)의 그 실행 마지막

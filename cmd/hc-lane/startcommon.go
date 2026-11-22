@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
 )
 
@@ -163,7 +164,7 @@ func termPairs() ([][2]string, int) {
 	return parsePairs(out, on)
 }
 
-// jstr: JSON 문자열 값이면 그 글(null·숫자·빠짐은 false)
+// jstr: JSON 문자열 값이면 그 글(null·숫자·빠짐은 false) — hcx.go jlistOK가 쓴다
 func jstr(raw json.RawMessage) (string, bool) {
 	var s string
 	if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &s) != nil {
@@ -172,44 +173,20 @@ func jstr(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
-// parsePairs: 입력 전체가 JSON 객체 하나, terminals는 배열이고 항목마다 address·cwd가 문자열이어야 한다 — 하나라도 어긋나면 2.
-// mach가 있으면 machines 배열에 그 기계가 connected로 있어야 한다(목록에 그 기계 터미널이 빠진 것을 「아무도 안 씀」으로 읽지 않게) — 아니면 3
+// parsePairs: hcjson.ParseList — 입력 전체가 JSON 값 하나, 항목 하나라도 계약을 어기면(살아 있는 터미널의 cwd가 절대 경로가 아님 포함 —
+// 재감사2 lane/R-202) 2. 끝난 터미널은 cwd가 없어도 되고(빈 글 — 작업 폴더를 쓰지 않는다). mach가 있으면 machines에 그 기계가 connected로
+// 있어야 한다(목록에 그 기계 터미널이 빠진 것을 「아무도 안 씀」으로 읽지 않게) — 아니면 3
 func parsePairs(out, mach string) ([][2]string, int) {
-	d := json.NewDecoder(strings.NewReader(out))
-	var top map[string]json.RawMessage
-	if d.Decode(&top) != nil || top == nil {
+	l, err := hcjson.ParseList([]byte(out))
+	if err != nil {
 		return nil, 2
 	}
-	if _, err := d.Token(); err != io.EOF {
-		return nil, 2
-	}
-	var ts []map[string]json.RawMessage
-	if json.Unmarshal(top["terminals"], &ts) != nil || ts == nil {
-		return nil, 2
-	}
-	ps := make([][2]string, 0, len(ts))
-	for _, t := range ts {
-		a, ok1 := jstr(t["address"])
-		c, ok2 := jstr(t["cwd"])
-		if t == nil || !ok1 || !ok2 || a == "" {
-			return nil, 2
-		}
-		ps = append(ps, [2]string{a, c})
+	ps := make([][2]string, 0, len(l.Terminals))
+	for _, t := range l.Terminals {
+		ps = append(ps, [2]string{t.Address, t.Cwd})
 	}
 	if mach != "" {
-		var ms []map[string]json.RawMessage
-		if json.Unmarshal(top["machines"], &ms) != nil || ms == nil {
-			return nil, 3
-		}
-		conn := false
-		for _, m := range ms {
-			n, _ := jstr(m["name"])
-			s, _ := jstr(m["state"])
-			if n == mach {
-				conn = s == "connected"
-			}
-		}
-		if !conn {
+		if m, ok := l.Machine(mach); !ok || m.State != "connected" {
 			return nil, 3
 		}
 	}

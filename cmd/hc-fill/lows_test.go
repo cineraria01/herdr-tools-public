@@ -21,7 +21,8 @@ func lowsSetup(t *testing.T, lane, flag, q15, q11 string) *lowsT {
 	confLines = []string{"lows app", "repo app m " + DATA}
 	x := &lowsT{t: t, log: DATA + "/hc-lane.log", rep: DATA + "/reports/audit-a1.md"}
 	lowsW(t, DATA+"/hc-lane", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>"+x.log+"\n")
-	lowsW(t, DATA+"/hc", "#!/bin/sh\necho '{\"created_ms\":1700000000000,\"name\":\""+lane+"\",\"state\":\"running\"}'\n")
+	// 진짜 hc get 꼴(주소=묻는 주소·live·cwd) — hcjson.ParseGet이 계약 밖 꼴(주소 없음·state running)은 모름으로 읽는다
+	lowsW(t, DATA+"/hc", "#!/bin/sh\necho \"{\\\"address\\\":\\\"$2\\\",\\\"created_ms\\\":1700000000000,\\\"cwd\\\":\\\"/\\\",\\\"name\\\":\\\""+lane+"\\\",\\\"state\\\":\\\"live\\\"}\"\n")
 	if err := os.Chmod(DATA+"/hc-lane", 0o755); err != nil {
 		t.Fatal(err)
 	}

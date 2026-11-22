@@ -128,10 +128,23 @@ func TestGofix2DiskRecordOwnership(t *testing.T) {
 	if r := digitRecords(d); len(r) != 2 {
 		t.Fatalf("모르는 기록은 그대로 둬야: %v", r)
 	}
-	if n := Orphans(); n != 1 {
-		t.Fatalf("우두머리가 아직 도는 모르는 기록은 하나: %d", n)
+	// 2바퀴 P1: 우두머리가 끝난 무리도 남아 있으면 센다(모름 = 미룸)
+	if n := Orphans(); n != 2 {
+		t.Fatalf("무리가 남은 모르는 기록은 둘: %d", n)
 	}
-	// 이 실행이 띄운 무리(live)는 시작 시각 없이도·우두머리가 끝나도 그것이다
+	// 이 실행이 띄워 bounded에 올린 무리(live)는 시작 시각 없이도·우두머리가 끝나도 무리가 남은 동안 그것이다. 올리지 않은(내린) 번호는 아니다
+	if ownGroup(c2.Process.Pid, "", true) == groupMine {
+		t.Fatal("bounded에 없는 번호를 숫자만으로 그것이라 했다")
+	}
+	curMu.Lock()
+	bounded[c2.Process.Pid], bounded[keep.Process.Pid] = "", ""
+	curMu.Unlock()
+	defer func() {
+		curMu.Lock()
+		delete(bounded, c2.Process.Pid)
+		delete(bounded, keep.Process.Pid)
+		curMu.Unlock()
+	}()
 	if ownGroup(c2.Process.Pid, "", true) != groupMine || ownGroup(keep.Process.Pid, "", true) != groupMine {
 		t.Fatal("이 실행이 띄운 무리는 그것이다")
 	}
@@ -342,5 +355,5 @@ func reauditHelper(h, d string) int {
 		time.Sleep(time.Minute)
 		return 0
 	}
-	return 2
+	return gofix3Helper(h, d)
 }

@@ -30,7 +30,7 @@ func s21b2(k *K) {
 	write(k.t, MH+"/oldm/.local/state/hc-lane/events.tsv", ev(nw, "x", "t5", "lane-rn", "완료", "abcd1234", "이름바꿈", "2"))
 	k.conf("lane.wait_grace 0", "lane.wait_busy", "lane.wait_procs")
 	lsR := func(m string) string {
-		return fmt.Sprintf(`{"terminals":[{"address":"%s/t6","name":"lane-rn2","state":"live","status":"blocked","turn":2},{"address":"%s/t7","name":"lane-rn3","state":"live","status":"done","turn":2}]}`, m, m)
+		return fmt.Sprintf(`{"terminals":[{"address":"%s/t6","name":"lane-rn2","cwd":"/","state":"live","status":"blocked","turn":2},{"address":"%s/t7","name":"lane-rn3","cwd":"/","state":"live","status":"done","turn":2}]}`, m, m)
 	}
 	mach := func(m string) string {
 		return `HC_FAKE_MACHINES={"machines":[{"name":"` + m + `","state":"connected"}]}`

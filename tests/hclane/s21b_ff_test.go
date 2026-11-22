@@ -105,7 +105,7 @@ func s21b4(k *K) {
 	// 재감사 R-M1: status 없는 대화형 지휘 — hc get foreground가 셸이 아니면 일하는 중
 	lsz := `{"terminals":[{"address":"t5bb","agent":"zsh","cwd":"` + k.R + `","state":"live","turn":9}]}`
 	fgj := func(n, pid string) string {
-		return fmt.Sprintf(`{"address":"t5bb","foreground":{"argv":["%s"],"name":"%s","pid":%s},"pid":1045,"state":"live","status":null}`, n, n, pid)
+		return fmt.Sprintf(`{"address":"t5bb","foreground":{"argv":["%s"],"name":"%s","pid":%s},"cwd":"/","pid":1045,"state":"live","status":null}`, n, n, pid)
 	}
 	z := func(body string) []string {
 		return []string{"HC_FAKE_LS=" + lsz, "HC_FAKE_GET_ADDR=t5bb", "HC_FAKE_GET_BODY=" + body}

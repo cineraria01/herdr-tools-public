@@ -172,17 +172,23 @@ func TestChildBusy(t *testing.T) {
 	syscall.Kill(-pid, syscall.SIGKILL)
 	c.Wait()
 
-	// 우두머리는 끝났는데 무리에 배경 프로세스가 남았으면(죽은 병합기의 착지가 남긴 것) 거둔다
+	// 우두머리는 끝났는데 무리에 배경 프로세스가 남았으면 소유를 입증할 수 없다 — 신호 없이 도는 것으로(재감사 2바퀴 P5).
+	// 무리까지 끝나면 기록을 지우고 도는 중이 아니다
 	c2, bg2 := startGroup(t, "exit 0")
 	pid2 := c2.Process.Pid
 	st2, _ := StartTime(pid2)
 	c2.Wait()
 	os.WriteFile(rec, []byte(strconv.Itoa(pid2)+"\t"+st2+"\n"), 0o666)
-	if ChildBusy(rec, 5*time.Second) { // 유예는 넉넉히(부하 때 TERM 받은 sleep이 거둬지기까지) — 거둬지면 바로 돌아온다
-		t.Fatal("끝난 착지는 도는 중이 아니다")
+	if !ChildBusy(rec, time.Second) || !Alive(bg2) {
+		t.Fatal("우두머리가 끝나고 무리가 남았으면 신호 없이 도는 것으로 쳐야 한다")
 	}
-	if !gone(bg2) {
-		t.Fatal("끝난 착지 무리에 남은 프로세스를 거둬야 한다")
+	syscall.Kill(-pid2, syscall.SIGKILL)
+	until(func() bool { return groupGone(pid2) })
+	if ChildBusy(rec, time.Second) {
+		t.Fatal("무리까지 끝난 착지는 도는 중이 아니다")
+	}
+	if _, err := os.Stat(rec); err == nil {
+		t.Fatal("무리까지 끝났으면 기록을 지워야 한다")
 	}
 }
 

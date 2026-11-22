@@ -5,8 +5,11 @@ package main
 // 선행(4)·기계(5)·지시문(3)·우선(13) 칸만 바꾼다(나머지 칸·줄 ID 그대로).
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -76,7 +79,7 @@ func editCmd(args []string) {
 		}
 	}
 	st, prj, note := "", "", ""
-	rc := withQ(func() {
+	rc := withRun(func() {
 		r := qrow(name)
 		if r == nil {
 			die("대기열에 없다: %s", name)
@@ -137,6 +140,30 @@ func editCmd(args []string) {
 	if prio != "" && st != "wait" && prioMeta(name, prj, plabel(prio)) == 1 {
 		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 edit --priority 하면 큐 메타를 고친다", name)
 	}
+}
+
+// withRun: run.lock(run 한 바퀴 내내 쥔다 — 줄·지시문을 잠금 밖에서 읽어 사본을 뜨고, 띄운 뒤에야 up으로 바꾼다)과 대기열 잠금 안에서 fn.
+// edit가 대기열 잠금만 쥐면 발사 중(사본을 뜬 뒤·up 전)에 선행·지시문을 바꿔, 대기열은 새 지시문인데 레인은 옛 사본으로 떴다
+// (재감사2 fill/R-208). --then(thenAdd)과 같은 잠금 차례·기다림 상한(HC_FILL_THEN_WAIT 초, 기본 600). 75 기다림 넘김 — 아무것도 안 바꿈
+func withRun(fn func()) int {
+	if err := os.MkdirAll(DATA, 0o755); err != nil {
+		die("%v", err)
+	}
+	wait := 600
+	if v := os.Getenv("HC_FILL_THEN_WAIT"); v != "" {
+		wait, _ = strconv.Atoi(v)
+	}
+	rf := lockWait(DATA+"/run.lock", time.Duration(wait)*time.Second)
+	if rf == nil {
+		fmt.Fprintln(os.Stderr, "hc-fill: run 바퀴나 대기열 잠금이 끝나지 않아 그만뒀다, 다시 부른다")
+		return 75
+	}
+	defer rf.Close()
+	rc := withQ(fn)
+	if rc == 75 {
+		fmt.Fprintln(os.Stderr, "hc-fill: run 바퀴나 대기열 잠금이 끝나지 않아 그만뒀다, 다시 부른다")
+	}
+	return rc
 }
 
 // rmCmd: rm <이름> [--force]. 주차 중인 줄은 --force 없이 지우지 않는다(종료 2)

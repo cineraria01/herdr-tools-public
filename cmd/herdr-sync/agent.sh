@@ -35,7 +35,20 @@ sig() {
   x=-; case $1 in *'#'*) ;; *) [ -x "$f" ] && x=x ;; esac
   echo "$(sum "$T/v").$x"
 }
-bsig() { if [ -f "$B" ]; then awk -F'\t' -v k="$1" '$1==k{s=$2} END{print (s=="" ? "-" : s)}' "$B"; else echo -; fi; }
+# bhas: base 파일 — 0 있음(일반 파일), 1 없음 확정, 2 모름(그 자리에 다른 것·끊긴 링크, 위 폴더를 못 뒤짐). 모름을 빈 이력으로 읽으면
+# 따로 고친 기계를 「같음」으로 덮는다(ops/R-206)
+bhas() {
+  [ "$B" = - ] && return 1
+  [ -f "$B" ] && return 0
+  { [ -e "$B" ] || [ -L "$B" ]; } && return 2
+  gone "$B" && return 1
+  return 2
+}
+# bsig <키>: 그 키의 base 서명(없으면 -). 못 읽으면 종료 1 — 부르는 쪽이 조회를 멈춘다
+bsig() {
+  bhas; case $? in 1) echo -; return 0 ;; 2) echo "base를 읽지 못했다: $B" >&2; return 1 ;; esac
+  awk -F'\t' -v k="$1" '$1==k{s=$2} END{print (s=="" ? "-" : s)}' "$B" || { echo "base를 읽지 못했다: $B" >&2; return 1; }
+}
 setbf() {   # setbf <파일>: 그 파일의 「키 서명」 줄들로 base를 한 번에 고친다
   [ "$B" = - ] && return 0
   [ -s "$1" ] || return 0
@@ -71,15 +84,19 @@ q() {
     if [ "$a" = -- ]; then case $s in k) s=r ;; r) s=t ;; t) s=x ;; x) s=y ;; esac; continue; fi
     printf '%s\n' "$a" >> "$T/$s"
   done
-  while IFS= read -r a; do s=$(sig "$a") || exit 1; printf 'U\t%s\t%s\n' "$s" "$(bsig "$a")"; done < "$T/k"
+  while IFS= read -r a; do s=$(sig "$a") || exit 1; b=$(bsig "$a") || exit 1; printf 'U\t%s\t%s\n' "$s" "$b"; done < "$T/k"
   while IFS= read -r a; do if [ -e "$HOME/$a" ] || [ -L "$HOME/$a" ]; then printf 'R\t%s\n' "$a"; fi; done < "$T/r"
   while IFS= read -r a; do if [ -e "$HOME/$a" ]; then printf 'Y\t%s\n' "$a"; fi; done < "$T/y"
   while IFS= read -r a; do
     awk -v r="$a/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' "$T/x" > "$T/ex"
     lt "$HOME/$a" "$a" "$T/ex" || exit 1
   done < "$T/t"
-  if [ -s "$T/t" ] && [ -f "$B" ]; then
-    awk -F'\t' -v t="$T/t" 'BEGIN { while ((getline l < t) > 0) r[l "/"] = 1 } { for (p in r) if (index($1, p) == 1) { print "B\t" $0; next } }' "$B"
+  if [ -s "$T/t" ]; then   # 나무 줄의 base: 못 읽으면 조회 실패(빈 이력으로 읽지 않는다, ops/R-206)
+    bhas; case $? in
+      0) awk -F'\t' -v t="$T/t" 'BEGIN { while ((getline l < t) > 0) r[l "/"] = 1 } { for (p in r) if (index($1, p) == 1) { print "B\t" $0; next } }' "$B" \
+           || { echo "base를 읽지 못했다: $B" >&2; exit 1; } ;;
+      2) echo "base를 읽지 못했다: $B" >&2; exit 1 ;;
+    esac
   fi
   printf 'H\t%s\nO\t%s\n' "$HOME" "$(uname -s)"
 }

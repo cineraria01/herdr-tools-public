@@ -194,11 +194,11 @@ func cleanSec(k *K) {
 	k.runE([]string{"HC_FAKE_LS=" + s13lsj("box/t7", w("c-live3"))}, "clean", "--on", "box", "--repo", k.R, "--branch", "c-live3")
 	k.check("clean --on: 그 기계 터미널이 폴더에서 돌면 멈춤", k.rc != 0 && strings.Contains(k.errf(), "box/t7") && k.kept("c-live3"))
 	// 재감사 R-06: JSON을 구조로 읽으니 칸 차례(cwd가 address 앞)와 상관없이 읽고, 칸이 빠지면 못 읽음으로 멈춘다
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"cwd":"` + w("c-live3") + `","address":"t8"}]}`}, "clean", "--repo", k.R, "--branch", "c-live3")
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"cwd":"` + w("c-live3") + `","address":"t8","state":"live"}]}`}, "clean", "--repo", k.R, "--branch", "c-live3")
 	k.check("clean: cwd가 address 앞이어도 읽고 멈춤", k.rc != 0 && strings.Contains(k.errf(), "t8") && k.kept("c-live3"))
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"cwd":"/x"}]}`}, "clean", "--repo", k.R, "--branch", "c-live3")
 	k.check("clean: hc ls 형식을 못 읽으면(address 없음) 멈춤", k.rc != 0 && strings.Contains(k.errf(), "hc ls --json 출력을 읽지 못했다") && k.kept("c-live3"))
-	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address" : "t7", "cwd" : "` + w("c-live3") + `"}]}`}, "clean", "--repo", k.R, "--branch", "c-live3")
+	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address" : "t7", "cwd" : "` + w("c-live3") + `", "state" : "live"}]}`}, "clean", "--repo", k.R, "--branch", "c-live3")
 	k.check("clean: 콜론 뒤 공백 꼴도 읽고 멈춤", k.rc != 0 && strings.Contains(k.errf(), "t7") && k.kept("c-live3"))
 	k.sh(k.R, `git worktree add -q --detach "$1" origin/main && git branch -q --no-track c-dh origin/main`, w("c-dh"))
 	k.s13clean("c-dh")

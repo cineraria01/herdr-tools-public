@@ -3,7 +3,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,65 +14,78 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/hcjson"
 )
 
 func init() { register("coord", coordCmd, noHelp) }
 
-// getState: hc get --json 한 번의 판정. 0 살아 있음(state live), 1 없음(완전한 not_found 오류 객체)·끝남(확인된 live 아닌 state),
-// 2 모름(코어 연결 실패·잘린 응답·찌꺼기·state 없음 — gofix L04, 재감사 R-13). 0이면 그 객체도
-func getState(out string, hrc int) (map[string]any, int) {
-	m := jone(strings.TrimSpace(out))
-	if m == nil {
-		return nil, 2
-	}
-	if hrc != 0 { // 실패한 hc get은 완전한 not_found 오류 객체일 때만 「없음」
-		if e, _ := m["error"].(map[string]any); e != nil && e["kind"] == "not_found" {
-			return nil, 1
-		}
-		return nil, 2
-	}
-	st, ok := m["state"].(string)
-	switch {
-	case !ok || st == "":
-		return nil, 2
-	case st != "live":
-		return nil, 1
-	}
-	return m, 0
+// hcGet: hc get <addr> --json 한 번(sec초 상한)을 hcjson.ParseGet으로 판정 — 표준 출력은 터미널 객체, 종료 3의 오류 객체는 표준 오류에 온다.
+// (t, true, nil) 있음 · (_, false, nil) 확인된 없음(완전한 not_found) · 오류는 모름(연결 실패·시간 넘김·잘림·찌꺼기·모르는 state·주소 다름)
+func hcGet(sec int, addr string) (hcjson.Terminal, bool, error) {
+	out, rc := hcGetRaw(sec, addr)
+	return hcjson.ParseGet([]byte(out), rc, addr)
 }
 
-// tinfo: 그 터미널의 맨 위 pid·이름(없으면 -)·레인/감시 라벨. rc 0 살아 있음, 1 없음·끝남·live인데 pid 없음, 2 모름(getState)
+// hcGetRaw: hcGet이 판정하는 글과 종료 코드 — 0 아닌 종료면 표준 오류(오류 객체), 비었으면 표준 출력
+func hcGetRaw(sec int, addr string) (string, int) {
+	var eb strings.Builder
+	out, rc := captErr(sec, &eb, "hc", "get", addr, "--json")
+	if rc != 0 && strings.TrimSpace(eb.String()) != "" {
+		out = eb.String()
+	}
+	return out, rc
+}
+
+// getState: hc get 판정. 0 살아 있음(state live), 1 없음(완전한 not_found)·끝남(확인된 finished), 2 모름(hcGet 오류 — gofix L04, 재감사 R-13)
+func getState(t hcjson.Terminal, found bool, err error) int {
+	switch {
+	case err != nil:
+		return 2
+	case !found || t.State != "live":
+		return 1
+	}
+	return 0
+}
+
+// tinfo: 그 터미널의 맨 위 pid·이름(없으면 -)·레인/감시 라벨. rc 0 살아 있음, 1 확인된 없음·끝남, 2 모름 — getState의 모름에 더해
+// live인데 신원 칸(pid·name)이 응답에 없거나 pid가 null·0이면 모름(실행 신원을 확인 못 한 것은 「없음」이 아니다 — 재감사2 lane/R-208, fill/R-206)
 func tinfo(addr string) (pid, name string, laneLabel bool, rc int) {
-	out, hrc := hcRun(10, errMerge, "get", addr, "--json")
-	m, r := getState(out, hrc)
-	if r != 0 {
+	t, found, err := hcGet(10, addr)
+	if r := getState(t, found, err); r != 0 {
 		return "", "", false, r
 	}
-	pid = topNum(m, "pid", "")
-	name, _ = jget(m, "name")
+	_, hasPid := t.Raw["pid"]
+	_, hasName := t.Raw["name"]
+	if !hasPid || !hasName || t.PID <= 0 {
+		return "", "", false, 2
+	}
+	name = t.Name
 	if name == "" {
 		name = "-"
 	}
-	if lb, ok := m["labels"].(map[string]any); ok {
-		laneLabel = lb["hc-lane"] == "1" || lb["hc-lane-watch"] == "1"
-	}
-	if pid == "" {
-		return pid, name, laneLabel, 1
-	}
-	return pid, name, laneLabel, 0
+	laneLabel = t.Labels["hc-lane"] == "1" || t.Labels["hc-lane-watch"] == "1"
+	return strconv.Itoa(t.PID), name, laneLabel, 0
 }
 
 func coordFile(addr string) string { return evdir() + "/coord." + ckey(addr) }
 
 // readCoord: 「주소 pid 이름 시각」(셸 판 IFS=탭 read — 빈 칸은 겹쳐 하나)
 func readCoord(path string) ([]string, bool) {
+	c, r := coordRead(path)
+	return c, r == 0
+}
+
+// coordRead: readCoord와 같되 0 있음, 1 없음(ENOENT)·꼴이 아님(줄바꿈 없음 — 쓰는 중), 2 읽기 실패(권한·폴더·입출력 — 모름)
+func coordRead(path string) ([]string, int) {
 	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 1
+	} else if err != nil {
+		return nil, 2
 	}
 	l, _, nl := strings.Cut(string(b), "\n")
 	if !nl {
-		return nil, false
+		return nil, 1
 	}
 	f := strings.FieldsFunc(l, func(r rune) bool { return r == '\t' })
 	if len(f) > 4 {
@@ -79,7 +94,7 @@ func readCoord(path string) ([]string, bool) {
 	for len(f) < 4 {
 		f = append(f, "")
 	}
-	return f, true
+	return f, 0
 }
 
 // coordSet: 살아 있고 레인·감시 터미널이 아니면 지휘 정보로 적는다. launch면 띄운 시각을 지금으로, 아니면 같은 pid의 옛 시각 그대로
@@ -99,20 +114,24 @@ func coordSet(addr string, launch bool) bool {
 	if os.MkdirAll(evdir(), 0o777) != nil {
 		return false
 	}
-	return atomic.WriteFile(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o666) == nil
+	// 사용자 전용 장부 — 구판이 0666으로 만든 기존 파일도 갈 때 0600으로 좁힌다(재감사2 lane/R-221·merger/R-206)
+	return atomic.WriteFileMode(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o600) == nil
 }
 
 // coordCheck: 그 지휘의 정보가 있고 지금 hc get pid·이름이 같으면 0(주소 addr). 1 다름·없음(까닭 why), 2 모름
 func coordCheck(addr string) (cad, why string, rc int) {
 	f := coordFile(addr)
-	c, ok := readCoord(f)
-	if !ok {
+	c, cr := coordRead(f)
+	if cr == 2 {
+		return "", fmt.Sprintf("지휘 정보를 읽지 못했다(%s)", f), 2
+	}
+	if cr != 0 {
 		return "", fmt.Sprintf("지휘 정보 없음(%s — 지휘가 레인을 띄우거나 wait를 걸면 생김)", f), 1
 	}
 	cad = c[0]
 	pid, name, _, r := tinfo(cad)
 	if r == 2 {
-		return cad, fmt.Sprintf("hc get %s 실패", cad), 2
+		return cad, fmt.Sprintf("hc get %s 로 지휘의 신원(state·pid·이름)을 확인 못 함", cad), 2
 	}
 	if r != 0 {
 		return cad, cad + " 터미널이 없거나 끝남", 1
@@ -125,16 +144,20 @@ func coordCheck(addr string) (cad, why string, rc int) {
 
 // coordDefault: 살아 있고 맞는 지휘 가운데 가장 최근에 레인을 띄운 곳. 1 없음, 2 그보다 최근 지휘를 확인 못 함
 func coordDefault() (string, string, int) {
-	fs, _ := filepath.Glob(evdir() + "/coord.*")
-	sort.Strings(fs)
+	cfs, _ := filepath.Glob(evdir() + "/coord.*")
+	sort.Strings(cfs)
 	var bt, ut int64 = -1, -1
 	ba := ""
-	for _, cf := range fs {
+	for _, cf := range cfs {
 		if strings.Count(filepath.Base(cf), ".") >= 2 {
 			continue // 쓰는 중인 coord.<주소>.<pid>
 		}
-		c, ok := readCoord(cf)
-		if !ok {
+		c, cr := coordRead(cf)
+		if cr == 2 { // 읽지 못한 후보는 「없음」이 아니다 — 시각을 모르니 어느 확인된 지휘보다 최근일 수 있다
+			ut = 1<<62 - 1
+			continue
+		}
+		if cr != 0 {
 			continue
 		}
 		ct := int64(0)
@@ -150,12 +173,12 @@ func coordDefault() (string, string, int) {
 	}
 	if ba == "" {
 		if ut >= 0 { // 확인된 지휘는 없지만 조회 못 한 후보가 있다 — 「없음」이 아니다(R-13)
-			return "", "확인 못 한 지휘 정보가 있다(hc get 실패·잘린 응답)", 2
+			return "", "확인 못 한 지휘 정보가 있다(hc get 실패·잘린 응답·읽기 실패)", 2
 		}
 		return "", "살아 있고 pid·이름이 맞는 지휘가 없다(지휘가 레인을 띄우거나 wait를 걸면 생김)", 1
 	}
 	if ut > bt {
-		return "", "더 최근 지휘를 확인 못 했다(hc get 실패)", 2
+		return "", "더 최근 지휘를 확인 못 했다(hc get 실패·읽기 실패)", 2
 	}
 	return ba, "", 0
 }

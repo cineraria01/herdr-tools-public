@@ -6,9 +6,6 @@ package clitest
 
 import (
 	"bytes"
-	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"hash/crc32"
 	"io/fs"
@@ -16,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -101,13 +99,15 @@ var (
 )
 
 // Bin: cmd/<name>을 이 시험 프로세스에서 한 번 지은 바이너리 경로. 모든 도구를 한 폴더에 지어, 곁 도구(hc-lane → hc-merger·
-// herdr-tools-config 등)를 바이너리 곁에서 찾는 길이 운영(~/.local/bin)과 같다. 폴더는 시험 프로세스 뒤에도 남는다(빌드 캐시가 다시 빠르게 짓는다)
+// herdr-tools-config 등)를 바이너리 곁에서 찾는 길이 운영(~/.local/bin)과 같다. go build도 Cmd.Run(시험 마감 안·무리 회수)으로 부른다.
+// 폴더 herdr-test-bin.<pid>.*는 Main이 시험 프로세스 끝에 지우고, 마감 panic·KILL로 남은 것은 다음 Bin이 주인 pid가 없을 때 지운다(재감사 base R-224·R-225)
 func Bin(t *testing.T, name string) string {
 	t.Helper()
 	binMu.Lock()
 	defer binMu.Unlock()
 	if binDir == "" {
-		d, err := os.MkdirTemp("", "herdr-test-bin.")
+		sweepBinDirs()
+		d, err := os.MkdirTemp("", fmt.Sprintf("herdr-test-bin.%d.", os.Getpid()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,17 +116,39 @@ func Bin(t *testing.T, name string) string {
 	p := filepath.Join(binDir, name)
 	if !binDone[name] {
 		binDone[name] = true
-		c := exec.Command("go", "build", "-o", p, "./cmd/"+name)
-		c.Dir = Root(t)
-		c.Env = append(os.Environ(), "CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH=")
-		if out, err := c.CombinedOutput(); err != nil {
-			binErr[name] = fmt.Errorf("go build ./cmd/%s: %v\n%s", name, err, out)
+		r := Cmd{Dir: Root(t), Env: []string{"CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH="}, Combined: true, Max: 10 * time.Minute}.
+			Run("go", "build", "-o", p, "./cmd/"+name)
+		if r.RC != 0 {
+			binErr[name] = fmt.Errorf("go build ./cmd/%s: 종료 %d\n%s%s", name, r.RC, r.Out, r.Err)
 		}
 	}
 	if err := binErr[name]; err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// sweepBinDirs: (binMu 안) 주인 시험 프로세스가 없는(ESRCH) herdr-test-bin.<pid>.* 폴더를 지운다. 이름에 pid가 없으면(옛 꼴) 모름 — 둔다
+func sweepBinDirs() {
+	ms, _ := filepath.Glob(filepath.Join(os.TempDir(), "herdr-test-bin.*.*"))
+	for _, m := range ms {
+		f := strings.Split(filepath.Base(m), ".")
+		pid, err := strconv.Atoi(f[1])
+		if len(f) == 3 && err == nil && pid > 1 && pid != os.Getpid() && !proc.Alive(pid) {
+			os.RemoveAll(m) //nolint:errcheck // 남은 시험 빌드 — 못 지우면 다음에
+		}
+	}
+}
+
+// Main: 패키지 TestMain에서 m.Run 대신 부른다 — 시험이 끝나면 Bin 폴더를 지우고 그 종료 코드로 끝난다
+func Main(m *testing.M) {
+	rc := m.Run()
+	binMu.Lock()
+	if binDir != "" {
+		os.RemoveAll(binDir) //nolint:errcheck // 시험 빌드 폴더
+	}
+	binMu.Unlock()
+	os.Exit(rc)
 }
 
 // BinDir: 그 도구들을 모두 지은 폴더(PATH 앞에 둔다)
@@ -179,46 +201,14 @@ func TempDir(t *testing.T) string {
 // DefaultMax: Cmd.Max가 0일 때 명령 하나의 상한 — go test 기본 마감(10분)보다 짧게
 var DefaultMax = 60 * time.Second
 
-// stopReserve: 상한을 넘긴 무리를 끄는 데 드는 여유(TERM → 2초 → KILL과 기다림)
-const stopReserve = 3 * time.Second
-
-// binStart: 시험 바이너리 시작(이 꾸러미 init) — testing이 -test.timeout 시계를 거는 m.Run보다 먼저라 마감을 조금 이르게 본다(안전한 쪽)
-var binStart = time.Now()
-
-// Budget: 명령 하나의 상한 max를 시험 바이너리의 바깥 마감(-test.timeout, t.Deadline()과 같은 시계) 안으로 줄인다.
-// 상한 넘김 뒤 끄기(stopReserve)와 출력 관 기다림(같은 상한)까지 마감 전에 끝나게 — 남은 시간에서 여유를 빼고 반으로.
-// 마감이 없거나(-test.timeout=0) 시험 바이너리 밖이면 max 그대로(재감사 base R-15)
-func Budget(max time.Duration) time.Duration {
-	f := flag.Lookup("test.timeout")
-	if f == nil {
-		return max
-	}
-	g, ok := f.Value.(flag.Getter)
-	if !ok {
-		return max
-	}
-	to, ok := g.Get().(time.Duration)
-	if !ok || to <= 0 {
-		return max
-	}
-	rem := time.Until(binStart.Add(to))
-	if 2*max+stopReserve <= rem {
-		return max
-	}
-	b := (rem - stopReserve) / 2
-	if b < 10*time.Millisecond {
-		b = 10 * time.Millisecond
-	}
-	return b
-}
-
-// Cmd: 한 번 부르기. Env는 os.Environ() 위에 덧씌운다("K=" 빈 값, "K" 혼자는 지움)
+// Cmd: 한 번 부르기. Env는 os.Environ() 위에 덧씌운다("K=" 빈 값, "K" 혼자는 지움) — Exact면 Env가 환경 전부
 type Cmd struct {
 	Dir      string
 	Env      []string
+	Exact    bool // Env만(바깥 환경을 물려받지 않는다)
 	Stdin    string
 	Combined bool          // 2>&1
-	Max      time.Duration // 명령 하나의 상한(0이면 DefaultMax)
+	Max      time.Duration // 명령 하나의 상한(0이면 DefaultMax). 시험 마감(-test.timeout)이 더 이르면 그 안으로 줄인다
 }
 
 // Res: 셸 $(…)처럼 Out은 끝 줄바꿈을 뺀 표준 출력(Combined면 둘 다), Err는 표준 오류 그대로
@@ -229,22 +219,26 @@ type Res struct {
 	Timeout bool // 상한을 넘겨(또는 끝난 뒤 출력 관이 상한만큼 안 닫혀) 무리째 껐다 — RC 124
 }
 
-// Run: 부르고 결과. 못 띄우면 RC 127. 명령은 새 프로세스 무리로 띄우고, 상한을 넘기면 그 무리만 TERM → 2초 → KILL하고
-// 기다린 뒤 RC 124·Timeout(시험 마감에 걸려 자식이 남지 않게)
+// Run: 부르고 결과. 못 띄우면 RC 127. 명령은 새 프로세스 무리로 띄우고(Child), 상한을 넘기면 그 무리만 TERM → 유예 → KILL하고
+// 거둔 뒤 RC 124·Timeout. 상한·유예·KILL 기다림은 모두 시험 마감 안에 든다 — 남은 시간이 회수 여유(minRemain)보다 짧으면
+// 띄우지 않고 RC 127(재감사 base R-223: TERM을 무시하는 자식도 마감 전에 KILL·회수)
 func (c Cmd) Run(name string, args ...string) Res {
 	max := c.Max
 	if max <= 0 {
 		max = DefaultMax
 	}
-	max = Budget(max)
-	ctx, cancel := context.WithTimeout(context.Background(), max)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	proc.Group(cmd)
-	cmd.Cancel = func() error { proc.StopGroup(cmd.Process.Pid, 2*time.Second); return nil }
-	cmd.WaitDelay = max // 끝난 뒤 출력 관을 쥔 손자는 상한만큼 기다리고 아래에서 무리째 끈다
+	end, grace, kw, ok := window(max)
+	if !ok {
+		return Res{RC: 127, Err: fmt.Sprintf("clitest: 시험 마감까지 남은 시간이 회수 여유(%s)보다 짧아 띄우지 않음: %s\n", minRemain, name)}
+	}
+	lim := time.Until(end)
+	cmd := exec.Command(name, args...)
 	cmd.Dir = c.Dir
-	cmd.Env = MergeEnv(os.Environ(), c.Env)
+	if c.Exact {
+		cmd.Env = MergeEnv(nil, c.Env)
+	} else {
+		cmd.Env = MergeEnv(os.Environ(), c.Env)
+	}
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
 	}
@@ -255,25 +249,37 @@ func (c Cmd) Run(name string, args ...string) Res {
 	} else {
 		cmd.Stderr = &e
 	}
-	err := cmd.Run()
-	if cmd.Process != nil && (ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay)) {
-		proc.StopGroup(cmd.Process.Pid, 2*time.Second) // 무리 번호는 무리가 남아 있는 동안 다른 프로세스에 다시 쓰이지 않는다
-		e.WriteString(fmt.Sprintf("clitest: 시간 넘김(%s) — 무리를 껐다: %s\n", max, name))
+	ch, err := start(cmd)
+	if err != nil {
+		return Res{RC: 127, Err: err.Error() + "\n"}
+	}
+	timeout := !ch.waitDone(time.Until(end))
+	ioWait := time.Until(end)
+	if timeout {
+		ch.stop(grace, kw)
+		ioWait = kw
+	}
+	select {
+	case <-ch.ioDone:
+	case <-time.After(ioWait):
+		if !timeout {
+			// 우두머리는 끝났는데 출력 관을 쥔 손자가 남았다 — 관을 쥔 것이 무리에 있으면 그것이 무리 번호를 쥐고 있다
+			timeout = true
+			sigSent.Add(2)
+			killGroup(ch.Pid, syscall.SIGTERM) //nolint:errcheck // 비었으면 ESRCH
+			select {
+			case <-ch.ioDone:
+			case <-time.After(grace):
+			}
+			killGroup(ch.Pid, syscall.SIGKILL) //nolint:errcheck // 비었으면 ESRCH
+		}
+		ch.closeIO()
+	}
+	if timeout {
+		e.WriteString(fmt.Sprintf("clitest: 시간 넘김(%s) — 무리를 껐다: %s\n", lim.Round(time.Millisecond), name))
 		return Res{Out: strings.TrimRight(o.String(), "\n"), Err: e.String(), RC: 124, Timeout: true}
 	}
-	rc := 0
-	var ee *exec.ExitError
-	switch {
-	case errors.As(err, &ee):
-		rc = ee.ExitCode()
-		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			rc = 128 + int(ws.Signal())
-		}
-	case err != nil:
-		rc = 127
-		e.WriteString(err.Error() + "\n")
-	}
-	return Res{Out: strings.TrimRight(o.String(), "\n"), Err: e.String(), RC: rc}
+	return Res{Out: strings.TrimRight(o.String(), "\n"), Err: e.String(), RC: ch.rc}
 }
 
 // MergeEnv: base 위에 over를 덧씌운다. "K"(= 없음)는 지운다

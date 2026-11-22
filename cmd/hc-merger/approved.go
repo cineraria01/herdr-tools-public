@@ -63,8 +63,8 @@ func (m *M) applied(e entry, prev, got string) int {
 	default:
 		return apUnknown
 	}
-	tree, rc := out("rev-parse", "--verify", got+"^{tree}")
-	if rc != 0 {
+	tree, rc := gitx.Tree("", got, os.Stderr) // 꼴이 틀린 트리 ID도 모름(빈 값·잘린 값을 「다름」으로 읽지 않게)
+	if rc != 0 || !gitx.ObjID(want) {
 		return apUnknown
 	}
 	if tree != want {

@@ -59,8 +59,9 @@ func TestWriteFileSwapsInode(t *testing.T) {
 
 // rename 직전 실패: 옛 파일 그대로, 임시 파일 없음
 func TestWriteFileRenameFailKeepsOld(t *testing.T) {
-	defer func(r func(string, string) error) { rename = r }(rename)
-	rename = func(string, string) error { return errors.New("끼워 넣은 실패") }
+	s := steps
+	s.Rename = func(string, string) error { return errors.New("끼워 넣은 실패") }
+	defer SwapSteps(SwapSteps(s))
 	d := t.TempDir()
 	p := filepath.Join(d, "state")
 	if err := os.WriteFile(p, []byte("old"), 0o644); err != nil {

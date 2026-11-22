@@ -5,12 +5,7 @@
 package util_test
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -20,7 +15,6 @@ import (
 	"time"
 
 	"herdr-tools/internal/clitest"
-	"herdr-tools/internal/proc"
 )
 
 var repo string // 저장소 루트
@@ -31,7 +25,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	repo = filepath.Clean(filepath.Join(wd, "..", ".."))
-	os.Exit(m.Run())
+	clitest.Main(m) // 끝나면 Bin 폴더를 지운다(재감사 base R-225)
 }
 
 // run1: 새 임시 폴더·격리 환경으로 f를 돌린다.
@@ -107,95 +101,56 @@ func TestRunBounded(t *testing.T) {
 	cmdMax = 500 * time.Millisecond
 	defer func() { cmdMax = old }()
 	T := tmpdir(t)
-	out, rc := run(T, isolated(T), "/bin/sh", "-c", "sleep 30 & echo $! >"+T+"/pid; wait")
-	b, _ := os.ReadFile(T + "/pid")
-	kid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if rc != 124 || kid <= 0 {
-		t.Fatalf("rc %d kid %d out %q", rc, kid, out)
+	out, rc := run(T, isolated(T), "/bin/sh", "-c", `(sleep 1; : >"$2") & : >"$1"; wait`, "sh", T+"/start", T+"/late")
+	if rc != 124 {
+		t.Fatalf("rc %d out %q", rc, out)
 	}
-	for i := 0; i < 20 && syscall.Kill(kid, 0) == nil; i++ {
-		time.Sleep(100 * time.Millisecond)
-	}
-	if syscall.Kill(kid, 0) == nil {
-		syscall.Kill(kid, syscall.SIGKILL)
-		t.Fatalf("배경 자식 %d가 남음", kid)
+	clitest.WaitFile(t, T+"/start", time.Second)
+	time.Sleep(1500 * time.Millisecond)
+	if !clitest.Absent(t, T+"/late") {
+		t.Fatal("배경 자식이 남아 늦은 표식을 썼다")
 	}
 }
 
-// 재감사 base R-15: 바깥 마감(-test.timeout)이 cmdMax보다 먼저 오면 명령 상한을 남은 시간 안으로 줄여 무리를 거두고 124로 돌아온다
+// 재감사 base R-223: 바깥 마감(-test.timeout)이 cmdMax보다 먼저 오면 TERM을 무시하는 자식도 마감 전에 KILL·회수하고 124로 돌아온다.
+// 시험 실행기(run)는 clitest.Cmd 위에 있다 — 마감 계약 전체는 internal/clitest/contract_test.go
 func TestRunWithinTestDeadline(t *testing.T) {
-	if pidf := os.Getenv("UTIL_DEADLINE_PIDF"); pidf != "" {
-		T := tmpdir(t)
-		if _, rc := run(T, isolated(T), "/bin/sh", "-c", "sleep 60 & echo $! >"+pidf+"; wait"); rc != 124 {
+	if d := os.Getenv("UTIL_DEADLINE_DIR"); d != "" {
+		if _, rc := run(d, isolated(d), "/bin/sh", "-c", `trap '' TERM; : >"$1"; sleep 2; : >"$2"`, "sh", d+"/start", d+"/late"); rc != 124 {
 			t.Fatalf("바깥 마감 전에 시간 넘김(124)이어야: %d", rc)
 		}
 		return
 	}
 	T := tmpdir(t)
-	pidf := T + "/pid"
-	e := isolated(T)
-	e["UTIL_DEADLINE_PIDF"] = pidf
-	out, rc := run(T, e, os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=8s", "-test.count=1")
-	b, _ := os.ReadFile(pidf)
-	kid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if kid > 0 && syscall.Kill(kid, 0) == nil {
-		syscall.Kill(kid, syscall.SIGKILL)
-		t.Errorf("바깥 마감 뒤 손자(%d)가 남았다", kid)
+	out, rc := run(T, isolated(T).With("UTIL_DEADLINE_DIR="+T), os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=1s", "-test.count=1")
+	if rc != 0 {
+		t.Fatalf("안쪽 시험이 마감 전에 끝나야(종료 0): rc %d\n%s", rc, out)
 	}
-	if rc != 0 || kid <= 0 {
-		t.Fatalf("안쪽 시험이 마감 전에 끝나야(종료 0): rc %d kid %d\n%s", rc, kid, out)
+	clitest.WaitFile(t, T+"/start", time.Second)
+	time.Sleep(2500 * time.Millisecond)
+	if !clitest.Absent(t, T+"/late") {
+		t.Error("바깥 마감 뒤 TERM 무시 자식이 남아 늦은 표식을 썼다")
 	}
 }
 
-// start: name을 새 프로세스 무리로, cmdMax 상한과 함께. 끝나면 무리에 남은 것(출력을 문 손자 등)도 거둔다 — 시험이 띄운 무리만
-func start(dir string, e Env, name string, args ...string) (*exec.Cmd, context.Context, context.CancelFunc) {
-	max := clitest.Budget(cmdMax) // 바깥 마감(-test.timeout)보다 먼저 끝나게(재감사 R-15)
-	ctx, cancel := context.WithTimeout(context.Background(), max)
-	cmd := exec.CommandContext(ctx, name, args...)
-	proc.Group(cmd)
-	cmd.Cancel = func() error { proc.StopGroup(cmd.Process.Pid, 2*time.Second); return nil }
-	cmd.Dir, cmd.Env = dir, e.list()
-	cmd.WaitDelay = min(10*time.Second, max) // 출력을 물고 남은 손자가 있어도 끝나게
-	return cmd, ctx, cancel
+// runCmd: dir에서 env e(전부 — 바깥 환경을 덧씌우지 않는다)로 cmdMax 상한. 새 무리·시험 마감 안 회수는 clitest.Cmd.Run(재감사 base R-223)
+func runCmd(dir string, e Env, combined bool, name string, args ...string) clitest.Res {
+	return clitest.Cmd{Dir: dir, Env: e.list(), Exact: true, Combined: combined, Max: cmdMax}.Run(name, args...)
 }
 
-// finish: start한 cmd의 결과 — 상한·출력 관 기다림 넘김이면 그 무리를 끄고 (124, 까닭)
-func finish(cmd *exec.Cmd, err error, ctxErr error) (int, string) {
-	if cmd.Process != nil && (ctxErr != nil || errors.Is(err, exec.ErrWaitDelay)) {
-		proc.StopGroup(cmd.Process.Pid, 2*time.Second)
-		return 124, fmt.Sprintf("시험 실행기: 시간 넘김(%s 또는 출력 관) — 무리를 껐다: %s\n", cmdMax, cmd.Path)
-	}
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-		return 0, ""
-	case errors.As(err, &ee) && ee.ExitCode() >= 0:
-		return ee.ExitCode(), ""
-	}
-	return -1, err.Error()
-}
-
-// run: dir에서 env로 name을 돌려 합친 출력과 종료 코드. 띄우지 못하면 rc -1과 그 오류를 출력에. 상한은 cmdMax(rc 124)
+// run: dir에서 env로 name을 돌려 합친 출력과 종료 코드. 띄우지 못하면 rc 127, 상한은 cmdMax(rc 124) — 까닭은 출력 끝에
 func run(dir string, e Env, name string, args ...string) (string, int) {
-	cmd, ctx, cancel := start(dir, e, name, args...)
-	defer cancel()
-	var b bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &b, &b
-	err := cmd.Run()
-	rc, why := finish(cmd, err, ctx.Err())
-	return b.String() + why, rc
+	r := runCmd(dir, e, true, name, args...)
+	if r.Out != "" {
+		r.Out += "\n" // clitest는 끝 줄바꿈을 뗀다 — 합친 출력 그대로처럼
+	}
+	return r.Out + r.Err, r.RC
 }
 
 // run2: run과 같되 stdout·stderr를 따로. 셸 시험의 "$(…)"처럼 stdout 끝 줄바꿈은 뗀다.
 func run2(dir string, e Env, name string, args ...string) (stdout, stderr string, rc int) {
-	cmd, ctx, cancel := start(dir, e, name, args...)
-	defer cancel()
-	var so, se strings.Builder
-	cmd.Stdout, cmd.Stderr = &so, &se
-	err := cmd.Run()
-	rc, why := finish(cmd, err, ctx.Err())
-	se.WriteString(why)
-	return strings.TrimRight(so.String(), "\n"), se.String(), rc
+	r := runCmd(dir, e, false, name, args...)
+	return r.Out, r.Err, r.RC
 }
 
 // tmpdir: 실제 경로(pwd -P)로 푼 임시 폴더. 끝나면 쓰기 막힌 폴더도 지울 수 있게 풀어 둔다.

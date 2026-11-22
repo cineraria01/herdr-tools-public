@@ -3,17 +3,16 @@ package main
 // 제출 막기(reland-live-lane — 한 프로젝트의 병합기가 sv-go-verify-lock 제출을 20분 검증한 뒤, 그 사이 같은 레인의 옛 커밋이 다시 제출돼 큐 참조가
 // 바뀌어 push가 lease로 멈췄다): 같은 레인 제출을 병합기가 지금 착지 중이면(internal/landing) 종료 2, 내려는 커밋이 원격 lane/<레인>의
 // 조상(옛 커밋)이면 경고 한 줄 뒤 --force-old 없이는 종료 2. 큐에 서 있기만 한 제출을 갈아 끼우는 것은 그대로 된다.
+// 조회 뒤·push 전에 병합기가 착지를 시작하는 경합은 제출 push의 갈아 끼움 표식(submit.go supersede)이 막는다.
 
 import (
 	"fmt"
 	"os"
-
-	"herdr-tools/internal/landing"
 )
 
-// submitGuard <ls-remote 출력> <원격 lane/<레인> SHA|빈 값> <내려는 커밋>
-func submitGuard(rs, cur, sh string) {
-	if qn := landing.Of(landing.Parse(rs), sln); qn != "" {
+// submitGuard <착지 중인 큐 이름|빈 값(landing.Of — 온전한 원격 조회로)> <원격 lane/<레인> SHA|빈 값> <내려는 커밋>
+func submitGuard(qn, cur, sh string) {
+	if qn != "" {
 		eprintf("hc-lane land: %s은 병합기가 지금 착지 중 — 결과(착지·막힘)를 기다린다(refs/merge-queue/%s)\n", sln, qn)
 		exit(2)
 	}

@@ -74,6 +74,35 @@ func sweepStaleTmp() {
 	}
 }
 
+// startTime: 자기 시작 시각(시험이 바꾼다)
+var startTime = proc.StartTime
+
+// mkOwnedTmp: 자기 임시 폴더(<TMPDIR>/herdr-tools-publish.*)를 만들고 소유 기록 owner(pid·시작 시각)를 쓴다. 기록을 못 만들면 그 빈
+// 폴더만 지우고 오류 — 블롭은 기록이 있는 폴더에만 꺼낸다(재감사 ops/R-213: 시작 시각 조회가 실패해도 기록 없이 블롭을 꺼내, SIGKILL
+// 뒤 다음 실행이 소유를 몰라 영영 남겼다)
+func mkOwnedTmp() (string, error) {
+	d, err := os.MkdirTemp(os.Getenv("TMPDIR"), me+".")
+	if err != nil {
+		return "", err
+	}
+	st, err := startTime(os.Getpid())
+	if err == nil && (st == "" || strings.ContainsAny(st, "\t\n")) {
+		err = fmt.Errorf("시작 시각 꼴이 틀렸다: %q", st)
+	}
+	if err == nil {
+		if err = os.WriteFile(d+"/owner", []byte(fmt.Sprintf("%d\t%s\n", os.Getpid(), st)), 0o600); err != nil {
+			os.Remove(d + "/owner")
+		}
+	}
+	if err != nil {
+		if rerr := os.Remove(d); rerr != nil {
+			err = fmt.Errorf("%w (빈 임시 폴더도 못 지움: %v)", err, rerr)
+		}
+		return "", fmt.Errorf("소유 기록을 만들지 못했다: %w", err)
+	}
+	return d, nil
+}
+
 func die(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
 	exit(1)
@@ -167,26 +196,25 @@ func main() {
 		die("origin/main 트리를 읽지 못했다")
 	}
 	short, _ := git("-C", repo, "rev-parse", "--short", src)
-	var err error
 	sweepStaleTmp()
-	if tmp, err = os.MkdirTemp(os.Getenv("TMPDIR"), me+"."); err != nil {
-		die("임시 폴더를 만들지 못했다: %v", err)
+	t0, err := mkOwnedTmp()
+	if err != nil {
+		die("임시 폴더를 만들지 못했다 — 게시하지 않는다: %v", err)
 	}
+	tmp = t0
 	// 신호로 끝날 때도 자식 무리를 거둔 뒤 이 임시 폴더를 지운다(재감사 ops R-10 — 옛 판은 TERM이면 남겼다). SIGKILL로 남은 것은
 	// 다음 실행이 owner(pid·시작 시각)로 소유를 확인해 지운다(sweepStaleTmp)
-	t0 := tmp
 	proc.OnStop(func() { os.RemoveAll(t0) })
-	if st, err := proc.StartTime(os.Getpid()); err == nil {
-		if err := os.WriteFile(tmp+"/owner", []byte(fmt.Sprintf("%d\t%s\n", os.Getpid(), st)), 0o600); err != nil {
-			die("임시 폴더에 쓰지 못했다: %v", err)
-		}
-	}
 
 	// 트리의 블롭마다 검사한다. 경로대로 디스크에 꺼내지 않는다(macOS 디스크는 대소문자·정규화를 구분하지 않아 경로가 겹치고 링크를 따라
 	// 바깥에 쓴다). 블롭은 <임시>/b/<sha>로만 꺼낸다: 검사한 바이트 = 공개로 가는 객체. -t: 하위 트리 이름도(빈 하위 트리는 -r만으로 안 나옴)
-	lsb, rc := gitx.Out("", os.Stderr, "-C", repo, "ls-tree", "-r", "-t", "-z", "--full-tree", tree)
-	if rc != 0 {
+	var lsz bytes.Buffer
+	if gitx.Run("", &lsz, os.Stderr, "-C", repo, "ls-tree", "-r", "-t", "-z", "--full-tree", tree) != 0 {
 		die("트리 목록을 읽지 못했다")
+	}
+	ents, ok := gitx.SplitZ(lsz.String()) // 끝 NUL까지 온 목록만(잘린 목록을 덜 검사하고 내보내지 않게 — 작업 중 발견)
+	if !ok {
+		die("트리 목록이 온전하지 않다(git ls-tree -z 잘림)")
 	}
 	empty, ok := git("-C", repo, "hash-object", "-t", "tree", "/dev/null")
 	if !ok {
@@ -199,13 +227,12 @@ func main() {
 	var paths, tpaths, shas []string // shas: 옮길 객체(블롭·하위 트리)
 	bpaths := map[string][]string{}  // 블롭 sha → 경로들
 	bad := false
-	for _, ent := range strings.Split(lsb, "\x00") {
-		if ent == "" {
-			continue
+	for _, ent := range ents {
+		meta, p, ok := strings.Cut(ent, "\t")
+		f := strings.Fields(meta)
+		if !ok || len(f) != 3 || p == "" || !gitx.ObjID(f[2]) {
+			die("트리 목록 줄 꼴이 틀렸다(git ls-tree -z)")
 		}
-		tab := strings.IndexByte(ent, '\t')
-		f := strings.Fields(ent[:tab])
-		p := ent[tab+1:]
 		mode, typ, sha := f[0], f[1], f[2]
 		if strings.Contains(p, "\n") {
 			die("줄바꿈이 든 경로는 내보내지 않는다")
@@ -434,15 +461,15 @@ print("\n".join(out))`)
 	}
 	fmt.Printf("검사 통과 (비공개 %s, 파일 %d개)\n", short, len(paths))
 	// 공개 저장소에 닿는 git은 remote로: 출력·오류 글에 publish.repo 주소 원문을 싣지 않는다(A12 — 인증값이 든 주소일 수 있다)
-	parent, ok := remote(dir, url, "ls-remote", url, "refs/heads/main")
-	if !ok {
-		die("공개 저장소를 읽지 못했다 (publish.repo)")
+	// 성공 응답도 요청한 이름 한 줄·완전한 객체 ID여야 받는다(gitx.LsRemote — 재감사 ops/R-220: SHA 앞 12자만 온 응답을 짧은 이름으로
+	// 풀어 「같음」·결과 파일을 썼다). 「공개 main 없음」은 --exit-code 종료 2뿐
+	var lse bytes.Buffer
+	pm, st := gitx.LsRemote(dir, url, &lse, "refs/heads/main")
+	os.Stderr.WriteString(strings.ReplaceAll(lse.String(), url, "publish.repo"))
+	if st == gitx.Unknown {
+		die("공개 저장소를 읽지 못했다 (publish.repo — git ls-remote 실패·잘린 응답)")
 	}
-	if f := strings.Fields(parent); len(f) > 0 {
-		parent = f[0]
-	} else {
-		parent = ""
-	}
+	parent := pm["refs/heads/main"]
 	var ptree string
 	if parent != "" {
 		if _, ok := remote(dir, url, "fetch", "-q", url, "refs/heads/main"); !ok {

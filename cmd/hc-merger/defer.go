@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/landing"
 )
 
 // defer_: 큐를 두고 다음 바퀴에(bash mdefer)
@@ -79,21 +81,21 @@ func refsha(list, ref string) string {
 	return ""
 }
 
-// lsRemote: git ls-remote <인자…> — 종료 0이어도 줄마다 「<SHA 40|64자>\t<참조>」 꼴이어야 받는다. 잘린 줄(SHA 앞 12자 등)이 하나라도
-// 있으면 목록 전체가 모름(종료 1)이다 — 잘린 줄을 「그 표식 없음」으로 읽고 일지를 지우지 않게(R-H03). 정상 빈 출력만 「없음」
+// lsRemote <원격> <패턴…>: gitx.LsRemote(--exit-code) — 줄마다 「<SHA 40|64자>\t<참조>」, 이름이 요청 패턴 안, 끝 줄바꿈까지 와야
+// 받는다. 하나라도 어긋나면(잘린 줄·요청 끝 글자가 빠진 이름·요청 밖 이름) 목록 전체가 모름(종료 1) — 「그 표식 없음」으로 읽고 일지를
+// 지우지 않게(R-H03, 재감사 merger/R-201). 「없음」은 종료 2(맞는 참조 없음)뿐. 돌려주는 목록은 이름순 「<SHA>\t<참조>」 줄(끝 줄바꿈 없음)
 func lsRemote(args ...string) (string, int) {
-	l, rc := out(append([]string{"ls-remote"}, args...)...)
-	if rc != 0 || l == "" {
-		return l, rc
+	if len(args) < 2 {
+		return "", 1
 	}
-	for _, line := range strings.Split(l, "\n") {
-		sha, ref, ok := strings.Cut(line, "\t")
-		if !ok || !objName.MatchString(sha) || ref == "" || strings.ContainsAny(ref, " \t") {
-			fmt.Fprintf(os.Stderr, "hc-lane merger: git ls-remote 출력 줄 꼴이 틀렸다(잘림?) — 모름으로 본다: %q\n", line)
-			return "", 1
-		}
+	refs, st := gitx.LsRemote("", args[0], os.Stderr, args[1:]...)
+	if st == gitx.Unknown {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: git ls-remote 응답이 온전하지 않다(실패·잘림·요청 밖 이름) — 모름으로 본다: %s\n", strings.Join(args[1:], " "))
+		return "", 1
 	}
-	return l, 0
+	var l []string
+	for _, r := range landing.Refs(refs) {
+		l = append(l, r.SHA+"\t"+r.Name)
+	}
+	return strings.Join(l, "\n"), 0
 }
-
-var objName = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)

@@ -6,9 +6,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
 )
 
@@ -74,43 +77,58 @@ func tsvEsc(s string) string {
 	return strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r").Replace(s)
 }
 
-// parseTerms: hc ls --json → 터미널 표. ok=false면 .terminals가 배열이 아니거나 JSON이 아님
+// parseTerms: hc ls --json → 터미널 표(hcjson.ParseList — 항목 하나라도 계약을 어기면 목록 전체를 못 읽음, 부분 표 없음).
+// 없음·null 칸은 「-」(agent 「-」는 유형 모름 — countSeats가 그 기계에 새 일을 놓지 않는다). ok=false면 못 읽음(모름)
 func parseTerms(raw string) ([]Term, bool) {
-	vs, ok := decodeAll(raw)
-	if !ok || len(vs) == 0 {
+	l, err := hcjson.ParseList([]byte(raw))
+	if err != nil {
 		return nil, false
 	}
-	var ts []Term
-	good := false
-	for _, v := range vs {
-		arr, isArr := jget(v, "terminals").([]any)
-		if !isArr {
-			continue
+	ts := make([]Term, 0, len(l.Terminals))
+	for _, t := range l.Terminals {
+		m := LOCAL
+		if i := strings.IndexByte(t.Address, '/'); i >= 0 {
+			m = t.Address[:i]
 		}
-		good = true
-		for _, t := range arr {
-			// 주소가 글자가 아니거나 비면 그 목록으로 자리·중복을 셀 수 없다 — 셸 판(jq .address | contains 오류)처럼 못 읽음(gofix-fill F02)
-			addr, isStr := jget(t, "address").(string)
-			if !isStr || addr == "" {
-				return nil, false
-			}
-			m := LOCAL
-			if i := strings.IndexByte(addr, '/'); i >= 0 {
-				m = addr[:i]
-			}
-			st := "-"
-			switch s := jget(t, "status").(type) {
-			case map[string]any:
-				st = jor(s["state"], "-")
-			case nil:
-			default:
-				st = jstr(s)
-			}
-			ts = append(ts, Term{tsvEsc(m), tsvEsc(addr), tsvEsc(jor(jget(t, "agent"), "-")), tsvEsc(jor(jget(t, "name"), "-")),
-				tsvEsc(st), tsvEsc(jor(jget(t, "cwd"), "-"))})
+		ts = append(ts, Term{tsvEsc(m), tsvEsc(t.Address), tsvEsc(orDash(t.Agent)), tsvEsc(orDash(t.Name)), tsvEsc(orDash(t.Status)), tsvEsc(orDash(t.Cwd))})
+	}
+	return ts, true
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// connectedOf: hc machine ls --json 출력에서 연결된 기계(hcjson.ParseMachines). ok=false면 못 읽음
+func connectedOf(raw string) ([]string, bool) {
+	ms, err := hcjson.ParseMachines([]byte(raw))
+	if err != nil {
+		return nil, false
+	}
+	var c []string
+	for _, m := range ms {
+		if m.State == "connected" {
+			c = append(c, m.Name)
 		}
 	}
-	return ts, good
+	return c, true
+}
+
+// hcGet: hc get <주소> --json 한 번(proc 상한)을 hcjson.ParseGet으로 — 표준 출력은 터미널 객체, 종료 3의 오류 객체는 표준 오류에 온다.
+// 오류는 모름(연결 실패·시간 넘김·잘림·찌꺼기·모르는 state·주소 다름)
+func hcGet(addr string) (hcjson.Terminal, bool, error) {
+	x := exec.Command("hc", "get", addr, "--json")
+	var o, e bytes.Buffer
+	x.Stdout, x.Stderr = &o, &e
+	rc := proc.Code(proc.RunMax(x, proc.Limit(x.Args)))
+	b := o.Bytes()
+	if rc != 0 && len(bytes.TrimSpace(e.Bytes())) > 0 { // 오류 객체는 표준 오류에(비었으면 표준 출력을 그대로 판정)
+		b = e.Bytes()
+	}
+	return hcjson.ParseGet(b, rc, addr)
 }
 
 // jsonList: raw의 .<key> 배열에서 sel을 통과한 것의 field를 줄로(jq -er 'map(select(…) | .<field>) | join("\n")'). ok=false면 배열 아님
@@ -139,13 +157,13 @@ func jsonList(raw, key, field string, sel func(any) bool) ([]string, bool) {
 
 func isConnected(x any) bool { return jstr(jget(x, "state")) == "connected" }
 
-// connected: 연결된 기계(못 읽으면 빈 목록)
+// connected: 연결된 기계(못 읽으면 빈 목록 — 「연결 안 됨」 쪽으로만 읽힌다)
 func connected() []string {
 	raw, rc := run("hc", "machine", "ls", "--json")
 	if rc != 0 {
 		return nil
 	}
-	l, _ := jsonList(raw, "machines", "name", isConnected)
+	l, _ := connectedOf(raw)
 	return l
 }
 
@@ -171,105 +189,66 @@ func onm(in io.Reader, m, body string, args ...string) (string, int) {
 	return Cmd{Name: "hc", Args: append(h, a...), In: in, Err: errPass}.Run()
 }
 
-func objects(vs []any) []map[string]any {
-	var o []map[string]any
-	for _, v := range vs {
-		if m, ok := v.(map[string]any); ok {
-			o = append(o, m)
-		}
-	}
-	return o
-}
-
-// pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms>)·PNAME. 0 살아 있음, 3 끝남 확정(not_found·finished), 1 모름
+// pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms>)·PNAME. 0 살아 있음, 3 끝남 확정(완전한 not_found·finished), 1 모름
+// (hcGet 오류, live인데 created_ms·name 칸이 없음 — 실행 신원을 모르면 주소 재사용을 가를 수 없다)
 func pget(addr string) int {
 	PRUN, PNAME = "", ""
-	out, rc := Cmd{Name: "hc", Args: []string{"get", addr, "--json"}, Err: errMerge}.Run()
-	vs, ok := decodeAll(out)
-	if ok && len(vs) > 0 {
-		last := vs[len(vs)-1]
-		k := jget(last, "error", "kind")
-		if k == nil || k == false {
-			k = jget(last, "kind")
-		}
-		if jstr(k) == "not_found" {
-			return 3
-		}
-	}
-	if rc != 0 {
+	t, found, err := hcGet(addr)
+	switch {
+	case err != nil:
 		return 1
-	}
-	if !ok {
-		return 1
-	}
-	obs := objects(vs)
-	if len(obs) == 0 {
-		return 1
-	}
-	o := obs[0]
-	if jstr(o["state"]) == "finished" {
+	case !found || t.State == "finished":
 		return 3
 	}
-	c := ""
-	if o["created_ms"] != nil && o["created_ms"] != false {
-		c = jstr(o["created_ms"])
-	}
-	if !isDigits(c) {
+	if _, ok := t.Raw["name"]; !ok || t.Created <= 0 {
 		return 1
 	}
-	PRUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + c
-	PNAME = jor(o["name"], "-")
+	PRUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(t.Created, 10)
+	PNAME = orDash(t.Name)
 	return 0
 }
 
 // startState <주소> <레인>: 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지. 0 잡힘(START_RUN), 1 안 잡힘 확정(그 레인 터미널이
-// 살아 있는데 status 없음·끝남·not_found), 2 모름(조회 실패·잘린 응답·다른 이름이나 주소·시작 시각 없음 — 시작했을 수 있다, 재감사 R-01·R-05)
+// 살아 있고 status가 null·끝남), 2 모름(조회 실패·잘린 응답·status 칸 없음·다른 이름이나 주소·시작 시각 없음·not_found — 시작했을 수 있다,
+// 재감사 R-01·R-05, 재감사2 fill/R-201). 마감까지 한 번이라도 모름이었고 끝남이 확인되지 않았으면 2
 func startState(addr, lane string) int {
 	end := time.Now().Unix() + int64(WAIT)
+	unk := false
 	for {
-		if r := startOnce(addr, lane); r == 0 || time.Now().Unix() >= end {
-			return r
+		r := startOnce(addr, lane)
+		switch {
+		case r == 0 || r == 3:
+			return min(r, 1)
+		case r == 2:
+			unk = true
+		}
+		if time.Now().Unix() >= end {
+			if unk {
+				return 2
+			}
+			return 1
 		}
 		time.Sleep(time.Duration(POLL) * time.Second)
 	}
 }
 
-// startOnce: startState 한 번. 응답 전체가 JSON 값 하나이고 hc get이 성공했을 때만 읽는다(gofix-fill F03)
+// startOnce: startState 한 번(hcGet — hcjson.ParseGet). 0 잡힘, 1 살아 있고 status null, 3 끝남 확인, 2 모름
 func startOnce(addr, lane string) int {
-	out, rc := run("hc", "get", addr, "--json")
-	vs, ok := decodeAll(out)
-	if !ok || len(vs) != 1 {
-		return 2
+	t, found, err := hcGet(addr)
+	if err != nil || !found || !t.HasName || t.Name != lane {
+		return 2 // 모름·확인 직후 사라짐(두 조회가 어긋남)·그 주소가 다른 터미널
 	}
-	o, isObj := vs[0].(map[string]any)
-	if !isObj {
-		return 2
+	if t.State == "finished" {
+		return 3
 	}
-	if jstr(jget(o, "error", "kind")) == "not_found" {
+	if _, ok := t.Raw["status"]; !ok || t.Created <= 0 {
+		return 2 // status 칸 자체가 없거나 실행 신원이 없는 부분 응답 — null(아직 안 잡힘)과 다르다
+	}
+	if t.Status == "" {
 		return 1
 	}
-	if rc != 0 || o["address"] != any(addr) {
-		return 2
-	}
-	name, named := o["name"].(string)
-	if named && name != lane || !named && o["name"] != nil {
-		return 2 // 그 주소가 다른 터미널이다
-	}
-	if o["state"] == any("finished") {
-		return 1
-	}
-	created := jstr(o["created_ms"])
-	if !named || o["state"] != any("live") || !isDigits(created) {
-		return 2
-	}
-	switch o["status"].(type) {
-	case map[string]any:
-		START_RUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + created
-		return 0
-	case nil:
-		return 1
-	}
-	return 2
+	START_RUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(t.Created, 10)
+	return 0
 }
 
 // alive <주소>: 이번 바퀴 터미널 표의 상태, 없으면 gone

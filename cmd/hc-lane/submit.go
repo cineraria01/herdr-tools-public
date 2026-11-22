@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/landing"
 )
 
@@ -82,20 +83,30 @@ const precheck = ".claude/herdr-precheck.sh"
 // 제출 상태(셸 ln_ sd_ pending_)
 var sln, ssd, spending string
 
+// lsq: 원격 참조 조회(gitx.LsRemote — 줄 꼴·요청 이름·끝 줄바꿈까지 본다). 모름(실패·시간 넘김·잘린 줄·요청 밖 이름)이면 큐·메타·
+// 접수 전 기록을 그대로 두고 75(같은 줄을 다시)로 끝낸다 — 「없음」은 종료 2(맞는 참조 없음)뿐(재감사 lane/R-212)
+func lsq(why string, patterns ...string) map[string]string {
+	m, st := gitx.LsRemote("", "origin", os.Stderr, patterns...)
+	if st == gitx.Unknown {
+		eprintf("hc-lane land(제출): %s — 원격을 읽지 못했다(git ls-remote 실패·잘림·요청 밖 이름). 큐는 그대로 — 같은 줄을 다시\n", why)
+		exit(75)
+	}
+	return m
+}
+
 // saccepted: 제출 기록 커밋 mc가 큐 기록 자리·넣음(merge-done)·돌려보냄(merge-failed-meta) 가운데 하나에 있으면 접수
 func saccepted(qn, mc string) bool {
 	q, d, f := "refs/merge-queue-meta/"+qn, "refs/merge-done/"+sln, "refs/merge-failed-meta/"+qn
-	refs, rc := gitOut("ls-remote", "origin", q, d, f)
-	if rc != 0 {
-		die("land(제출): 원격 접수를 확인하지 못했다(git ls-remote) — 같은 줄을 다시")
-	}
-	for _, l := range lines(refs) {
-		x := strings.Fields(l)
-		if len(x) >= 2 && (x[1] == q || x[1] == d || x[1] == f) && x[0] == mc {
-			return true
-		}
-	}
-	return false
+	refs := lsq("원격 접수를 확인하지 못했다", q, d, f)
+	return refs[q] == mc || refs[d] == mc || refs[f] == mc
+}
+
+// supersede: 레인이 큐 qn을 갈아 끼운다는 표식 — 착지 중 표식 자리(landing.Prefix+qn)에 새 기록 커밋 val을 「본 값 그대로일 때만」
+// (없으면 없음 lease — 서버가 원자 비교) 쓰는 push 인자. 병합기가 조회 뒤 push 전에 그 자리에 착지 중 표식을 올렸으면 같은 원자
+// push 전체가 거절된다(재감사 lane/R-213·R-214). val은 큐 SHA가 아니라 landing.Of가 착지 중으로 보지 않고, 병합기가 다음 바퀴에 지운다
+func supersede(refs map[string]string, qn, val string) []string {
+	mk := landing.Prefix + qn
+	return []string{val + ":" + mk, "--force-with-lease=" + mk + ":" + refs[mk]}
 }
 
 // srecord: 접수된 제출을 이 기계 기록(hc-submitted)·제출 사건에 남기고 접수 전 기록을 지운다
@@ -150,10 +161,10 @@ func lprio() string {
 	}
 }
 
-// metaPrio <메타 ref> <옛 SHA> <우선 라벨>: 메타 커밋 제목의 priority=가 다르면 커밋 객체를 글 그대로(priority만) 다시 써
-// --force-with-lease로 갈아 끼우고 참. 같으면 거짓. 못 바꾸면 경고하고 거짓(큐 그대로 — 제출은 이미 있다)
-// ponytail: 병합기가 그 항목을 착지하는 바로 그 사이면 lease가 거절하거나 병합기 정리가 새 메타를 못 지운다 — hc-fill prio와 같은 창
-func metaPrio(ref, old, pl string) bool {
+// metaPrio <메타 ref> <옛 SHA> <우선 라벨> <원격 목록>: 메타 커밋 제목의 priority=가 다르면 커밋 객체를 글 그대로(priority만) 다시 써
+// --force-with-lease로 갈아 끼우고 참. 같으면 거짓. 못 바꾸면 경고하고 거짓(큐 그대로 — 제출은 이미 있다).
+// 같은 원자 push에 갈아 끼움 표식(supersede)을 실어, 조회 뒤 병합기가 그 항목에 착지 중 표식을 올렸으면 메타를 바꾸지 않는다(lane/R-214)
+func metaPrio(ref, old, pl string, refs map[string]string) bool {
 	var b bytes.Buffer
 	if runCmd(cmdOpt{stdout: &b}, "git", "cat-file", "commit", old) != 0 {
 		eprintf("hc-lane land: 경고 — 큐 메타 %s 를 못 읽어 우선을 그대로 둔다\n", ref)
@@ -187,8 +198,14 @@ func metaPrio(ref, old, pl string) bool {
 		return false
 	}
 	nw := strings.TrimSpace(nb.String())
-	if po, rc := gitOut2(nil, "push", "-q", "--porcelain", "origin", nw+":"+ref, "--force-with-lease="+ref+":"+old); rc != 0 {
-		eprintf("%s\nhc-lane land: 경고 — 큐 메타 %s 를 못 바꿨다(push 거절 — 그 사이 병합기가 바꿨거나 지웠다) — 우선 그대로\n", po, ref)
+	if !gitx.ObjID(nw) {
+		eprintf("hc-lane land: 경고 — 새 큐 메타 ID를 읽지 못해 우선을 그대로 둔다(%q)\n", cut(nw, 80))
+		return false
+	}
+	args := append([]string{"push", "-q", "--atomic", "--porcelain", "origin", nw + ":" + ref, "--force-with-lease=" + ref + ":" + old},
+		supersede(refs, strings.TrimPrefix(ref, "refs/merge-queue-meta/"), nw)...)
+	if po, rc := gitOut2(nil, args...); rc != 0 {
+		eprintf("%s\nhc-lane land: 경고 — 큐 메타 %s 를 못 바꿨다(push 거절 — 그 사이 병합기가 착지를 시작했거나 메타를 바꿨다) — 우선 그대로\n", po, ref)
 		return false
 	}
 	fmt.Printf("hc-lane land: 이 커밋은 이미 병합기 큐에 있다(lane/%s) — 새로 내지 않고 큐 메타 %s 만 priority=%s 로 바꿨다\n", sln, ref, pl)
@@ -321,11 +338,9 @@ func submitCmd() {
 		die("land(제출): git merge-base --is-ancestor 실패(종료 %d)", ia)
 	}
 	laneRef := "refs/heads/lane/" + sln
-	rs, rc := gitOut("ls-remote", "origin", laneRef, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-failed/*", "refs/merge-done/"+sln, landing.Prefix+"*")
-	if rc != 0 {
-		die("land(제출): 원격을 읽지 못했다(git ls-remote) — 같은 줄을 다시")
-	}
-	cur := field2(rs, laneRef)
+	rs := lsq("원격 큐를 읽지 못했다", laneRef, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-failed/*", "refs/merge-done/"+sln, landing.Prefix+"*")
+	rl := landing.Refs(rs) // 이름순 — 같은 원격 상태면 늘 같은 판정
+	cur := rs[laneRef]
 	// 같은 커밋을 이미 냈으면 새 제출을 만들지 않는다: 큐에 그 SHA로 남아 있으면 접수 그대로, refs/merge-done/<레인>의 원본이 이 커밋이면 이미 넣음
 	receiptMatches := func(ref, oid string) bool {
 		if oid == "" {
@@ -348,32 +363,33 @@ func submitCmd() {
 	}
 	queueRe := regexp.MustCompile(`^refs/merge-queue/[0-9]+-`)
 	oldq := ""
-	for _, l := range lines(rs) {
-		f := strings.Fields(l)
-		if len(f) < 2 {
-			continue
-		}
-		if n := queueRe.ReplaceAllString(f[1], ""); n != f[1] && n == sln && f[0] == sh {
-			oldq = f[1]
+	for _, r := range rl {
+		if n := queueRe.ReplaceAllString(r.Name, ""); n != r.Name && n == sln && r.SHA == sh {
+			oldq = r.Name
 			break
 		}
 	}
 	oldm := "refs/merge-queue-meta/" + oldq[strings.LastIndex(oldq, "/")+1:]
-	if cur == sh && oldq != "" && receiptMatches(oldm, field2(rs, oldm)) {
+	lq := landing.Of(rl, sln) // 병합기가 지금 착지 중인 이 레인 제출 — 메타·큐를 바꾸는 어떤 일보다 먼저 본다(lane/R-214)
+	if cur == sh && oldq != "" && receiptMatches(oldm, rs[oldm]) {
 		s, _ := gitOut("rev-parse", "--short", sh)
+		if lq != "" {
+			fmt.Printf("hc-lane land: 이 커밋(%s)은 병합기가 지금 착지 중이다(refs/merge-queue/%s) — 큐·메타·우선 그대로. 결과는 병합기가 사건으로 알린다\n", s, lq)
+			exit(0)
+		}
 		// 우선만 바꿔 다시 냄(fill-edit-after): 적은 HC_LANE_PRIORITY가 지금 메타와 다르면 메타만 갈아 끼운다. 적지 않았으면 그대로
 		// (띄울 때 값이 남은 레인이 지휘가 올린 우선을 되돌리지 않게)
-		if os.Getenv("HC_LANE_PRIORITY") != "" && metaPrio(oldm, field2(rs, oldm), lprio()) {
+		if os.Getenv("HC_LANE_PRIORITY") != "" && metaPrio(oldm, rs[oldm], lprio(), rs) {
 			exit(0)
 		}
 		fmt.Printf("hc-lane land: 이 커밋(%s)은 이미 병합기 큐에 있다(lane/%s) — 새로 내지 않음. 결과는 병합기가 사건으로 알린다\n", s, sln)
 		exit(0)
 	}
-	if receiptMatches("refs/merge-done/"+sln, field2(rs, "refs/merge-done/"+sln)) {
+	if receiptMatches("refs/merge-done/"+sln, rs["refs/merge-done/"+sln]) {
 		fmt.Printf("hc-lane land: 이 커밋은 병합기가 이미 %s 에 넣었다(refs/merge-done/%s) — 제출할 것 없음\n", base, sln)
 		exit(0)
 	}
-	submitGuard(rs, cur, sh)
+	submitGuard(lq, cur, sh)
 	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
 	// 돌리는 것은 제출 커밋 속 판만(무시·추적 안 된 로컬 파일을 돌리지 않는다 — committedHook, gofix L12)
 	// 후보 트리에서 훅의 있음·없음·조회 실패를 가른다 — 조회 실패를 「선택 훅 없음」으로 읽고 제출하지 않는다(R-16)
@@ -404,31 +420,17 @@ func submitCmd() {
 	oldRe := regexp.MustCompile(`^refs/merge-queue(-meta)?/`)
 	tenDigits := regexp.MustCompile(`^[0-9]{10}-`)
 	var olds [][2]string
-	for _, l := range lines(rs) {
-		f := strings.Fields(l)
-		if len(f) < 2 {
-			continue
-		}
-		n := oldRe.ReplaceAllString(f[1], "")
-		if n != f[1] && tenDigits.MatchString(n) && len(n) >= 11 && n[11:] == sln {
-			olds = append(olds, [2]string{f[1], f[0]})
+	for _, r := range rl {
+		n := oldRe.ReplaceAllString(r.Name, "")
+		if n != r.Name && tenDigits.MatchString(n) && len(n) >= 11 && n[11:] == sln {
+			olds = append(olds, [2]string{r.Name, r.SHA})
 		}
 	}
 	// 큐 이름은 지금 큐와 반송된 것(refs/merge-failed/)에 없는 초로
 	e := time.Now().Unix()
 	for {
-		taken := false
-		for _, l := range lines(rs) {
-			for _, k := range []string{"queue", "queue-meta", "failed"} {
-				if strings.HasSuffix(l, "refs/merge-"+k+"/"+strconv.FormatInt(e, 10)+"-"+sln) {
-					t := strings.TrimSuffix(l, "refs/merge-"+k+"/"+strconv.FormatInt(e, 10)+"-"+sln)
-					if t != "" && strings.ContainsAny(t[len(t)-1:], " \t\n\r\v\f") {
-						taken = true
-					}
-				}
-			}
-		}
-		if !taken {
+		n := strconv.FormatInt(e, 10) + "-" + sln
+		if rs["refs/merge-queue/"+n] == "" && rs["refs/merge-queue-meta/"+n] == "" && rs["refs/merge-failed/"+n] == "" {
 			break
 		}
 		e++
@@ -478,12 +480,15 @@ func submitCmd() {
 	if rc == 0 {
 		mc, rc = gitOut("commit-tree", et, "-p", sh, "-m", msg)
 	}
-	if rc != 0 {
+	if rc != 0 || !gitx.ObjID(mc) {
 		die("land(제출): 제출 기록 커밋을 만들지 못했다")
 	}
 	args := []string{sh + ":" + laneRef, sh + ":" + q, mc + ":" + qm, "--force-with-lease=" + laneRef + ":" + cur, "--force-with-lease=" + q + ":", "--force-with-lease=" + qm + ":"}
 	for _, o := range olds {
 		args = append(args, ":"+o[0], "--force-with-lease="+o[0]+":"+o[1])
+		if on, ok := strings.CutPrefix(o[0], "refs/merge-queue/"); ok {
+			args = append(args, supersede(rs, on, mc)...) // 조회 뒤 병합기가 이 옛 제출의 착지를 시작했으면 push 전체 거절(lane/R-213)
+		}
 	}
 	markLaneName(sln)
 	// fsync·rename·폴더 fsync — push 뒤 기계가 갑자기 꺼져도 접수 전 기록이 남게(gofix E06)
