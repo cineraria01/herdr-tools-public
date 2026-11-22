@@ -169,12 +169,14 @@ func syncOwners() {
 			}
 		}
 	}
+	ACT, ACTPARK = nil, nil
 	if okey {
+		actTick(rows) // 실제 변경(키 A) — 못 읽은 레인은 지시문 키만
 		for _, o := range append([]Row(nil), OREC...) {
 			if o.F(1) == "" {
 				continue
 			}
-			for _, k := range lkeys(o.F(2), o.F(6)) {
+			for _, k := range append(lkeys(o.F(2), o.F(6)), actKeys(o.F(2), o.F(1))...) {
 				OWN = append(OWN, Row{o.F(2), o.F(1), k.F(1), k.F(2)})
 			}
 		}

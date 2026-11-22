@@ -323,12 +323,7 @@ func ovGlobEsc(s string) string {
 func lkeys(p, brief string) []Row {
 	lr := strings.TrimSuffix(repoOf(p, LOCAL), "/")
 	kp := kpre(p)
-	var igs []string
-	for _, f := range confRows("overlap_ignore") {
-		if len(f) >= 2 && f[1] == p {
-			igs = append(igs, f[2:]...)
-		}
-	}
+	igs := ovIgnores(p)
 	bl := readLines(brief)
 	var ex []string
 	for _, l := range bl {
@@ -389,14 +384,7 @@ func lkeys(p, brief string) []Row {
 			if x == "" {
 				continue
 			}
-			ig := false
-			for _, g := range igs {
-				if ovGlob(g, x) {
-					ig = true
-					break
-				}
-			}
-			if !ig && !seen[x] {
+			if !ovIgnored(igs, x) && !seen[x] {
 				seen[x] = true
 				o = append(o, Row{k, x})
 			}
@@ -405,17 +393,39 @@ func lkeys(p, brief string) []Row {
 	return o
 }
 
-// ovcmp <소유 줄(레인 R|M 키)> <후보 키(R|M 키)>: 앞 레인마다 「앞레인<TAB>예약|언급<TAB>키 둘까지」(예약 = 둘 다 R인 겹침)
+// ovIgnores <프로젝트>: 설정 overlap_ignore 패턴
+func ovIgnores(p string) []string {
+	var igs []string
+	for _, f := range confRows("overlap_ignore") {
+		if len(f) >= 2 && f[1] == p {
+			igs = append(igs, f[2:]...)
+		}
+	}
+	return igs
+}
+
+func ovIgnored(igs []string, x string) bool {
+	for _, g := range igs {
+		if ovGlob(g, x) {
+			return true
+		}
+	}
+	return false
+}
+
+// ovcmp <소유 줄(레인 R|M|A 키)> <후보 키(R|M|A 키)>: 앞 레인마다 「앞레인<TAB>실제|예약|언급<TAB>키 둘까지」 — 예약 = 둘 다 R,
+// 실제 = 한쪽이 실제 변경(A)이고 다른 쪽이 A나 R(A와 M은 언급). 한 앞 레인에 여럿이면 실제 > 예약 > 언급
 func ovcmp(own, cand []Row) []Row {
 	hitf := func(a, b string) bool {
 		return a == b || strings.HasSuffix(a, "/") && strings.HasPrefix(b, a) || strings.HasSuffix(b, "/") && strings.HasPrefix(a, b)
 	}
 	type rk struct {
-		r bool
+		r int // 0 언급 · 1 예약 · 2 실제
 		o string
 	}
+	strong := func(k string) bool { return k == "R" || k == "A" }
 	var ord []string
-	seenO, res := map[string]bool{}, map[string]bool{}
+	seenO, res := map[string]bool{}, map[string]int{}
 	ks, kc := map[rk][]string{}, map[rk]int{}
 	for _, f := range own {
 		if f.NF() < 3 || f.F(3) == "" {
@@ -430,10 +440,14 @@ func ovcmp(own, cand []Row) []Row {
 				seenO[o] = true
 				ord = append(ord, o)
 			}
-			r := f.F(2) == "R" && c.F(1) == "R"
-			if r {
-				res[o] = true
+			r := 0
+			switch {
+			case f.F(2) == "R" && c.F(1) == "R":
+				r = 1
+			case strong(f.F(2)) && strong(c.F(1)):
+				r = 2
 			}
+			res[o] = max(res[o], r)
 			k := rk{r, o}
 			if !has(ks[k], c.F(2)) && kc[k] < 2 {
 				ks[k] = append(ks[k], c.F(2))
@@ -443,11 +457,7 @@ func ovcmp(own, cand []Row) []Row {
 	}
 	var out []Row
 	for _, o := range ord {
-		if res[o] {
-			out = append(out, Row{o, "예약", strings.Join(ks[rk{true, o}], ",")})
-		} else {
-			out = append(out, Row{o, "언급", strings.Join(ks[rk{false, o}], ",")})
-		}
+		out = append(out, Row{o, []string{"언급", "예약", "실제"}[res[o]], strings.Join(ks[rk{res[o], o}], ",")})
 	}
 	return out
 }

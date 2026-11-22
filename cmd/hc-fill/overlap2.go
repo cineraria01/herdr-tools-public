@@ -326,15 +326,23 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 	if len(ow) == 0 {
 		return true
 	}
-	OVKEYS = lkeys(p, brief)
+	OVKEYS = candKeys(p, name, brief)
 	ov := ovcmp(ow, OVKEYS)
 	if len(ov) == 0 {
 		return true
 	}
 	if OVM == "block" {
 		for _, r := range ov {
-			if r.F(2) == "예약" {
-				say("겹침 대기 %s: %s (%s) — 앞 레인이 착지하면 뜬다", name, r.F(1), r.F(3))
+			if r.F(2) == "예약" || r.F(2) == "실제" {
+				why := r.F(3) // 예약은 예전 꼴 그대로(시험·지휘가 읽는 줄), 실제 변경만 「실제 」를 붙인다
+				if r.F(2) == "실제" {
+					why = "실제 " + why
+				}
+				if ACTPARK[p+"\t"+name] { // 주차해 둔 가지: 앞 레인을 먼저 착지시키고 그 위로 이어 띄운다
+					say("재개 미룸 %s: %s (%s) — 앞 레인이 착지한 뒤 주차한 가지에서 이어 띄운다", name, r.F(1), why)
+				} else {
+					say("겹침 대기 %s: %s (%s) — 앞 레인이 착지하면 뜬다", name, r.F(1), why)
+				}
 				OVWAIT = append(OVWAIT, Row{name, r.F(1), r.F(3), dash(only), p})
 				return false
 			}
@@ -350,7 +358,7 @@ func ovlPlaced(name, p, brief, after, ak string) {
 		return
 	}
 	if len(OVKEYS) == 0 {
-		OVKEYS = lkeys(p, brief)
+		OVKEYS = candKeys(p, name, brief)
 	}
 	for _, k := range OVKEYS {
 		OWN = append(OWN, append(Row{p, name}, k...))
