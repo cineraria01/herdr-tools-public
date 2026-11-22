@@ -11,7 +11,8 @@ package main
 //     그 기계 ~/.local/lib/herdr-go(Go 소스 나무 줄이 깐다)의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다.
 //     어느 쪽이든 같은 폴더 임시 파일 → mv 한 번(본체 하나가 한 세대 — 옛 「.bin/<도구> + .src 두 파일」을 따로 바꾸던 길은 없다, R-01·R-11).
 //     옛 판으로 되돌릴 일도 없다: mv가 안 되면 옛 본체 그대로다. 기록(~/.local/state/herdr-sync/bin.tsv: 도구·본체 sha256·소스 판)은
-//     「이미 이 판인가」를 알아보는 데만 쓴다 — 실행은 기록을 보지 않는다. 기록이 본체와 어긋나면(쓰다 죽음) 판 모름으로 보고 다시 깐다.
+//     「이미 이 판인가」와 「그 기계에서 따로 바꿨나」를 알아보는 데만 쓴다 — 실행은 기록을 보지 않는다. 본체가 기록의 sha와 다르면
+//     (손 교체 — sync-bin-conflict) 덮지 않고 C 충돌, --take <기계>:.local/bin/<도구>면 덮고 옛 판을 bak/<시각>/에(bincfl.go).
 //     받기·짓기 모두 안 되면 그 기계는 「다름 (바이너리)」, 크게 경고하고 그 기계의 설정·지움은 미룬다(옛 포장으로 떨어지지 않는다)
 //   - 쓰는 쪽은 herdr-sync 하나(맥 잠금 안)다 — 「부를 때 짓는」 실행기(옛 lib/go-run.sh)는 없다(R-10·R-40)
 // 로그에는 publish.repo 주소 원문을 찍지 않는다(설정 키 이름만 — 주소에 인증값이 들 수 있다, A12).
@@ -40,7 +41,8 @@ var BINS []binUnit
 
 // installSh: 기계에서 바이너리를 까는 조각(POSIX sh — 리눅스 dash도). 인자: <모드 set|check> <커밋12> <소스판> <CPU(uname -m)>, 그다음 (도구 주소 sha256)…
 // (주소·sha256이 -이면 받지 않고 짓기만). 도구마다 정확히 한 줄: S(이미 이 판)·W(받음)·B(지음 — 까닭)·E(못 깖 — 까닭, 옛 본체 그대로)·
-// D(--check: 다름 — 까닭). W·B 셋째 칸이 있으면 기록을 못 씀(다음 실행이 다시 깐다).
+// D(--check: 다름 — 까닭)·C(충돌 — 따로 바뀜·해시를 읽지 못함·기록을 읽지 못함, 쓰지 않음). W·B 셋째 칸에 「기록을 쓰지 못했다」가 있으면
+// 다음 실행이 다시 깐다(그사이 새 판이 오면 충돌로 보인다 — --take). take·stamp(조각 앞 변수, takeSh): 충돌이어도 덮을 도구 · 백업 시각.
 // 이 기계 소스 판(cur)은 srcDigest와 같은 계산(TestInstallShSourceDigest가 본다)
 // budget(조각 앞에 붙인 변수, 초 — 없거나 0이면 상한 없음): 그 시각이 지나면 남은 도구는 받거나 짓지 않고 E 「시간 상한」(옛 본체 그대로,
 // 다음 herdr-sync가 잇는다), 받기(curl)도 남은 시간까지만.
@@ -57,7 +59,7 @@ b=$HOME/.local/bin
 st=$HOME/.local/state/herdr-sync/bin.tsv
 g=$HOME/.local/lib/herdr-go
 tab=$(printf '\t')
-sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | awk '{print $1}'; }
+sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi 2>/dev/null | awk '{print $1}'; }
 gob() {
   command -v go 2>/dev/null && return 0
   for x in /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do [ -x "$x" ] && { echo "$x"; return 0; }; done
@@ -73,12 +75,17 @@ rec() {
 }
 while [ $# -ge 3 ]; do
   t=$1 url=$2 sum=$3; shift 3
-  have=
-  [ ! -f "$b/$t" ] || have=$(sha "$b/$t")
+  have= ex= tk=
+  if [ -e "$b/$t" ] || [ -L "$b/$t" ]; then ex=1 have=$(sha "$b/$t"); fi
   if [ -n "$have" ] && grep -qxF "$t$tab$have$tab$src" "$st" 2>/dev/null; then printf 'S\t%s\n' "$t"; continue; fi
   if [ -n "$have" ] && [ "$have" = "$sum" ]; then
     [ "$mode" = check ] || rec "$t" "$have" || :
     printf 'S\t%s\n' "$t"; continue
+  fi
+  if [ -n "$ex" ]; then
+    r=; [ ! -f "$st" ] || r=$(awk -F'\t' -v t="$t" '$1 == t { s = $2 } END { print s }' "$st") || r='?'
+    c=; if [ -z "$have" ]; then c='해시를 읽지 못함'; elif [ "$r" = '?' ]; then c='기록을 읽지 못함'; elif [ -n "$r" ] && [ "$r" != "$have" ]; then c='따로 바뀜'; fi
+    if [ -n "$c" ]; then case " ${take:-} " in *" $t "*) tk=1 ;; *) printf 'C\t%s\t%s\n' "$t" "$c"; continue ;; esac; fi
   fi
   if [ "$mode" = check ]; then
     if [ -n "$have" ]; then printf 'D\t%s\t판이 다르거나 모름\n' "$t"; else printf 'D\t%s\t없음\n' "$t"; fi
@@ -103,6 +110,13 @@ while [ $# -ge 3 ]; do
       printf 'E\t%s\t%s · 그 기계에서 짓지 못했다: %s\n' "$t" "$why" "$(tail -n 1 "$n.log" 2>/dev/null)"; rm -f "$n" "$n.log"; continue
     fi
     rm -f "$n.log"
+  fi
+  if [ -n "$tk" ]; then
+    o=bak/${stamp:-$(date +%Y%m%d-%H%M%S)}/.local/bin/$t
+    if ! { mkdir -p "${st%/*}/${o%/*}" && cp -p "$b/$t" "${st%/*}/$o"; }; then
+      rm -f "$n"; printf 'E\t%s\t따로 바뀐 판을 백업하지 못했다 — 옛 본체 그대로\n' "$t"; continue
+    fi
+    why="$why${why:+ · }따로 바뀐 판을 덮음 — 옛 판은 $o"
   fi
   if chmod 755 "$n" && s=$(sha "$n") && [ -n "$s" ] && mv -f "$n" "$b/$t"; then
     note=$why
@@ -178,8 +192,9 @@ func unknownTargets(bins []binUnit, osOf map[string]string) []string {
 	return r
 }
 
-// installBins: 그 기계(맥은 "맥")에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다)
-func installBins(m, osname string, rel *relInfo) ([]string, bool) {
+// installBins: 그 기계(맥은 "맥")에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다).
+// 충돌(따로 바뀐 바이너리)은 conf에 더한다 — 그 바이너리만 그대로 두고 설정·지움은 계속한다
+func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 	tools := binTools(m, osname)
 	if len(tools) == 0 || rel == nil {
 		return nil, true
@@ -212,19 +227,22 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 		// proc가 무리째(짓던 go·컴파일러 자손까지) 거둔 뒤 돌아오고 결과는 모름 — 돌아온 뒤 본체·bin.tsv를 쓰는 자손이 남지 않는다.
 		// herdr-sync가 신호를 받으면 onSignals의 StopCurrent가 이 무리를 다 거둔 뒤에 끝낸다(잠금은 그 뒤에 놓인다)
 		bm := buildMax()
-		c = exec.Command("sh", append([]string{"-c", budgetSh(int(bm / time.Second)), "_"}, args...)...)
+		c = exec.Command("sh", append([]string{"-c", takeSh(m, tools) + budgetSh(int(bm/time.Second)), "_"}, args...)...)
 		c.Stderr = &errb
 		b, err := proc.OutputMax(c, bm)
 		out, rc = string(b), proc.Code(err)
 	} else {
 		// 조각이 installBudget 안에 끝내고(남은 도구는 E 「시간 상한」), hc 상한까지 남은 몫은 마지막 짓기·보고 몫
-		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", budgetSh(installBudget), "_"}, args...)...)
+		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", takeSh(m, tools) + budgetSh(installBudget), "_"}, args...)...)
 		c.Stderr = &errb
 		out, rc = output(c)
 	}
 	ok := rc == 0
 	for _, p := range putNotes(m, tools, out, rc, errb.String()) {
 		switch {
+		case p.conf:
+			say("%s", p.s)
+			*conf++
 		case p.bad:
 			ok = false
 			fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", p.s)
@@ -256,8 +274,8 @@ func putNotes(m string, tools []string, out string, rc int, errs string) []note 
 }
 
 type note struct {
-	s               string
-	warn, bad, diff bool // 경고 · 못 깖(크게) · 다름(--check)
+	s                     string
+	warn, bad, diff, conf bool // 경고 · 못 깖(크게) · 다름(--check) · 충돌(따로 바뀐 바이너리)
 }
 
 // installReport: installSh 출력 → 알릴 줄. 보낸 도구마다 S·W·B·E·D 가운데 정확히 한 줄이어야 한다 — 빠짐·겹침·모르는 도구는 못 깖(C03)
@@ -283,6 +301,10 @@ func installReport(m string, tools []string, out string) []note {
 		case a[0] == "S" && why == "":
 		case a[0] == "W" && why == "":
 			r = append(r, note{s: fmt.Sprintf("%s 받음 %s", m, a[1])})
+		case a[0] == "W" && why != "" && !strings.Contains(why, "기록을 쓰지 못했다"): // --take로 덮음
+			r = append(r, note{s: fmt.Sprintf("%s 받음 %s (%s)", m, a[1], why)})
+		case a[0] == "C" && why != "":
+			r = append(r, note{s: fmt.Sprintf("충돌 %s:.local/bin/%s (%s)", m, a[1], why), conf: true})
 		case a[0] == "B" && why != "" && !strings.Contains(why, "기록을 쓰지 못했다"):
 			r = append(r, note{s: fmt.Sprintf("%s 지음 %s (릴리스를 못 받아 그 기계에서 — %s)", m, a[1], why)})
 		case (a[0] == "W" || a[0] == "B") && strings.Contains(why, "기록을 쓰지 못했다"):

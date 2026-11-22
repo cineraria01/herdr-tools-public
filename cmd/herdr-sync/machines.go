@@ -219,7 +219,7 @@ func syncMachines(machines []string, mq *qres) {
 	}
 	// 2. 공개 내보내기·릴리스(맥에서 짓고 올림), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
 	rel := binsPrepare(func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) })
-	mbd, macBins := installBins("맥", "Darwin", rel)
+	mbd, macBins := installBins("맥", "Darwin", rel, &rconf)
 	rdiff = append(rdiff, mbd...)
 	for _, m := range live {
 		q := qs[m]
@@ -394,7 +394,7 @@ func syncMachines(machines []string, mq *qres) {
 			diffs = append(diffs, "base") // 다음 실행이 다시 적는다 — 그때까지 같음이 아니다(B09)
 		}
 		// 바이너리(파일·Go 소스를 맞춘 뒤 — 그 기계에서 지을 때 그 소스를 쓴다) → 설정 → 지움. 바이너리를 다 못 깔면 설정·지움을 미룬다
-		bd, binOK := installBins(m, q.O, rel)
+		bd, binOK := installBins(m, q.O, rel, &conf)
 		diffs = append(diffs, bd...)
 		if !binOK && !check {
 			row(m, diffs, conf)

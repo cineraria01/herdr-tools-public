@@ -17,7 +17,7 @@ func TestInstallBinsTransportFailsAfterLine(t *testing.T) {
 	calls := t.TempDir() + "/calls"
 	fakeBin(t, "hc", "echo x >> "+calls+"\nprintf 'W\\tdemo\\n'\nexit 255\n")
 	so, se := captureStd(t, func() {
-		diff, ok := installBins("w1", "Darwin", &relInfo{c12: "c", src: "s", base: "file:///r", tag: "bin-c", sums: map[string]string{"demo": "ab"}})
+		diff, ok := installBins("w1", "Darwin", &relInfo{c12: "c", src: "s", base: "file:///r", tag: "bin-c", sums: map[string]string{"demo": "ab"}}, new(int))
 		if ok || len(diff) != 1 || diff[0] != "바이너리" {
 			t.Errorf("전송 실패인데 다 깔림: %v %v", diff, ok)
 		}

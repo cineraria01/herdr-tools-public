@@ -199,3 +199,19 @@ func TestParseGet(t *testing.T) {
 		}
 	}
 }
+
+// seat-clean-fix(2026-11-23): 폴더 「안」 판정 — hc-lane busyTerms와 hc-sweep 분리 작업 트리 지우기가 같이 쓴다
+func TestUnder(t *testing.T) {
+	for _, c := range []struct {
+		cwd, dir string
+		want     bool
+	}{
+		{"/a/wt", "/a/wt", true}, {"/a/wt/sub/x", "/a/wt", true}, {"/a/wt/", "/a/wt", true}, {"/a/wt", "/a/wt/", true},
+		{"/a/wt2", "/a/wt", false}, {"/a/wt2/x", "/a/wt", false}, {"/a", "/a/wt", false}, {"/A/wt", "/a/wt", false},
+		{"", "/a/wt", false}, {"/a/wt", "", false}, {"/a/./wt/../wt/s", "/a/wt", true},
+	} {
+		if got := Under(c.cwd, c.dir); got != c.want {
+			t.Errorf("Under(%q, %q) = %v, 기대 %v", c.cwd, c.dir, got, c.want)
+		}
+	}
+}

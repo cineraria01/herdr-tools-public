@@ -158,9 +158,9 @@ func TestInstallShOneGeneration(t *testing.T) {
 		readOr(home+"/.local/state/herdr-sync/bin.tsv") != "demo\t"+sum+"\t"+src+"\n" {
 		t.Fatalf("다음 실행이 기록을 채움: %q %q", out, readOr(home+"/.local/state/herdr-sync/bin.tsv"))
 	}
-	// 어긋난 기록(본체 sha가 다름): S가 아니다
+	// 어긋난 기록(본체 sha가 다름 — 그 기계에서 따로 바꿈): S가 아니고 충돌(sync-bin-conflict)
 	os.WriteFile(home+"/.local/bin/demo", []byte(oldBody), 0o755)
-	if out := runSh(t, home, nil, "check", "c0", src, "arm64", "demo", "-", "-"); !strings.HasPrefix(out, "D\tdemo\t") {
+	if out := runSh(t, home, nil, "check", "c0", src, "arm64", "demo", "-", "-"); out != "C\tdemo\t따로 바뀜\n" {
 		t.Errorf("본체가 기록과 다른데 --check: %q", out)
 	}
 }

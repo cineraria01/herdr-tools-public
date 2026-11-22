@@ -104,7 +104,7 @@ func TestReleaseLinuxAsset(t *testing.T) {
 	if sums := readOr(dir + "/SHA256SUMS"); !strings.Contains(sums, hex.EncodeToString(h[:])+"  hello-linux-amd64\n") {
 		t.Errorf("명세에 리눅스 자산 해시가 없다: %q", sums)
 	}
-	if _, ok := installBins("lx", "Linux", rel); !ok {
+	if _, ok := installBins("lx", "Linux", rel, new(int)); !ok {
 		t.Errorf("리눅스 기계 깔기가 실패했다")
 	}
 	if got, err := os.ReadFile(lxh + "/.local/bin/hello"); err != nil || !bytes.Equal(got, b) {

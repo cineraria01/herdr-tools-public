@@ -24,6 +24,9 @@ func doPulls() {
 		if m == "repo" {
 			continue
 		}
+		if binKey(k) {
+			die("바이너리는 --pull을 받지 않는다. 그 기계 판을 남기려면 그대로 둔다(충돌로 보인다), 맥 판으로 덮으려면 --take: %s", s)
+		}
 		if k != "*" && !unitKey(k) && !treespec(k) {
 			die("설정 키는 --pull을 받지 않는다. 맥 settings.json을 고친 뒤 --take를 쓴다: %s", s)
 		}

@@ -189,6 +189,19 @@ func (s *sx) release() {
 	s.ok("릴리스: 같은 커밋·같은 해시는 다시 안 올림, 이미 깐 기계는 다시 안 받음", s.r.RC == 0 && s.has("릴리스 같음 "+tag) && !regexp.MustCompile(`(?m)^release (create|upload)`).MatchString(calls) && !s.contains(" 받음 hello"))
 	s.run("--check")
 	s.ok("깔기 --check: 깐 판은 같음", !s.contains("다름:바이너리"))
+	// sync-bin-conflict: 그 기계에서 손으로 바꾼 바이너리(bin.tsv의 마지막 깐 sha와 다름)는 덮지 않고 충돌, 설정·지움은 계속, --take면 덮고 bak에
+	hand := "#!/bin/sh\necho hand\n"
+	s.putx(wb, hand)
+	s.run("w1")
+	s.ok("깔기: 손 교체한 바이너리는 충돌·안 덮음", s.r.RC == 1 && s.has("충돌 w1:.local/bin/hello (따로 바뀜)") && s.rx(`^w1: 충돌 1건`) && ct.Read(wb) == hand &&
+		!s.contains("w1 바이너리를 다 깔지 못했다"))
+	s.run("--check", "w1")
+	s.ok("깔기 --check: 손 교체는 같은 충돌", s.r.RC == 1 && s.has("충돌 w1:.local/bin/hello (따로 바뀜)") && ct.Read(wb) == hand)
+	s.run("--take", "w1:.local/bin/hello", "w1")
+	s.ok("깔기 --take: 덮고 옛 판을 bak에", s.r.RC == 0 && s.contains("w1 받음 hello (따로 바뀐 판을 덮음 — 옛 판은 bak/") && ct.Cmd{}.Run(wb).Out == "hello "+tag[4:] &&
+		ct.FindName(W1+"/.local/state/herdr-sync/bak", "hello"))
+	s.run("--pull", "w1:.local/bin/hello", "w1")
+	s.ok("깔기: 바이너리는 --pull을 받지 않는다", s.r.RC != 0 && s.contains("바이너리는 --pull을 받지 않는다"))
 	// 받은 것의 해시가 다르면 쓰지 않고, 그 기계 소스 판이 같으니 그 기계에서 짓는다(같은 커밋을 새김)
 	ct.Append(s.t, rel+"/hello", "x")
 	os.Remove(wb)

@@ -238,7 +238,7 @@ func busyTerms(ps [][2]string, skipSelf bool) []string {
 		if !ok || (skipSelf && on == "" && a == selfTerm) {
 			continue
 		}
-		if p[1] == unkCwd || strings.HasPrefix(p[1]+"/", wt+"/") {
+		if p[1] == unkCwd || hcjson.Under(p[1], wt) {
 			b = append(b, onp(a)+" "+p[1])
 		}
 	}

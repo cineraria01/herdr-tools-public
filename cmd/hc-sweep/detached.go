@@ -5,6 +5,9 @@ package main
 import (
 	"path/filepath"
 	"strings"
+	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 // detachedClean: cwd가 분리 HEAD이고 변경 0(추적 안 된 파일 포함)이고 HEAD가 어느 가지(로컬·원격)에든 든 작업 트리면 메인 저장소,
@@ -34,9 +37,45 @@ func detachedClean(cwd string, r runner) string {
 	return filepath.Dir(common)
 }
 
-// worktreeRemove: 닫은 터미널의 분리·깨끗한 작업 트리를 다시 확인하고 `git worktree remove`(--force 없이 — 그사이 변경이 생겼으면
-// git이 거절한다). (성공, 한 줄)
-func worktreeRemove(mainRepo, cwd string, r runner) (bool, string) {
+// dirInUse: 지금 hc ls에서 이 기계의 live 터미널(self 말고)이 dir 또는 그 아래를 cwd로 쓰면 그 까닭 한 줄, 아무도 안 쓰면 "".
+// hc ls 실패·판독 실패·이 기계 모름 항목(hcjson Unknown)도 쓰는 중으로 본다(R-3M01 — 모르면 남김). 심볼릭 링크는 양쪽 다 푼다
+// (11-23 끝난 감사 터미널을 닫으며 같은 폴더를 쓰던 확인 세션들의 작업 트리를 지운 일 뒤)
+func dirInUse(dir, self string, r runner) string {
+	res := r(2*time.Minute, nil, "hc", "ls", "--json")
+	if res.err != nil || res.rc != 0 {
+		return "hc ls 실패 — 그 폴더를 누가 쓰는지 모름"
+	}
+	l, err := hcjson.ParseList([]byte(res.out))
+	if err != nil {
+		return "hc ls 판독 실패 — 그 폴더를 누가 쓰는지 모름"
+	}
+	real := func(p string) string {
+		if q, err := filepath.EvalSymlinks(p); err == nil {
+			return q
+		}
+		return p
+	}
+	d := real(dir)
+	for _, t := range l.Terminals {
+		if t.Address == self || strings.Contains(t.Address, "/") { // 자신·다른 기계(그 cwd는 이 기계 폴더가 아니다)
+			continue
+		}
+		if t.Unknown != "" {
+			return "hc ls에 읽지 못한 터미널 " + t.Address + " — 그 폴더를 쓰는지 모름"
+		}
+		if t.State == "live" && (hcjson.Under(t.Cwd, dir) || hcjson.Under(real(t.Cwd), d)) {
+			return "다른 터미널 " + t.Address + " 이 쓰는 중(" + t.Cwd + ")"
+		}
+	}
+	return ""
+}
+
+// worktreeRemove: 닫은 터미널(self)의 분리·깨끗한 작업 트리를 다시 확인하고 `git worktree remove`(--force 없이 — 그사이 변경이 생겼으면
+// git이 거절한다). 다른 터미널이 그 폴더를 쓰거나 모르면(dirInUse) 손대지 않는다. (성공, 한 줄)
+func worktreeRemove(mainRepo, cwd, self string, r runner) (bool, string) {
+	if why := dirInUse(cwd, self, r); why != "" {
+		return false, why + " — 손대지 않음"
+	}
 	if detachedClean(cwd, r) != mainRepo {
 		return false, "다시 보니 분리·깨끗이 아님 — 손대지 않음"
 	}

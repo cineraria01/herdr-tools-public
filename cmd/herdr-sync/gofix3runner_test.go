@@ -28,7 +28,7 @@ func TestR205MacBuildBounded(t *testing.T) {
 	BINS, check = []binUnit{{"demo", "macos"}}, false
 	t.Cleanup(func() { BINS, check = oldB, oldC })
 	start := time.Now()
-	_, ok := installBins("맥", "Darwin", &relInfo{c12: "0123456789ab", src: src})
+	_, ok := installBins("맥", "Darwin", &relInfo{c12: "0123456789ab", src: src}, new(int))
 	el := time.Since(start)
 	if ok {
 		t.Errorf("상한에 걸린 맥 대체 빌드를 「다 깔림」으로 읽었다 (ops/R-205)")

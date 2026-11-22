@@ -47,8 +47,13 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 		var dtRepo string
 		if f.worktree == yes && now-orNow(t, now) >= 30*minute {
 			// 분리·깨끗한 읽기 전용 작업 트리(감사 스크립트의 worktree add --detach): 닫고 git worktree remove
+			// 다른 live 터미널이 그 폴더를 쓰거나 모르면 닫지도 지우지도 않는다(worktreeRemove가 지우기 직전 한 번 더 본다)
 			if dtRepo = detachedClean(str(t, "cwd"), run); dtRepo != "" {
-				f.worktree, f.unlanded, f.detached = no, no, true
+				if f.wtwhy = dirInUse(str(t, "cwd"), str(t, "address"), run); f.wtwhy != "" {
+					dtRepo = ""
+				} else {
+					f.worktree, f.unlanded, f.detached = no, no, true
+				}
 			}
 		}
 		if (isWorker(t) || f.detached) && f.worktree == no { // R2 보호에만 쓴다
@@ -100,7 +105,7 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			fmt.Printf("작업 트리 정리%s: %s %s — %s\n", fail, wtRepo, wtBranch, msg)
 		}
 		if dtRepo != "" && strings.HasPrefix(res, "닫힘") {
-			ok, msg := worktreeRemove(dtRepo, str(t, "cwd"), run)
+			ok, msg := worktreeRemove(dtRepo, str(t, "cwd"), str(t, "address"), run)
 			fail := ""
 			if !ok {
 				fail = " 실패"

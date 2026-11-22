@@ -531,7 +531,7 @@ func setkey(k string) bool {
 	return false
 }
 
-func known(k string) bool { return k == "*" || unitKey(k) || treespec(k) || setkey(k) }
+func known(k string) bool { return k == "*" || unitKey(k) || treespec(k) || setkey(k) || binKey(k) }
 
 // spec: 목록에 <기계>:<키>, <기계>:*, 또는 그 키를 담은 <기계>:<뿌리>/**가 있나
 func spec(list []string, m, k string) bool {

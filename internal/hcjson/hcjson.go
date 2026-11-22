@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 )
 
 // Terminal: hc ls·get의 터미널 한 항목
@@ -356,6 +357,16 @@ func (l List) Machine(name string) (Machine, bool) {
 		}
 	}
 	return Machine{}, false
+}
+
+// Under: cwd가 dir이거나 그 아래인가 — 글자로(filepath.Clean, 대소문자 그대로, `/a/wt`가 `/a/wt2`에 걸리지 않게 경계까지).
+// 심볼릭 링크는 부르는 쪽이 푼다(원격 경로는 이 기계에서 풀 수 없다). hc-lane busyTerms와 hc-sweep 분리 작업 트리 지우기가 같이 쓴다
+func Under(cwd, dir string) bool {
+	if cwd == "" || dir == "" {
+		return false
+	}
+	c, d := filepath.Clean(cwd), filepath.Clean(dir)
+	return c == d || strings.HasPrefix(c, strings.TrimSuffix(d, string(filepath.Separator))+string(filepath.Separator))
 }
 
 // ByAddress: 주소가 addr인 항목 전부(둘이면 둘 다 — 부르는 쪽이 모름으로)
