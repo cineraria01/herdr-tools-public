@@ -380,6 +380,8 @@ set -- env "HC_LANE_OWNER=${lenv_o:-*}" ${lenv_r:+"HC_LANE_OWNER_RUN=$lenv_r"} "
 case ${HC_LANE_JOB-} in '') ;; *[!a-z0-9~-]*) die "HC_LANE_JOB 글자(a-z0-9~-): $HC_LANE_JOB" ;; *) set -- env "HC_LANE_JOB=$HC_LANE_JOB" "${@:2}" ;; esac
 # 착지 줄 우선(hc-fill이 넣음 — 이 레인을 --after로 기다리는 대기 줄 수): 레인의 hc-lane land가 herdr-land.sh에 넘긴다
 [ -z "${HERDR_LAND_PRIORITY-}" ] || set -- env "HERDR_LAND_PRIORITY=$HERDR_LAND_PRIORITY" "${@:2}"
+# 제출 우선(hc-fill이 대기열 줄의 우선으로 넣음): 레인의 hc-lane land가 큐 메타 priority=로 싣는다
+[ -z "${HC_LANE_PRIORITY-}" ] || set -- env "HC_LANE_PRIORITY=$HC_LANE_PRIORITY" "${@:2}"
 
 # 다른 기계 레인은 맥 Herdr 창의 그 기계 공간(이름 = 기계 이름, 기계마다 하나)에 탭으로 보이게 hc run --label herdr.space=<id>.
 # <id>는 그 기계 쪽 공간 id(창이 보이는 「<기계>/」 접두를 뗀 것 — 붙이면 모르는 id라 새 공간이 생긴다, 2026-11-17 low-sg 공간).

@@ -276,6 +276,8 @@ func s21b1(k *K) {
 	k.runE([]string{"HC_TERMINAL_ID=tb2", "HC_FAKE_RUN_ADDR=t9gg"}, "--start-wait", "0", "--direct", "--name", "lane-mg", "--repo", k.R, "--", "claude")                           // tb2가 가장 최근에 레인을 띄움
 	k.runE([]string{"HC_LANE_OWNER=ta1", "HC_LANE_COORD=ta1", "HC_LANE_FILL=1", "HC_FAKE_RUN_ADDR=t9hh"}, "--start-wait", "0", "--name", "lane-mh", "--repo", k.R, "--", "claude") // hc-fill(터미널 밖)
 	k.check("HC_LANE_OWNER: 레인 기록 주인이 그 지휘(fill), 레인 환경에도 HC_LANE_OWNER", k.rc == 0 && contains(s21bLines(lanes), "t9hh\tlane-mh\tta1\tfill") && k.has("HC_LANE_OWNER=ta1"))
+	k.runE([]string{"HC_LANE_OWNER=ta1", "HC_LANE_COORD=ta1", "HC_LANE_FILL=1", "HC_LANE_PRIORITY=긴급", "HC_FAKE_RUN_ADDR=t9hp"}, "--start-wait", "0", "--name", "lane-mp", "--repo", k.R, "--", "claude")
+	k.check("HC_LANE_PRIORITY: hc-fill이 준 제출 우선을 레인 환경에", k.rc == 0 && k.has("HC_LANE_PRIORITY=긴급"))
 	appendf(k.t, lanes, "t9ii\tlane-mi\t-\tfill\n") // 주인 없는 옛 hc-fill 레인
 	wa, wb = watch("ta1", "a"), watch("tb2", "b")
 	upto(pids("ta1", "tb2"))

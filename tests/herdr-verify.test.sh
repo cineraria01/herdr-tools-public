@@ -141,6 +141,77 @@ seq 601 >"$R/big"
 out=$(HC_LANE= bash "$R/.claude/herdr-precheck.sh" 2>&1); rc=$?
 t "사전 검사(--cheap-only): 줄 수 한도 넘김이면 종료 1" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "새 거대 파일 big 601줄" && [ ! -e "$T/slow-ran" ]'
 
+# 10. 병렬 실행기(2026-11-22 verify-parallel): 동시에 돌고, 결과는 원래(이름) 순서로, 하나가 실패해도 끝까지, 종료 1
+mk par 'exit 0'
+rm "$R/tests/x.test.sh"
+mkdir -p "$T/par"
+# a·b·c는 셋 다 시작해야 끝난다(동시가 아니면 5초 뒤 실패). b가 먼저 끝나도 a 다음에 찍힌다
+for n in a b c; do
+  printf '#!/bin/bash\ntouch "%s/par/%s"; [ %s = a ] && sleep 1\nfor i in $(seq 50); do [ -e "%s/par/a" ] && [ -e "%s/par/b" ] && [ -e "%s/par/c" ] && exit 0; sleep 0.1; done; exit 1\n' \
+    "$T" "$n" "$n" "$T" "$T" "$T" >"$R/tests/$n.test.sh"
+done
+printf '#!/bin/bash\necho "FAIL - 일부러"; echo 끝줄; exit 3\n' >"$R/tests/f.test.sh"   # 이름은 글자 하나 — 로캘 정렬이 점을 무시해도 차례가 같게
+printf '#!/bin/bash\ntouch "%s/par/g"\n' "$T" >"$R/tests/g.test.sh"
+order() { printf '%s\n' "$out" | grep -E '^(통과|실패) tests/' | tr '\n' ' '; }
+out=$(HC_LANE= HERDR_VERIFY_JOBS=3 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "병렬: 셋이 함께 돌고 원래 순서로, 실패 하나면 종료 1, 그 뒤 시험도 돎" \
+  '[ $rc = 1 ] && [ "$(order)" = "통과 tests/a.test.sh 통과 tests/b.test.sh 통과 tests/c.test.sh 실패 tests/f.test.sh 통과 tests/g.test.sh " ] && [ -e "$T/par/g" ] || { printf "%s\n" "$out"; false; }'
+t "병렬: 실패 시험의 FAIL 줄과 끝 줄" 'printf "%s" "$out" | grep -q "^FAIL - 일부러" && printf "%s" "$out" | grep -q "^끝줄"'
+t "병렬: 끝에 검증 시간 줄(동시 3)" 'printf "%s" "$out" | grep -q "^검증 시간 [0-9]*초 · 동시 3 — 긴 단계: "'
+rm -f "$R/tests/f.test.sh"
+rm -f "$T/par/a" "$T/par/b" "$T/par/c"
+out=$(HC_LANE= HERDR_VERIFY_JOBS=1 HERDR_VERIFY_STEP_SECS=60 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "HERDR_VERIFY_JOBS=1: 하나씩이라 서로 기다리는 a가 실패" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "^실패 tests/a.test.sh" && printf "%s" "$out" | grep -q "동시 1"'
+
+# 11. 시간 넘김: 상한(HERDR_VERIFY_STEP_SECS)을 넘으면 무리째(배경 자식까지) 끄고 「시간 넘김」, 다른 시험은 그대로 통과
+mk slow "sleep 300 </dev/null >/dev/null 2>&1 & echo \$! >'$P/slow'; sleep 300"
+printf '#!/bin/bash\nexit 0\n' >"$R/tests/y.test.sh"
+s=$(date +%s); out=$(HC_LANE= HERDR_VERIFY_STEP_SECS=2 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?; e=$(( $(date +%s) - s ))
+t "시간 넘김: 실패 줄, 무리째 끔, 몇 초 안(${e}초), 다른 시험 통과" \
+  '[ $rc = 1 ] && printf "%s" "$out" | grep -q "^실패 tests/x.test.sh: 시간 넘김(2초)" && gone "$(cat "$P/slow")" && [ $e -lt 15 ] && printf "%s" "$out" | grep -q "^통과 tests/y.test.sh"'
+
+# 12. 단계: 「# herdr-verify: stages」 파일은 --stages의 단계를 따로(동시에) 돌리고 한 줄로 결과. 「!」 단계는 홀로 — 다른 것과 겹치지 않음
+mk stgrepo 'touch "'"$T"'/stg-x"; exit 0'
+mkdir -p "$T/stg"
+cat >"$R/tests/s.test.sh" <<EOF
+#!/bin/bash
+# herdr-verify: stages
+case "\${1-}" in
+  --stages) printf '%s\n' '!solo' p1 p2 ;;
+  --stage) case "\$2" in
+    solo) touch "$T/stg/solo"; sleep 1; ls "$T/stg" >"$T/stg-during"; [ ! -e "$T/stg-x" ] ;;
+    p1|p2) touch "$T/stg/\$2"; for i in \$(seq 50); do [ -e "$T/stg/p1" ] && [ -e "$T/stg/p2" ] && break; sleep 0.1; done
+      [ -e "$T/stg/p1" ] && [ -e "$T/stg/p2" ] && [ "\$2" != "\${STG_FAIL-}" ] ;;
+  esac ;;
+  *) exit 9 ;;
+esac
+EOF
+out=$(HC_LANE= HERDR_VERIFY_JOBS=4 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "단계: 한 파일 한 줄 통과, p1·p2 동시, 홀로 단계는 맨 먼저 혼자" \
+  '[ $rc = 0 ] && [ "$(order)" = "통과 tests/s.test.sh 통과 tests/x.test.sh " ] && [ "$(cat "$T/stg-during")" = solo ] || { printf "%s\n" "$out"; false; }'
+rm -f "$T/stg/p1" "$T/stg/p2" "$T/stg-x"
+out=$(HC_LANE= HERDR_VERIFY_JOBS=4 STG_FAIL=p2 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "단계: 한 단계 실패면 그 파일 실패, 실패한 단계 이름" \
+  '[ $rc = 1 ] && printf "%s" "$out" | grep -q "^실패 tests/s.test.sh" && printf "%s" "$out" | grep -q "^  단계 p2: 실패(종료 1)" && ! printf "%s" "$out" | grep -q "단계 p1"'
+printf '#!/bin/bash\n# herdr-verify: stages\nexit 1\n' >"$R/tests/s.test.sh"
+out=$(HC_LANE= bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "단계: 목록을 못 읽으면 그 파일 실패" '[ $rc = 1 ] && printf "%s" "$out" | grep -q "^실패 tests/s.test.sh: 단계 목록(--stages)을 못 읽음"'
+
+# 13. 병렬에서 부모가 1이 된 고아(setsid): 동시에 돈 시험 목록과 함께 잡고 끔
+mk psid "python3 -c 'import os,sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' \"\$(dirname \"\$0\")/../bin/idle\" </dev/null >/dev/null 2>&1 & echo \$! >'$P/psid'"
+printf '#!/bin/bash\nsleep 1\n' >"$R/tests/z.test.sh"
+out=$(HC_LANE= HERDR_VERIFY_JOBS=2 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "병렬 고아: 실패, 동시에 돈 시험 목록, 끔" \
+  '[ $rc = 1 ] && printf "%s" "$out" | grep -q "고아 pid $(cat "$P/psid")" && printf "%s" "$out" | grep -q "동시에 돈 시험 가운데: tests/x.test.sh tests/z.test.sh" && gone "$(cat "$P/psid")"'
+
+# 14. 셸 판 계약 시험(tests/*-bash.test.sh)은 HERDR_TEST_BASH=1일 때만 — 아니면 「건너뜀」 줄(통과로 찍지 않음)
+mk sh 'exit 0'
+printf '#!/bin/bash\ntouch "%s/bash-ran"\n' "$T" >"$R/tests/x-bash.test.sh"
+out=$(HC_LANE= HERDR_TEST_BASH= bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "셸 판 시험: 기본은 건너뜀 줄, 안 돎" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "^건너뜀 tests/x-bash.test.sh" && ! printf "%s" "$out" | grep -q "통과 tests/x-bash" && [ ! -e "$T/bash-ran" ]'
+out=$(HC_LANE= HERDR_TEST_BASH=1 bash "$R/.claude/herdr-verify.sh" 2>&1); rc=$?
+t "셸 판 시험: HERDR_TEST_BASH=1이면 돎" '[ $rc = 0 ] && printf "%s" "$out" | grep -q "^통과 tests/x-bash.test.sh" && [ -e "$T/bash-ran" ]'
+
 # 끝: 이 시험이 띄운 것 0
 t "이 시험의 고아 0" allgone
 

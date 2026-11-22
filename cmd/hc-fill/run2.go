@@ -320,7 +320,7 @@ func waitRow(r Row) {
 	if dash(ef) == "parked" {
 		RESUME, RSEC = true, resumeSec(name, after, bBranch)
 	}
-	AK, PAFT, PSOLO = dash(ak), after, dash(ovk)
+	AK, PAFT, PSOLO, PRIO = dash(ak), after, dash(ovk), r.F(13)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
 	RESUME, RSEC = false, ""
 	if placed || GOTADDR {
@@ -467,7 +467,7 @@ func earlyRows() {
 		if !strings.HasPrefix(dash(ak), "audit=") {
 			NEED = needs(SB)
 		}
-		AK, PAFT, PSOLO = dash(ak), after, dash(ovk)
+		AK, PAFT, PSOLO, PRIO = dash(ak), after, dash(ovk), r.F(13)
 		place(name, prj, SB, only, dash(reply), dash(owner), after)
 		ESEC = ""
 		if placed || GOTADDR {

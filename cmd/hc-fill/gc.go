@@ -252,6 +252,21 @@ func idleTick() {
 		if len(dm) == 0 {
 			continue
 		}
+		// 대기열에 띄울 것이 없는 빈 자리는 지휘가 할 일이 없다 — 기본은 안 보낸다(2026-11-22 go-alert-quiet: 사건 절반이 이 줄).
+		// 설정 idle_empty분을 주면 그 간격에 한 번, 그동안 빈 기계를 묶어서. 간격은 idle.tsv에 남은 none 줄의 마지막 보낸 때로 잰다
+		// ponytail: 자리가 찼다 비어 그 기계 줄이 지워지면 그 기계 보낸 때도 잊는다 — 다른 기계 줄이 없으면 간격보다 빨리 다시 갈 수 있다
+		if ik == "none" {
+			ie := int64(atoi10(conf("idle_empty")))
+			last := int64(0)
+			for _, r := range inew {
+				if r.F(6) == "none" && int64(num(r.F(3))) > last {
+					last = int64(num(r.F(3)))
+				}
+			}
+			if ie == 0 || inow-last < ie*60 {
+				continue
+			}
+		}
 		imsg := strings.Join(msgs, " · ")
 		var iwhy string
 		switch ik {

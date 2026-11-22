@@ -304,6 +304,10 @@ func launchMain(args []string) int {
 	if p := os.Getenv("HERDR_LAND_PRIORITY"); p != "" {
 		envs = append([]string{"HERDR_LAND_PRIORITY=" + p}, envs...)
 	}
+	// 제출 우선(hc-fill이 대기열 줄의 우선으로 넣음): 레인의 hc-lane land가 큐 메타 priority=로 싣는다
+	if p := os.Getenv("HC_LANE_PRIORITY"); p != "" {
+		envs = append([]string{"HC_LANE_PRIORITY=" + p}, envs...)
+	}
 
 	// 다른 기계 레인은 맥 Herdr 창의 그 기계 공간에 탭으로(hc run --label herdr.space=<id>)
 	if on != "" {

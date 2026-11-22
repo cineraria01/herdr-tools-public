@@ -335,6 +335,9 @@ func secD2(k *K) {
 	k.check("놀고 있음: 빈 자리 수가 줄면(레인이 뜸) 처음부터 다시 셈 — 그 바퀴엔 알리지 않음",
 		!hasF(RL, "box-1 자리") && hasF(RL, "box-2 자리 2개 11분째 빔") && k.dIt("box-1", 5) == "1", read(RL), read(IT))
 	k.dBack(2, 660)
+	if k.impl != "bash" { // go-alert-quiet: 대기열 빔은 idle_empty(예시 60)분에 한 번 — 바로 앞 box-2 알림에서 그만큼 지난 것으로
+		k.dBack(3, 3700)
+	}
 	rm(RL)
 	k.run("run")
 	k.check("놀고 있음: 다시 센 뒤 idle분 넘으면 그때 알림(box-1 자리 1개 11분째)", hasF(RL, "box-1 자리 1개 11분째 빔"), read(RL), read(IT))

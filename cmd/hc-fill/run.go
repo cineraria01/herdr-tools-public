@@ -37,6 +37,7 @@ func runRound() {
 	}
 	inboxTick()
 	mergerTick()
+	specVerifiersTick()
 	idle := conf("idle")
 	if idle == "" {
 		idle = "10"

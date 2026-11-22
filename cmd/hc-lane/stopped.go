@@ -56,6 +56,40 @@ func turnAfter(lt, tn string) (after, unknown bool) {
 	return atoi(tn) > atoi(lt)+1, false
 }
 
+// handedOff: 마지막 report가 제출(병합기 큐에 넣음)·주차(원격 lane/<레인>에 두고 hc-fill이 다시 띄움)면 그 터미널은 할 일이 없다 —
+// 닫히거나(hc-sweep·끝남) 차례를 끝내 쉬어도 지휘에 알릴 것이 없다(결과는 병합기·hc-fill이 따로 알린다). 2026-11-22 go-alert-quiet
+func handedOff(last string) bool { return last == "제출" || last == "주차" }
+
+// stopWhy: 멈춤 까닭(빈 값 = 알릴 것 없음). s = 터미널 state, ss = status, tn = 지금 turn, last·lt = 마지막 report 상태·turn,
+// sw = 마지막 report 뒤 정리됨이 있었나(그 사건이 따로 간다), rd = 읽기·채움 레인(완료가 끝)
+func stopWhy(s, ss, tn, last, lt string, sw, rd bool) string {
+	if s != "live" {
+		if sw || handedOff(last) {
+			return ""
+		}
+		fin := last == "착지" || last == "판정" || rd && last == "완료"
+		if after, unk := turnAfter(lt, tn); fin && !unk && !after {
+			return ""
+		}
+		return "뜻밖의 종료(" + s + ")"
+	}
+	switch ss {
+	case "blocked", "error":
+		return ss
+	case "done", "idle":
+		switch {
+		case handedOff(last):
+			return ""
+		case last == "완료" || last == "착지" || last == "막힘" || last == "판정":
+			if after, unk := turnAfter(lt, tn); unk || !after {
+				return ""
+			}
+		}
+		return ss
+	}
+	return ""
+}
+
 func (e *ev) stopped(evl, mu []string) []string {
 	if !e.lsok {
 		fmt.Fprintln(os.Stderr, "hc-lane wait: hc ls 실패 — 이번 바퀴는 멈춘 레인을 못 봤다")
@@ -82,21 +116,9 @@ func (e *ev) stopped(evl, mu []string) []string {
 			mn = "-"
 		}
 		last, lt, sw := lastIn(evl, a, nm)
-		why := ""
-		fin := " 착지 판정 제출 주차 "
-		if k := km[[2]string{lastSeg(a), nm}]; k == "read" || k == "fill" {
-			fin = " 착지 판정 제출 주차 완료 "
-		}
+		lk := km[[2]string{lastSeg(a), nm}]
+		why := stopWhy(s, ss, tn, last, lt, sw, lk == "read" || lk == "fill")
 		if s != "live" {
-			if !sw {
-				if strings.Contains(fin, " "+last+" ") && last != "" {
-					if after, unk := turnAfter(lt, tn); unk || after {
-						why = "뜻밖의 종료(" + s + ")"
-					}
-				} else {
-					why = "뜻밖의 종료(" + s + ")"
-				}
-			}
 			// killed가 지휘의 hc kill인지: parent가 없거나 아직 살아 있을 때만 조용히 넘긴다
 			kq := false
 			if why != "" && rs == "killed" {
@@ -113,20 +135,6 @@ func (e *ev) stopped(evl, mu []string) []string {
 					}
 				}
 				why = ""
-			}
-		} else {
-			switch ss {
-			case "blocked", "error":
-				why = ss
-			case "done", "idle":
-				switch last {
-				case "완료", "착지", "막힘", "판정":
-					if after, unk := turnAfter(lt, tn); !unk && after {
-						why = ss
-					}
-				default:
-					why = ss
-				}
 			}
 		}
 		if why == "" {

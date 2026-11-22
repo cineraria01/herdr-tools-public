@@ -32,14 +32,18 @@ func hookPath(t *testing.T, name string) string {
 }
 
 // impls: 판 목록. 훅 다섯은 한 바이너리 herdr-hooks라 스위치도 하나 — HERDR_HOOKS_IMPL(없으면 HERDR_IMPL, lib/go-run.sh와 같은 차례).
-// 밖에서 정했으면 그 판 하나만, 아니면 go·bash 두 판을 모두 돈다.
+// 밖에서 정했으면 그 판 하나만, 아니면 go 하나 — 셸 판 갈래는 HERDR_TEST_BASH=1일 때만 두 판을(2026-11-22 verify-parallel:
+// 셸 판은 곧 걷는다, 지휘 t1cj). 셸 판을 지우는 날 이 스위치도 지운다.
 func impls() []string {
 	for _, k := range []string{"HERDR_HOOKS_IMPL", "HERDR_IMPL"} {
 		if v := os.Getenv(k); v != "" {
 			return []string{v}
 		}
 	}
-	return []string{"go", "bash"}
+	if os.Getenv("HERDR_TEST_BASH") == "1" {
+		return []string{"go", "bash"}
+	}
+	return []string{"go"}
 }
 
 var (

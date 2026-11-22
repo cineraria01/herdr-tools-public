@@ -92,7 +92,7 @@ func (m *M) runCandidate() int {
 	c := exec.Command(gSelf, "land", m.base)
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
-		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0)
+		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0, "HERDR_SPEC_TREE="+m.stree)
 	return proc.Wait(c, m.mj+"/child")
 }
 

@@ -37,6 +37,7 @@ type M struct {
 	lr                              string // 착지 종료(뒤에 설명이 붙을 수 있음)
 	O, lk2, hs                      string
 	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
+	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -348,7 +349,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = out("ls-remote", "origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*")
+	m.qs, rc = out(append([]string{"ls-remote", "origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*"}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
@@ -374,6 +375,9 @@ func (m *M) round() {
 		}
 	}
 	if !m.pickBatch() {
+		if m.mq == "" && !m.mer {
+			m.specIdle()
+		}
 		return
 	}
 	m.mq = m.b[0].q
@@ -444,6 +448,13 @@ func (m *M) round() {
 		dieGit(rc, "merger: 후보 작업 트리를 만들지 못했다(%s)", m.br)
 	}
 	if len(m.b) > 1 && !m.stack() {
+		return
+	}
+	// 추측 병렬 검증(specrun.go) — 맨 앞 추측이 검증 기계에서 도는 중이면 착지하지 않고 쉰다
+	var sd specDecision
+	if sd, m.stree = m.spec(); sd == specWaitFront {
+		m.fin()
+		m.mq, m.mer = "", true
 		return
 	}
 	labs := make([]string, len(m.b))

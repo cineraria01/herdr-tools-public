@@ -340,7 +340,8 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 	// 대기 표식을 먼저 쓴다. 디스크가 차서 못 쓰면 날짜 키로 보내 hc-lane이 그날 두 번 적지 않게 한다
 	at := pendingAt
 	if at == "" {
-		at = time.Now().Format("2006-01-02T15:04:05") // 키 글자(hc-lane report --key: A-Za-z0-9_.:/-)
+		// 키 글자(hc-lane report --key: A-Za-z0-9_.:/-). 초 아래까지 — 회복 뒤 같은 초의 새 부족이 같은 키로 걸러지지 않게
+		at = time.Now().Format("2006-01-02T15:04:05.000000")
 		if os.MkdirAll(filepath.Dir(state), 0o755) != nil || os.WriteFile(state, []byte(pendingMark+"\t"+at+"\t"+msg+"\n"), 0o644) != nil {
 			at = time.Now().Format("2006-01-02")
 		}

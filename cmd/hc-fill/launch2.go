@@ -175,8 +175,13 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		la = append(la, "--on", on)
 	}
 	la = append(append(la, "--name", lane, "--repo", repo, "--"), args...)
-	out, lr := Cmd{Name: "hc-lane", Args: la, Err: errMerge,
-		Env: []string{"HC_LANE_COORD=" + wco, "HC_LANE_OWNER=" + own, "HC_LANE_FILL=1", "HERDR_LAND_PRIORITY=" + strconv.Itoa(wcnt(lane))}}.Run()
+	env := []string{"HC_LANE_COORD=" + wco, "HC_LANE_OWNER=" + own, "HC_LANE_FILL=1", "HERDR_LAND_PRIORITY=" + strconv.Itoa(wcnt(lane))}
+	// 제출 우선: 대기열 줄의 우선을 레인 환경 HC_LANE_PRIORITY로(2026-11-22 fill-prio-pass — 긴급 줄이 보통으로 제출돼 큐 뒤에 섰다).
+	// 레인이 land 줄에 따로 주면 그 값. 감사 줄(--read)은 착지하지 않으니 넘기지 않는다
+	if rd == "" {
+		env = append(env, "HC_LANE_PRIORITY="+plabel(PRIO))
+	}
+	out, lr := Cmd{Name: "hc-lane", Args: la, Err: errMerge, Env: env}.Run()
 	out = sub(out)
 	crash("after-launch")
 	// 5·6·7: 띄웠지만 시작 확인 실패(터미널은 남음) → 주소를 받아 「상태 안 잡힘」 길로.

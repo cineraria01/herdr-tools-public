@@ -45,6 +45,15 @@ func (s *sx) signalMid(path, sub string, sig os.Signal) int {
 	for i := 0; i < 600 && !ct.Exists(pidf); i++ {
 		time.Sleep(100 * time.Millisecond)
 	}
+	// 부모가 그 무리를 고아 기록(proc.RecordDir()/<무리>)에 적은 뒤에 죽인다 — 띄운 뒤 적기 전에 죽이면 다음 실행이 거둘 무리를 몰라
+	// 부하에서 「push 중에 죽은 뒤 … 거둔다」가 흔들렸다(2026-11-22 verify-parallel — mini-m4 부하 30·병렬 검증에서 두 번, 작업 중 발견해 함께 고침)
+	var gp int
+	fmt.Sscanf(ct.Read(pidf), "%d", &gp)
+	if d := proc.RecordDir(); d != "" && gp > 0 {
+		for i := 0; i < 100 && !ct.Exists(filepath.Join(d, fmt.Sprint(gp))); i++ {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	c.Process.Signal(sig)
 	s.sigRC = -1
 	if err := c.Wait(); err != nil {

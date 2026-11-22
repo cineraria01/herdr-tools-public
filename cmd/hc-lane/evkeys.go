@@ -114,7 +114,10 @@ func (e *ev) newEvents(cand []string, born string) []string {
 		t2 := fld(f, 3) + "\x1c" + fld(f, 4)
 		if fld(f, 5) == "정리됨" {
 			ls, ln := lr.lst[t2], lr.ltn[t2]
-			fin := ls == "착지" || ls == "판정" || ls == "제출" || ls == "주차" ||
+			if handedOff(ls) { // 제출·주차 뒤 정리는 turn과 상관없이 조용히(stopped.go handedOff)
+				continue
+			}
+			fin := ls == "착지" || ls == "판정" ||
 				ls == "완료" && (kind[[2]string{lastSeg(f[2]), f[3]}] == "read" || kind[[2]string{lastSeg(f[2]), f[3]}] == "fill")
 			if fin && num(fld(f, 8)) && num(ln) && atoi(fld(f, 8)) <= atoi(ln)+1 {
 				continue
@@ -122,12 +125,7 @@ func (e *ev) newEvents(cand []string, born string) []string {
 			if seen[nk("멈춤"+tab+f[2]+tab+f[3]+tab+"쉼 turn "+fld(f, 8))] {
 				continue
 			}
-			// 바로 앞 report가 제출(병합기에 넣고 끝남)이면 정상 정리 — 셸 판 ev_cmd와 같게
-			pre := "뜻밖의 종료(정리됨) "
-			if ls == "제출" {
-				pre = "제출 뒤 정리(정리됨) "
-			}
-			f[4], f[5], f[6] = "멈춤", "-", pre+f[6]
+			f[4], f[5], f[6] = "멈춤", "-", "뜻밖의 종료(정리됨) "+f[6]
 		}
 		if f[4] != "멈춤" {
 			lr.rep(f[4], f[5], turnOf(f), t2)

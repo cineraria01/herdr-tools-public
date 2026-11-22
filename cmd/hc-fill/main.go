@@ -127,17 +127,14 @@ func prioCmd(args []string) {
 	if !ok {
 		die("우선순위는 긴급|높음|보통|낮음(urgent|high|normal|low): %s", args[1])
 	}
+	st, prj := "", ""
 	rc := withQ(func() {
 		r := qrow(args[0])
-		st := ""
 		if r != nil {
-			st = r.F(6)
+			st, prj = r.F(6), r.F(2)
 		}
 		if st == "" {
 			die("대기열에 없다: %s", args[0])
-		}
-		if st != "wait" {
-			die("대기 중이 아니다(%s): %s — 우선순위는 띄우기 전에만 바꾼다", st, args[0])
 		}
 		var out []Row
 		for _, x := range qRowsW() {
@@ -157,6 +154,10 @@ func prioCmd(args []string) {
 		exit(1)
 	}
 	say("우선 %s → %s", args[0], plabel(p))
+	// 떠 있는 레인: 이미 병합기 큐에 냈으면 그 큐 메타도(2026-11-22 fill-prio-pass — 지휘가 메타 제목을 손으로 고쳤다)
+	if st != "wait" && prioMeta(args[0], prj, plabel(p)) == 1 {
+		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 prio 하면 큐 메타를 고친다", args[0])
+	}
 }
 
 func watchCmd(args []string) {

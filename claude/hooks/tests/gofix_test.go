@@ -176,7 +176,16 @@ func TestCotenantGofix(t *testing.T) {
 				t.Skip("셸 판은 손자가 관을 놓을 때까지 기다린다(알려진 차이)")
 			}
 			// 손자가 9초 쥔다 — 훅은 기한(2초·예산 4초) 안에 끊는다. 부하에 흔들리지 않게 상한은 넉넉히 7초
-			c.write(c.T+"/bin/hc", "#!/bin/sh\n/bin/sleep 9 &\necho '{\"terminals\":[]}'\n")
+			// 손자 pid를 적어 두고 하위 시험이 끝나면 끈다 — 안 끄면 9초 동안 시험 무리에 고아로 남는다(검증의 고아 검사가 잡음,
+			// 2026-11-22 verify-parallel이 훅 꾸러미를 따로 돌리며 드러남 — 작업 중 발견해 함께 고침)
+			c.write(c.T+"/bin/hc", "#!/bin/sh\n/bin/sleep 9 &\necho $! >\""+c.T+"/hc-sleep.pid\"\necho '{\"terminals\":[]}'\n")
+			t.Cleanup(func() {
+				if b, err := os.ReadFile(c.T + "/hc-sleep.pid"); err == nil {
+					if p, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && p > 1 {
+						syscall.Kill(p, syscall.SIGKILL) //nolint:errcheck // 이미 끝났으면 그만
+					}
+				}
+			})
 			t0 := time.Now()
 			c.run("sb", "Edit", R+"/a.txt")
 			if d := time.Since(t0); c.RC != 2 || d > 7*time.Second {

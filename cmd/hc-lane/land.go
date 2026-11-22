@@ -66,6 +66,7 @@ func landCmd() int {
 	}
 	// 이 착지의 인자는 이 착지만 쓴다 — 검증 자식에 물려주지 않는다
 	px, mgx = os.Getenv("HERDR_LAND_PUSH_EXTRA"), os.Getenv("HERDR_MERGER")
+	specTreeTake(mgx == "1")
 	os.Unsetenv("HERDR_LAND_PUSH_EXTRA")
 	os.Unsetenv("HERDR_MERGER")
 	qa0 = strings.Join(qadirs(), "\n")
@@ -158,6 +159,7 @@ func landCmd() int {
 		if px != "" {
 			argv = append(argv, "HERDR_LAND_PUSH_EXTRA="+px)
 		}
+		verifiedEnv("") // 저장소 착지 스크립트가 rebase 뒤 검증 스크립트에 그대로 물려준다(트리 대조는 검증 스크립트가)
 		rc := lrun(append(argv, "bash", mls, base)...)
 		if rc != 0 {
 			lfail(rc)
@@ -362,6 +364,7 @@ func landBuiltin() int {
 			die("land: .claude/herdr-verify.sh 가 없어 push하지 않았다(검증 없는 착지는 없다). 저장소에 검증 스크립트(또는 .claude/herdr-land.sh)를 두거나 지휘에 알린다")
 		}
 		committedHook(cand, ".claude/herdr-verify.sh")
+		verifiedEnv(cand)
 		if rc := lrun("bash", ".claude/herdr-verify.sh"); rc != 0 {
 			lfail(rc)
 			die("land: 검증 실패, push하지 않았다. 고쳐 커밋한 뒤 같은 줄을 다시")

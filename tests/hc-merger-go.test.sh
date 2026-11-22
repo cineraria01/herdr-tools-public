@@ -2,10 +2,21 @@
 # Go 판 단위 시험(go.mod 모듈 전체 — cmd/hc-merger·internal/*): gofmt·go vet·go test -race(프로세스 무리 정리·잠금 안 물림·git 모름 → 쉼·
 # 우선순위·복구 단계별 죽기·사건 줄 꼴·원자 쓰기). 공통 실행기 lib/go-run.sh가 바이너리를 짓고 고르는지도 본다.
 # 운영 도구 계약 시험(cmd/<도구>/contract*_test.go — 옛 tests/<도구>.test.sh)도 여기서 Go 판(기본)으로 돈다. 셸 판은 tests/ops-go-bash.test.sh
-# 훅 계약 시험(claude/hooks/tests/*_test.go — 옛 claude/hooks/tests/*.test.sh)도 여기서 돈다 — 판 스위치가 없으면 go·bash 두 판을 다(2026-11-21 go-tests-hooks)
+# 훅 계약 시험(claude/hooks/tests/*_test.go — 옛 claude/hooks/tests/*.test.sh)도 여기서 돈다 — 판 스위치가 없으면 go 판만, HERDR_TEST_BASH=1이면 go·bash 두 판을(2026-11-21 go-tests-hooks, 2026-11-22 verify-parallel)
 # go가 없으면 실패한다 — Go 판을 쓰는 기계에는 go가 있어야 한다(없으면 go_run이 경고하고 셸 판으로 돈다)
-# 실행: bash tests/hc-merger-go.test.sh
+# 실행: bash tests/hc-merger-go.test.sh   (전부, 차례대로)
+# 검증(.claude/herdr-verify.sh)은 단계로 나눠 동시에 돈다(2026-11-22 verify-parallel): --stages가 단계 이름을, --stage <이름>이 그 단계만.
+#  vet(gofmt·vet·failsum 자체 시험) · batch(묶음) · hooks(훅 꾸러미에서 TestCotenantGuard 뺀 것) · !cotenant(TestCotenantGuard — 1분 부하를
+#  재는 calm이 있어 홀로) · slow:<꾸러미>(나머지 느린 꾸러미) · go-run(공통 실행기). 인자 없이 돌면 예전처럼 훅 꾸러미를 통째로
+# herdr-verify: stages
 set -u
+only=
+case "${1-}" in
+  --stages) printf '%s\n' '!cotenant' slow:tests/hcfill slow:cmd/herdr-sync batch hooks go-run vet; exit 0 ;;   # 긴 것 먼저
+  --stage) only=${2-}
+    case "$only" in vet|batch|hooks|cotenant|slow:tests/hcfill|slow:cmd/herdr-sync|go-run) ;; *) echo "FAIL - 모르는 단계: $only"; exit 2 ;; esac ;;
+esac
+want() { [ -z "$only" ] || [ "$only" = "$1" ]; }
 here=$(cd "$(dirname "$0")" && pwd)
 src=$here/..
 [ -f "$src/go.mod" ] || src=$here/../../lib/herdr-go   # 깔린 곳(~/.local/bin/tests → ~/.local/lib/herdr-go)
@@ -16,9 +27,11 @@ cd "$src" || { echo "FAIL - 소스 없음: $src"; exit 1; }
 export GOTOOLCHAIN=local GOCACHE=${GOCACHE:-$PWD/.bin/go-build}
 fail=0
 gofmt=${gob%/go}/gofmt; [ -x "$gofmt" ] || gofmt=gofmt
-f=$("$gofmt" -l cmd internal)
-if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
-if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
+if want vet; then
+  f=$("$gofmt" -l cmd internal)
+  if [ -z "$f" ]; then echo "ok - gofmt"; else echo "FAIL - gofmt: $f"; fail=1; fi
+  if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1; fi
+fi
 # tests/hclane(hc-lane 계약 시험, 몇 분)은 빼고 tests/hc-lane-go.test.sh·hc-lane-bash.test.sh가 따로 돈다.
 # 느린 꾸러미(SLOW)는 묶음 뒤에 하나씩 따로, 각자 1200초 — 묶음째 돌면 서로의 부하로 늘어져 한 상한을 아무나 넘겼다(2026-11-22
 # verify-go-timeout: claude/hooks/tests의 TestCotenantGuard가 묶음 속에서 10분 초과, 혼자는 1분 안. mini-m6-1 묶음 실측 hooks 820초·
@@ -42,6 +55,7 @@ gotest() { # 이름 상한 꾸러미…
   local tp; tp=$(awk '/^panic: test timed out after/{t=1} t && /^FAIL\t/{print $2; t=0}' "$log" | paste -sd ' ' -)
   if [ -n "$tp" ]; then echo "FAIL - go test -race: 시간 넘김($lim) — $tp"; else echo "FAIL - go test -race: $name"; fi
 }
+if want vet; then
 fs=$(mktemp "${TMPDIR:-/tmp}/failsum.XXXXXX") || exit 1
 printf '%s\n' 'ok  	x/a	0.1s' '==================' 'WARNING: DATA RACE' 'Read at 0x1 by goroutine 8:' '  x.f()' '      /x/f.go:3 +0x1' '' \
   '==================' '--- FAIL: TestA (0.50s)' '    a_test.go:9: 무리 안 배경 sleep이 남았다' '    testing.go:1490: race detected during execution of test' \
@@ -55,14 +69,24 @@ FAIL |     a_test.go:9: 무리 안 배경 sleep이 남았다
 FAIL |     testing.go:1490: race detected during execution of test'
 got=$(failsum "$fs")
 if [ "$got" = "$want" ]; then echo "ok - failsum: 실패한 시험 이름·출력·DATA RACE 묶음만"; else echo "FAIL - failsum: 바람/얻음"; printf '%s\n---\n%s\n' "$want" "$got"; fail=1; fi
-pkgs=$("$gob" list ./...) || { echo "FAIL - go list"; fail=1; }
+fi
+case "$only" in vet|go-run) pkgs= ;; *) pkgs=$("$gob" list ./...) || { echo "FAIL - go list"; fail=1; } ;; esac
 # shellcheck disable=SC2046 # 꾸러미 목록은 낱말로 나눈다
-gotest 묶음 600s $(printf '%s\n' "$pkgs" | grep -v '/tests/hclane$' | grep -Ev "$SLOW")
-for p in $(printf '%s\n' "$pkgs" | grep -E "$SLOW"); do gotest "${p#herdr-tools/}" 1200s "$p"; done
+want batch && gotest 묶음 600s $(printf '%s\n' "$pkgs" | grep -v '/tests/hclane$' | grep -Ev "$SLOW")
+cot='^TestCotenantGuard$'
+for p in $(printf '%s\n' "$pkgs" | grep -E "$SLOW"); do
+  n=${p#herdr-tools/}
+  case "$only:$n" in
+    :*) gotest "$n" 1200s "$p" ;;
+    hooks:claude/hooks/tests) gotest "$n(TestCotenantGuard 빼고)" 1200s -skip "$cot" "$p" ;;
+    cotenant:claude/hooks/tests) gotest "$n(TestCotenantGuard)" 1200s -run "$cot" "$p" ;;
+    "slow:$n:$n") gotest "$n" 1200s "$p" ;;
+  esac
+done
 
 # 공통 실행기(lib/go-run.sh — 저장소에서만. 깔린 곳은 ~/.local/lib/go-run.sh가 같은 파일). 가짜 도구 모듈로 본다
 gr=$here/../lib/go-run.sh
-if [ -f "$gr" ]; then
+if want go-run && [ -f "$gr" ]; then
   T=$(mktemp -d "${TMPDIR:-/tmp}/go-run.XXXXXX") || exit 1
   mkdir -p "$T/lib" "$T/cmd/hc-fake"
   cp "$gr" "$T/lib/go-run.sh"

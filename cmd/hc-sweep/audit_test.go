@@ -82,6 +82,12 @@ func TestDiskAlertPending(t *testing.T) {
 	if diskAlert(1, 1, 10, state, d, false, lane, rep) != "" || len(keys) != 2 {
 		t.Fatal("셸 판 표식을 다시 보냄")
 	}
+	// 회복 뒤 다시 부족이면 새 키 — 같은 초 안이라도(키가 초 단위면 hc-lane이 같은 사건으로 걸러 두 번째 알림이 사라졌다.
+	// 2026-11-22 병합기 TestHcSweepDisk 「회복 뒤 다시 부족이면 다시 알림」 흔들림, verify-parallel이 함께 고침)
+	diskAlert(100*gb, 1, 10, state, d, false, lane, rep) // 회복: 표식 지움
+	if diskAlert(1, 1, 10, state, d, false, lane, rep) == "" || len(keys) != 3 || keys[2] == keys[1] {
+		t.Fatalf("회복 뒤 다시 부족: 새 키로 한 번 더 보내야 함: %v", keys)
+	}
 }
 
 // [B05] hc가 not_found를 답했을 때만 「없음」 — 그 밖의 실패는 모름

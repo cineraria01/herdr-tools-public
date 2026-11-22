@@ -16,6 +16,7 @@ on= name=
 while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
 echo "$name ${HERDR_LAND_PRIORITY:-없음}" >>"$T_LOG/landprio.log"   # 착지 줄 우선(그 레인을 기다리는 줄 수)
+echo "$name ${HC_LANE_PRIORITY:-없음}" >>"$T_LOG/laneprio.log"   # 제출 우선(대기열 줄의 우선)
 for x in ${HC_FAKE_LANE_SLOW-}; do case $x in "${on:-here}/$name="*) sleep "${x#*=}" ;; esac; done   # 「<기계>/<이름>=<초>」: 착수(lane.log) 뒤 늦게 답함
 case " ${HC_FAKE_LANE_FAIL-} " in *" ${on:-here}/$name "*) echo "hc-lane: 가짜 실패" >&2; exit 1 ;; esac
 case " ${HC_FAKE_LANE_HELD-} " in *" $name "*) echo "hc-lane: 이미 돎 — refs/hc-lanes/$name 를 다른 실행이 쥐고 있다" >&2; exit 10 ;; esac   # 임대가 남은 레인: 어느 기계든 10

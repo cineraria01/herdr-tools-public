@@ -91,6 +91,7 @@ var (
 	RSEC      string // 이어 가기 절
 	ESEC      string // 먼저 띄움 절
 	AK        string // 감사 칸(15칸, 빈 값은 -)
+	PRIO      string // 우선 칸(13칸) — 띄울 때 레인 환경 HC_LANE_PRIORITY(제출 우선)로
 	PAFT      string // 선행(4칸)
 	PSOLO     string // 겹침칸(16칸, 빈 값은 -)
 	placed    bool
