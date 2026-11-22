@@ -68,6 +68,19 @@ func cleanOwner() bool {
 	return true
 }
 
+// keepOffSelf: 자기 레인(HC_LANE이 이 가지·이름)을 정리했으면 자기 터미널(HC_TERMINAL_ID)의 hc keep을 끈다. Herdr 창에 붙인
+// 터미널은 keep이 켜져 에이전트가 끝나면 셸로 남아 그 기계 hc-fill 자리를 붙잡았다(2026-11-21 mini-m4 land-claim-net 13시간).
+// 다른 레인 정리(hc-sweep·gc)·dry-run은 건드리지 않는다. 실패는 알리기만 한다(정리는 이미 끝남)
+func keepOffSelf() {
+	self, ln := os.Getenv("HC_TERMINAL_ID"), os.Getenv("HC_LANE")
+	if dry || self == "" || ln == "" || (ln != branch && ln != name) {
+		return
+	}
+	if _, r := hcRun(30, errDrop, "keep", self, "--off"); r != 0 {
+		errf("hc-lane clean: 자기 터미널 %s keep 끄기 실패(종료 %d) — hc-sweep이 착지 증거로 정리한다\n", self, r)
+	}
+}
+
 // cleanLease: 정리가 끝나면 이 실행의 임대만 놓는다
 func cleanLease() {
 	if !remote {

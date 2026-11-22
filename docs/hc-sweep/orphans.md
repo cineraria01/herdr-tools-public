@@ -14,6 +14,10 @@
     이 기계 hc-fill 대기열에 결과를 아직 되돌려 주지 않은(`up`) 받은편지 레인은 닫지 않는다.
   - 착지한 레인의 교착 풀기(2026-11-21 mini-m6-1 land-metrics 16시간 — hc-sweep은 남은 작업 트리 때문에 터미널을, `hc-lane gc`는 그 폴더를 쓰는 터미널 때문에 작업 트리를 남겨 서로 기다렸다): worker가 링크된 작업 트리에서 쉰 지 30분(또는 제출 뒤)이고, 그 레인이 착지했고(`git cherry origin/main HEAD`에 `+` 없음 + 착지 증거 — 이 레인 이름·이 실행의 hc-lane 사건 착지·제출·완료·판정(실행 키 칸 `<주소>@<created_ms>`가 같은 것, 키 없는 옛 줄은 같은 주소이고 이 터미널이 생긴 뒤 것), 없으면 이 터미널이 생긴 뒤의 원격 `refs/hc-landed/<가지>/<초>` — 같은 이름의 옛 레인 증거는 안 친다) 작업 트리가 깨끗하면(`status --porcelain --untracked-files=all` 빔) 보호를 풀고 R2로 닫은 뒤 `hc-lane clean --repo <메인 저장소> --branch <가지>`를 hc exec로 부른다(결과는 closed.log 「작업 트리 정리」).
     git은 모두 hc exec(TCC), 모름이면 남김.
+  - 끝난 keep 셸 레인(2026-11-22 sweep-landed-keep — mini-m4 land-claim-net이 착지·정리 뒤 13시간 자리를 붙잡았다): Herdr 창에 붙인 터미널은 `hc keep`이 켜져 에이전트가 끝나면 셸로 바뀌고 status 없이 live로 남는다.
+    상태 없는 셸 칸도 목록에 넣어 `hc get`으로 보고, keep이 켜졌고 전경이 셸이며 hc-lane 레인(R2와 같은 worker 판정)이고 작업 트리가 없고 이 실행의 마지막 hc-lane 사건(정리됨 빼고)이 제출·착지면 「에이전트 상태 없음」 보호를 풀어 R2로 닫는다.
+    사람 keep 목록(`~/.claude-tasks/keep`의 이름·주소)·이름 보호·착지 전 커밋은 그대로 막고, 작업 트리가 남았거나 모르면 위 규칙을 따른다.
+    레인 자신도 마지막 `hc-lane clean`(자기 레인 — `HC_LANE`이 그 가지·이름)에서 자기 터미널(`HC_TERMINAL_ID`)의 keep을 끈다(`hc keep <주소> --off`, 정리할 것 없음이어도 — 다른 레인 정리·dry-run은 안 건드림, 실패는 알리기만).
   - `hc-sweep --dry-run`은 찾기만 — 남기는 터미널마다 「남김: <주소> <이름> — <까닭>」 한 줄. hc ls 실패·terminals 목록 아님·설정 읽기 실패·cwd 모르는 이 기계 터미널이면 아무것도 끄지 않는다.
   - **구현**: `cmd/hc-sweep`. 외부 명령(hc·git·ps·lsof·sqlite3)은 쓸기와 같은 프로세스 무리로 띄우고(쓸기 무리를 끄면 함께 끝난다) 상한 시간에 그 자식을 끈다.
     잠금 `<상태>/hc-sweep/sweep.lock`(flock — 남이 쥐면 75, `--dry-run`은 안 잡음).

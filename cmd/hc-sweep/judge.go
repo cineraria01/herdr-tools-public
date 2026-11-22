@@ -51,12 +51,17 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 	status, isObj := t["status"].(map[string]any)
 	name, labels, worker := str(t, "name"), obj(t, "labels"), isWorker(t)
 	st := str(status, "state")
+	// 착지로 끝난 keep 셸 레인: hc keep이 켜진 레인 터미널은 에이전트가 끝나면 셸로 바뀌어 status 없이 live로 남는다(2026-11-21
+	// mini-m4 land-claim-net 13시간). 레인이 제출·착지로 끝났고 작업 트리가 없으면 상태 없음 보호를 풀어 R2로 본다. 사람 keep 목록·
+	// 이름 보호·착지 전 커밋은 아래 그대로 막는다
+	endedKeep := t["status"] == nil && t["keep"] == true && worker && f.worktree == no && f.submitted &&
+		shellName(str(obj(t, "foreground"), "name"))
 	guards := []struct {
 		bad bool
 		why string
 	}{
 		{str(t, "state") != "live" || strings.Contains(str(t, "address"), "/"), "live 아님·다른 기계"},
-		{!isObj || !truthy(status["app"]), "에이전트 상태 없음"},
+		{(!isObj || !truthy(status["app"])) && !endedKeep, "에이전트 상태 없음"},
 		{isObj && st != "idle" && st != "done", "idle·done 아님"},
 		{strings.Contains(name, "loop") || strings.HasSuffix(name, "-proxy"), "보호: 이름(loop·-proxy)"},
 		{keep[name] || keep[str(t, "address")], "보호: keep 목록"},
@@ -111,6 +116,15 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 		return "R3", ""
 	}
 	return "", fmt.Sprintf("%s, 쉰 지 %d분(R3 6시간 전)", why, idle)
+}
+
+// shellName: 전경 프로그램이 셸인가(hc keep이 잃은 프로그램 대신 띄우는 것)
+func shellName(n string) bool {
+	switch strings.TrimPrefix(filepath.Base(n), "-") {
+	case "zsh", "bash", "sh", "fish", "dash", "ksh":
+		return true
+	}
+	return false
 }
 
 // linkedWorktree: cwd가 아직 있는 링크된 git 워크트리인가(.git이 파일). 없어진 폴더·일반 폴더·메인 저장소면 false.
@@ -184,7 +198,8 @@ func eventRows(path string) ([][]string, error) {
 	return rows, sc.Err()
 }
 
-// submitted: 그 터미널(주소·이름, 실행 키 칸이 있으면 <주소>@<created_ms>)의 마지막 hc-lane 사건(정리됨 빼고)이 「제출」인가(못 읽으면 false)
+// submitted: 그 터미널(주소·이름, 실행 키 칸이 있으면 <주소>@<created_ms>)의 마지막 hc-lane 사건(정리됨 빼고)이 「제출」·「착지」인가
+// (레인이 제 손을 떠남 — 못 읽으면 false)
 func submitted(t map[string]any, path string) bool {
 	rows, err := eventRows(path)
 	if err != nil {
@@ -197,7 +212,7 @@ func submitted(t map[string]any, path string) bool {
 			last = r[4]
 		}
 	}
-	return last == "제출"
+	return last == "제출" || last == "착지"
 }
 
 // thisRun: 사건 줄이 이 터미널의 이 실행 것인가(B03 — 이름은 다시 쓰인다). 실행 키 칸(10째)이 있으면 <주소>@<created_ms>와 같아야

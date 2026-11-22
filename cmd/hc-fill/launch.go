@@ -272,11 +272,44 @@ func lanesOn(m string) int {
 		if r.F(6) != "up" || r.F(7) != m || strings.HasPrefix(r.F(15), "audit=") || r.F(8) == "" {
 			continue
 		}
-		if lalive(r.F(8), r.F(1)) { // 주소+이름(주소 재사용)
-			k++
+		for _, t := range TERMS { // 주소+이름(주소 재사용), 끝난 keep 셸 레인은 빼고
+			if t.Addr == r.F(8) && t.Name == r.F(1) {
+				if !laneEnded(t) {
+					k++
+				}
+				break
+			}
 		}
 	}
 	return k + cnt(NOWL, m)
+}
+
+// laneEnded: hc keep이 셸로 바꾼(전경이 셸) 레인 터미널인데 그 레인이 끝났나 — 이 기계 작업 트리가 없어졌거나, 이 실행(try.tsv
+// 실행 키)의 마지막 사건(정리됨 빼고)이 제출·착지. 띄운 직후(작업 트리 있고 사건 없음)·모름은 false(자리로 센다). 2026-11-21 mini-m4
+// land-claim-net이 착지·정리 뒤 keep 셸로 13시간 자리를 붙잡았다
+func laneEnded(t Term) bool {
+	switch strings.TrimPrefix(t.Agent, "-") {
+	case "zsh", "bash", "sh", "fish", "dash", "ksh":
+	default:
+		return false
+	}
+	if t.M == LOCAL && strings.HasPrefix(t.Cwd, "/") {
+		if _, err := os.Stat(t.Cwd); os.IsNotExist(err) {
+			return true
+		}
+	}
+	key := attemptRun(t.Name, t.Addr)
+	if EVBAD || key == "" {
+		return false
+	}
+	last := ""
+	for _, e := range EV {
+		r := splitRow(e)
+		if r.F(3) == t.Addr && r.F(4) == t.Name && r.F(5) != "정리됨" && r.NF() >= 10 && r.F(10) == key {
+			last = r.F(5)
+		}
+	}
+	return last == "제출" || last == "착지"
 }
 
 // tryput: 시도 기록(이름·줄 ID·기계·먼저·감사·확정 주소·실행). 대기열에서 빠져도 그 터미널이 끝날 때까지 보존한다. 0 됨

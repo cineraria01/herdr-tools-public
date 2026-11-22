@@ -149,9 +149,10 @@ func secE(k *K) {
 	k.run("ls")
 	k.check("ls: 감사 통과 — 수거 기다림", eLine(k.out, "w1 ", "감사 통과 — 수거 기다림"))
 	write(k.t, k.VD()+"/w1/"+A1+".ack", "landing\t2026-11-20T00:00:00Z\tw1@1700000000000\tp\n")
-	k.run("run")
+	// fill-audit-term-close: 그 주소를 다른 실행(created_ms가 띄울 때 확정한 것과 다름)이 쓰면 닫지 않고 지금처럼 지휘에 알린다
+	k.runE([]string{"HC_FAKE_CREATED=slow/audit-" + A1 + "=1800000000000"}, "run")
 	rl := k.T + "/report.log"
-	k.check("레인이 수거(<ID>.ack landing) → 차수 taken, 감사 터미널 정리 주소를 지휘에 한 번(키 hf:<ID>:cleanup), 감사 줄 뺌, 끄지 않음",
+	k.check("레인이 수거(<ID>.ack landing) → 차수 taken, 주소를 다른 실행이 씀 → 끄지 않고 정리 주소를 지휘에 한 번(키 hf:<ID>:cleanup), 감사 줄 뺌",
 		k.acol(A1, 8) == "taken" && hasF(rl, "--key hf:"+A1+":cleanup") && hasF(rl, "감사 터미널 slow/audit-"+A1+" 정리 필요") && k.where("audit-"+A1) == "" && !hasE(k.T+"/hc.log", "^kill"), read(rl))
 	k.run("run")
 	k.check("끝난 차수는 다시 안 다룸(정리 사건 한 번), ls 「감사 통과 받음」", k.nrep("hf:"+A1+":cleanup") == 1 && eLine(k.eLs(), "w1 ", "감사 통과 받음"))
@@ -174,6 +175,10 @@ func secE(k *K) {
 	write(k.t, k.VD()+"/w2/"+B1+".ack", "taken\t2026-11-20T00:00:00Z\tw2@1700000000000\n")
 	k.run("run")
 	k.check("지적 수거(taken) → 차수 taken", k.acol(B1, 8) == "taken")
+	// fill-audit-term-close: 이름(audit-<차수 ID>)·실행이 띄울 때 확정한 것과 같으면 hc-fill이 그 정확한 주소를 스스로 닫는다(막힘 알림 없음)
+	k.check("판정 수거 뒤 이름·차수 맞는 감사 터미널은 스스로 닫음(hc kill <주소>, 사건 한 줄, 정리 알림 없음), 감사 줄 뺌",
+		hasE(k.T+"/hc.log", "^kill box-1/audit-"+B1+"$") && strings.Contains(k.out, "감사 터미널 닫음 box-1/audit-"+B1+" (audit-"+B1+", 차수 "+B1) &&
+			k.nrep("hf:"+B1+":cleanup") == 0 && k.where("audit-"+B1) == "", read(k.T+"/hc.log"), k.out)
 	write(k.t, k.T+"/lane.log", "")
 	k.ev("box-1/w2", "w2", "완료", "bbbb222", "고침")
 	k.lj(w2)

@@ -316,6 +316,9 @@ func aCleanup() {
 		if lalive(qa, cn) {
 			switch alive(qa) {
 			case "done", "idle":
+				if aCloseTerm(cn, qa) {
+					break
+				}
 				if aesc(auLn, qown(auLn), "감사 터미널 "+qa+" 정리 필요("+cn+", 차수 "+auAid+" "+auAst+") — 정리할 때 이름과 차수를 다시 확인한다", "hf:"+auAid+":cleanup") != 0 {
 					return
 				}
@@ -328,6 +331,21 @@ func aCleanup() {
 	if withQ(func() { rc = qRmx(cn, qs) }) == 0 && rc == 0 {
 		fmt.Println("감사 줄 뺌 " + cn + " (차수 " + auAid + " " + auAst + ")")
 	}
+}
+
+// aCloseTerm <감사 이름> <주소>: 판정을 읽은 차수의 감사 터미널을 스스로 닫는다 — 그 주소의 지금 터미널 이름이 이 차수 이름
+// (audit-<차수 ID>)이고 실행(<주소>@<created_ms>)이 띄울 때 try.tsv에 확정한 것과 같을 때만, 그 정확한 주소로 hc kill. 다르거나
+// 모르거나 kill이 실패하면 false(부른 쪽이 지금처럼 지휘에 알린다). 2026-11-22 지휘가 하루 세 번 손으로 닫았다
+func aCloseTerm(cn, qa string) bool {
+	run := attemptRun(cn, qa)
+	if run == "" || pget(qa) != 0 || PNAME != cn || PRUN != run {
+		return false
+	}
+	if _, rc := (Cmd{Name: "hc", Args: []string{"kill", qa}, Err: errMerge}).Run(); rc != 0 {
+		return false
+	}
+	fmt.Println("감사 터미널 닫음 " + qa + " (" + cn + ", 차수 " + auAid + " " + auAst + ", 실행 " + run + ")")
+	return true
 }
 
 // auSameRound: 차수 줄의 sha가 완료 sha s로 시작하나(s가 -이면 차수 sha도 -)

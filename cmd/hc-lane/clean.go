@@ -197,6 +197,7 @@ func cleanMain(args []string) int {
 	if !reg && !dir && !br {
 		fmt.Printf("정리할 것 없음: 워크트리 %s 와 브랜치 %s 가 이미 없다\n", wt, branch)
 		cleanLease()
+		keepOffSelf()
 		cj("nothing", "")
 		return 0
 	}
@@ -576,6 +577,7 @@ func cleanMain(args []string) int {
 		}
 	}
 	cleanLease()
+	keepOffSelf()
 	if dry {
 		cj("planned", "")
 	} else {

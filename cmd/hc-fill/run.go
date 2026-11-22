@@ -373,7 +373,9 @@ func countSeats() {
 		tm, ta, tn, ts, tc := t.M, t.Addr, t.Name, t.Status, t.Cwd
 		pre := fmt.Sprintf("자리 %s %s %s: ", tm, ta, tn)
 		if t.Agent != AGENT { // 상태 모르는 hc-lane 레인(띄운 직후·훅 안 보냄)은 살아 있는 에이전트로 셈
-			if ts == "-" && has(LANEADDR, ta) {
+			if ts == "-" && has(LANEADDR, ta) && laneEnded(t) {
+				say("%s%s, 끝난 레인(hc keep이 셸로 바꿈) → 안 셈", pre, t.Agent)
+			} else if ts == "-" && has(LANEADDR, ta) {
 				say("%s%s, 상태 모름(hc-lane 레인) → 셈", pre, t.Agent)
 				SEATS = append(SEATS, tm)
 			}

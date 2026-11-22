@@ -21,7 +21,8 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 	for _, x := range list {
 		t, ok := x.(map[string]any)
 		if ok && str(t, "state") == "live" && str(t, "address") != "" && !strings.Contains(str(t, "address"), "/") &&
-			(str(t, "status") == "idle" || str(t, "status") == "done") {
+			(str(t, "status") == "idle" || str(t, "status") == "done" || (t["status"] == nil && shellName(str(t, "agent")))) {
+			// 상태 없는 셸 칸도 본다 — hc keep이 셸로 바꾼 끝난 레인(judge가 hc get의 keep·착지 증거로 가른다)
 			listed = append(listed, t)
 		}
 	}
