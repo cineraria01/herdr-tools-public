@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -33,7 +34,7 @@ func lcPasteScan(body string) (paste, shown, abs, why string) {
 	seen := map[string]bool{}
 	var b strings.Builder
 	total := 0
-	for _, tok := range strings.FieldsFunc(strings.ReplaceAll(body, "`", " "), lcBlank) {
+	for _, tok := range lcPasteToks(body) {
 		x := ovUnwrap(tok)
 		cands := []string{x}
 		if loc := ovParticleRe.FindStringIndex(x); loc != nil {
@@ -91,6 +92,27 @@ func lcPasteScan(body string) (paste, shown, abs, why string) {
 		}
 	}
 	return b.String(), "", "", ""
+}
+
+var lcQuotedRe = regexp.MustCompile("`[^`\n]+`|\"[^\"\n]+\"|'[^'\n]+'")
+
+// lcPasteToks: 본문의 낱말(나온 차례대로) — 백틱·따옴표로 묶은 것은 공백이 들었으면 묶음 전체를 한 항목으로 먼저(「감사 자료.md」, R-25),
+// 이어 그 안 낱말도. 묶지 않은 곳은 공백으로 나눈다
+func lcPasteToks(body string) []string {
+	var o []string
+	split := func(s string) { o = append(o, strings.FieldsFunc(strings.ReplaceAll(s, "`", " "), lcBlank)...) }
+	last := 0
+	for _, m := range lcQuotedRe.FindAllStringIndex(body, -1) {
+		split(body[last:m[0]])
+		in := strings.TrimFunc(body[m[0]+1:m[1]-1], lcBlank)
+		if strings.IndexFunc(in, lcBlank) >= 0 {
+			o = append(o, in)
+		}
+		split(in)
+		last = m[1]
+	}
+	split(body[last:])
+	return o
 }
 
 // lcPasteDirs: 붙일 수 있는 폴더(링크를 푼 실제 경로) — 설정 `paste_dirs <폴더…>`(~/ 꼴 가능), 없으면 ~/.claude-tasks(지휘가 보고·지시를 두는 곳).

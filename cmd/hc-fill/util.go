@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -413,11 +414,16 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-// runExitHooks: 끝내기 훅(나중에 단 것부터) — exit와 run의 신호 처리(셸 판 EXIT trap은 TERM에도 돈다, Fable L2)
+var exitOnce sync.Once
+
+// runExitHooks: 끝내기 훅(나중에 단 것부터) — exit와 run의 신호 처리(셸 판 EXIT trap은 TERM에도 돈다, Fable L2).
+// 정상 종료와 신호가 겹쳐도 한 번만(뒤에 온 쪽은 앞의 정리가 끝날 때까지 기다린다, R-20). 훅은 신호 고루틴을 띄우기 전에 단다
 func runExitHooks() {
-	for i := len(exitHooks) - 1; i >= 0; i-- {
-		exitHooks[i]()
-	}
+	exitOnce.Do(func() {
+		for i := len(exitHooks) - 1; i >= 0; i-- {
+			exitHooks[i]()
+		}
+	})
 }
 
 func die(format string, a ...any) {

@@ -218,35 +218,54 @@ func pget(addr string) int {
 	return 0
 }
 
-// statusOK <주소>: 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지. 잡히면 START_RUN
-func statusOK(addr string) bool {
+// startState <주소> <레인>: 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지. 0 잡힘(START_RUN), 1 안 잡힘 확정(그 레인 터미널이
+// 살아 있는데 status 없음·끝남·not_found), 2 모름(조회 실패·잘린 응답·다른 이름이나 주소·시작 시각 없음 — 시작했을 수 있다, 재감사 R-01·R-05)
+func startState(addr, lane string) int {
 	end := time.Now().Unix() + int64(WAIT)
 	for {
-		// hc get이 성공하고 응답 전체가 JSON일 때만(셸 판 pipefail + jq -e — 잘린 응답·실패 종료는 안 잡힘, gofix-fill F03)
-		out, rc := run("hc", "get", addr, "--json")
-		vs, ok := decodeAll(out)
-		if rc != 0 || !ok {
-			vs = nil
-		}
-		got, created := false, ""
-		for _, v := range vs {
-			if _, isObj := jget(v, "status").(map[string]any); isObj {
-				got, created = true, jor(jget(v, "created_ms"), "-")
-			}
-		}
-		if got {
-			if isDigits(created) {
-				START_RUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + created
-			} else {
-				START_RUN = "-"
-			}
-			return true
-		}
-		if time.Now().Unix() >= end {
-			return false
+		if r := startOnce(addr, lane); r == 0 || time.Now().Unix() >= end {
+			return r
 		}
 		time.Sleep(time.Duration(POLL) * time.Second)
 	}
+}
+
+// startOnce: startState 한 번. 응답 전체가 JSON 값 하나이고 hc get이 성공했을 때만 읽는다(gofix-fill F03)
+func startOnce(addr, lane string) int {
+	out, rc := run("hc", "get", addr, "--json")
+	vs, ok := decodeAll(out)
+	if !ok || len(vs) != 1 {
+		return 2
+	}
+	o, isObj := vs[0].(map[string]any)
+	if !isObj {
+		return 2
+	}
+	if jstr(jget(o, "error", "kind")) == "not_found" {
+		return 1
+	}
+	if rc != 0 || o["address"] != any(addr) {
+		return 2
+	}
+	name, named := o["name"].(string)
+	if named && name != lane || !named && o["name"] != nil {
+		return 2 // 그 주소가 다른 터미널이다
+	}
+	if o["state"] == any("finished") {
+		return 1
+	}
+	created := jstr(o["created_ms"])
+	if !named || o["state"] != any("live") || !isDigits(created) {
+		return 2
+	}
+	switch o["status"].(type) {
+	case map[string]any:
+		START_RUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + created
+		return 0
+	case nil:
+		return 1
+	}
+	return 2
 }
 
 // alive <주소>: 이번 바퀴 터미널 표의 상태, 없으면 gone

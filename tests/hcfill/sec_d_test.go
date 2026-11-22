@@ -151,7 +151,10 @@ func secD(k *K) {
 	k.check("주인: --coord로 바꿈", k.rc == 0 && k.dq("ow2", 12) == "tq2")
 	k.add("ow3")
 	k.check("주인: 터미널 밖 add는 주인 없음(-)", k.dq("ow3", 12) == "-")
+	// 재감사 R-09: 주인 없이 넣는 것은 지휘가 아님이 hc get으로 확인될 때만 — t5ln은 레인 라벨(hc-lane=1)이 붙은 터미널
+	k.wrap("hc", `if [ "$1" = get ] && [ "$2" = t5ln ]; then echo '{"address":"t5ln","created_ms":1700000000000,"name":"lane","state":"live","labels":{"hc-lane":"1"},"status":null}'; exit 0; fi`)
 	k.runE([]string{"HC_FAKE_COORD_SET_FAIL=t5ln", "HC_TERMINAL_ID=t5ln"}, "add", "--name", "ow4", "--project", "app", "--brief", k.brief("ow4"))
+	k.unwrap("hc")
 	k.check("주인: 지휘 터미널이 아니면(레인 안) 주인 없이 넣고 한 줄", k.rc == 0 && k.dq("ow4", 12) == "-" && strings.Contains(k.out, "주인 없이"))
 	k.runE([]string{"HC_FAKE_COORD_SET_FAIL=t5ln"}, "add", "--name", "ow5", "--project", "app", "--brief", k.brief("ow5"), "--coord", "t5ln")
 	k.check("주인: --coord가 지휘가 아니면 거절", k.rc == 1 && k.where("ow5") == "")
@@ -174,7 +177,7 @@ func secD(k *K) {
 	// 감사 [중간] 1(a): 띄우기 전에 주인 지휘가 끝났으면 주인 없이, watch는 살아 있는 지휘에게
 	k.fresh()
 	k.runE([]string{"HC_TERMINAL_ID=tq1"}, "add", "--name", "ow8", "--project", "app", "--brief", k.brief("ow8"))
-	k.runE([]string{"HC_FAKE_COORD_GONE=tq1"}, "run")
+	k.runE([]string{"HC_FAKE_COORD_GONE=tq1", "HC_FAKE_GONE=tq1"}, "run") // 재감사 R-09: 끝남은 hc get(not_found)도 확인해야
 	k.check("주인 지휘가 띄우기 전에 사라지면 주인 없이(-) 띄우고 watch는 hc-lane coord 지휘에게, 한 줄 알림",
 		k.where("ow8") == "up box-1 box-1/ow8" && dCat(k.T+"/owner.log") == "없음" && dCat(k.T+"/coord.log") == "t8kk" &&
 			dCat(k.T+"/coordcheck.log") == "tq1" && strings.Contains(k.out, "주인 지휘 tq1 가 지금 없다"),

@@ -81,6 +81,8 @@
                 않은 가지만 git 기본으로 켜지고 정해 둔 값·조건부 false는 그대로. 「Resolved」로 푼 경로는 land가 git add)
                 원격이 있으면 main push에 --atomic으로 착지 표식 refs/hc-landed/<레인>/<UTC 초>(= 착지한 커밋)와 이 레인 임대 지우기
                 (HC_LANE_LEASE 값 lease)를 함께 싣는다(herdr-land.sh에는 HERDR_LAND_PUSH_EXTRA로 넘김). 못 실었으면 착지 뒤 따로
+                herdr-land.sh에는 HERDR_LAND_HOOK_REV=<지금 도는 그 스크립트 판의 커밋>도 넘긴다(직접 착지 = HEAD(먼저 rebase했으면
+                그 뒤), 병합기 안 = 기본 브랜치 커밋 — 스크립트가 이 커밋 트리로 도구를 짓게). 호출자 값은 덮어쓰고 내장 길 검증엔 안 넘김
                 종료 0 착지, 1 검증 실패·검증 없음·push 실패·인자 오류, 3 rebase 충돌, 4 거절 횟수 넘음, 75 바깥 명령 시간 넘김(모름 — 다시)
                 검증(herdr-land.sh면 그 전체) 출력은 화면 그대로 + ${XDG_STATE_HOME:-~/.local/state}/hc-lane/land-logs/<레인>-<시각>-<pid>.log
                 (14일 지난 것은 지움). 실패면 실패 줄(--- FAIL·FAIL <패키지>·panic·(fail)·✗·✖·not ok, 최대 40줄 — 이번에 생긴

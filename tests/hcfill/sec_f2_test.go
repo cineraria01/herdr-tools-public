@@ -132,6 +132,14 @@ func secF2(k *K) {
 	k.confSed(`^idle .*`, "idle     0")
 	k.run("run")
 	k.check("merger 줄: 빈 대기열·idle 0에도 켬 표식 push", k.rc == 0 && strings.Contains(k.out, "대기열 비었음") && fBoth(gl, "push", "refs/herdr/merger/box-2"), read(gl))
+	// idle 0은 놀고 있음 알림만 끈다 — 빈 대기열이어도 켜진 병합기의 반송을 읽는다(R-16)
+	k.runE(mgm, "run")
+	k.check("빈 대기열·idle 0·병합기 켬: 다시 맞춤 기준(#since)을 적음", k.rc == 0 && hasE(k.DATA+"/reland.tsv", "^#since"), k.out)
+	write(k.t, k.T+"/events", "2099-01-01T00:00:00Z\tbox-2\t-\trl-x\t막힘\t-\t병합기: 착지 실패(종료 3, 충돌 a.go) — 원본 aaaaaaaa, 제출 ID box-rl-x, refs/merge-failed/100-rl-x 로 옮김, 로그 /s/l.log\t-\tt9\t-\t-\t-\n")
+	k.runE(mgm, "run")
+	// 가짜 git은 refs/merge-failed/ 조회에 요청한 참조 없는 큐 줄만 준다 — 모름(R-15)이라 장부·대기열은 그대로
+	k.check("빈 대기열·idle 0·병합기 켬: 반송을 읽고, 원격 응답이 꼴에 안 맞으면 보류",
+		k.rc == 0 && strings.Contains(k.out, "다시 맞춤 보류 rl-x: 원격 refs/merge-failed/100-rl-x 를 못 읽음") && !hasE(k.DATA+"/reland.tsv", "^100-rl-x") && !hasE(k.DATA+"/queue.tsv", "rl-x"), k.out)
 	// 새로 뜬 레인 터미널이 아직 사건을 하나도 안 적었으면 같은 이름의 옛 병합기 착지로 소유를 풀지 않는다
 	k.fO12()
 	write(k.t, k.T+"/events", "2026-11-19T09:00:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t병합기 착지(지난 실행)\t-\n")

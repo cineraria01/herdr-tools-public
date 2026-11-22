@@ -231,7 +231,7 @@ func idleTick() {
 				iall = true
 				continue
 			}
-			if _, rc := run("hc-lane", "coord", "--check", o); rc != 1 {
+			if rc, _ := ownerCheck(o); rc != 1 { // 없음이 확인된 주인만 뺀다(모름을 빼면 받는 쪽이 모든 지휘로 넓어진다 — 재감사 R-09)
 				if ito != "" {
 					ito += ","
 				}

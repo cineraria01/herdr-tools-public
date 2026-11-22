@@ -75,7 +75,7 @@
   - `values`: 맞출 키(`.model`, `.env.X` 꼴).
   - `hooks`: 이벤트마다 command에 이 글자가 든 훅 항목만 맞춘다. 다른 훅 항목은 건드리지 않는다.
   - `refs`: 맞추지 않고 `--check`에서 「참고」로만 보일 키.
-  - `exceptions`: 기계 이름마다 그 기계 값을 그대로 둘 키.
+  - `exceptions`: 기계 이름마다 그 기계 값을 그대로 둘 키. 훅은 판정 이름(`hook:PreToolUse:cotenant-guard`)으로 적으면 그 기계의 그 훅 항목을 쓰지도 지우지도 않는다(`--check`에서도 「예외」, 다름으로 안 셈).
 - 문자열 값 안의 맥 `$HOME`은 대상 기계의 `$HOME`으로 바꿔 넣는다.
 - 키마다 3-way다. base는 대상 기계의 `~/.local/state/herdr-sync/settings-base.json`이다.
 - 쓰기 전에 `settings.json`을 백업하고, 고친 결과가 올바른 JSON일 때만 바꿔 넣는다.

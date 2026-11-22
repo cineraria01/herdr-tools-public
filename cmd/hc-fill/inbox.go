@@ -63,7 +63,7 @@ setowner &&
 // 그 밖의 onm 본문(셸 판 글자 그대로)
 const (
 	inbCatReqSh   = `cat "$d/$1.req"`
-	inbHasBriefSh = `if grep -q "[^[:space:]]" "$d/$1.brief.md" 2>/dev/null; then echo yes; else echo no; fi`
+	inbHasBriefSh = `b=$d/$1.brief.md; [ -f "$b" ] || { echo no; exit 0; }; grep -q "[^[:space:]]" "$b"; c=$?; if [ $c = 0 ]; then echo yes; elif [ $c = 1 ]; then echo no; else exit $c; fi` // 없음·빈 것만 no, 못 읽으면 실패(R-22)
 	inbClaimSh    = `mkdir -p "$d/.hc-fill/claim" && printf "%s %s %s\n" "$2" "$3" "$4" >"$d/.hc-fill/claim/$1.tmp" && mv -f "$d/.hc-fill/claim/$1.tmp" "$d/.hc-fill/claim/$1"`
 	inbCatBriefSh = `b=$d/$1.brief.md; [ -f "$b" ] || b=$d/taken/$1.$2.brief.md; cat "$b"`
 	inbTakenSh    = `mkdir -p "$d/taken" && { [ ! -f "$d/$1.brief.md" ] || mv -f "$d/$1.brief.md" "$d/taken/$1.$2.brief.md"; } &&
@@ -239,7 +239,10 @@ func inbOne(im, idir, n string) {
 		case hb == "-":
 			why = "지시문 " + n + ".brief.md가 없거나 비었다"
 		default:
-			yo, _ := onm(nil, im, inbHasBriefSh, idir, n)
+			yo, yrc := onm(nil, im, inbHasBriefSh, idir, n)
+			if yrc != 0 { // 명령이 실패하면 출력(「no」여도)을 믿지 않는다 — 요청·접수 그대로(R-22)
+				yo = ""
+			}
 			switch sub(yo) {
 			case "yes":
 			case "no":

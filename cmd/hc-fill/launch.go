@@ -294,7 +294,8 @@ func tryput(name, rid, m, e, u, addr, r string) int {
 	return 0
 }
 
-// try_old_busy: 줄을 교체했어도 이전 시도의 기계가 끊겼거나 그 이름의 터미널이 아직 있으면 기다린다(참)
+// try_old_busy: 줄을 교체했어도 이전 시도의 기계가 끊겼거나 그 이름의 터미널이 아직 있으면 기다린다(참).
+// 이전 시도가 미확정(주소 ?)이면 주소를 모르니 그 기계의 같은 이름 터미널은 다 그 시도일 수 있다(재감사 R-03 — 새 줄이 채택하지 않게)
 func tryOldBusy(name, rid string) bool {
 	machine, addr := "", ""
 	for _, r := range readRows(DATA + "/try.tsv") {
@@ -310,7 +311,7 @@ func tryOldBusy(name, rid string) bool {
 		return true
 	}
 	for _, t := range TERMS {
-		if t.M == machine && t.Name == name && (addr == "" || addr == "-" || t.Addr == addr) {
+		if t.M == machine && t.Name == name && (addr == "" || addr == "-" || addr == "?" || t.Addr == addr) {
 			return true
 		}
 	}

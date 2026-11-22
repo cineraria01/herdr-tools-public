@@ -34,7 +34,8 @@
   "exceptions": {
     "lx": [
       ".modelSettings",
-      ".effortLevel"
+      ".effortLevel",
+      "hook:PreToolUse:cotenant-guard"
     ]
   }
 }

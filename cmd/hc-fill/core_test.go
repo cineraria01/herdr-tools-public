@@ -162,8 +162,8 @@ func TestCountSeatsSimple(t *testing.T) {
 	if got := strings.Join(SEATS, ","); got != "b,b,s" {
 		t.Fatalf("SEATS %q, 바람 b,b,s", got)
 	}
-	if !HELDW || len(HNEW) != 2 {
-		t.Fatalf("HELDW %v HNEW %v", HELDW, HNEW)
+	if !HELDW.Load() || len(HNEW) != 2 {
+		t.Fatalf("HELDW %v HNEW %v", HELDW.Load(), HNEW)
 	}
 }
 

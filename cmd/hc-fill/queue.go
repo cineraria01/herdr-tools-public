@@ -5,7 +5,9 @@ package main
 // 셸 판의 qlock은 자식 프로세스라 그 안의 die·crash는 그 자식만 끝냈다 — withQ가 그 꼴을 그대로 받는다(종료 코드로 돌려줌)
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"strconv"
@@ -69,8 +71,14 @@ func withQ(fn func()) (rc int) {
 
 func qRows() []Row { return readRows(Q) }
 
+// qRowsWHook: 시험 자리(평소 nil) — 쓰기 명령의 재읽기를 실패시켜 그 명령이 qRowsW로 읽는지 본다(R-29)
+var qRowsWHook func()
+
 // qRowsW: 고쳐 다시 쓸 대기열 줄 — 파일이 있는데 못 읽으면 종료 1(빈 목록으로 읽어 빈 대기열을 써 넣지 않게, Fable L1 — 셸 판은 awk 실패면 mv를 안 했다)
 func qRowsW() []Row {
+	if qRowsWHook != nil {
+		qRowsWHook()
+	}
 	text, ok := readFile(Q)
 	if !ok && exists(Q) {
 		fmt.Fprintf(os.Stderr, "hc-fill: 대기열을 읽지 못해 고치지 않는다: %s\n", Q)
@@ -155,14 +163,42 @@ func qHasName(n string) bool {
 	return false
 }
 
+// qHasNameW: 쓰기 전 같은 이름 확인 — 대기열이 있는데 못 읽으면 종료 1(모름을 「없음」으로 읽어 같은 이름을 더하지 않게, R-21)
+func qHasNameW(n string) bool {
+	for _, r := range qRowsW() {
+		if r.F(1) == n {
+			return true
+		}
+	}
+	return false
+}
+
+// thenofW: 쓰기 전 thenof — 대기열이나 줄의 지시문(없는 파일은 「안 붙음」)을 못 읽으면 종료 1(R-21)
+func thenofW(name string) string {
+	pre := "## 이어서: " + name + " "
+	for _, r := range qRowsW() {
+		b, err := os.ReadFile(r.F(3))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "hc-fill: 대기열 줄 %s의 지시문을 읽지 못해 더하지 않는다: %s\n", r.F(1), r.F(3))
+			exit(1)
+		}
+		for _, l := range lines(string(b)) {
+			if strings.HasPrefix(l, pre) {
+				return r.F(1)
+			}
+		}
+	}
+	return ""
+}
+
 // qAdd: 대기열 끝에 한 줄(셸 판 _add). tmp가 있으면 이름이 새것일 때만 그 사본을 f[2](지시문 자리)로 옮긴다. 0 됨
 func qAdd(tmp string, f ...string) int {
 	return withQ(func() {
-		if qHasName(f[0]) {
+		if qHasNameW(f[0]) {
 			die("이미 대기열에 있다: %s (hc-fill ls)", f[0])
 		}
 		// 잠금 밖 검사와 이 사이에 같은 이름이 --then으로 붙었을 수 있다 — 잠금 안에서 다시(아스트라 E03)
-		if x := thenof(f[0]); x != "" {
+		if x := thenofW(f[0]); x != "" {
 			die("%s은 이미 %s에 이어 붙였다(--then) — 다른 이름으로", f[0], x)
 		}
 		if tmp != "" {
@@ -464,7 +500,7 @@ func qInadd(n, p, brief, after, only, prio, dest, rid string) (string, int) {
 
 // q_rm <이름>: 받은편지 줄은 결과가 아직 없으면 취소문을 고정해 요청자에게 간다(잠금 안)
 func qRm(n string) {
-	if !qHasName(n) {
+	if !qHasNameW(n) {
 		die("대기열에 없다: %s", n)
 	}
 	if rmigrate() != 0 {

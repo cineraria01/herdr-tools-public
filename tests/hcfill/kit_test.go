@@ -433,7 +433,7 @@ func pgrepF(pat string) []int { return pgrep("-f", pat) }
 func (k *K) leftw() []int { l, _ := k.leftwOK(); return l }
 
 // leftwOK: 이 시험의 hc-fill watch — 명령 줄에 $T가 든 것(셸 판), 또는 이 시험의 watch.lock을 연 것(Go 판).
-// ok=false면 프로세스 목록을 못 읽었다 — 「남은 것 0」으로 세지 않는다
+// ok=false면 프로세스 목록이나 살아 있는 후보의 연 파일(lsof)을 못 읽었다 — 「남은 것 0」으로 세지 않는다(R-30). 그사이 끝난 후보는 뺀다
 func (k *K) leftwOK() ([]int, bool) {
 	seen := map[int]bool{}
 	mine, ok1 := pgrepOK("-f", k.T+"/hc-fill watch")
@@ -442,7 +442,13 @@ func (k *K) leftwOK() ([]int, bool) {
 	}
 	all, ok2 := pgrepOK("-f", "/hc-fill watch")
 	for _, p := range all {
-		b, _ := exec.Command("lsof", "-p", strconv.Itoa(p)).Output()
+		b, err := exec.Command("lsof", "-p", strconv.Itoa(p)).Output()
+		if err != nil {
+			if !errors.Is(syscall.Kill(p, 0), syscall.ESRCH) {
+				ok2 = false // 살아 있는데 소유를 못 읽음 — 모름
+			}
+			continue
+		}
 		if strings.Contains(string(b), k.DATA+"/watch.lock") {
 			seen[p] = true
 		}

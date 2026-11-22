@@ -75,10 +75,10 @@ func evTick() {
 		projs = append(projs, r.F(2))
 	}
 	// 병합기를 켠 프로젝트는 떠 있는 줄이 없어도 병합기 사건을 읽는다(반송 → 자동 다시 맞춤, reland.go)
-	mgp := false
+	mgp := relandOn()
 	for _, f := range confRows("merger") {
-		if len(f) >= 3 && conf("reland_max") != "0" {
-			projs, mgp = append(projs, f[1]), true
+		if len(f) >= 3 && mgp {
+			projs = append(projs, f[1])
 		}
 	}
 	if len(eups) == 0 && strings.TrimSpace(strings.Join(eoms, "")) == "" && !mgp {

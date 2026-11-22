@@ -116,6 +116,26 @@ func TestInstallShDownload(t *testing.T) {
 	}
 }
 
+// sync-hc-timeout: 끝 시각(budget)이 지나면 받지도 짓지도 않고 E 「시간 상한」, 옛 본체 그대로. 시각은 가짜 date가 실행마다 1000초씩 민다
+func TestInstallShBudget(t *testing.T) {
+	home, art, sum, src := instEnv(t)
+	fb := t.TempDir()
+	os.WriteFile(fb+"/uname", []byte(uname("arm64")), 0o755)
+	os.WriteFile(fb+"/date", []byte("#!/bin/sh\nf="+fb+"/n; n=$(cat $f 2>/dev/null || echo 0); echo $((n+1000)) > $f; echo $((n+1000))\n"), 0o755)
+	c := exec.Command("sh", "-c", budgetSh(500), "_", "set", "c0", src, "arm64", "demo", "file://"+art, sum)
+	c.Env = append(os.Environ(), "HOME="+home, "PATH="+fb+":"+os.Getenv("PATH"))
+	out, _ := c.Output()
+	if string(out) != "E\tdemo\t시간 상한 — 다음 herdr-sync에서\n" || readOr(home+"/.local/bin/demo") != oldBody || len(leftovers(home)) != 0 {
+		t.Fatalf("시간 상한: %q 본체 %q 남은 것 %v", out, readOr(home+"/.local/bin/demo"), leftovers(home))
+	}
+	// 시각 안이면 그대로 받는다
+	c = exec.Command("sh", "-c", budgetSh(5000), "_", "set", "c0", src, "arm64", "demo", "file://"+art, sum)
+	c.Env = append(os.Environ(), "HOME="+home, "PATH="+fb+":"+os.Getenv("PATH"))
+	if out, _ := c.Output(); string(out) != "W\tdemo\n" {
+		t.Fatalf("시각 안: %q", out)
+	}
+}
+
 // R-01·R-11: 바꿔 넣기가 안 되면 옛 본체 그대로·임시 파일 없음(되돌릴 백업도 지울 백업도 없다 — 본체 하나가 한 세대).
 // 기록 쓰기만 실패하면 본체는 새 것이고 다음 실행이 알아본다. 기록이 본체와 어긋나면(쓰다 죽음) 판 모름으로 보고 다시 깐다
 func TestInstallShOneGeneration(t *testing.T) {

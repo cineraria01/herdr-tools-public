@@ -112,6 +112,7 @@ func landCmd() int {
 	os.Unsetenv("HERDR_LAND_PATCHID")
 	os.Unsetenv("HERDR_LAND_VERDICT")
 	os.Unsetenv("HERDR_LAND_SHA")
+	os.Unsetenv("HERDR_LAND_HOOK_REV") // 착지 훅에만 hc-lane이 정해 넘긴다(호출자 값이 내장 길 검증에 새지 않게)
 	if lpid != "" {
 		var rc int
 		if lmb, rc = gitOut("merge-base", lorig, bref); rc != 0 {
@@ -156,12 +157,17 @@ func landCmd() int {
 		if lpid != "" {
 			lverdictPrecheck()
 		}
-		argv := []string{"env", "HERDR_LAND=1"}
+		brev, rc := gitOut("rev-parse", "--verify", "-q", ob+"^{commit}")
+		if rc != 0 || brev == "" {
+			die("land: %s 커밋 조회 실패 — 착지 훅을 실행하지 않았다", obl)
+		}
+		// HERDR_LAND_HOOK_REV: 지금 도는 착지 스크립트 blob이 나온 커밋(저장소 스크립트가 이 트리로 도구를 짓는다)
+		argv := []string{"env", "HERDR_LAND=1", "HERDR_LAND_HOOK_REV=" + brev}
 		if px != "" {
 			argv = append(argv, "HERDR_LAND_PUSH_EXTRA="+px)
 		}
 		verifiedEnv("") // 저장소 착지 스크립트가 rebase 뒤 검증 스크립트에 그대로 물려준다(트리 대조는 검증 스크립트가)
-		rc := lrun(append(argv, "bash", mls, base)...)
+		rc = lrun(append(argv, "bash", mls, base)...)
 		if rc != 0 {
 			lfail(rc)
 		}
@@ -242,11 +248,15 @@ func landHook() int {
 	if lp == "" || strings.Trim(lp, "0123456789") != "" {
 		lp = "0"
 	}
-	argv := []string{"env", "HERDR_LAND=1", "HERDR_LAND_PRIORITY=" + lp}
+	hrev, rc := gitOut("rev-parse", "--verify", "-q", "HEAD")
+	if rc != 0 || hrev == "" {
+		die("land: HEAD를 읽지 못했다(git 실패) — 착지 훅을 실행하지 않았다")
+	}
+	argv := []string{"env", "HERDR_LAND=1", "HERDR_LAND_PRIORITY=" + lp, "HERDR_LAND_HOOK_REV=" + hrev}
 	if ax != "" {
 		argv = append(argv, "HERDR_LAND_PUSH_EXTRA="+ax)
 	}
-	rc := lrun(append(argv, "bash", ".claude/herdr-land.sh", base)...)
+	rc = lrun(append(argv, "bash", ".claude/herdr-land.sh", base)...)
 	if rc != 0 {
 		lfail(rc)
 		return rc

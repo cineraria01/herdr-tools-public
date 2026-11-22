@@ -35,7 +35,11 @@ const fakeHC = `#!/bin/bash
 case $1 in
   machine) printf '{"machines":[%s]}\n' "$HC_FAKE_MACHINES" ;;
   exec) shift; in=0
-    while [ "$1" != -- ]; do case $1 in -i) in=1 ;; --on) m=$2; shift ;; esac; shift; done; shift
+    while [ "$1" != -- ]; do case $1 in -i) in=1 ;; --on) m=$2; shift ;;
+      --timeout) # 진짜 hc처럼 1~600초만 받는다(2026-11-22 sync-hc-timeout)
+        { [ "$2" -ge 1 ] && [ "$2" -le 600 ]; } 2>/dev/null || { echo "{\"error\":{\"kind\":\"invalid_params\",\"message\":\"timeout must be more than 0 and at most 600 s, not $2\"}}" >&2; exit 6; }
+        shift ;;
+      esac; shift; done; shift
     h=$HCT/m/$m
     echo "$m" >> "$HCT/calls"   # 기계마다 hc 호출 수를 센다
     { [ -d "$h" ] && [ ! -e "$h/OFFLINE" ]; } || { echo "connect failed: $m" >&2; exit 1; }

@@ -15,16 +15,22 @@ import (
 
 var auditTerm = map[string]bool{"taken": true, "superseded": true, "coord": true, "nosha": true, "legacy": true}
 
-func runRound() {
+// runHooks: 바퀴의 끝내기 훅을 단다 — run의 신호 고루틴을 띄우기 전에(훅 목록·SB를 그 고루틴이 동기화 없이 읽지 않게, R-20).
+// 훅은 바퀴가 바꾸는 전역을 읽지 않는다: 경로·dry는 단 때 값, 자리 셈 끝은 HELDW(atomic)
+func runHooks() {
 	SB = DATA + "/.run-brief.tmp"
+	sb, d, held := SB, dry, DATA+"/held.tsv"
 	exitHooks = append(exitHooks, func() {
-		if !dry && !HELDW {
-			if err := os.WriteFile(DATA+"/held.tsv", nil, 0o644); err != nil {
+		if !d && !HELDW.Load() {
+			if err := os.WriteFile(held, nil, 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 			}
 		}
-		os.Remove(SB)
+		os.Remove(sb)
 	})
+}
+
+func runRound() {
 	if !dry {
 		sweepTmp()
 		if withQ(func() {
@@ -62,7 +68,8 @@ func runRound() {
 	}
 	if !nonEmpty(Q) && !hpend {
 		say("대기열 비었음")
-		if IDLE == 0 {
+		// idle 0은 놀고 있음 알림만 끈다 — 자동 다시 맞춤이 켜졌으면 병합기 반송을 읽고 처리하러 바퀴를 끝까지 돈다(R-16)
+		if IDLE == 0 && !relandOn() {
 			gcTick()
 			exit(0)
 		}
@@ -174,6 +181,20 @@ func sweepTmp() {
 func readTables() {
 	// hc의 오류 글은 버리지 않는다(셸 판처럼 로그에 — Fable L9)
 	hcOut := func(args ...string) (string, int) { return Cmd{Name: "hc", Args: args, Err: errPass}.Run() }
+	machinesUp := func() []string {
+		raw, rc := hcOut("machine", "ls", "--json")
+		if rc != 0 || sub(raw) == "" {
+			die("hc machine ls 실패, 이번 바퀴는 띄우지 않았다")
+		}
+		c, ok := jsonList(raw, "machines", "name", isConnected)
+		if !ok {
+			die("hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다")
+		}
+		return c
+	}
+	// 연결 확인은 목록 앞뒤 두 번 — 목록을 읽는 동안 끊겼다 다시 붙은 기계의 터미널은 목록에 없을 수 있다. 두 번 다 연결된 기계만 연결로
+	// 본다(그 기계의 「터미널 없음」을 이번 목록으로 정하지 않게 — 재감사 R-02)
+	before := machinesUp()
 	raw, rc := hcOut("ls", "--json")
 	if rc != 0 || sub(raw) == "" {
 		die("hc ls 실패, 이번 바퀴는 띄우지 않았다")
@@ -182,16 +203,18 @@ func readTables() {
 	if TERMS, ok = parseTerms(raw); !ok {
 		die("hc ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다")
 	}
+	// 라벨 목록도 전체 목록과 같은 기준(주소가 빈 글이 아닌 항목만 — 하나라도 빠지면 못 읽음, 재감사 R-04)
 	raw, rc = hcOut("ls", "--label", "hc-lane=1", "--json")
+	var lt []Term
 	if rc == 0 {
-		LANEADDR, ok = jsonList(raw, "terminals", "address", nil)
+		lt, ok = parseTerms(raw)
 	}
 	if rc != 0 || !ok {
 		die("hc ls --label hc-lane=1 실패, 이번 바퀴는 띄우지 않았다")
 	}
-	raw, rc = hcOut("machine", "ls", "--json")
-	if rc != 0 || sub(raw) == "" {
-		die("hc machine ls 실패, 이번 바퀴는 띄우지 않았다")
+	LANEADDR = nil
+	for _, t := range lt {
+		LANEADDR = append(LANEADDR, t.Addr)
 	}
 	found := false
 	for _, t := range TERMS {
@@ -202,8 +225,11 @@ func readTables() {
 	if !found {
 		die("경고: hc ls에 %s 종류가 하나도 없다(지휘 자신도 그 종류라 늘 하나는 있어야 한다). 설정 agent 값이나 hc의 이름이 바뀌었는지 본다. 이번 바퀴는 띄우지 않았다", AGENT)
 	}
-	if CONN, ok = jsonList(raw, "machines", "name", isConnected); !ok {
-		die("hc machine ls --json 출력을 읽지 못했다, 이번 바퀴는 띄우지 않았다")
+	CONN = nil
+	for _, m := range machinesUp() {
+		if has(before, m) {
+			CONN = append(CONN, m)
+		}
 	}
 }
 
@@ -411,7 +437,7 @@ func countSeats() {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
 	}
-	HELDW = true
+	HELDW.Store(true)
 }
 
 // asecText: 자동 감사 쓰기 레인의 run 지시문 끝 절(셸 판 ASEC 그대로)

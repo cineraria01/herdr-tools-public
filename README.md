@@ -47,7 +47,7 @@ herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 �
 - sh를 못 띄우는 기계(Windows 등, hc 오류 `spawn_failed`·`cannot start `)는 `<기계>: 건너뜀 (sh 없음 — Windows 등)`, uname이 Darwin·Linux가 아닌 기계(Git sh의 `MINGW64_NT-…`·`MSYS_NT-…` 등)는 `<기계>: 건너뜀 (OS <uname>)` 한 줄만 찍고 아무것도 쓰지 않는다(`--take`·`--pull`로 집어도). 둘 다 종료 코드에 넣지 않는다. 진짜 연결 실패·시간 초과는 지금처럼 `다름 (연결)`·종료 1이다.
 - 모름은 멈춤이다(2026-11-22 gofix-ops): git 조회(`status`·`rev-list` 등)가 실패하거나 시간을 넘기면, 맥·저장소·기계의 파일을 못 읽으면(권한 등), 기계 조회가 끝 줄(OS)까지 오지 않으면 그것을 깨끗함·없음·성공으로 읽지 않고 멈추거나 그 기계를 연결 실패로 친다. 모음 중(스테이징과 커밋 사이)에 죽으면 다음 실행이 `~/.local/state/herdr-sync/repo-journal.tsv`로 자기 스테이징만 되돌리고 다시 모은다(그 뒤 남이 손댔으면 멈춤 — 확인한 뒤 일지를 지운다). 앞 실행이 남긴 git 자식 무리는 거두고, 거두지 못하면 75. `sync.list`의 끝 줄바꿈 없음·줄 끝 CR·뿌리 밖 경로(절대 경로·`..`)는 종료 2. 기계마다 도는 조각은 sh다(`cmd/herdr-sync/agent.sh`를 임베드 — 원격 기계에 Go가 없어도 된다).
 - 다른 herdr-sync가 돌고 있으면 바로 끝난다(종료 75). 맥이 아닌 곳(`~/Applications/Herdr.app`·`/Applications/Herdr.app`이 없거나 `hc machine ls`에 기계가 없는 곳)에서는 종료 2.
-- 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다. 그 도구가 판정 줄 없이 실패하면 `다름 (도구문제:설정)`으로 보인다(충돌과 다르다).
+- 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다. 그 도구가 판정 줄 없이 실패하면 `다름 (도구문제:설정)`으로 보인다(충돌과 다르다). `keys.json` `exceptions.<기계>`에 훅 판정 이름(`hook:PreToolUse:cotenant-guard`)을 적으면 그 기계의 그 훅은 쓰지도 지우지도 비교하지도 않는다(`<기계> 예외 hook:…` — 예: 훅 바이너리가 깔리지 않는 리눅스 기계).
 - 저장소에 커밋하지 않은 변경이 있으면 아무것도 하지 않고 멈춘다. 표식 없는 `~/.codex/AGENTS.md`는 충돌로 보이고, `--take`하면 codebase-memory-mcp 블록만 남기고 구역을 넣는다(백업).
 
 ### 나무 줄: 폴더 통째로 (스킬 폴더 등)

@@ -47,7 +47,17 @@ var BINS []binUnit
 // (주소·sha256이 -이면 받지 않고 짓기만). 도구마다 정확히 한 줄: S(이미 이 판)·W(받음)·B(지음 — 까닭)·E(못 깖 — 까닭, 옛 본체 그대로)·
 // D(--check: 다름 — 까닭). W·B 셋째 칸이 있으면 기록을 못 씀(다음 실행이 다시 깐다).
 // 이 기계 소스 판(cur)은 srcDigest와 같은 계산(TestInstallShSourceDigest가 본다)
+// budget(조각 앞에 붙인 변수, 초 — 없거나 0이면 상한 없음): 그 시각이 지나면 남은 도구는 받거나 짓지 않고 E 「시간 상한」(옛 본체 그대로,
+// 다음 herdr-sync가 잇는다), 받기(curl)도 남은 시간까지만.
+// ponytail: 이미 시작한 짓기 하나는 끊지 않는다 — hc 상한(hcExecMax)과의 차이(120초)가 그 몫. 짓기가 그보다 길어지면 hc run --bg로 나눈다
+const installBudget = hcExecMax - 120
+
+// budgetSh: 끝 시각(secs초 뒤)을 지키는 installSh
+func budgetSh(secs int) string { return "budget=" + strconv.Itoa(secs) + "\n" + installSh }
+
 const installSh = `mode=$1 c12=$2 src=$3 arch=$4; shift 4
+end=; [ "${budget:-0}" -le 0 ] || end=$(( $(date +%s) + budget ))
+left() { if [ -z "$end" ]; then echo 300; else l=$(( end - $(date +%s) )); [ "$l" -lt 300 ] || l=300; echo "$l"; fi; }
 b=$HOME/.local/bin
 st=$HOME/.local/state/herdr-sync/bin.tsv
 g=$HOME/.local/lib/herdr-go
@@ -79,11 +89,13 @@ while [ $# -ge 3 ]; do
     if [ -n "$have" ]; then printf 'D\t%s\t판이 다르거나 모름\n' "$t"; else printf 'D\t%s\t없음\n' "$t"; fi
     continue
   fi
+  tl=$(left)
+  if [ "$tl" -le 0 ]; then printf 'E\t%s\t시간 상한 — 다음 herdr-sync에서\n' "$t"; continue; fi
   n=$b/.$t.new.$$ why= how=W
   rm -f "$n" "$n.log"
   if [ "$url" = - ]; then why='릴리스 없음'
   elif [ "$um" != "$arch" ]; then why="CPU가 $um"
-  elif ! curl -fsSL --max-time 300 -o "$n" "$url" 2>/dev/null; then why='받지 못했다'
+  elif ! curl -fsSL --max-time "$tl" -o "$n" "$url" 2>/dev/null; then why='받지 못했다'
   elif [ "$(sha "$n")" != "$sum" ]; then why='받은 것의 해시가 다르다'
   fi
   if [ -n "$why" ]; then
@@ -181,7 +193,8 @@ func installBins(m, osname string, rel *relInfo) ([]string, bool) {
 	if m == "맥" {
 		c = exec.Command("sh", append([]string{"-c", installSh, "_"}, args...)...)
 	} else {
-		c = exec.Command("hc", append([]string{"exec", "--timeout", "1800", "--on", m, "--", "sh", "-c", installSh, "_"}, args...)...)
+		// 조각이 installBudget 안에 끝내고(남은 도구는 E 「시간 상한」), hc 상한까지 남은 몫은 마지막 짓기·보고 몫
+		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", budgetSh(installBudget), "_"}, args...)...)
 	}
 	var errb bytes.Buffer
 	c.Stderr = &errb

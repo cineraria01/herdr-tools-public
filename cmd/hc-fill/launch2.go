@@ -121,14 +121,15 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if own == "-" {
 		own = ""
 	}
-	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면(종료 1 — 없음이 확인됨) 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는
-	// 살아 있는 지휘에게. 그 밖(시간 넘김·연결 실패)은 모름 — 주인을 풀지 않고 이번 바퀴는 미룬다(gofix-fill F06·L8)
+	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면(없음이 확인됨 — ownerCheck) 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는
+	// 살아 있는 지휘에게. 그 밖(시간 넘김·연결 실패·살아 있으나 pid 없음)은 모름 — 주인을 풀지 않고 이번 바퀴는 미룬다(gofix-fill F06·L8, 재감사 R-09)
 	if own != "" {
-		if ce, rc := (Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}).Run(); rc == 1 {
-			say("알림: %s 의 주인 지휘 %s 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) (%s)", lane, own, lastLine(sub(ce)))
+		switch rc, why := ownerCheck(own); rc {
+		case 1:
+			say("알림: %s 의 주인 지휘 %s 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) (%s)", lane, own, why)
 			own = ""
-		} else if rc != 0 {
-			say("미룸 %s: 주인 지휘 %s 확인을 못 함(종료 %d) — 다음 바퀴에 (%s)", lane, own, rc, lastLine(sub(ce)))
+		case 2:
+			say("미룸 %s: 주인 지휘 %s 확인을 못 함 — 다음 바퀴에 (%s)", lane, own, why)
 			return 2
 		}
 	}
@@ -143,8 +144,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if own == "" {
 		o, rc := Cmd{Name: "hc-lane", Args: []string{"coord"}, Err: errMerge}.Run()
 		wco = sub(o)
-		if rc == proc.TimeoutCode { // 지휘가 있는지 모름 — 감시 없이 띄우지 않고 다음 바퀴에
-			say("미룸 %s: 지휘 확인(hc-lane coord) 시간 넘김 — 다음 바퀴에", lane)
+		// 지휘가 있는지 모름(시간 넘김·종료 1 밖·「확인 못 했다」) — 감시 없이 띄우지 않고 다음 바퀴에(재감사 R-09). 없음은 종료 1의 「지휘 없음」만
+		if rc == proc.TimeoutCode || (rc != 0 && (rc != 1 || strings.Contains(wco, "확인 못"))) {
+			say("미룸 %s: 지휘 확인(hc-lane coord)을 못 함(종료 %d) — 다음 바퀴에 (%s)", lane, rc, lastLine(wco))
 			return 2
 		}
 		if rc != 0 {
@@ -192,6 +194,10 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		say("모름 %s @%s: hc-lane 띄우기 시간 넘김 — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, mm)
 		return 3
 	default:
+		if launchUnsure(lr, out) { // 발사가 나갔을 수 있다 — 확정 실패가 아니라 미확정(?)(재감사 R-01)
+			say("모름 %s @%s: hc-lane 띄우기 결과 미확정(종료 %d) — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다): %s", lane, mm, lr, lcTail3(out))
+			return 3
+		}
 		say("실패 %s @%s: hc-lane: %s", lane, mm, lcTail3(out))
 		tryMark(lane, mm, "")
 		return 1
@@ -207,8 +213,11 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	}
 	last := lastLine(out)
 	ADDR = ""
-	if vs, _ := decodeAll(last); len(vs) > 0 {
-		ADDR = jor(jget(vs[0], "lane"), "")
+	// 끝 줄 전체가 JSON 객체 하나이고 주소가 빈 글이 아니며 이름이 이 레인일 때만(잘린 뒷부분·다른 꼴은 못 읽음 — 재감사 R-05)
+	if vs, ok := decodeAll(last); ok && len(vs) == 1 && jget(vs[0], "name") == any(lane) {
+		if a, isStr := jget(vs[0], "lane").(string); isStr {
+			ADDR = a
+		}
 	}
 	if ADDR == "" { // 띄웠다고 답했는데 주소가 없다 — 시작했을 수 있으니 시간 넘김과 같이 미확정
 		say("모름 %s @%s: hc-lane 출력에서 주소를 못 읽음 — 다른 기계에 띄우지 않음: %s", lane, mm, last)
@@ -243,6 +252,40 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		return 5
 	}
 	return 0
+}
+
+// launchUnsure: hc-lane 띄우기의 실패 종료 가운데 발사가 나갔을 수 있는 것(참). 확정 실패는 hc run 전의 거절·실패
+// (종료 1·2·10, 못 띄움 127)뿐이고, hc-lane이 hc run 뒤 결과를 모른다고 한 1(「hc run 결과를 확인하지 못했다」)·바깥 상한(「결과 모름」)·
+// 갑작스런 끝(panic·신호·그 밖의 종료)은 미확정이다
+func launchUnsure(rc int, out string) bool {
+	switch rc {
+	case 1, 2, 10, 127:
+	default:
+		return true
+	}
+	return strings.Contains(out, "hc run 결과를 확인하지 못했다") || strings.Contains(out, "결과 모름") || strings.Contains(out, "panic:")
+}
+
+// ownerCheck <주인 지휘>: 0 살아 있음, 1 없음 확인, 2 모름(까닭 why). hc-lane coord --check 1은 「없거나 끝남」과 「살아 있으나 pid 없음」이
+// 같은 꼴이라 그대로 믿지 않는다 — 다른 실행(pid·이름 다름)이거나 hc get이 끝남(not_found·finished)을 확인했을 때만 없음(재감사 R-09)
+func ownerCheck(own string) (int, string) {
+	ce, rc := Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}.Run()
+	why := lastLine(sub(ce))
+	switch {
+	case rc == 0:
+		return 0, ""
+	case rc != 1:
+		return 2, fmt.Sprintf("종료 %d %s", rc, why)
+	case strings.Contains(why, "지휘 정보(") && strings.Contains(why, "와 다름"):
+		return 1, why
+	}
+	pr, pn := PRUN, PNAME // pget이 채우는 실행 키는 부른 쪽 것 그대로
+	gone := pget(own) == 3
+	PRUN, PNAME = pr, pn
+	if gone {
+		return 1, why
+	}
+	return 2, why + " — hc get은 끝남을 확인하지 못함"
 }
 
 // balanceMax: herdr-balance 한 번의 상한 — HC_FILL_BALANCE_TIMEOUT초(빼면 30)
@@ -360,12 +403,22 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		if lr != 0 && lr != 5 {
 			continue
 		}
+		ss := 1
+		if lr == 0 {
+			ss = startState(ADDR, lane)
+		}
+		if ss == 2 { // 시작 확인(hc get)을 못 함 — 띄운 주소가 있으니 시작했을 수 있다: 미확정(?)으로 두고 다른 기계에 또 띄우지 않는다(재감사 R-01·R-05)
+			say("모름 %s @%s %s: 시작 확인(hc get)을 못 함 — 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, m, ADDR)
+			NOW = append(NOW, m)
+			bad = true
+			break
+		}
 		if !isa {
 			ownBind(lane, "pending:"+m, ADDR)
 			GOTADDR = true
 		}
 		NOW = append(NOW, m) // 상태가 안 잡혀도 자리는 차 있다
-		if lr == 0 && statusOK(ADDR) {
+		if ss == 0 {
 			if !isa {
 				NOWL = append(NOWL, m)
 			}

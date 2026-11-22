@@ -213,6 +213,17 @@ exec /usr/bin/lockf "$@"
 	k.run("run")
 	k.check("받은편지: 다음 바퀴에 받음", cIsF(IS+"/taken/inq-c."+k.rid("inq-c")+".req") && k.cState("inq-c") == "up")
 
+	// 원격 검사가 「no」를 찍고 실패 종료(255)해도 그 출력은 믿지 않는다 — 거절이 아니라 다음 바퀴에(R-22)
+	k.ifresh()
+	k.req(IS, "inq-n", "app", "-", "slow")
+	k.set("HC_FAKE_EXEC_NO=then echo yes")
+	k.run("run")
+	k.unset("HC_FAKE_EXEC_NO")
+	k.check("받은편지: 지시문 확인 명령 실패(no·255)는 거절이 아니라 다음 바퀴에", !exists(IS+"/rejected") && cIsF(IS+"/inq-n.req") &&
+		cIsF(IS+"/inq-n.brief.md") && k.where("inq-n") == "" && k.cO("inq-n: 지시문을 확인하지 못했다, 다음 바퀴에"))
+	k.run("run")
+	k.check("받은편지: 확인 명령이 돌아오면 받음", cIsF(IS+"/taken/inq-n."+k.rid("inq-n")+".req") && k.cState("inq-n") == "up")
+
 	// 옛 줄(11칸에 #요청 ID 없음) 옮기기: 결정적 ID rl…, 떠 있던 줄은 옛 보고 경로, 옛 차례로 넣고 못 옮긴 요청은 옮기기만
 	k.ifresh()
 	k.req(IS, "inq-r", "app", "-", "slow")

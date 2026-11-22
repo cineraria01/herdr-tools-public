@@ -251,6 +251,10 @@ func main() {
 		command, _ := h.M["command"].(string)
 		mk := markers(keys, ev, command)[0] // 위에서 하나임을 확인했다
 		k := "hook:" + ev + ":" + mk
+		if has(exc, k) { // 그 기계의 그 훅은 쓰지도 지우지도 않는다(예: 훅 바이너리가 없는 기계)
+			fmt.Fprintf(&out, "예외 %s\n", k)
+			continue
+		}
 		hk := ojson.NewObject()
 		hk.Set("type", "command")
 		for _, f := range h.Keys {

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -171,6 +172,21 @@ func dupDone(r Row, prj string, merger bool) bool {
 	return merger && mqueued(prj, r.F(1)) == 0
 }
 
+// dupLandedSince <landed 줄> <줄 넣은 시각>: 그 커밋이 줄을 넣은 뒤의 것(이번 실행의 착지)인가 — 같은 이름 옛 커밋이면 거짓(R-26).
+// 넣은 시각이나 커밋 시각을 모르면 참(전처럼 뺀다 — 알림일 뿐이라 조용한 쪽)
+func dupLandedSince(l, at string) bool {
+	t, err := time.ParseInLocation("2006-01-02T15:04", at, time.Local)
+	if err != nil {
+		return true
+	}
+	o, rc := run("git", "-C", FR, "show", "-s", "--format=%ct", strings.Fields(l)[0])
+	ct, err := strconv.ParseInt(sub(o), 10, 64)
+	if rc != 0 || err != nil {
+		return true
+	}
+	return ct >= t.Unix()
+}
+
 // dupWarn <레인> <프로젝트> <지시문>: 비슷한 레인마다 「알림: 비슷한 레인 …」 한 줄(가장 비슷한 dupShow개 + 「외 N」).
 // 감사 줄·끝난 레인(완료 보고·병합기 큐·착지)은 안 본다 — 그건 겹침 막기(overlap)가 볼 일
 func dupWarn(name, prj, brief string) {
@@ -225,7 +241,7 @@ func dupWarn(name, prj, brief string) {
 		s := "대기"
 		if st == "up" {
 			if logKnown {
-				if l, ok := landed(n); ok && l != "" {
+				if l, ok := landed(n); ok && l != "" && dupLandedSince(l, r.F(10)) {
 					continue
 				}
 			}

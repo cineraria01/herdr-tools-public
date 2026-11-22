@@ -13,25 +13,6 @@ import (
 // lsTerm: hc ls --json 한 터미널(jq '[.address, (.status // "-" | tostring)] | @tsv'에 이름을 더함)
 type lsTerm struct{ Addr, Status, Name string }
 
-// lsScalar: jq @tsv 칸 — 문자열은 그대로, 수·참거짓은 글로, null은 빈 값. 객체·배열은 ok=false(jq 오류)
-func lsScalar(raw json.RawMessage) (string, bool) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || string(raw) == "null" {
-		return "", true
-	}
-	switch raw[0] {
-	case '{', '[':
-		return "", false
-	case '"':
-		var s string
-		if json.Unmarshal(raw, &s) != nil {
-			return "", false
-		}
-		return s, true
-	}
-	return string(raw), true
-}
-
 // lsTostring: jq 「.status // "-" | tostring」 — null·false는 -, 문자열은 그대로, 그 밖은 압축 JSON(키 차례 그대로)
 func lsTostring(raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
@@ -71,8 +52,9 @@ func lsTerms(raw string) ([]lsTerm, bool) {
 			if json.Unmarshal(e, &t) != nil {
 				return nil, false
 			}
-			a, ok := lsScalar(t["address"])
-			if !ok {
+			// 주소는 run의 목록(parseTerms)과 같은 기준 — 빈 글이 아닌 글만. 빠진 항목이 있으면 그 목록으로 끝남을 정하지 않는다(재감사 R-04)
+			var a string
+			if json.Unmarshal(t["address"], &a) != nil || a == "" {
 				return nil, false
 			}
 			var name string

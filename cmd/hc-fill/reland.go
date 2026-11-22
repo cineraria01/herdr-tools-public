@@ -3,9 +3,9 @@ package main
 // 자동 다시 맞춤(Go 판에서 더함, 2026-11-22 go-auto-reland — 11/21 병합기 rebase 충돌 반송이 하루 열 번 넘었고, 그때마다 지휘가
 // 「lane 가지를 가져와 rebase·검증·다시 제출」 지시문을 손으로 써 띄웠다). 병합기 기계가 적은 막힘 사건 가운데 rebase 충돌
 // (「병합기: 착지 실패(종료 3, 충돌 …)」 — cmd/hc-merger/judge.go)만 골라 대기열에 <레인>-reland(같은 프로젝트·같은 주인·우선 높음·
-// 자동 감사 끔)를 넣고 주인 지휘에 「자동 다시 맞춤 넣음」 사건 한 줄. 같은 레인(-reland 꼬리를 뗀 이름)은 설정 reland_max번
+// 자동 감사 끔)를 넣고 주인 지휘에 「자동 다시 맞춤 넣음」 사건 한 줄. 같은 레인(원래 레인 — 장부의 바탕)은 설정 reland_max번
 // (기본 2, 0이면 끔)까지, 넘으면 주인 지휘에 막힘만. 검증 실패(종료 1)·일시 실패(75 등)는 꼴이 달라 건드리지 않는다.
-// 처리한 반송은 reland.tsv 「큐 이름 레인 바탕 결과 다시맞춤 시각」, 첫 줄 「#since <UTC>」 — 파일이 처음 생길 때의 시각이고,
+// 처리한 반송은 reland.tsv(줄 꼴은 relandTick), 첫 줄 「#since <UTC>」 — 켠 뒤 첫 정상 바퀴의 시각이고,
 // 그 앞의 반송(지휘가 이미 손으로 다시 띄운 것)은 보지 않는다.
 // 원래 레인이 살아 있으면(2026-11-22 reland-live-lane — sv-go-verify-lock 반송 때 살아 있던 원래 레인이 스스로 풀어 다시 냈는데
 // -reland도 떠 같은 일을 둘이 했다): 실행 기록(OREC, 없으면 터미널 표)의 그 이름 터미널이 연결된 기계에 살아 있고 작업 트리
@@ -67,14 +67,73 @@ func relandName(base string, k int) string {
 	return base + suf
 }
 
-// relandTick: run 바퀴가 사건(EV)을 읽은 뒤 부른다. dry-run·사건 못 읽음은 건너뜀
-func relandTick() {
-	mx := relandMax()
-	if mx == 0 || dry || EVBAD || len(EV) == 0 {
+// relandOn: 자동 다시 맞춤이 켜졌나 — 설정 merger 줄(프로젝트·기계)이 있고 reland_max가 0이 아님(사건 읽기·빈 대기열 바퀴도 이것으로)
+func relandOn() bool {
+	if v := conf("reland_max"); isDigits(v) && atoi10(v) == 0 {
+		return false
+	}
+	for _, f := range confRows("merger") {
+		if len(f) >= 3 {
+			return true
+		}
+	}
+	return false
+}
+
+// relandEvOK: 이번 바퀴에 병합기 사건을 다 읽었나 — 병합기 큐(켬 표식)를 못 읽은 프로젝트, 연결 안 됨·사건 모름인 병합기 기계가
+// 있으면 아니다(그 바퀴에 #since를 적으면 그 사이 반송을 앞 이력으로 버린다)
+func relandEvOK() bool {
+	for _, f := range confRows("merger") {
+		if len(f) >= 3 && inlist(f[1], MQBAD) {
+			return false
+		}
+	}
+	unk := evUnk()
+	for _, m := range fields(MGM) {
+		if m != LOCAL && (!connHas(m) || has(unk, m)) {
+			return false
+		}
+	}
+	return true
+}
+
+// relandKey: 주인 알림 키 — 넣음은 hf:reland:<큐 이름>, 원래 레인에 보냄은 그 뒤 「:sent」(같은 반송이 보냄 뒤 넣음이 되면
+// hc-lane report --key가 같은 키를 이미 있다고 보고 넣음 알림을 삼켰다 — 작업 중 발견해 함께 고침)
+func relandKey(n, res string) string {
+	if res == "보냄" {
+		return "hf:reland:" + n + ":sent"
+	}
+	return "hf:reland:" + n
+}
+
+// relandTell: 주인 지휘에 알림(중간) — 되면 장부에 「알림 <결과>」 줄, 안 되면 그대로 두어 다음 바퀴가 같은 키로 다시(R-19)
+func relandTell(rf, n, lane, base, res, owner, msg string) {
+	if hcLaneReport("중간", msg, lane, owner, relandKey(n, res)) != 0 {
+		say("알림 실패(hc-lane report) — 다음 바퀴에 다시: %s", msg)
 		return
 	}
+	if err := appendLine(rf, strings.Join([]string{n, lane, base, "알림", res, utcnow()}, "\t")); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
+	}
+	say("%s", msg)
+}
+
+// relandTick: run 바퀴가 사건(EV)을 읽은 뒤 부른다. dry-run·사건 못 읽음은 건너뜀.
+// 장부 reland.tsv 줄: 「큐 이름 레인 바탕 결과 다시맞춤 시각 [주인 알림글]」 — 넣음·보냄은 주인·알림글을 함께 적고, 알림이 되면
+// 「큐 이름 레인 바탕 알림 <결과> 시각」을 따로 적는다(알림 줄이 없으면 다음 바퀴가 다시 보낸다). 바탕은 원래 레인 이름 —
+// 다시 맞춤 레인의 반송은 그 이름을 넣은 줄의 바탕을 잇는다(잘린 이름에서 새 바탕을 만들면 횟수가 다시 시작됐다, R-18)
+func relandTick() {
+	if !relandOn() || dry || EVBAD {
+		return
+	}
+	mx := relandMax()
 	rf := DATA + "/reland.tsv"
 	if !isFile(rf) {
+		// 켠 첫 정상 바퀴(사건 0개여도)에 기준 시각 — 그 앞 반송만 뺀다(R-17). 병합기 사건을 다 못 읽었으면 다음 바퀴에
+		if !relandEvOK() {
+			say("다시 맞춤 기준 보류: 병합기 사건을 다 읽지 못함 — 다음 바퀴에")
+			return
+		}
 		if err := writeAtomic(rf, "#since\t"+utcnow()+"\n"); err != nil {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
@@ -86,21 +145,41 @@ func relandTick() {
 		return
 	}
 	since, seen, cnt, pend := "~", map[string]bool{}, map[string]int{}, map[string]Row{}
+	bases, told := map[string]string{}, map[string]bool{}
+	var tell []Row
 	for _, l := range lines(text) {
 		r := splitRow(l)
 		switch {
 		case r.F(1) == "#since":
 			since = r.F(2)
+		case r.F(4) == "알림":
+			told[r.F(1)+"\t"+r.F(5)] = true
 		case r.F(4) == "보냄": // 원래 레인에 보내고 다시 냄을 기다리는 반송 — 뒤 줄(넣음·다시 냄 등)이 있으면 끝난 것
 			if !seen[r.F(1)] {
 				pend[r.F(1)] = r
+			}
+			if r.F(8) != "" {
+				tell = append(tell, r)
 			}
 		case r.F(1) != "":
 			seen[r.F(1)] = true
 			delete(pend, r.F(1))
 			if r.F(4) == "넣음" {
 				cnt[r.F(3)]++
+				bases[r.F(5)] = r.F(3)
+				if r.F(8) != "" {
+					tell = append(tell, r)
+				}
 			}
+		}
+	}
+	for _, r := range tell { // 등록·보냄은 됐는데 주인 알림이 안 간 것 — 같은 키로 다시
+		if !told[r.F(1)+"\t"+r.F(4)] {
+			ow := r.F(7)
+			if ow == "-" {
+				ow = ""
+			}
+			relandTell(rf, r.F(1), r.F(2), r.F(3), r.F(4), ow, r.F(8))
 		}
 	}
 	mg := map[string]bool{}
@@ -117,19 +196,23 @@ func relandTick() {
 			continue
 		}
 		seen[qm[1]] = true
+		base := bases[r.F(4)]
+		if base == "" {
+			base = relandSuf.ReplaceAllString(r.F(4), "")
+		}
 		if pr, ok := pend[qm[1]]; ok {
-			relandPend(rf, qm[1], mm[1], r, mx, cnt, pr, mg)
+			relandPend(rf, qm[1], mm[1], base, r, mx, cnt, pr, mg)
 			continue
 		}
-		relandOne(rf, qm[1], mm[1], r, mx, cnt, true)
+		relandOne(rf, qm[1], mm[1], base, r, mx, cnt, true)
 	}
 }
 
 // relandPend: 원래 레인에 보낸 반송 — 보낸 뒤 그 레인이 다시 냈으면 「다시 냄」, reland_wait분이 지나도 안 냈으면 다시 맞춤
-func relandPend(rf, n, files string, r Row, mx int, cnt map[string]int, pr Row, mg map[string]bool) {
+func relandPend(rf, n, files, base string, r Row, mx int, cnt map[string]int, pr Row, mg map[string]bool) {
 	lane, at := r.F(4), pr.F(6)
 	re := func() {
-		if err := appendLine(rf, strings.Join([]string{n, lane, pr.F(3), "다시 냄", pr.F(5), utcnow()}, "\t")); err != nil {
+		if err := appendLine(rf, strings.Join([]string{n, lane, base, "다시 냄", pr.F(5), utcnow()}, "\t")); err != nil {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
 		say("다시 맞춤 안 함 %s: 원래 레인이 다시 냈다(refs/merge-failed/%s)", lane, n)
@@ -150,7 +233,7 @@ func relandPend(rf, n, files string, r Row, mx int, cnt map[string]int, pr Row, 
 	}
 	// 시간이 지났다 — 큐에 같은 레인(다시 냄)·착지 중이면 relandOne이 아무것도 하지 않는다
 	say("다시 맞춤 %s: 원래 레인(%s)에 보낸 뒤 %d분 — 병합기 큐를 보고 다시 맞춤", lane, pr.F(5), relandWait())
-	relandOne(rf, n, files, r, mx, cnt, false)
+	relandOne(rf, n, files, base, r, mx, cnt, false)
 }
 
 // relandLive <레인> <프로젝트>: 원래 레인 터미널 주소와 상태 — 살아 있음(연결된 기계에 그 주소·이름 터미널 + 작업 트리 남음)·닫힘·
@@ -208,16 +291,22 @@ func relandLive(lane, p string) (string, string) {
 // relandOne: 반송 하나(큐 이름 n) — 프로젝트를 찾고(원격에 refs/merge-failed/<n>이 아직 있어야), 상한이면 막힘, 아니면 줄을 넣는다.
 // 원격을 못 읽거나 이름이 아직 대기열에 있으면 적지 않고 다음 바퀴에
 // live면 먼저 원래 레인을 본다(relandLive) — 살아 있으면 그 터미널에 보내고 끝(보냄, 횟수에 안 셈)
-func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int, live bool) {
+func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, live bool) {
 	lane, mach, owner := r.F(4), r.F(2), r.F(9)
 	if owner == "-" {
 		owner = ""
 	}
-	base := relandSuf.ReplaceAllString(lane, "")
 	rec := func(res, name string) {
 		if err := appendLine(rf, strings.Join([]string{n, lane, base, res, name, utcnow()}, "\t")); err != nil {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
+	}
+	// recTell: 결과 줄에 주인·알림글을 함께 적고(등록), 알림은 따로(relandTell — 안 되면 다음 바퀴가 다시)
+	recTell := func(res, name, msg string) {
+		if err := appendLine(rf, strings.Join([]string{n, lane, base, res, name, utcnow(), dash(owner), msg}, "\t")); err != nil {
+			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
+		}
+		relandTell(rf, n, lane, base, res, owner, msg)
 	}
 	p, st := relandFind(n)
 	switch st {
@@ -251,13 +340,7 @@ func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int, live bool
 				say("다시 맞춤 %s: 원래 레인(%s)에 hc send 실패 — 다시 맞춤으로", lane, a)
 				break
 			}
-			rec("보냄", a)
-			msg = fmt.Sprintf("원래 레인에 보냄 %s(%s) — 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s), %d분 안에 다시 안 내면 다시 맞춤", lane, a, n, files, relandWait())
-			if hcLaneReport("중간", msg, lane, owner, "hf:reland:"+n) != 0 {
-				say("알림 실패(hc-lane report) — %s", msg)
-				return
-			}
-			say("%s", msg)
+			recTell("보냄", a, fmt.Sprintf("원래 레인에 보냄 %s(%s) — 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s), %d분 안에 다시 안 내면 다시 맞춤", lane, a, n, files, relandWait()))
 			return
 		case "모름":
 			say("다시 맞춤 %s: 원래 레인이 살아 있는지 모름 — 다시 맞춤으로", lane)
@@ -271,11 +354,12 @@ func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int, live bool
 		return
 	}
 	name := relandName(base, cnt[base]+1)
+	msg := fmt.Sprintf("자동 다시 맞춤 넣음 %s — %s 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s)", name, lane, n, files)
 	if qHasName(name) {
-		// 넣은 뒤 기록 전에 끊긴 바퀴면 그 줄의 지시문이 이 반송을 가리킨다 — 기록만 잇는다
+		// 넣은 뒤 기록 전에 끊긴 바퀴면 그 줄의 지시문이 이 반송을 가리킨다 — 기록을 잇고 알림도 보낸다
 		if b, _ := readFile(qrow(name).F(3)); strings.Contains(b, "refs/merge-failed/"+n+" ") {
-			rec("넣음", name)
 			cnt[base]++
+			recTell("넣음", name, msg)
 		} else {
 			say("다시 맞춤 보류 %s: %s 가 아직 대기열에 있다 — 빠진 뒤에", lane, name)
 		}
@@ -300,14 +384,8 @@ func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int, live bool
 		say("다시 맞춤 보류 %s: 대기열에 못 넣음 — 다음 바퀴에", lane)
 		return
 	}
-	rec("넣음", name)
 	cnt[base]++
-	msg := fmt.Sprintf("자동 다시 맞춤 넣음 %s — %s 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s)", name, lane, n, files)
-	if hcLaneReport("중간", msg, lane, owner, "hf:reland:"+n) != 0 {
-		say("알림 실패(hc-lane report) — %s", msg)
-		return
-	}
-	say("%s", msg)
+	recTell("넣음", name, msg)
 }
 
 // relandFind <큐 이름>: 병합기 설정 프로젝트 가운데 원격에 refs/merge-failed/<n>이 있는 것. 있음·없음·모름(원격을 못 읽은 프로젝트가 있음)
@@ -325,19 +403,38 @@ func relandFind(n string) (string, string) {
 			unk = true
 			continue
 		}
-		o, rc := run("git", "-C", r, "ls-remote", "origin", "refs/merge-failed/"+n)
-		if rc != 0 {
-			unk = true
+		ref := "refs/merge-failed/" + n
+		o, rc := run("git", "-C", r, "ls-remote", "--exit-code", "origin", ref)
+		if rc == 2 && o == "" { // --exit-code: 맞는 참조가 없다고 확정
 			continue
 		}
-		if strings.TrimSpace(o) != "" {
+		if rc == 0 && relandLsHas(o, ref) {
 			return p, "있음"
 		}
+		unk = true // 종료 0이 아님·빈·잘린·꼴 틀린 출력·요청한 이름 없음 — 모름(R-15)
 	}
 	if unk {
 		return "", "모름"
 	}
 	return "", "없음"
+}
+
+var relandLsLine = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?\t(\S+)$`)
+
+// relandLsHas: ls-remote 출력이 온전한 줄(「<40/64자 16진>\t<참조>」, 끝 줄바꿈)로만 되어 있고 그 가운데 요청한 참조가 정확히 있나
+func relandLsHas(o, ref string) bool {
+	if !strings.HasSuffix(o, "\n") {
+		return false
+	}
+	hit := false
+	for _, l := range strings.Split(strings.TrimSuffix(o, "\n"), "\n") {
+		m := relandLsLine.FindStringSubmatch(l)
+		if m == nil {
+			return false
+		}
+		hit = hit || m[2] == ref
+	}
+	return hit
 }
 
 // relandBrief: 다시 맞춤 레인 지시문(착지·정리 절차는 hc-fill이 run 지시문 끝에 붙인다)

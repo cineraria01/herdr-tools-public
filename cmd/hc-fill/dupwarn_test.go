@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func dupBrief(t *testing.T, dir, name, body string) string {
@@ -152,6 +153,38 @@ func TestDupWarnAdd(t *testing.T) {
 	confLines = lines(base + "dup_warn off\n")
 	if got := dupCapture(t, func() { dupWarn("new", "app", mine) }); got != "" {
 		t.Fatalf("off: %q", got)
+	}
+}
+
+// R-26: 떠 있는 줄의 이름과 같은 커밋 제목은 그 줄을 넣은 뒤의 것(이번 실행의 착지)일 때만 경고에서 뺀다 — 옛 커밋(이름 재사용)이면 경고
+func TestDupWarnReusedName(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git 없음")
+	}
+	setData(t)
+	repo := t.TempDir()
+	for _, c := range [][]string{{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "reused: 옛 일"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "ran: 이번 착지"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, c...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", c, out)
+		}
+	}
+	LOCAL = "here"
+	confLines = lines("local here\nrepo app here " + repo + "\n")
+	d := t.TempDir()
+	title := "# 레인 %s — 착지 원격 조회 실패를 75로 (app, 지휘 t1, 2026-11-21)\n본문\n"
+	same := func(n string) string { return dupBrief(t, d, n, strings.Replace(title, "%s", n, 1)) }
+	row := func(n, addr, at string) string {
+		return strings.Join(pad16(n, "app", same(n), "-", "-", "up", "here", addr, "-", at, "-", "t1", "normal", "-", "-", "-"), "\t") + "\n"
+	}
+	later, earlier := time.Now().Add(time.Hour).Format("2006-01-02T15:04"), time.Now().Add(-time.Hour).Format("2006-01-02T15:04")
+	if err := os.WriteFile(Q, []byte(row("reused", "here/w1", later)+row("ran", "here/w2", earlier)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := dupCapture(t, func() { dupWarn("new", "app", same("new")) })
+	if want := "알림: 비슷한 레인 reused (주인 t1, 떠 있음 here/w1) — 제목 낱말 100% 겹침\n"; got != want {
+		t.Fatalf("알림\n got %q\nwant %q", got, want)
 	}
 }
 

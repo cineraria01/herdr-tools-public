@@ -145,6 +145,11 @@ func addCmd(args []string) {
 			if cx {
 				die("--coord %s 를 지휘로 적지 못했다: %s", coord, lastLine(ce))
 			}
+			// coord --set 실패는 「지휘 아님」과 「확인 못 함」이 같은 꼴 — 지휘가 아님이 확인될 때만 주인 없이(재감사 R-09)
+			if !notCoord(coord) {
+				fmt.Fprintf(os.Stderr, "hc-fill: 미룸 — %s 를 주인 지휘로 적지 못했고 지휘가 아닌지도 확인하지 못했다(%s). 주인 없이 넣지 않았다 — 다시 add 한다\n", coord, lastLine(ce))
+				exit(75)
+			}
 			say("알림: %s 는 지휘 터미널이 아니라 주인 없이 넣음 — 이 레인 사건은 모든 지휘에게 간다 (%s)", coord, lastLine(ce))
 			coord = ""
 		}
@@ -159,7 +164,7 @@ func addCmd(args []string) {
 	}
 	if withQ(func() {
 		// 착지 뒤 명령 줄을 대기열 줄보다 먼저 — 같은 이름이 이미 있으면 qAdd가 거절하니 그 전에 남의 줄을 바꾸지 않게 여기서도 본다
-		if onl != "" && !qHasName(name) {
+		if onl != "" && !qHasNameW(name) { // 못 읽으면 남의 착지 뒤 명령을 바꾸기 전에 끝(R-21)
 			onlandPut(name, onl, prj, coord)
 		}
 		qAdd(tmp, name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk)
@@ -282,4 +287,21 @@ func thenLocked(tl, pre, prj, brief string) {
 func usage() {
 	fmt.Fprint(os.Stderr, usageText)
 	exit(2)
+}
+
+// notCoord <주소>: 그 터미널이 지휘가 아님이 hc get으로 확인됨(레인·감시 라벨, 끝남·not_found). 조회 실패·잘린 응답·라벨 없는 살아 있는
+// 터미널은 거짓(모름 — 지휘일 수 있다)
+func notCoord(addr string) bool {
+	out, rc := Cmd{Name: "hc", Args: []string{"get", addr, "--json"}, Err: errMerge}.Run()
+	vs, ok := decodeAll(out)
+	if !ok || len(vs) != 1 {
+		return false
+	}
+	if jstr(jget(vs[0], "error", "kind")) == "not_found" {
+		return true
+	}
+	if rc != 0 || jstr(jget(vs[0], "address")) == "" {
+		return false
+	}
+	return jstr(jget(vs[0], "state")) == "finished" || jstr(jget(vs[0], "labels", "hc-lane")) == "1" || jstr(jget(vs[0], "labels", "hc-lane-watch")) == "1"
 }

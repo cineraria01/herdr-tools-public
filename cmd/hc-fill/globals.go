@@ -5,6 +5,8 @@
 // 전역 상태: 셸 판의 바퀴 전역 변수를 같은 이름 꼴로 둔다(한 바퀴 = 한 프로세스, 차례로 돈다). 빈 값 뜻도 셸 판과 같다.
 package main
 
+import "sync/atomic"
+
 // 실행 환경(main이 채움)
 var (
 	CONF   string // 설정 파일 hc-fill.tsv
@@ -27,11 +29,13 @@ var (
 // X: 원격 sh 머리 — 첫 인자 경로의 ~/ 를 그 기계 HOME으로
 const X = `d=$1; shift; case $d in "~/"*) d=$HOME/${d#"~/"} ;; esac; `
 
+// HELDW: 자리를 다 셌다(held.tsv를 비우지 않음) — run 신호 고루틴의 끝내기 훅도 읽는다(R-20)
+var HELDW atomic.Bool
+
 // 바퀴 상태(run이 채움). 목록은 셸 판의 줄 목록 변수와 같은 뜻
 var (
 	MQP, MQBAD          string // 병합기 큐를 읽은 프로젝트·못 읽은 프로젝트(「,<프로젝트>」 목록)
 	MQS                 []Row  // 「프로젝트 참조 SHA」
-	HELDW               bool   // 자리를 다 셌다(held.tsv를 비우지 않음)
 	SB                  string // DATA/.run-brief.tmp — 이번 줄 지시문 사본
 	IDLE                int
 	TASK, LAUNCH, COORD string

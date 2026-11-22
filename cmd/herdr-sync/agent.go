@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,10 @@ import (
 	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/proc"
 )
+
+// hcExecMax: hc exec --timeout 상한(초). hc는 1~600만 받고 넘으면 invalid_params·종료 6으로 거절한다(2026-11-22 sync-hc-timeout).
+// 더 오래 걸릴 수 있는 일은 기계 쪽 조각이 스스로 끝 시각을 지킨다(installSh의 budget)
+const hcExecMax = 600
 
 // macCmd: 맥에서 조각. hsb는 base 파일(HSB) — ""면 조각 기본값(~/.local/state/herdr-sync/base.tsv), "-"면 base를 고치지 않음
 func macCmd(hsb string, args ...string) *exec.Cmd {
@@ -37,7 +42,7 @@ func on(m string, input bool, args ...string) *exec.Cmd {
 	if input {
 		a = append(a, "-i")
 	}
-	a = append(a, "--timeout", "600", "--on", m, "--", "sh", "-c", agent, "_")
+	a = append(a, "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", agent, "_")
 	c := exec.Command("hc", append(a, args...)...)
 	c.Stderr = os.Stderr
 	return c

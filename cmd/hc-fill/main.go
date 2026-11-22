@@ -133,15 +133,18 @@ func prioCmd(args []string) {
 	}
 	st, prj := "", ""
 	rc := withQ(func() {
-		r := qrow(args[0])
-		if r != nil {
-			st, prj = r.F(6), r.F(2)
+		rows := qRowsW() // 못 읽으면 「없다」가 아니라 종료 1(R-29)
+		for _, x := range rows {
+			if x.F(1) == args[0] {
+				st, prj = x.F(6), x.F(2)
+				break
+			}
 		}
 		if st == "" {
 			die("대기열에 없다: %s", args[0])
 		}
 		var out []Row
-		for _, x := range qRowsW() {
+		for _, x := range rows {
 			if x.F(1) == args[0] {
 				for i := x.NF() + 1; i < 13; i++ {
 					x = x.Set(i, "-")
@@ -230,6 +233,7 @@ func runCmd(args []string) {
 		exit(75)
 	}
 	heldLocks = append(heldLocks, f)
+	runHooks() // 신호 고루틴보다 먼저(R-20)
 	// 바퀴 상한·watch 멈춤으로 TERM을 받으면: 상한 걸고 따로 무리로 띄운 자식(git·hc 등 — 이 무리 신호가 안 닿는다)까지 거두고 끝낸다
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

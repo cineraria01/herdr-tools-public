@@ -178,6 +178,20 @@ func TestContract(t *testing.T) {
 		c.Ok("예외: 예외 줄, 값 그대로, 종료 0", r.RC == 0 && has("예외 .effortLevel") && has("예외 .modelSettings") && has("같음 .model") && S("effortLevel") == `"medium"` && S("modelSettings", "a") == "1")
 		runM("w2", `{"values":{".effortLevel":"xhigh"}}`, "--take", "*")
 		c.Ok("예외: 다른 기계는 맞춘다", r.RC == 0 && r.Out == "씀 .effortLevel")
+		// 훅 예외: lx의 hook:PreToolUse:cotenant-guard는 옛 명령 그대로(쓰지도 지우지도 않음), --check에서 다름으로 안 센다
+		oldG := `{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"old cotenant-guard.sh"}]}]}}`
+		gin := `{"values":{},"hooks":[{"event":"PreToolUse","matcher":"Edit","command":"new cotenant-guard"}]}`
+		fresh(oldG)
+		runM("lx", gin, "--check")
+		c.Ok("훅 예외 --check: 예외 줄만, 종료 0", r.RC == 0 && r.Out == "예외 hook:PreToolUse:cotenant-guard")
+		runM("lx", gin, "--take", "*")
+		c.Ok("훅 예외: 옛 명령 그대로, 백업 없음", r.RC == 0 && r.Out == "예외 hook:PreToolUse:cotenant-guard" && commands() == canon(`["old cotenant-guard.sh"]`) && nobak())
+		fresh(`{}`)
+		runM("lx", gin)
+		c.Ok("훅 예외: 없어도 더하지 않음", r.RC == 0 && r.Out == "예외 hook:PreToolUse:cotenant-guard" && S("hooks") == "null")
+		fresh(oldG)
+		runM("w2", gin, "--take", "*")
+		c.Ok("훅 예외: 다른 기계는 새 명령으로", r.RC == 0 && r.Out == "씀 hook:PreToolUse:cotenant-guard" && commands() == canon(`["new cotenant-guard"]`))
 
 		// 참고: 다르면 참고 줄만, 같으면 없음, refs가 없으면 없음. 이 기계 HOME은 맥 HOME으로 되돌려 비교
 		fresh(`{}`)

@@ -121,7 +121,7 @@ func TestRelandLiveLane(t *testing.T) {
 	}
 	rep, _ := readFile(DATA + "/reports")
 	if !strings.Contains(rep, "report|중간|-|원래 레인에 보냄 l-live(here/t1) — 병합기 rebase 충돌 반송(refs/merge-failed/100-l-live") ||
-		!strings.Contains(rep, "--to|t9|--key|hf:reland:100-l-live|") {
+		!strings.Contains(rep, "--to|t9|--key|hf:reland:100-l-live:sent|") {
 		t.Fatalf("주인 알림: %q", rep)
 	}
 	rl, _ := readFile(DATA + "/reland.tsv")
@@ -151,6 +151,10 @@ func TestRelandLiveLane(t *testing.T) {
 	if !strings.Contains(rl, "500-l-back\tl-back\tl-back\t다시 냄\there/t5\t") || !strings.Contains(rl, "100-l-live\tl-live\tl-live\t넣음\tl-live-reland\t") {
 		t.Fatalf("기록: %q", rl)
 	}
+	// 보냄 뒤 넣음 알림은 보냄과 다른 키(같은 키면 hc-lane report --key가 이미 있다고 삼킨다 — 작업 중 발견해 함께 고침)
+	if rep, _ = readFile(DATA + "/reports"); !strings.Contains(rep, "자동 다시 맞춤 넣음 l-live-reland — l-live 병합기 rebase 충돌 반송(refs/merge-failed/100-l-live, 충돌 README.md)|--name|l-live|--to|t9|--key|hf:reland:100-l-live|") {
+		t.Fatalf("보냄 뒤 넣음 알림 키: %q", rep)
+	}
 	n = len(qRows())
 	tick()
 	if s3, _ := readFile(DATA + "/sends"); s3 != sends || len(qRows()) != n {
@@ -158,11 +162,11 @@ func TestRelandLiveLane(t *testing.T) {
 	}
 }
 
-// lastF: reland.tsv에서 그 큐 이름 줄의 마지막 칸(시각)
+// lastF: reland.tsv에서 그 큐 이름 첫 줄의 시각(6칸 — 넣음·보냄 줄은 뒤에 주인·알림글이 붙는다)
 func lastF(text, n string) string {
 	for _, l := range lines(text) {
-		if f := strings.Split(l, "\t"); f[0] == n {
-			return f[len(f)-1]
+		if f := strings.Split(l, "\t"); f[0] == n && len(f) >= 6 {
+			return f[5]
 		}
 	}
 	return ""
