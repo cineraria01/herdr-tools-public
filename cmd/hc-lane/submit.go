@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/landing"
 )
 
 // 제출 기록 값(셸 mmeta가 채우는 mbs_ mid_ mjb_ mvd_ mpid_)
@@ -275,7 +276,7 @@ func submitCmd() {
 		die("land(제출): git merge-base --is-ancestor 실패(종료 %d)", ia)
 	}
 	laneRef := "refs/heads/lane/" + sln
-	rs, rc := gitOut("ls-remote", "origin", laneRef, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-failed/*", "refs/merge-done/"+sln)
+	rs, rc := gitOut("ls-remote", "origin", laneRef, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-failed/*", "refs/merge-done/"+sln, landing.Prefix+"*")
 	if rc != 0 {
 		die("land(제출): 원격을 읽지 못했다(git ls-remote) — 같은 줄을 다시")
 	}
@@ -322,6 +323,7 @@ func submitCmd() {
 		fmt.Printf("hc-lane land: 이 커밋은 병합기가 이미 %s 에 넣었다(refs/merge-done/%s) — 제출할 것 없음\n", base, sln)
 		exit(0)
 	}
+	submitGuard(rs, cur, sh)
 	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
 	// 돌리는 것은 제출 커밋 속 판만(무시·추적 안 된 로컬 파일을 돌리지 않는다 — committedHook, gofix L12)
 	_, inCommit := gitOutQ("rev-parse", "-q", "--verify", sh+":"+precheck)

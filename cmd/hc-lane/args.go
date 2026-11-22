@@ -14,7 +14,7 @@ type opts struct {
 	on, branch, name, repo, lbase, act, lvd string
 	integ, minage, brief, swarg             string
 	read, direct, resume, archive, dry      bool
-	steps, rb                               bool
+	steps, rb, forceOld                     bool
 	rest                                    []string // -- 뒤(또는 fetch 참조)
 }
 
@@ -90,6 +90,11 @@ func parseArgs(cmd string, a []string) (o opts, pe *parseErr) {
 			o.rb, a = true, a[1:]
 		case x == "--archive":
 			o.archive, a = true, a[1:]
+		case x == "--force-old":
+			if cmd != "land" {
+				return o, die1("--force-old는 land에서만 쓴다")
+			}
+			o.forceOld, a = true, a[1:]
 		case x == "--verdict":
 			if e := val(); e != nil {
 				return o, e

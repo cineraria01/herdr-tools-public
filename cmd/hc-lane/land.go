@@ -17,6 +17,7 @@ func init() { register("land", landMain, can("land")) }
 var (
 	base, lbase, lvd string
 	remote           bool
+	lforceOld        bool   // --force-old: 원격 lane/<레인>의 조상(옛 커밋)도 제출
 	bref, blab       string // 착지 기준 참조와 그 이름(알림용)
 	lpid, lorig      string // 승인 착지: 승인 변경 patch-id, 대조 원본 커밋
 	lmb, lrrf        string // 승인 원본과 기준의 갈림점, rerere 기록 파일
@@ -30,7 +31,7 @@ const lf = ".claude/herdr-land.sh"
 
 func landMain(a []string) int {
 	o := mustParse("land", a)
-	lbase, lvd = o.lbase, o.lvd
+	lbase, lvd, lforceOld = o.lbase, o.lvd, o.forceOld
 	return landCmd()
 }
 

@@ -7,6 +7,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"herdr-tools/internal/landing"
 )
 
 // mqload <프로젝트>: 그 프로젝트 원격의 refs/merge-queue/*·refs/herdr/merger/*를 한 바퀴에 한 번 MQS에. 못 읽으면 MQBAD에
@@ -45,16 +47,34 @@ func mqload(p string) {
 		MQBAD += "," + p
 		return
 	}
-	o, rc := run("git", "-C", r, "ls-remote", "origin", "refs/merge-queue/*", "refs/herdr/merger/*")
+	o, rc := run("git", "-C", r, "ls-remote", "origin", "refs/merge-queue/*", "refs/herdr/merger/*", landing.Prefix+"*")
 	if rc != 0 {
 		MQBAD += "," + p
 		return
 	}
 	for _, l := range lines(sub(o)) {
 		if f := fields(l); len(f) == 2 {
-			MQS = append(MQS, Row{p, f[1]})
+			MQS = append(MQS, Row{p, f[1], f[0]})
 		}
 	}
+}
+
+// mqlanding <프로젝트> <레인>: 병합기가 그 레인 제출을 지금 착지 중이면 0, 아니면 1, 못 읽으면 2(internal/landing — hc-lane land와 같은 판정)
+func mqlanding(p, lane string) int {
+	mqload(p)
+	if inlist(p, MQBAD) {
+		return 2
+	}
+	var refs []landing.Ref
+	for _, r := range MQS {
+		if r.F(1) == p {
+			refs = append(refs, landing.Ref{Name: r.F(2), SHA: r.F(3)})
+		}
+	}
+	if landing.Of(refs, lane) != "" {
+		return 0
+	}
+	return 1
 }
 
 var mgQueueRe = regexp.MustCompile(`^refs/merge-queue/[0-9]+-`)

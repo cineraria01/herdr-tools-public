@@ -30,7 +30,7 @@ const X = `d=$1; shift; case $d in "~/"*) d=$HOME/${d#"~/"} ;; esac; `
 // 바퀴 상태(run이 채움). 목록은 셸 판의 줄 목록 변수와 같은 뜻
 var (
 	MQP, MQBAD          string // 병합기 큐를 읽은 프로젝트·못 읽은 프로젝트(「,<프로젝트>」 목록)
-	MQS                 []Row  // 「프로젝트 참조」
+	MQS                 []Row  // 「프로젝트 참조 SHA」
 	HELDW               bool   // 자리를 다 셌다(held.tsv를 비우지 않음)
 	SB                  string // DATA/.run-brief.tmp — 이번 줄 지시문 사본
 	IDLE                int

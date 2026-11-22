@@ -7,6 +7,11 @@ package main
 // (기본 2, 0이면 끔)까지, 넘으면 주인 지휘에 막힘만. 검증 실패(종료 1)·일시 실패(75 등)는 꼴이 달라 건드리지 않는다.
 // 처리한 반송은 reland.tsv 「큐 이름 레인 바탕 결과 다시맞춤 시각」, 첫 줄 「#since <UTC>」 — 파일이 처음 생길 때의 시각이고,
 // 그 앞의 반송(지휘가 이미 손으로 다시 띄운 것)은 보지 않는다.
+// 원래 레인이 살아 있으면(2026-11-22 reland-live-lane — sv-go-verify-lock 반송 때 살아 있던 원래 레인이 스스로 풀어 다시 냈는데
+// -reland도 떠 같은 일을 둘이 했다): 실행 기록(OREC, 없으면 터미널 표)의 그 이름 터미널이 연결된 기계에 살아 있고 작업 트리
+// (<저장소>.wt/<레인>)가 남았으면 다시 맞춤 대신 그 터미널에 hc send 한 줄, 주인 지휘에 「원래 레인에 보냄」(중간), 기록 결과 「보냄」
+// (다시맞춤 칸은 그 주소). 설정 reland_wait분(기본 30) 안에 그 레인이 다시 내면(제출·착지 사건, 병합기의 새 사건, 큐에 같은 레인)
+// 「다시 냄」, 아니면 그때 다시 맞춤을 넣는다. 기계가 연결 안 됨·작업 트리를 못 봄(모름)·닫힘이면 지금처럼 바로 다시 맞춤.
 
 import (
 	"fmt"
@@ -14,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -32,6 +38,19 @@ func relandMax() int {
 	if !isDigits(v) {
 		say("알림: 설정 reland_max는 횟수(숫자)다, 2로: %s", v)
 		return 2
+	}
+	return atoi10(v)
+}
+
+// relandWait: 설정 reland_wait(빼면 30분)
+func relandWait() int {
+	v := conf("reland_wait")
+	if v == "" {
+		return 30
+	}
+	if !isDigits(v) {
+		say("알림: 설정 reland_wait는 분(숫자)이다, 30으로: %s", v)
+		return 30
 	}
 	return atoi10(v)
 }
@@ -66,14 +85,19 @@ func relandTick() {
 		say("다시 맞춤 보류: %s 를 못 읽음", rf)
 		return
 	}
-	since, seen, cnt := "~", map[string]bool{}, map[string]int{}
+	since, seen, cnt, pend := "~", map[string]bool{}, map[string]int{}, map[string]Row{}
 	for _, l := range lines(text) {
 		r := splitRow(l)
 		switch {
 		case r.F(1) == "#since":
 			since = r.F(2)
+		case r.F(4) == "보냄": // 원래 레인에 보내고 다시 냄을 기다리는 반송 — 뒤 줄(넣음·다시 냄 등)이 있으면 끝난 것
+			if !seen[r.F(1)] {
+				pend[r.F(1)] = r
+			}
 		case r.F(1) != "":
 			seen[r.F(1)] = true
+			delete(pend, r.F(1))
 			if r.F(4) == "넣음" {
 				cnt[r.F(3)]++
 			}
@@ -93,13 +117,98 @@ func relandTick() {
 			continue
 		}
 		seen[qm[1]] = true
-		relandOne(rf, qm[1], mm[1], r, mx, cnt)
+		if pr, ok := pend[qm[1]]; ok {
+			relandPend(rf, qm[1], mm[1], r, mx, cnt, pr, mg)
+			continue
+		}
+		relandOne(rf, qm[1], mm[1], r, mx, cnt, true)
 	}
+}
+
+// relandPend: 원래 레인에 보낸 반송 — 보낸 뒤 그 레인이 다시 냈으면 「다시 냄」, reland_wait분이 지나도 안 냈으면 다시 맞춤
+func relandPend(rf, n, files string, r Row, mx int, cnt map[string]int, pr Row, mg map[string]bool) {
+	lane, at := r.F(4), pr.F(6)
+	re := func() {
+		if err := appendLine(rf, strings.Join([]string{n, lane, pr.F(3), "다시 냄", pr.F(5), utcnow()}, "\t")); err != nil {
+			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
+		}
+		say("다시 맞춤 안 함 %s: 원래 레인이 다시 냈다(refs/merge-failed/%s)", lane, n)
+	}
+	for _, e := range EV {
+		x := splitRow(e)
+		if strings.Contains(x.F(7), "refs/merge-failed/"+n+" ") {
+			continue // 이 반송 사건 자체
+		}
+		if x.F(4) == lane && x.F(1) > at && (x.F(5) == "제출" || x.F(5) == "착지" || (mg[x.F(2)] && x.F(5) == "막힘")) {
+			re()
+			return
+		}
+	}
+	t, err := time.Parse("2006-01-02T15:04:05Z", at)
+	if err == nil && time.Since(t) < time.Duration(relandWait())*time.Minute {
+		return
+	}
+	// 시간이 지났다 — 큐에 같은 레인(다시 냄)·착지 중이면 relandOne이 아무것도 하지 않는다
+	say("다시 맞춤 %s: 원래 레인(%s)에 보낸 뒤 %d분 — 병합기 큐를 보고 다시 맞춤", lane, pr.F(5), relandWait())
+	relandOne(rf, n, files, r, mx, cnt, false)
+}
+
+// relandLive <레인> <프로젝트>: 원래 레인 터미널 주소와 상태 — 살아 있음(연결된 기계에 그 주소·이름 터미널 + 작업 트리 남음)·닫힘·
+// 모름(기계 연결 안 됨·작업 트리를 못 봄). 실행 기록(OREC)에서 찾고, 기록이 없으면 터미널 표에서 같은 이름
+func relandLive(lane, p string) (string, string) {
+	var cs [][2]string
+	for _, o := range OREC {
+		if o.F(1) == lane && !strings.HasPrefix(o.F(4), "pending:") {
+			cs = append(cs, [2]string{o.F(3), o.F(4)})
+		}
+	}
+	if len(cs) == 0 {
+		for _, t := range TERMS {
+			if t.Name == lane {
+				cs = append(cs, [2]string{t.M, t.Addr})
+			}
+		}
+	}
+	unk := false
+	for _, c := range cs {
+		m, a := c[0], c[1]
+		if m != LOCAL && !connHas(m) {
+			unk = true
+			continue
+		}
+		if !lalive(a, lane) {
+			continue
+		}
+		repo := repoOf(p, m)
+		if repo == "" {
+			unk = true
+			continue
+		}
+		o, rc := onm(nil, m, `if [ -d "$d" ]; then echo 있음; else echo 없음; fi`, strings.TrimSuffix(repo, "/")+".wt/"+lane)
+		switch strings.TrimSpace(o) {
+		case "있음":
+			if rc == 0 {
+				return a, "살아 있음"
+			}
+			unk = true
+		case "없음":
+			if rc != 0 {
+				unk = true
+			}
+		default:
+			unk = true
+		}
+	}
+	if unk {
+		return "", "모름"
+	}
+	return "", "닫힘"
 }
 
 // relandOne: 반송 하나(큐 이름 n) — 프로젝트를 찾고(원격에 refs/merge-failed/<n>이 아직 있어야), 상한이면 막힘, 아니면 줄을 넣는다.
 // 원격을 못 읽거나 이름이 아직 대기열에 있으면 적지 않고 다음 바퀴에
-func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int) {
+// live면 먼저 원래 레인을 본다(relandLive) — 살아 있으면 그 터미널에 보내고 끝(보냄, 횟수에 안 셈)
+func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int, live bool) {
 	lane, mach, owner := r.F(4), r.F(2), r.F(9)
 	if owner == "-" {
 		owner = ""
@@ -119,6 +228,40 @@ func relandOne(rf, n, files string, r Row, mx int, cnt map[string]int) {
 		say("다시 맞춤 안 함 %s: refs/merge-failed/%s 가 원격에 없다(이미 치움)", lane, n)
 		rec("없음", "-")
 		return
+	}
+	// 그 레인의 새 제출이 병합기에 있으면(지금 착지 중·큐에 섬 — 반송은 큐 참조를 같은 원자 push로 지운다) 아무것도 하지 않는다
+	switch lr, qr := mqlanding(p, lane), mqueued(p, lane); {
+	case lr == 2 || qr == 2:
+		say("다시 맞춤 보류 %s: 병합기 큐를 못 읽음 — 다음 바퀴에", lane)
+		return
+	case lr == 0:
+		say("다시 맞춤 안 함 %s: 병합기가 그 레인의 새 제출을 지금 착지 중(refs/merge-failed/%s)", lane, n)
+		rec("착지 중", "-")
+		return
+	case qr == 0:
+		say("다시 맞춤 안 함 %s: 그 레인의 새 제출이 병합기 큐에 있다(refs/merge-failed/%s)", lane, n)
+		rec("다시 냄", "-")
+		return
+	}
+	if live {
+		switch a, st := relandLive(lane, p); st {
+		case "살아 있음":
+			msg := fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 검증 뒤 hc-lane land main 다시", files, n)
+			if !auSend(a, msg) {
+				say("다시 맞춤 %s: 원래 레인(%s)에 hc send 실패 — 다시 맞춤으로", lane, a)
+				break
+			}
+			rec("보냄", a)
+			msg = fmt.Sprintf("원래 레인에 보냄 %s(%s) — 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s), %d분 안에 다시 안 내면 다시 맞춤", lane, a, n, files, relandWait())
+			if hcLaneReport("중간", msg, lane, owner, "hf:reland:"+n) != 0 {
+				say("알림 실패(hc-lane report) — %s", msg)
+				return
+			}
+			say("%s", msg)
+			return
+		case "모름":
+			say("다시 맞춤 %s: 원래 레인이 살아 있는지 모름 — 다시 맞춤으로", lane)
+		}
 	}
 	if cnt[base] >= mx {
 		msg := fmt.Sprintf("%s 병합기 rebase 충돌로 또 반송 — 자동 다시 맞춤 %d번 넘음, 지휘 판단 (refs/merge-failed/%s, 충돌 %s)", lane, mx, n, files)

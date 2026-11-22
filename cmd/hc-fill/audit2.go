@@ -135,7 +135,10 @@ func aQueued() {
 		fmt.Println(P + "넘길 판정 " + auAn + " → " + auLn + " " + auPa + " (" + auAv + ", 높음 " + h + "·중간 " + md + "·낮음 " + lw + ")")
 		return
 	}
-	aupd(auAid, "8", "deliver", "9", auAfx, "10", auAv, "17", rep)
+	if auAv == "pass" && atoi10(lw) > 0 { // 낮음 후속(lows.go lowsTick)
+		auAfl = addFlag(auAfl, "lows="+strconv.Itoa(atoi10(lw)))
+	}
+	aupd(auAid, "8", "deliver", "9", auAfx, "10", auAv, "16", auAfl, "17", rep)
 	crash("after-consume")
 	fmt.Println("판정 받음 " + auAn + " → " + auLn + " (" + auAv + ", 높음 " + h + "·중간 " + md + "·낮음 " + lw + ")")
 	auAst, auAlc, auAlw = "deliver", "", ""

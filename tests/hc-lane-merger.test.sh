@@ -221,16 +221,22 @@ cout=$("$LANE" clean --repo "$W/b/proj" --branch l-ns 2>&1); crc=$?
 t "clean: 제출 안 한 가지는 멈춤(그대로)" '[ $crc = 1 ] && git -C "$W/b/proj" show-ref -q --verify refs/heads/l-ns'
 
 # 17. 재제출 경합(구조 B — 1차 높음 4): 옛 제출을 검증하는 동안 레인이 옛 파일을 뺀 새 제출을 내면, 옛 제출의 main push는 큐 표식
-#     lease로 통째로 거절된다(main 그대로) — 옛 파일은 main에 들어가지 않고, 막힘 없이 새 제출이 들어간다
+#     lease로 통째로 거절된다(main 그대로) — 옛 파일은 main에 들어가지 않고, 막힘 없이 새 제출이 들어간다(bash 병합기).
+#     Go 병합기는 착지 직전 원격 refs/herdr/landing/<큐>를 올려(reland-live-lane — 20분 검증이 재제출로 헛수고가 됐다) 착지 중 재제출을
+#     hc-lane land가 종료 2로 거절한다 — 옛 제출이 막힘 없이 들어가고 큐는 빈다
 merge   # 앞 시험(15)이 남긴 l-cl 제출을 먼저 넣는다
 lane a l-rs rs.txt rs1
 land a l-rs
 # 첫 검증(옛 제출) 도중 레인이 기준에서 다시 갈라 rs.txt 없이 다시 제출한다(검증은 통과)
-printf '#!/bin/sh\nrm -f "$T/vhook.l-rs"\ncd "$W/a/proj" && git checkout -q -B l-rs origin/main && printf "rs2\\n" >rs2.txt && git add rs2.txt && git commit -qm l-rs2 rs2.txt && env -u HERDR_MERGER HC_LANE=l-rs "$LANE" land >/dev/null 2>&1\nexit 0\n' >"$T/vhook.l-rs"
+printf '#!/bin/sh\nrm -f "$T/vhook.l-rs"\ncd "$W/a/proj" && git checkout -q -B l-rs origin/main && printf "rs2\\n" >rs2.txt && git add rs2.txt && git commit -qm l-rs2 rs2.txt && env -u HERDR_MERGER HC_LANE=l-rs "$LANE" land >/dev/null 2>"$T/rs.err"\necho $? >"$T/rs.rc"\nexit 0\n' >"$T/vhook.l-rs"
 chmod +x "$T/vhook.l-rs"
 export W LANE
 merge
-t "재제출 경합: 병합기 계속(종료 0), 옛 파일 rs.txt는 main에 없음, 새 제출 착지, 막힘 없음" '[ $mrc = 0 ] && ! og cat-file -e main:rs.txt 2>/dev/null && og cat-file -e main:rs2.txt && mainlog | grep -Fxq l-rs2 && ! awk -F"\t" "\$4 == \"l-rs\" && \$5 == \"막힘\"" "$EV" | grep -q . && [ -z "$(qrefs)" ] && grep -Fq "lease 참조가 바뀜" "$T/merr" || { cat "$T/merr"; echo "$mout"; qrefs; false; }'
+if [ "$HC_LANE_MERGER_IMPL" = bash ]; then
+  t "재제출 경합: 병합기 계속(종료 0), 옛 파일 rs.txt는 main에 없음, 새 제출 착지, 막힘 없음" '[ $mrc = 0 ] && ! og cat-file -e main:rs.txt 2>/dev/null && og cat-file -e main:rs2.txt && mainlog | grep -Fxq l-rs2 && ! awk -F"\t" "\$4 == \"l-rs\" && \$5 == \"막힘\"" "$EV" | grep -q . && [ -z "$(qrefs)" ] && grep -Fq "lease 참조가 바뀜" "$T/merr" || { cat "$T/merr"; echo "$mout"; qrefs; false; }'
+else
+  t "재제출 경합(Go 병합기): 착지 중 재제출은 종료 2·안내, 옛 제출이 막힘 없이 착지, 큐 빔" '[ $mrc = 0 ] && [ "$(cat "$T/rs.rc")" = 2 ] && grep -Fq "l-rs은 병합기가 지금 착지 중" "$T/rs.err" && og cat-file -e main:rs.txt && ! og cat-file -e main:rs2.txt 2>/dev/null && ! awk -F"\t" "\$4 == \"l-rs\" && \$5 == \"막힘\"" "$EV" | grep -q . && [ -z "$(qrefs)" ] || { cat "$T/merr" "$T/rs.err"; echo "$mout"; qrefs; false; }'
+fi
 
 # 18. 큐 표식을 받지 못하면(그새 바뀜·망) 그 바퀴는 쉰다 — --once는 끝나고(몰아치며 되풀이하지 않음) 큐는 그대로
 lane a l-ff ff.txt ff

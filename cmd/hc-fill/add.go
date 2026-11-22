@@ -13,11 +13,11 @@ import (
 
 func addCmd(args []string) {
 	name, prj, brief, after, only, coord := "", "", "", "-", "-", ""
-	cx, prio, early, aud, ovk, thn, xo := false, "normal", "-", "-", "-", "", ""
+	cx, prio, early, aud, ovk, thn, xo, onl := false, "normal", "-", "-", "-", "", "", ""
 	for len(args) > 0 {
 		a := args[0]
 		switch a {
-		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord":
+		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land":
 			xo += " " + a // --then과 함께 못 씀
 		}
 		switch a {
@@ -59,6 +59,8 @@ func addCmd(args []string) {
 			coord, cx = v, true
 		case "--then":
 			thn = v
+		case "--on-land":
+			onl = v
 		case "--priority":
 			p, ok := pnorm(v)
 			if !ok {
@@ -120,6 +122,9 @@ func addCmd(args []string) {
 			}
 		}
 	}
+	if onl != "" {
+		onlandCheck(onl, prj)
+	}
 	if only != "-" {
 		for _, m := range words(only) {
 			if !machineKnown(m) {
@@ -152,7 +157,13 @@ func addCmd(args []string) {
 		os.Remove(tmp)
 		die("지시문을 복사하지 못했다: %s → %s", brief, bf)
 	}
-	if qAdd(tmp, name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk) != 0 {
+	if withQ(func() {
+		// 착지 뒤 명령 줄을 대기열 줄보다 먼저 — 같은 이름이 이미 있으면 qAdd가 거절하니 그 전에 남의 줄을 바꾸지 않게 여기서도 본다
+		if onl != "" && !qHasName(name) {
+			onlandPut(name, onl, prj, coord)
+		}
+		qAdd(tmp, name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk)
+	}) != 0 {
 		os.Remove(tmp)
 		exit(1)
 	}
@@ -173,6 +184,9 @@ func addCmd(args []string) {
 	}
 	if aud != "-" {
 		note += ", 자동 감사 끔"
+	}
+	if onl != "" {
+		note += ", 착지 뒤 " + onl
 	}
 	switch ovk {
 	case "overlap-ok":

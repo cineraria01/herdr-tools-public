@@ -38,6 +38,7 @@ func runRound() {
 	inboxTick()
 	mergerTick()
 	specVerifiersTick()
+	onlandTick() // 대기열이 비어도(착지한 줄이 빠진 뒤) 돈다
 	idle := conf("idle")
 	if idle == "" {
 		idle = "10"
@@ -119,6 +120,7 @@ func runRound() {
 	parkTick()
 	replyTick() // 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다
 	auditTick()
+	lowsTick() // 감사 통과 차수의 [낮음] 후속 레인(lows.go)
 	stallTick()
 	relandTick() // 병합기 rebase 충돌 반송 → 다시 맞춤 줄(이 바퀴에 띄울 수 있게 orderRows 앞)
 	auditSeats()

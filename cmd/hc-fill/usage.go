@@ -2,20 +2,27 @@ package main
 
 // usageText: 셸 판 usage 그대로(lib/hc-fill/common.sh)
 const usageText = `사용법: hc-fill add --name <레인> --project <프로젝트> --brief <지시문 경로> [--after <레인>[,…]] [--only <기계>[,…]] [--coord <지휘 주소>]
-               [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo]   (우선은 영어 urgent|high|normal|low도 받음, 기본 보통)
+               [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo] [--on-land <이름>]   (우선은 영어 urgent|high|normal|low도 받음, 기본 보통)
         hc-fill add --name <이름> --project <프로젝트> --brief <지시문 경로> --then <대기 중인 선행>
+        hc-fill status [--owner <지휘 주소> | --mine]   (Go 판만 — 레인마다 한 줄: 단계·기계·넣은 뒤·예상)
         hc-fill ls | rm <레인> | prio <레인> <우선순위> | run [--dry-run] | watch [--every <초, 기본 60>]
   add    대기열 끝에 한 줄. 프로젝트·기계는 설정에 있는 것만
          지시문은 이때 내용을 ~/.local/share/hc-fill/briefs/added/<레인>.md로 복사한다(못 읽거나 비었으면 거절)
          주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
          (HC_LANE_OWNER)으로 넘겨 그 레인의 사건(hc-lane report·멈춤)은 그 지휘 watch에게만 간다. 지휘 터미널이 아니면(레인 안·
          터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
-         넣은 뒤 같은 프로젝트의 대기·떠 있는 줄(모든 주인)과 제목 낱말·지시문 경로가 겹치면 「알림: 비슷한 레인 …」 한 줄씩(막지 않음, 설정 dup_warn)
+         넣은 뒤 같은 프로젝트의 대기·작업 중인 줄(모든 주인, 완료·제출·착지한 줄 빼고)과 예약(「파일:」·「쓰기:」)이 겹치거나 제목 낱말이
+         겹치면 「알림: 비슷한 레인 …」 — 가장 비슷한 3개 + 「외 N」(막지 않음, 설정 dup_warn)
          --no-early: 선행 착지 전 「먼저 띄움」을 끈다(선행의 산출물 없이는 준비조차 못 하는 레인)
          --no-audit: 자동 감사(설정 audit)를 붙이지 않는다(지시문이 자기 감사를 정한 레인)
          --overlap-ok: 이 줄은 겹침(설정 overlap)을 보지 않는다
          --solo: 단독 — 같은 프로젝트에 다른 쓰기 소유 레인이 있으면 기다리고, 떠 있는 동안 그 프로젝트의 다른 쓰기 줄을 띄우지 않는다
          (파일을 가로지르는 이름 바꾸기·sweep 레인). 설정 overlap과 상관없이. --overlap-ok와 함께 못 씀
+         --on-land <이름>: 이 레인이 착지하면(접수 뒤 origin/<기본>에 든 제목 머리 <레인>: 커밋이나 착지 표식 refs/hc-landed/<레인>/<초>)
+         이 기계에서 설정 「on-land <이름> <프로젝트> <명령…>」의 명령을 한 번 돌린다(그 프로젝트 local repo 폴더에서 sh -c, 환경
+         HC_ONLAND_NAME·HC_ONLAND_LANES·HC_ONLAND_SHA, 상한 1시간, 로그 ~/.local/share/hc-fill/onland/<이름>-<시각>.log). 메인 폴더 맞추기는
+         명령 몫. 같은 이름은 하나씩 — 도는 동안 착지한 것들은 끝난 뒤 한 번으로 합쳐 다시. 결과는 주인 지휘에 hc-lane report
+         --name on-land-<이름>(성공 중간 · 실패 막힘, 로그 경로). 14일 안에 착지하지 않으면 버린다
          --then <선행>: 같은 일의 다음 단계는 새 줄 없이 대기(wait) 중인 선행 줄 지시문 끝에 「## 이어서: <이름>」 절로 붙인다
          (넘길 때마다 맥락이 새고 숨은 결정이 부딪힌다 — 한 레인이 이어서). 그 절의 커밋 제목 머리는 <이름>: 이라 --after <이름>도 풀린다.
          선행이 없음·떠 있음·받은편지·감사 줄·다른 프로젝트, --after·--only·--priority·--no-early·--no-audit·--coord·--overlap-ok·--solo와 함께면 거절(종료 2).
@@ -65,7 +72,11 @@ const usageText = `사용법: hc-fill add --name <레인> --project <프로젝�
          검사와 띄우기는 바퀴마다 뜬 지시문 사본 하나로 하고, 그 사이 대기열 줄이 바뀌면 다음 바퀴에
          자동 다시 맞춤(Go 판, 설정 reland_max 기본 2·0이면 끔): 병합기가 rebase 충돌(착지 실패 종료 3)로 반송하면 <레인>-reland
          (같은 프로젝트·주인, 우선 높음, 자동 감사 끔 — refs/merge-failed/<이름>을 origin/main으로 rebase·검증·다시 제출)를 넣고
-         주인 지휘에 「자동 다시 맞춤 넣음」 한 줄. 같은 레인이 reland_max번 넘게 반송되면 지휘에 막힘만(기록 reland.tsv)
+         주인 지휘에 「자동 다시 맞춤 넣음」 한 줄. 같은 레인이 reland_max번 넘게 반송되면 지휘에 막힘만(기록 reland.tsv).
+         원래 레인 터미널이 살아 있고(실행 기록의 그 주소·이름, 연결된 기계) 작업 트리가 남았으면 다시 맞춤 대신 그 터미널에
+         hc send(rebase해 풀고 다시 land)·주인 지휘에 「원래 레인에 보냄」, 설정 reland_wait분(기본 30) 안에 다시 안 내면 그때 다시 맞춤.
+         기계 연결 안 됨·작업 트리 모름·닫힘이면 바로 다시 맞춤. 그 레인의 새 제출이 병합기에 있으면(지금 착지 중 — 원격
+         refs/herdr/landing/<큐>, hc-lane land와 같은 판정 — 이거나 큐에 섬) 보내지도 넣지도 않는다
   watch  run을 --every초마다(한 번에 하나만, 이미 돌면 종료 75)
 설정: ${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv (칸 설명은 저장소 config.example/hc-fill.tsv)
 대기열: ~/.local/share/hc-fill/queue.tsv, run 지시문: 그 기계 ~/.local/share/hc-fill/runs/<레인>-run.md

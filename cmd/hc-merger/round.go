@@ -349,7 +349,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = out(append([]string{"ls-remote", "origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*"}, specLsPatterns...)...)
+	m.qs, rc = out(append([]string{"ls-remote", "origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
@@ -366,6 +366,7 @@ func (m *M) round() {
 		m.mer = true
 		return
 	}
+	m.landUnmark() // 일지를 정리한 뒤라 이 병합기는 착지 중이 아니다(landing.go)
 	// 제출 기록(레인이 같은 push로 올림)을 한 번에 받는다. 못 받으면 이 바퀴는 쉰다
 	if strings.Contains(m.qs, "refs/merge-queue-meta/") {
 		if fetchr(true, "-q", "origin", "+refs/merge-queue-meta/*:refs/hc-merger/meta/*") != 0 {
@@ -466,6 +467,7 @@ func (m *M) round() {
 	if len(m.b) > 1 {
 		more = fmt.Sprintf(", 묶음 %d", len(m.b))
 	}
+	m.landMark()
 	fmt.Printf("hc-lane merger: 착지 시작 — %s (기준 %s%s)\n", m.mlab, first8(m.B), more)
 	m.mbn, m.ls0 = fmt.Sprint(len(m.b)), time.Now().Unix()
 	// 상주 부모가 끝났으면 새 착지를 시작하지 않는다. 이미 시작한 착지의 결과는 다음 병합기가 일지로 수거한다
