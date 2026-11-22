@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -16,19 +15,7 @@ const (
 	lcPasteAllMax  = 256 << 10
 )
 
-// lcSecrets: 비밀 꼴 — 실제 값 모양만 본다(문서 속 「API_KEY」 같은 이름만으로는 막지 않는다: 지침 문서가 늘 걸려 레인이 못 떴다)
-var lcSecrets = []struct {
-	name string
-	re   *regexp.Regexp
-}{
-	{"개인 키", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
-	{"sk-ant-", regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{16,}`)},
-	{"ghp_", regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{30,}`)},
-	{"github_pat_", regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`)},
-	{"AKIA", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
-	{"xoxb-", regexp.MustCompile(`xox[abprs]-[A-Za-z0-9-]{10,}`)},
-	{"이름=값", regexp.MustCompile(`(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)["']?\s*[=:]\s*["']?[A-Za-z0-9/+_.=-]{12,}`)},
-}
+// 비밀 꼴 판정은 secret.go(lcSecretHit) — 실제 값 모양만 본다(문서 속 「API_KEY」 같은 이름만으로는 막지 않는다)
 
 func lcBlank(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f'
@@ -96,10 +83,8 @@ func lcPasteScan(body string) (paste, shown, abs, why string) {
 				break
 			}
 			total += len(data)
-			for _, s := range lcSecrets {
-				if s.re.Match(data) {
-					return "", c, p, "비밀 꼴(" + s.name + ")을 담았다"
-				}
+			if k, n, nm := lcSecretHit(data); k != "" {
+				return "", c, p, lcSecretWhy(k, n, nm)
 			}
 			b.WriteString("\n## (붙임) 지휘 기계 파일 원문 — " + c + "\n" + string(data))
 			break

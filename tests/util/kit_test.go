@@ -85,6 +85,7 @@ func isolated(T string) Env {
 		delete(e, k)
 	}
 	e["GIT_CEILING_DIRECTORIES"] = T + ":" + filepath.Dir(T)
+	e["HC_SWEEP_TAILSCALE"] = "off" // 이 기계의 진짜 Tailscale을 부르지 않게
 	return e
 }
 

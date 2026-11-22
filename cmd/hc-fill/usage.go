@@ -10,6 +10,7 @@ const usageText = `사용법: hc-fill add --name <레인> --project <프로젝�
          주인 지휘: --coord, 없으면 부른 터미널($HC_TERMINAL_ID). hc-lane coord --set으로 지휘 정보를 남기고 띄울 때 레인 주인
          (HC_LANE_OWNER)으로 넘겨 그 레인의 사건(hc-lane report·멈춤)은 그 지휘 watch에게만 간다. 지휘 터미널이 아니면(레인 안·
          터미널 밖) 주인 없이(-) 넣고 한 줄 — 그 사건은 모든 지휘에게. --coord가 지휘가 아니면 거절
+         넣은 뒤 같은 프로젝트의 대기·떠 있는 줄(모든 주인)과 제목 낱말·지시문 경로가 겹치면 「알림: 비슷한 레인 …」 한 줄씩(막지 않음, 설정 dup_warn)
          --no-early: 선행 착지 전 「먼저 띄움」을 끈다(선행의 산출물 없이는 준비조차 못 하는 레인)
          --no-audit: 자동 감사(설정 audit)를 붙이지 않는다(지시문이 자기 감사를 정한 레인)
          --overlap-ok: 이 줄은 겹침(설정 overlap)을 보지 않는다

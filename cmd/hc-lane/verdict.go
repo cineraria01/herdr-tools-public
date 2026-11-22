@@ -17,35 +17,19 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/proc"
 )
 
 // 판정 파일 값(셸 vf va vr vs vv vp vb vo, 표시 vx·끝 vdn, 이 실행 vme)
 var lvf, lva, lvr, lvs, lvv, lvb, lvx, lvdn, lvd0, lvme string
 
-// lpatch: 두 커밋 사이 변경의 patch-id(--stable). 변경이 없으면 「-」
+// lpatch: 두 커밋 사이 변경의 patch-id(--stable). 변경이 없으면 「-」 — 병합기 묶음의 구성원별 승인 확인과 같은 함수
+// 상한에 걸리면 lastTimeout — 뒤따르는 die가 land에서 75(다시)로 끝나 병합기가 반송하지 않는다(gofix M01)
 func lpatch(a, b string) (string, bool) {
-	d, rc := gitOut("--literal-pathspecs", "diff", "-U0", "--binary", a, b, "--")
-	if rc != 0 {
-		return "", false
-	}
-	if d == "" {
-		return "-", true
-	}
-	var o bytes.Buffer
-	c := exec.Command("git", "patch-id", "--stable")
-	c.Stdin, c.Stdout, c.Stderr = strings.NewReader(d+"\n"), &o, os.Stderr
-	if code(proc.Run(c)) != 0 {
-		return "", false
-	}
-	p := trim(o.String())
-	if i := strings.IndexByte(p, ' '); i >= 0 { // ${p%% *}
-		p = p[:i]
-	}
-	if p == "" {
-		return "", false
-	}
-	return p, true
+	p, rc := gitx.PatchID(os.Stderr, a, b)
+	lastTimeout = rc == proc.TimeoutCode
+	return p, rc == 0
 }
 
 // lvload: 판정 지시를 읽는다. 0 읽음, 1 없음, 2 꼴 틀림

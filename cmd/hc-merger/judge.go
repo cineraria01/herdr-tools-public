@@ -292,7 +292,12 @@ func (m *M) recover() bool {
 // doneAll: 담긴 제출을 모두 완료. 망 오류면 false(일지를 두고 다음 바퀴에)
 func (m *M) doneAll(C, why string) bool {
 	for _, e := range m.b {
-		if m.done(e.q, e.s, e.l, e.m, C, why, false) != 0 {
+		w := why
+		if len(m.b) > 1 && e.v != "" {
+			// 묶음 착지는 묶음 전체 판정 없이 들어갔다 — 그 구성원의 승인 확인(approved)을 병합기 일지(제출 ID 칸 + 이 까닭)에 남긴다
+			w += fmt.Sprintf(", 승인 확인 판정 %s patch-id %s", e.v, e.p)
+		}
+		if m.done(e.q, e.s, e.l, e.m, C, w, false) != 0 {
 			return false
 		}
 	}

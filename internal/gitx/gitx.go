@@ -62,3 +62,27 @@ func Probe(out string, rc int, absent ...int) State {
 	}
 	return Unknown
 }
+
+// PatchID: 두 커밋 사이 변경(a → b 트리 차이)의 patch-id(--stable)와 종료 코드. 변경이 없으면 「-」. 0이 아니면 모름 —
+// 상한에 걸렸으면 proc.TimeoutCode(부르는 쪽이 「다시」로 읽게, gofix M01), 빈 patch-id면 1.
+// 감사 승인의 판정이다 — hc-lane land(승인 착지·제출)와 병합기 묶음(구성원별 승인 확인)이 같은 이 함수를 쓴다
+func PatchID(stderr io.Writer, a, b string) (string, int) {
+	d, rc := Out("", stderr, "--literal-pathspecs", "diff", "-U0", "--binary", a, b, "--")
+	if rc != 0 {
+		return "", rc
+	}
+	if d == "" {
+		return "-", 0
+	}
+	var o bytes.Buffer
+	c := exec.Command("git", "patch-id", "--stable")
+	c.Stdin, c.Stdout, c.Stderr = strings.NewReader(d+"\n"), &o, stderr
+	if rc := proc.Code(proc.Run(c)); rc != 0 {
+		return "", rc
+	}
+	p, _, _ := strings.Cut(strings.TrimRight(o.String(), "\n"), " ")
+	if p == "" {
+		return "", 1
+	}
+	return p, 0
+}

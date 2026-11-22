@@ -91,18 +91,19 @@ func fakeGit(t *testing.T) string {
 
 func TestRunTimeout(t *testing.T) {
 	pidf := fakeGit(t)
-	t.Setenv("HERDR_TIMEOUT_GIT", "1")
+	// 상한 3초 — 1초는 부하 때 가짜 git이 손자 pid를 적기 전에 거둬질 수 있었다(그러면 무리째 거뒀는지 못 본다, 2026-11-22 proc-race-flaky)
+	t.Setenv("HERDR_TIMEOUT_GIT", "3")
 	c := exec.Command("git", "-C", "/nowhere", "remote", "get-url", "origin")
 	t0 := time.Now()
 	out, err := Output(c)
-	if el := time.Since(t0); el > 10*time.Second {
-		t.Fatalf("상한 1초인데 %v 걸림", el)
+	if el := time.Since(t0); el > 30*time.Second { // 상한이 안 먹으면 60초
+		t.Fatalf("상한 3초인데 %v 걸림", el)
 	}
 	var te *TimeoutError
 	if !errors.As(err, &te) || out != nil || !errors.Is(err, ErrTimeout) {
 		t.Fatalf("TimeoutError(ErrTimeout)·빈 출력이어야: err=%v out=%q", err, out)
 	}
-	if te.Error() != "시간 넘김 git -C /nowhere remote get-url 1" {
+	if te.Error() != "시간 넘김 git -C /nowhere remote get-url 3" {
 		t.Errorf("줄 꼴: %q", te.Error())
 	}
 	if Code(err) != TimeoutCode {
@@ -128,7 +129,8 @@ func TestRunHeldPipeNoRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", d+":"+os.Getenv("PATH"))
-	t.Setenv("HERDR_TIMEOUT_GIT", "1")
+	// 상한은 넉넉히(30초) — 보는 것은 관 기다림(Grace) 쪽이다. 1초면 부하 때 상한이 먼저 sh를 거둬 helper pid가 안 적혔다
+	t.Setenv("HERDR_TIMEOUT_GIT", "30")
 	old := Grace
 	Grace = 200 * time.Millisecond
 	defer func() { Grace = old }()

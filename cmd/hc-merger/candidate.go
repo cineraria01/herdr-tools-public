@@ -47,6 +47,11 @@ func (m *M) stack() bool {
 		}
 	}
 	if len(k) < len(m.b) {
+		// 하나만 남으면 혼자 착지와 같게 원본 제출 그대로 — 승인 착지는 HEAD가 제출 SHA(HERDR_LAND_SHA)여야 한다
+		if len(k) == 1 && inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br, m.C0) != 0 {
+			m.defer_("후보 가지를 원본 제출로 되돌리지 못했다")
+			return false
+		}
 		m.keep(k...)
 		m.jwrite()
 		m.exbuild()
@@ -73,10 +78,21 @@ func (m *M) runCandidate() int {
 			return 75
 		}
 	}
+	// 혼자면 착지가 그 제출의 승인 patch-id를 대조한다. 묶음 HEAD는 어느 한 승인 변경도 아니라 묶음 전체에 대한 판정은 넘기지 않는다 —
+	// 판정이 붙은 구성원은 filterBatch(approved)가 하나씩 확인해야만 묶음에 들었다
+	v, p := m.bv, m.bp
+	if len(m.b) > 1 {
+		v, p = "", ""
+		for _, e := range m.b {
+			if e.v != "" {
+				fmt.Fprintf(lf, "hc-lane merger: 묶음 구성원 승인 확인됨 — %s 제출 ID %s 판정 %s patch-id %s\n", e.l, e.d, e.v, e.p)
+			}
+		}
+	}
 	c := exec.Command(gSelf, "land", m.base)
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+m.ex,
-		"HERDR_LAND_VERDICT="+m.bv, "HERDR_LAND_PATCHID="+m.bp, "HERDR_LAND_SHA="+m.C0)
+		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0)
 	return proc.Wait(c, m.mj+"/child")
 }
 

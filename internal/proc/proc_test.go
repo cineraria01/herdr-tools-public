@@ -26,20 +26,33 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// until: ok가 참이 될 때까지 20ms마다(상한 30초 — 부하 때 프로세스 띄우기·거두기가 몇 초씩 늦어도 넘기지 않게, 2026-11-22 proc-race-flaky).
+// 참이면 바로 돌아오니 평소 시험 시간은 그대로다
+func until(ok func() bool) bool {
+	for end := time.Now().Add(30 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if ok() {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+	}
+}
+
 // waitFile: 파일에 적힌 pid(다른 프로세스가 쓴다)
 func waitFile(t *testing.T, f string) int {
 	t.Helper()
-	for i := 0; i < 250; i++ {
-		if b, err := os.ReadFile(f); err == nil && strings.HasSuffix(string(b), "\n") {
-			p, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-			if p > 1 {
-				return p
-			}
+	p := 0
+	if !until(func() bool {
+		b, err := os.ReadFile(f)
+		if err == nil && strings.HasSuffix(string(b), "\n") {
+			p, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 		}
-		time.Sleep(20 * time.Millisecond)
+		return p > 1
+	}) {
+		t.Fatal(f + " 가 쓰이지 않았다")
 	}
-	t.Fatal(f + " 가 쓰이지 않았다")
-	return 0
+	return p
 }
 
 // startGroup: sh 스크립트를 새 무리로 띄우고, 그 안의 배경 sleep pid를 돌려준다
@@ -56,16 +69,8 @@ func startGroup(t *testing.T, script string) (*exec.Cmd, int) {
 	return c, pid
 }
 
-func gone(pid int) bool {
-	for i := 0; i < 100; i++ {
-		// 좀비는 우리 자식이 아니면 init이 거둔다 — kill 0이 ESRCH가 될 때까지
-		if syscall.Kill(pid, 0) == syscall.ESRCH {
-			return true
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return false
-}
+// gone: 좀비는 우리 자식이 아니면 init이 거둔다 — kill 0이 ESRCH가 될 때까지(옛 상한 2초는 TestRunHeldPipeNoRace의 4초 손자도 못 기다렸다)
+func gone(pid int) bool { return until(func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }) }
 
 // helperCmd: 사례 h를 하위 프로세스로(기록 폴더·작업 폴더는 d)
 func helperCmd(h, d string) *exec.Cmd {
@@ -138,7 +143,7 @@ func TestGateWithoutGoRunsNothing(t *testing.T) {
 func TestWaitMaxTimeoutIsUnknown(t *testing.T) {
 	t0 := time.Now()
 	rc := WaitMax(exec.Command("sh", "-c", "trap 'exit 0' TERM; sleep 60 & wait"), "", 500*time.Millisecond)
-	if el := time.Since(t0); el > 10*time.Second || rc != TimeoutCode {
+	if el := time.Since(t0); el > 30*time.Second || rc != TimeoutCode { // 상한이 안 먹으면 60초 — 30초는 부하 여유
 		t.Fatalf("상한에 걸리면 %d 이어야: rc=%d %v", TimeoutCode, rc, el)
 	}
 }
@@ -173,7 +178,7 @@ func TestChildBusy(t *testing.T) {
 	st2, _ := StartTime(pid2)
 	c2.Wait()
 	os.WriteFile(rec, []byte(strconv.Itoa(pid2)+"\t"+st2+"\n"), 0o666)
-	if ChildBusy(rec, time.Second) {
+	if ChildBusy(rec, 5*time.Second) { // 유예는 넉넉히(부하 때 TERM 받은 sleep이 거둬지기까지) — 거둬지면 바로 돌아온다
 		t.Fatal("끝난 착지는 도는 중이 아니다")
 	}
 	if !gone(bg2) {
@@ -320,12 +325,7 @@ func helper(h, d string) int {
 		go func() {
 			done <- Wait(exec.Command("sh", "-c", "echo $$ >"+d+"/lead; sleep 30 & echo $! >"+d+"/bg; wait"), "")
 		}()
-		for i := 0; i < 250; i++ {
-			if b, _ := os.ReadFile(d + "/bg"); strings.HasSuffix(string(b), "\n") {
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		until(func() bool { b, _ := os.ReadFile(d + "/bg"); return strings.HasSuffix(string(b), "\n") })
 		StopCurrent(time.Second)
 		go func() { done <- Wait(exec.Command("touch", d+"/new"), "") }()
 		select {
@@ -344,13 +344,21 @@ func helper(h, d string) int {
 			go func() { <-ch; StopCurrent(Grace); os.Exit(143) }()
 		}
 		if h == "killed" {
+			// 부모는 고아 기록이 쓰인 뒤에 죽는다 — Run은 손자가 뜬 뒤에도 ps(시작 시각)를 기다려 기록하니, 손자 파일만 보고 죽으면
+			// 부하 때 기록 전에 죽어 Reap이 0이었다(2026-11-22 proc-race-flaky). 느린 ps로 그 순서를 늘 벌려 둔다
+			os.WriteFile(d+"/ps", []byte("#!/bin/sh\nsleep 0.5\nexec /bin/ps \"$@\"\n"), 0o755)
+			psPath = d + "/ps"
 			go func() {
-				for i := 0; i < 250; i++ {
-					if b, _ := os.ReadFile(d + "/grandchild"); strings.HasSuffix(string(b), "\n") {
-						break
+				until(func() bool {
+					b, _ := os.ReadFile(d + "/grandchild")
+					es, _ := os.ReadDir(d + "/rec")
+					rec := false
+					for _, e := range es {
+						_, err := strconv.Atoi(e.Name())
+						rec = rec || err == nil
 					}
-					time.Sleep(20 * time.Millisecond)
-				}
+					return strings.HasSuffix(string(b), "\n") && rec
+				})
 				syscall.Kill(os.Getpid(), syscall.SIGKILL)
 			}()
 		}

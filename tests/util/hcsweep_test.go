@@ -83,7 +83,12 @@ exit 1
 		out, rc = run(T, env, SWEEP, append([]string{"--only-under", T}, args...)...)
 	}
 	sweep := func(args ...string) { sweepEnv(e, args...) }
-	cfg := func(ls ...string) { write(t, T+"/cfg/config", strings.Join(ls, "\n")+"\n") }
+	// 디스크 쓸기는 끈다(hcsweepdisk_test가 본다): 기본 문턱 10GB면 여유가 15GB 아래인 기계에서 진짜 GOCACHE(병합기가 물려줌)를
+	// 줄이고 hc-disk-low 줄이 events.tsv에 더해져, 결과가 그 기계 디스크에 따라 바뀐다
+	cfg := func(ls ...string) {
+		write(t, T+"/cfg/config", strings.Join(append([]string{"sweep.disk_free_gb 0"}, ls...), "\n")+"\n")
+	}
+	cfg()
 	LOG := T + "/home/.claude-tasks/closed.log"
 	has := func(s string) bool { return strings.Contains(out, s) }
 
@@ -259,7 +264,7 @@ exit 1
 	c.ok("hc ls에 terminals 목록이 없음: 고아 쓸기 건너뜀, 안 끔", has("고아 쓸기 건너뜀") && allalive(ALL...))
 	os.Rename(T+"/ls.bak", T+"/ls.json")
 
-	os.Remove(T + "/cfg/config")
+	cfg() // 끄기 키 없음
 	sweep("--min-age", "0")
 	sweep("--min-age", "0")
 	c.ok("끄기 설정 없음(기본 끔): 찍기만, 안 끔", grep(out, fmt.Sprintf("끄기 꺼짐.*pid %d ", pid("e"))) && allalive(ALL...))

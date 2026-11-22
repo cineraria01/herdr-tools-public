@@ -1225,7 +1225,14 @@ approved_submit() {
   tick
   test "$(og show main:approved)" = yes
   test "$(og show main:other)" = yes
-  grep -q '승인 착지(판정 a1)' "$HOME"/.local/state/hc-lane/merger-logs/lane-*.log
+  if [ "$HC_LANE_MERGER_IMPL" = bash ]; then
+    # bash 판(되돌리기 스위치)은 판정 붙은 제출을 늘 혼자 착지한다
+    grep -q '승인 착지(판정 a1)' "$HOME"/.local/state/hc-lane/merger-logs/lane-*.log
+  else
+    # Go 판은 판정 붙은 제출도 묶음에 담는다(merger-batch-audited) — 착지에 묶음 판정은 없고, 구성원별 승인 확인이 로그·병합기 일지에 남는다
+    grep -q '묶음 구성원 승인 확인됨 — lane 제출 ID .* 판정 a1 patch-id ' "$HOME"/.local/state/hc-lane/merger-logs/*.log
+    awk -F'\t' '$3=="lane" && $7==2 && $10=="착지" && $12 ~ /승인 확인 판정 a1 patch-id / {n++} END {exit n!=1}' "$HOME/.local/state/hc-lane/merger-journal.tsv"
+  fi
   awk -F'\t' '$4=="lane" && $5=="착지" && $12=="hf:a1:landed" {n++} END {exit n!=1}' "$HOME/.local/state/hc-lane/events.tsv"
 }
 batch_base() {

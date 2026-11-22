@@ -16,6 +16,7 @@ import (
 // entry: 묶음에 담긴 제출 하나
 type entry struct {
 	q, s, l, m, d string // 큐 참조 · 제출 SHA · 레인 · 기록 SHA(없으면 -) · 제출 ID
+	v, p          string // 감사 판정 · 승인 patch-id(판정 없으면 둘 다 빈 값). 일지(cur)에는 안 적는다 — 복구는 착지하지 않는다
 }
 
 // M: 병합기 일꾼의 상태(bash 판의 전역 변수들)
@@ -306,16 +307,17 @@ func (m *M) pickBatch() bool {
 			}
 			return false
 		}
-		// 승인 patch-id는 한 제출의 변경을 가리킨다 — 다른 제출과 섞지 않는다
-		plainSub := mt.verdict == "" && mt.id != ""
-		if !plainSub && len(m.b) > 0 {
+		// 제출 ID가 없는 손 제출은 혼자. 판정이 붙은 제출도 담는다 — 구성원마다 자기 승인 patch-id를 filterBatch(approved)가 확인하고,
+		// 다르면 그 구성원만 이번 묶음에서 뺀다
+		batchable := mt.id != ""
+		if !batchable && len(m.b) > 0 {
 			break
 		}
 		if len(m.b) == 0 {
 			m.bj, m.bd, m.bv, m.bp = mt.jobref, mt.id, mt.verdict, mt.patch
 		}
-		m.b = append(m.b, entry{q: mq, s: ms, l: ln, m: dash(mm), d: mt.id})
-		if !plainSub || len(m.b) >= n {
+		m.b = append(m.b, entry{q: mq, s: ms, l: ln, m: dash(mm), d: mt.id, v: mt.verdict, p: mt.patch})
+		if !batchable || len(m.b) >= n {
 			break
 		}
 	}
@@ -501,6 +503,10 @@ func (m *M) filterBatch() bool {
 			}
 		}
 	}
+	// 맨 앞의 승인이 지금 변경과 다르면(또는 모르면) 혼자 — 착지가 그 판정으로 지금처럼 다시 보고 돌려보낸다
+	if len(m.b) > 1 && !m.approved(m.b[0]) {
+		m.keep(0)
+	}
 	su := false
 	switch m.touch(m.b[0].s) {
 	case 0:
@@ -530,6 +536,9 @@ func (m *M) filterBatch() bool {
 			}
 			if hl != "" && m.hb == "" {
 				continue
+			}
+			if !m.approved(m.b[i]) {
+				continue // 큐에 그대로 — 맨 앞이 되면 혼자 착지가 판정을 본다
 			}
 			switch m.touch(s) {
 			case 0:

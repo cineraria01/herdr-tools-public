@@ -24,7 +24,25 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/badbin", T+"/home", T+"/cfg", T+"/tmp", T+"/outside/keep")
 	script(t, T+"/bin/hc", T, "#!/bin/sh\n[ \"$1\" = ls ] && { echo '{\"terminals\": []}'; exit 0; }\nexit 1\n")
 	script(t, T+"/badbin/lsof", T, "#!/bin/sh\nexit 1\n")
-	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+T+"/tmp")
+	// 「go가 도는가」(ps -x -o comm=)는 가짜 목록 @T@/ps-comm으로 — 실제 ps면 검증이 함께 돌리는 다른 꾸러미의 go test가 보여 결과가 바뀐다.
+	// 다른 ps 부름(세션 찾기 등)은 진짜로
+	script(t, T+"/bin/ps", T, "#!/bin/sh\n[ \"$*\" = \"-x -o comm=\" ] && exec cat @T@/ps-comm\nexec /bin/ps \"$@\"\n")
+	psComm := func(goRunning bool) {
+		l := "/bin/sh\nhc-sweep\nps\n"
+		if goRunning {
+			l += "/opt/homebrew/bin/go\n"
+		}
+		write(t, T+"/ps-comm", l)
+	}
+	psComm(false)
+	G, OLD := T+"/gocache", T+"/home/Library/Caches/go-build"
+	if e[implVar("hc-sweep")] == "go" { // Go 판 바이너리는 바깥 GOCACHE로 미리 짓는다(아래 GOCACHE를 시험 폴더로 바꾸면 빈 캐시로 다시 지을 수 있다)
+		if o, rc := run(T, e, SWEEP, "--version"); rc != 0 {
+			t.Fatalf("hc-sweep --version: %d %s", rc, o)
+		}
+	}
+	// GOCACHE도 시험 폴더로: 병합기는 GOCACHE=~/.cache/go-build를 물려준다 — 그대로면 문턱을 크게 둔 바퀴가 진짜 Go 캐시를 훑고 줄인다
+	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+T+"/tmp", "GOCACHE="+G, "HC_SWEEP_GO_COMM=")
 	cfg := func(ls ...string) { write(t, T+"/cfg/config", strings.Join(ls, "\n")+"\n") }
 	sweepEnv := func(env Env, args ...string) {
 		out, _ = run(T, env, SWEEP, append([]string{"--only-under", T}, args...)...)
@@ -134,6 +152,8 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	// 회복(여유 ≥ 문턱의 1.5배) 뒤 다시 부족이면 또 한 번
 	cfg("sweep.disk_free_gb 0.000001")
 	sweep()
+	// 알림 키는 초 단위 시각(hc-disk-low:<시각>) — 첫 알림과 같은 초면 hc-lane이 같은 키로 거른다. 바퀴는 몇 분 간격이라 실제로는 안 겹친다
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 	cfg("sweep.disk_free_gb 1000000000")
 	sweep()
 	c.ok("회복 뒤 다시 부족이면 다시 알림", grepc(read(EV), "hc-disk-low") == 2)
@@ -148,8 +168,7 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	sl.Wait()
 
 	// Go 빌드 캐시 상한(2026-11-21 mini-m4 ~/.cache/go-build 하루 13.4GB): 여유가 문턱 1.5배 아래면 GOCACHE를 sweep.gocache_gb 아래로
-	// 오래된 항목부터 줄이고, GOCACHE와 다른 옛 자리 ~/Library/Caches/go-build는 비운다. go가 돌면(HC_SWEEP_GO_COMM 이름) 건너뜀
-	G, OLD := T+"/gocache", T+"/home/Library/Caches/go-build"
+	// 오래된 항목부터 줄이고, GOCACHE와 다른 옛 자리 ~/Library/Caches/go-build는 비운다. go가 돌면(가짜 ps 목록에 go) 건너뜀
 	z := strings.Repeat("\x00", 4096)
 	for i := 1; i <= 4; i++ {
 		f := fmt.Sprintf("%s/0%d/h%d-a", G, i%2, i)
@@ -160,22 +179,11 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	write(t, G+"/ab/new-d", z)
 	write(t, OLD+"/00/x-a", z)
 	write(t, G+"/README", "r")
-	// 가짜 go 이름은 실행마다 다르게: ps -x는 이 사용자 프로세스를 다 본다 — 같은 기계에서 이 시험이 함께 돌면(두 판·다른 레인) 남의 가짜 go를 본다
-	fake := fmt.Sprintf("hcsweep-fakego-%d", os.Getpid())
-	e = e.With("HC_SWEEP_GO_COMM="+fake, "GOCACHE="+G)
-	mkdirs(t, T+"/fg")
-	os.Symlink("/bin/sleep", T+"/fg/"+fake)
 	cfg("sweep.disk_free_gb 1000000000", "sweep.gocache_gb 0.000009", "sweep.tmp_hours 0") // 항목 다섯 20KB → 9KB 아래: h1·h2·h3을 지움
-	fg := exec.Command(T+"/fg/"+fake, "60")
-	if err := fg.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { fg.Process.Kill(); fg.Wait() })
-	time.Sleep(300 * time.Millisecond)
+	psComm(true)
 	sweep()
 	c.ok("Go 캐시: go가 돌면 건너뜀", exists(G+"/00/h2-a") && exists(OLD+"/00/x-a") && strings.Contains(out, "go가 도는 중"))
-	fg.Process.Kill()
-	fg.Wait()
+	psComm(false)
 	sweep("--dry-run")
 	c.ok("Go 캐시: dry-run은 찍기만", exists(G+"/01/h1-a") && strings.Contains(out, "Go 캐시 줄이기 (할 것)"))
 	sweep()

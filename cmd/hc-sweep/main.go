@@ -345,11 +345,12 @@ func sweepMain(args []string) int {
 			defer lk.Close()
 		}
 	}
-	// 색인·디스크 쓸기는 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
+	// 색인·디스크 쓸기·Tailscale 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
 	sweepIndex(*dry, *minAge*60)
 	if err := diskRun(*dry, run); err != nil {
 		fmt.Println("디스크 쓸기 실패:", err)
 	}
+	tailscaleRun(*dry, run)
 	ls, err := hc("ls")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hc-sweep: hc ls 실패:", err)

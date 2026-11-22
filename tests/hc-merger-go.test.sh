@@ -24,15 +24,37 @@ if "$gob" vet ./...; then echo "ok - go vet"; else echo "FAIL - go vet"; fail=1;
 # verify-go-timeout: claude/hooks/tests의 TestCotenantGuard가 묶음 속에서 10분 초과, 혼자는 1분 안. mini-m6-1 묶음 실측 hooks 820초·
 # tests/hcfill 440초·cmd/herdr-sync 384초, 그다음 hc-merger 46초). 나머지는 묶음으로 600초. 상한을 넘으면 「시간 넘김 — <꾸러미>」로 실패한다.
 SLOW='/claude/hooks/tests$|/tests/hcfill$|/cmd/herdr-sync$'
+# failsum: go test 로그에서 실패한 시험 이름과 그 출력(`--- FAIL` 줄과 그 아래 들여 쓴 줄, panic·DATA RACE 묶음)을 「FAIL | 」 줄로 —
+# 검증(herdr-verify.sh)이 ^FAIL 줄을 먼저 보이니 끝 40줄에 잘려도 남는다(2026-11-22 proc-race-flaky: 「FAIL herdr-tools/internal/proc」만 남아 원인을 못 봤다).
+# 묶음마다 25줄, 모두 120줄까지
+failsum() {
+  awk '/^[ \t]*--- FAIL/ || /^panic: / || /^WARNING: DATA RACE/ {n=25; print; next}
+    /^(FAIL|ok |PASS$|=+$)/ || /^[ \t]*--- (PASS|SKIP)/ {n=0}
+    n && NF {n--; print}' "$1" | head -120 | sed 's/^/FAIL | /'
+}
 gotest() { # 이름 상한 꾸러미…
   local name=$1 lim=$2 log; shift 2
   log=$(mktemp "${TMPDIR:-/tmp}/go-test.XXXXXX") || { echo "FAIL - go test -race: 임시 파일"; fail=1; return; }
   "$gob" test -race -count=1 -timeout "$lim" "$@" 2>&1 | tee "$log"
   if [ "${PIPESTATUS[0]}" = 0 ]; then echo "ok - go test -race: $name"; return; fi
   fail=1
+  failsum "$log"
   local tp; tp=$(awk '/^panic: test timed out after/{t=1} t && /^FAIL\t/{print $2; t=0}' "$log" | paste -sd ' ' -)
   if [ -n "$tp" ]; then echo "FAIL - go test -race: 시간 넘김($lim) — $tp"; else echo "FAIL - go test -race: $name"; fi
 }
+fs=$(mktemp "${TMPDIR:-/tmp}/failsum.XXXXXX") || exit 1
+printf '%s\n' 'ok  	x/a	0.1s' '==================' 'WARNING: DATA RACE' 'Read at 0x1 by goroutine 8:' '  x.f()' '      /x/f.go:3 +0x1' '' \
+  '==================' '--- FAIL: TestA (0.50s)' '    a_test.go:9: 무리 안 배경 sleep이 남았다' '    testing.go:1490: race detected during execution of test' \
+  '--- PASS: TestB (0.00s)' 'FAIL' 'FAIL	x/b	10.5s' 'ok  	x/c	0.2s' >"$fs"
+want='FAIL | WARNING: DATA RACE
+FAIL | Read at 0x1 by goroutine 8:
+FAIL |   x.f()
+FAIL |       /x/f.go:3 +0x1
+FAIL | --- FAIL: TestA (0.50s)
+FAIL |     a_test.go:9: 무리 안 배경 sleep이 남았다
+FAIL |     testing.go:1490: race detected during execution of test'
+got=$(failsum "$fs")
+if [ "$got" = "$want" ]; then echo "ok - failsum: 실패한 시험 이름·출력·DATA RACE 묶음만"; else echo "FAIL - failsum: 바람/얻음"; printf '%s\n---\n%s\n' "$want" "$got"; fail=1; fi
 pkgs=$("$gob" list ./...) || { echo "FAIL - go list"; fail=1; }
 # shellcheck disable=SC2046 # 꾸러미 목록은 낱말로 나눈다
 gotest 묶음 600s $(printf '%s\n' "$pkgs" | grep -v '/tests/hclane$' | grep -Ev "$SLOW")

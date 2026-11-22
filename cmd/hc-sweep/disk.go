@@ -345,7 +345,18 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 			at = time.Now().Format("2006-01-02")
 		}
 	}
-	key := []string{"--key", "hc-disk-low:" + at}
+	if !laneReport(r, lane, "hc-disk-low", msg, "hc-disk-low:"+at) {
+		fmt.Println("디스크 부족 알림 실패(hc-lane report) — 다음 바퀴에 같은 키로 다시")
+		return ""
+	}
+	if lexists(state) { // 보냄: 대기 표식을 「보냄」으로(못 바꾸면 다음 바퀴가 같은 키로 한 번 더 — hc-lane이 거른다)
+		os.WriteFile(state, []byte(at+"\t"+msg+"\n"), 0o644)
+	}
+	return msg
+}
+
+// laneReport: 터미널 밖 사건 한 줄(hc-lane report 중간 - <msg> --name <name> [--key <key>]). 터미널 표식은 뗀다(이 터미널 사건이 되지 않게)
+func laneReport(r runner, lane, name, msg, key string) bool {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=") // = 없는 항목도 패닉 없이(L5)
@@ -359,15 +370,12 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 			lane = p
 		}
 	}
-	res := r(60*time.Second, env, lane, append([]string{"report", "중간", "-", msg, "--name", "hc-disk-low"}, key...)...)
-	if res.err != nil || res.rc != 0 {
-		fmt.Println("디스크 부족 알림 실패(hc-lane report) — 다음 바퀴에 같은 키로 다시")
-		return ""
+	args := []string{"report", "중간", "-", msg, "--name", name}
+	if key != "" {
+		args = append(args, "--key", key)
 	}
-	if lexists(state) { // 보냄: 대기 표식을 「보냄」으로(못 바꾸면 다음 바퀴가 같은 키로 한 번 더 — hc-lane이 거른다)
-		os.WriteFile(state, []byte(at+"\t"+msg+"\n"), 0o644)
-	}
-	return msg
+	res := r(60*time.Second, env, lane, args...)
+	return res.err == nil && res.rc == 0
 }
 
 func freeBytes(path string) (float64, error) {

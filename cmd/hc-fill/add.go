@@ -181,6 +181,7 @@ func addCmd(args []string) {
 		note += ", 단독"
 	}
 	say("더함 %s (%s%s)", name, prj, note)
+	dupWarn(name, prj, bf)
 	if after != "-" {
 		rows := qRows()
 		for _, a := range words(after) {
