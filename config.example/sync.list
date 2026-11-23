@@ -44,6 +44,7 @@ Go           .local/lib/herdr-go/internal/**                  tools:internal/   
 맥도구       .local/share/hc-fill/hc-fill-audit.example.md    tools:config.example/hc-fill-audit.md           local
 맥도구       .local/bin/herdr-tools-config                    tools:cmd/herdr-tools-config                    local
 맥도구       .local/bin/herdr-tools-publish                   tools:cmd/herdr-tools-publish                   local
+맥도구       .local/bin/omc-update                            tools:cmd/omc-update                            local
 지움         .local/bin/old-tool                              -                                               local
 # 셸 판이 남긴 것(2026-11-22 걷음) — 바이너리를 다 깐 기계에서만 백업 폴더로 옮긴다
 지움         .local/lib/go-run.sh                             -                                               all

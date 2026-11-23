@@ -14,7 +14,7 @@
 | `herdr-tools-publish` | 범용 저장소를 기록 없이 공개 저장소로 내보내기(herdr-sync가 부른다) | 맥 |
 | `herdr-balance` | Herdr 창에서 지휘 pane 옆 worker 높이 맞추기(`--watch`) | 맥 |
 | `hc-launchd-guard` | launchd 작업을 Herdr 터미널에서 돌리는 지킴이([launchd 작업](docs/hc-launchd-guard/guard.md)) | macOS 기계 |
-| `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `worker-mac-check`·`worker-mac-setup` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 워커 맥 점검·설정(`worker-mac-setup mesh`: 워커끼리 ssh·hc 연결) | 맥·macOS 기계 |
+| `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `worker-mac-check`·`worker-mac-setup`, `omc-update` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 워커 맥 점검·설정(`worker-mac-setup mesh`: 워커끼리 ssh·hc 연결), OMC 플러그인·omc CLI를 기계마다 같은 판으로(`--all`·`--check`) | 맥·macOS 기계 |
 | `herdr-hooks` | Claude Code PreToolUse 훅 다섯(`herdr-hooks <훅>`): 같은 작업 트리 동거 편집 가드(`cotenant-guard`), 무인 루프 질문 창 막기, `hc-lane wait` 분리(&) 실행 막기, 조회로 고른 pid kill 막기, 레인 세션의 셸 파일 고치기·heredoc 커밋·zsh 확장 경로 막기(`lane-no-shell-edit`) | macOS 기계 |
 
 ## 설치
@@ -72,6 +72,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane 병합기 (제출·merger, 최소판)](docs/hc-lane/merger.md)
 - [hc-lane park (주차)](docs/hc-lane/park.md)
 - [hc-lane rerere (같은 충돌 다시 풀기)](docs/hc-lane/rerere.md)
+- [hc-lane stats (착지 통계)](docs/hc-lane/stats.md)
 - [hc-lane watch (늘 도는 감시)](docs/hc-lane/watch.md)
 - [launchd 작업: 지킴이(`hc-launchd-guard`)로 Herdr 터미널에서](docs/hc-launchd-guard/guard.md)
 - [hc-sweep: 디스크 쓸기](docs/hc-sweep/disk-sweep.md)
@@ -87,5 +88,6 @@ README에는 아래 목차 줄만 둔다.
 - [herdr-sync: 사용법 (맥에서만)](docs/herdr-sync/usage.md)
 - [설정](docs/herdr-tools-config/config.md)
 - [공개 저장소로 내보내기 (herdr-tools-publish)](docs/herdr-tools-publish/publish.md)
+- [omc-update: OMC 플러그인과 omc CLI를 기계마다 같은 판으로](docs/omc-update/usage.md)
 - [파일 크기: 줄 수 톱니바퀴](docs/repo/line-budget.md)
 - [시험](docs/repo/tests.md)

@@ -1,0 +1,5 @@
+       hc-lane stats [--all | --on <기계>…] [--since <시각|30m·2h·1d>] [--until <시각|30m·2h·1d>]
+  stats         착지 통계: 이 기계(와 --all이면 hc machine ls의 연결된 기계마다 hc exec --on 한 번)의 events.tsv와 병합기 일지
+                merger-journal.tsv만 읽어 착지 수·제출 → 착지·완료 → 착지·감사 통과 → 착지·병합기 검증 실행·레인 자리 점유를 센다.
+                모르는 것은 숫자에 넣지 않고 「모름 n(까닭)」에 따로. 수집 못 한 기계는 첫 줄에 적고 하나도 세지 않으며 종료 1.
+                정의는 docs/hc-lane/stats.md, 병합기 전 기준선은 docs/land-stats-baseline.md
