@@ -58,7 +58,8 @@ func detachedClean(cwd string, r runner) (mainRepo, top, why string) {
 
 // dirInUse: 지금 hc ls에서 이 기계의 live 터미널(self 말고 — 빈 글이면 아무도 빼지 않는다)이 dir 또는 그 아래를 cwd로 쓰면 그 까닭
 // 한 줄, 아무도 안 쓰면 "". hc ls 실패·판독 실패·이 기계 모름 항목(hcjson Unknown)도 쓰는 중으로 본다(R-3M01 — 모르면 남김).
-// 같은 폴더는 글자가 아니라 디스크로 본다(hcjson.Uses — 심볼릭 링크·대소문자·한글 정규화가 다른 철자, R-4A03)
+// 같은 폴더는 글자가 아니라 디스크로 본다(hcjson.Uses — 심볼릭 링크·대소문자·한글 정규화가 다른 철자, R-4A03). 띄운 폴더(ls cwd)로
+// 아무도 안 쓰면 그 기계의 나머지 live 터미널마다 hc get 한 번(상한 30초)으로 지금 폴더(foreground.cwd)도 본다 — 못 얻으면 모름(남김)
 func dirInUse(dir, self string, r runner) string {
 	res := r(2*time.Minute, nil, "hc", "ls", "--json")
 	if res.err != nil || res.rc != 0 {
@@ -68,6 +69,7 @@ func dirInUse(dir, self string, r runner) string {
 	if err != nil {
 		return "hc ls 판독 실패 — 그 폴더를 누가 쓰는지 모름"
 	}
+	var others []string
 	for _, t := range l.Terminals {
 		if (self != "" && t.Address == self) || strings.Contains(t.Address, "/") { // 자신·다른 기계(그 cwd는 이 기계 폴더가 아니다)
 			continue
@@ -75,8 +77,32 @@ func dirInUse(dir, self string, r runner) string {
 		if t.Unknown != "" {
 			return "hc ls에 읽지 못한 터미널 " + t.Address + " — 그 폴더를 쓰는지 모름"
 		}
-		if t.State == "live" && hcjson.Uses(t.Cwd, dir) {
+		if t.State == "live" && hcjson.Uses(t.CwdText, dir) {
 			return "다른 터미널 " + t.Address + " 이 쓰는 중(" + t.Cwd + ")"
+		}
+		if t.State == "live" {
+			others = append(others, t.Address)
+		}
+	}
+	// 띄운 폴더로는 아무도 — 띄운 뒤 cd로 들어온 터미널도 본다: 지금 폴더(hc get foreground.cwd). 못 얻으면 모름(2026-11-23 cwd-now-inuse)
+	for _, a := range others {
+		res := r(30*time.Second, nil, "hc", "get", a, "--json")
+		if res.err != nil {
+			return "hc get " + a + " 실패 — 그 터미널의 지금 폴더 모름"
+		}
+		b := res.out
+		if res.rc != 0 && strings.TrimSpace(res.errs) != "" { // 종료 3의 not_found 오류 객체는 표준 오류에 온다
+			b = res.errs
+		}
+		t, found, err := hcjson.ParseGet([]byte(b), res.rc, a)
+		switch {
+		case err != nil:
+			return "hc get " + a + " 실패 — 그 터미널의 지금 폴더 모름"
+		case !found || t.State != "live": // 그사이 끝남·사라짐 — 그 폴더를 안 쓴다
+		case t.NowCwd == "":
+			return "터미널 " + a + " 의 지금 폴더 모름(hc get에 foreground.cwd 없음)"
+		case hcjson.Uses(t.NowCwd, dir):
+			return "다른 터미널 " + a + " 이 쓰는 중(지금 폴더 " + t.NowCwd + ")"
 		}
 	}
 	return ""

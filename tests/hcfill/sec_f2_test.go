@@ -152,7 +152,7 @@ func secF2(k *K) {
 	k.check("겹침 block: 원격 없는 저장소는 큐 없음 — 앞 레인이 사라지면 풀림", k.up("o2") && !strings.Contains(k.out, "병합기 큐를 못 읽음"))
 	// 마지막 사건이 「제출」인 레인은 그 제출 ID가 든 병합기 착지로 푼다 — 같은 초여도
 	k.fO12()
-	write(k.t, k.T+"/events", "2026-11-19T10:00:00Z\tm\tbox-1/o1\to1\t제출\tabc12345\tbox-1-7 → 큐\t2\n2026-11-19T10:01:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t제출 ID box-1-70 (갈래점 x)\t-\n")
+	write(k.t, k.T+"/events", "2026-11-19T10:00:00Z\tm\tbox-1/o1\to1\t제출\tabc12345\tbox-1-20261119T100000-7 → 큐\t2\n2026-11-19T10:01:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t제출 ID box-1-20261119T100000-70 (갈래점 x)\t-\n")
 	k.runE(mgm, "run")
 	k.check("병합기 소유: 제출 뒤 시각이어도 ID가 다른 착지는 소유를 풀지 않음", k.fWait("o2"))
 	write(k.t, k.T+"/events", "2026-11-19T10:00:00Z\tm\tbox-1/o1\to1\t제출\tabc12345\tbox-1-20261119T100000-7 → refs/merge-queue/1763546400-o1\t2\n2026-11-19T10:00:00Z\tbox-2\tbox-2/t9\to1\t착지\tdef45678\t병합기 착지 — 제출 abc12345, 제출 ID box-1-20261119T100000-7 (갈래점 x)\t-\n")

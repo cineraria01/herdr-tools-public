@@ -361,6 +361,26 @@ func replyTick() {
 	}
 }
 
+// inbMerge <레인> <주소>: 병합기에 제출하고 끝난 레인(마지막 사건 「제출」)은 그 제출 ID의 병합기 결과(착지·막힘)가 정해진 뒤에
+// 회신하고, 그 결과를 끝 줄로. wait면 아직 미룬다(그 까닭은 여기서 적는다). 제출 ID가 없는 손 report 제출은 제출로 치지 않는다
+func inbMerge(n, a string) (mline string, wait bool) {
+	lx := sublast(n, a)
+	if lx == "" {
+		return "", false
+	}
+	sid := evSid(lx)
+	mr := mgres(n, sid)
+	if mr == "" {
+		say("되돌려 주기 미룸 %s: 병합기 결과 기다림(제출 ID %s)", n, sid)
+		return "", true
+	}
+	x := splitRow(mr)
+	if x.F(5) == "착지" {
+		return "착지 " + runeCut(x.F(6), 12) + " (병합기 " + x.F(2) + ", 제출 ID " + sid + ")", false
+	}
+	return "결과: 실패 병합기 막힘 — " + x.F(7), false
+}
+
 // inbFix: reply_tick 1) 한 줄 — 레인 기계 보고를 고정본 replies/<요청 ID>.md로
 func inbFix(n, m, a, rp string) {
 	i := strings.LastIndexByte(rp, '#')
@@ -386,21 +406,9 @@ func inbFix(n, m, a, rp string) {
 		say("되돌려 주기 미룸 %s: 레인 사건을 못 읽어 제출 여부를 모름", n)
 		return
 	}
-	// 병합기에 제출하고 끝난 레인(마지막 사건 「제출」)은 그 제출 ID의 병합기 결과(착지·막힘)가 정해진 뒤에 회신하고, 그 결과를 끝 줄로
-	mline := ""
-	if lx := joblast(n, a, "제출"); lx != "" {
-		sid := F1(fields(splitRow(lx).F(7)), 0)
-		mr := mgres(n, sid)
-		if mr == "" {
-			say("되돌려 주기 미룸 %s: 병합기 결과 기다림(제출 ID %s)", n, sid)
-			return
-		}
-		x := splitRow(mr)
-		if x.F(5) == "착지" {
-			mline = "착지 " + runeCut(x.F(6), 12) + " (병합기 " + x.F(2) + ", 제출 ID " + sid + ")"
-		} else {
-			mline = "결과: 실패 병합기 막힘 — " + x.F(7)
-		}
+	mline, wait := inbMerge(n, a)
+	if wait {
+		return
 	}
 	rpth := "~/.local/share/hc-fill/reports/" + n + "." + rid + ".md"
 	if strings.Contains(lr.F(8), "legacy") {

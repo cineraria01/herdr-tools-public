@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/events"
 )
 
 // evUnk: 사건을 못 읽은 기계(EV의 「모름 <기계>」 줄)
@@ -41,6 +43,29 @@ func mgres(lane, sid string) string {
 		}
 	}
 	return l
+}
+
+// evSid <제출 사건 줄>: 그 제출 ID(events.SubmitID — 12칸 submit:<ID>, 옛 줄은 ID 꼴 첫 낱말). 손으로 적은 제출이면 ""
+func evSid(l string) string {
+	e, ok := events.Parse(l)
+	if !ok {
+		return ""
+	}
+	return e.SubmitID()
+}
+
+// sublast <레인> <주소>: joblast(…, "제출")와 같되 제출 ID가 있는 진짜 제출만 — 손으로 적은 report 제출은 건너뛰고 그 앞의 제출을
+func sublast(n, a string) string {
+	saved := EV
+	defer func() { EV = saved }()
+	var f []string
+	for _, e := range EV {
+		if evF(e, 5) != "제출" || evSid(e) != "" {
+			f = append(f, e)
+		}
+	}
+	EV = f
+	return joblast(n, a, "제출")
 }
 
 // evSortU: awk 'NF' | sort -u (바이트 차례)
@@ -135,13 +160,11 @@ func evTick() {
 		// 제출 뒤 정리 중간 보고가 끼어도 같은 실행의 병합 결과를 보인다
 		subm := ""
 		switch evF(l, 5) {
-		case "제출":
-			subm = l
-		case "중간":
-			subm = joblast(n, a, "제출")
+		case "제출", "중간":
+			subm = sublast(n, a)
 		}
 		if subm != "" {
-			if r := mgres(n, F1(strings.Fields(evF(subm, 7)), 0)); r != "" {
+			if r := mgres(n, evSid(subm)); r != "" {
 				l = r
 			}
 		}

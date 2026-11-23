@@ -68,6 +68,21 @@ func (k *K) kStarts(name string) int {
 	return n
 }
 
+// kSlowLaunch: 새로 넣은 레인 name의 첫 띄우기가 상한에 걸리는 바퀴(env)를 돈다 — 가짜 hc-lane이 착수 줄을 적은 뒤 상한에 걸려야
+// 「이미 시작했을 수 있는」 꼴이다. proc는 마감을 잡은 뒤 ps로 시작 시각을 읽고 고아 기록을 쓰고서야 자식을 풀어 주니, 부하(조각 여럿
+// -race)에서는 1초 마감이 그 준비에 다 쓰여 가짜가 한 줄도 못 돌고 거둬진다(제품 결과는 같은 모름·미확정, 2026-11-23 shard-load-flaky).
+// 그때는 준비가 안 된 것이라 처음부터 다시 준비한다(5번까지 — 그래도 착수가 없으면 그대로 두어 뒤 단언이 잡는다)
+func (k *K) kSlowLaunch(name string, env ...string) {
+	for i := 0; i < 5; i++ {
+		k.fresh()
+		k.add(name)
+		k.runE(env, "run")
+		if k.kStarts(name) > 0 {
+			return
+		}
+	}
+}
+
 // kUnsure: 시도 기록에 그 레인이 기계 m의 미확정(주소 칸 ?)으로 남았다
 func (k *K) kUnsure(name, m string) bool {
 	return hasE(k.DATA+"/try.tsv", "^"+name+"\t[^\t]*\t"+m+"\t[^\t]*\t[^\t]*\t\\?\t")
@@ -118,9 +133,7 @@ func secKLaneUnsure(k *K) {
 // R-02(아스트라 재감사): 전체 목록(hc ls)을 읽을 때 끊겨 있던 기계가 연결 확인(hc machine ls) 전에 다시 붙어도, 그 바퀴의 목록으로
 // 미확정(?)을 지우지 않는다 — 목록 앞뒤 두 연결 확인에서 다 연결된 기계만 연결로 본다
 func secKReconnect(k *K) {
-	k.fresh()
-	k.add("kr")
-	k.runE([]string{"HC_FAKE_LANE_SLOW=box-1/kr=3", "HERDR_TIMEOUT_LANE=1"}, "run")
+	k.kSlowLaunch("kr", "HC_FAKE_LANE_SLOW=box-1/kr=3", "HERDR_TIMEOUT_LANE=1")
 	k.check("재연결 준비: 띄우기 시간 넘김 → box-1 미확정(?)", k.kStarts("kr") == 1 && k.kUnsure("kr", "box-1"), read(k.DATA+"/try.tsv"))
 	rm(k.T + "/ls.once")
 	k.mj("box-2", "shared", "slow")
@@ -143,9 +156,7 @@ if [ "$1" = ls ] && [ ! -e "$T_LOG/ls.once" ]; then case " $* " in *" --label "*
 
 // R-03(아스트라 재감사): 미확정 발사 뒤 rm·같은 이름 add(줄 ID가 다름) — 새 줄이 옛 시도의 터미널을 채택하지 않고, 옛 실행이 정리된 뒤 띄운다
 func secKRidReplace(k *K) {
-	k.fresh()
-	k.add("kd")
-	k.runE([]string{"HC_FAKE_LANE_SLOW=box-1/kd=3", "HERDR_TIMEOUT_LANE=1"}, "run")
+	k.kSlowLaunch("kd", "HC_FAKE_LANE_SLOW=box-1/kd=3", "HERDR_TIMEOUT_LANE=1")
 	rid1 := k.qcol("kd", 17)
 	k.run("rm", "kd")
 	write(k.t, k.T+"/kd2.md", "# 지시문 kd 새 판\n본문\n")
@@ -278,26 +289,36 @@ func secKOrphan(k *K) {
 // T2 ③④(Fable)·L2: watch가 바퀴 상한(HC_FILL_ROUND_TIMEOUT)에 run을 TERM으로 끊으면 run은 상한 걸린 자식 무리(hc ls)를 거두고
 // 끝내기 훅(held.tsv 비움·지시문 사본 지움)을 돈다. 셸 판에는 바퀴 상한이 없다(Go 판만)
 func secKRoundTimeout(k *K) {
-	k.fresh()
 	pf := k.T + "/ls-slow.pid"
-	rm(pf)
-	write(k.t, k.DATA+"/held.tsv", "x\t1\n")
-	write(k.t, k.DATA+"/.run-brief.tmp", "옛 사본\n")
-	wout, err := os.Create(k.T + "/watch2.out")
-	if err != nil {
-		k.t.Fatal(err)
+	var bg *exec.Cmd
+	pid := 0
+	// 가짜 hc ls가 pid를 적은 뒤 바퀴 상한(2초)에 걸려야 「상한 걸린 무리」 꼴이다 — 부하에서 바퀴가 hc ls에 닿기 전에 상한이 오면
+	// 준비가 안 된 것이라 다시 준비한다(5번까지, kSlowLaunch와 같은 까닭)
+	for try := 0; try < 5 && pid == 0; try++ {
+		if bg != nil {
+			syscall.Kill(-bg.Process.Pid, syscall.SIGTERM)
+			bg.Wait()
+		}
+		k.fresh()
+		rm(pf)
+		write(k.t, k.DATA+"/held.tsv", "x\t1\n")
+		write(k.t, k.DATA+"/.run-brief.tmp", "옛 사본\n")
+		wout, err := os.Create(k.T + "/watch2.out")
+		if err != nil {
+			k.t.Fatal(err)
+		}
+		defer wout.Close()
+		bg = exec.Command(k.FILL, "watch", "--every", "60")
+		bg.Dir, bg.Env, bg.Stdout, bg.Stderr = k.T, k.environ([]string{"HC_FAKE_LS_SLOW=30", "HC_FILL_ROUND_TIMEOUT=2"}), wout, wout
+		bg.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := bg.Start(); err != nil {
+			k.t.Fatal(err)
+		}
+		for i := 0; i < 100 && !strings.Contains(read(k.T+"/watch2.out"), "바퀴를 끝낸다"); i++ {
+			time.Sleep(100 * time.Millisecond)
+		}
+		pid, _ = strconv.Atoi(strings.TrimSpace(read(pf)))
 	}
-	defer wout.Close()
-	bg := exec.Command(k.FILL, "watch", "--every", "60")
-	bg.Dir, bg.Env, bg.Stdout, bg.Stderr = k.T, k.environ([]string{"HC_FAKE_LS_SLOW=30", "HC_FILL_ROUND_TIMEOUT=2"}), wout, wout
-	bg.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := bg.Start(); err != nil {
-		k.t.Fatal(err)
-	}
-	for i := 0; i < 100 && !strings.Contains(read(k.T+"/watch2.out"), "바퀴를 끝낸다"); i++ {
-		time.Sleep(100 * time.Millisecond)
-	}
-	pid, _ := strconv.Atoi(strings.TrimSpace(read(pf)))
 	gone := false
 	for i := 0; i < 50; i++ {
 		if gone = pid > 0 && syscall.Kill(pid, 0) != nil; gone {
@@ -326,16 +347,17 @@ func secKLocalLimits(k *K) {
 	k.runE([]string{"HC_FAKE_BALANCE_SLOW=30", "HC_FILL_BALANCE_TIMEOUT=1"}, "run")
 	k.check("herdr-balance가 멈춰도 상한 안에 끝남(분할 붙이기 실패 알림, 레인은 뜸)", time.Since(t0) < 25*time.Second && k.state("hb") == "up" &&
 		strings.Contains(k.out, "분할 붙이기 실패"), time.Since(t0).String(), k.out)
-	// 이 기계 레인의 완료 sha 풀기가 늦음: 상한(1초)에 끊고 감사를 미룸(다음 바퀴에)
+	// 이 기계 레인의 완료 sha 풀기가 늦음: 상한(3초)에 끊고 감사를 미룸(다음 바퀴에). 상한은 그 바퀴의 다른 git에도 걸리고 proc의
+	// 띄우기 준비(ps·고아 기록)도 그 안에서 세니 1초는 부하(조각 여럿 -race)에서 모자랐다(2026-11-23 shard-load-flaky)
 	k.afresh()
 	k.add("lr", "--only", "here")
 	k.run("run")
 	k.lj("lr:claude-code:lr:done:/")
 	k.ev("lr", "lr", "완료", "abc1234", "끝")
 	t0 = time.Now()
-	k.runE([]string{"HC_FAKE_REVSLOW=abc1234", "HERDR_TIMEOUT_GIT=1"}, "run")
+	k.runE([]string{"HC_FAKE_REVSLOW=abc1234", "HERDR_TIMEOUT_GIT=3"}, "run")
 	// R-28(재감사): 바퀴 전체 시간이 아니라 대상 자식(rev-parse)이 상한에 끊긴 신호·결과와 감사 상태를 본다 — 다른 조회의 정상 지연도
-	// 받도록 시간은 안전 상한만(가짜 rev-parse는 3초 늦으니 기다렸다면 sha를 풀어 감사를 열었다)
+	// 받도록 시간은 안전 상한만(가짜 rev-parse는 30초 늦으니 기다렸다면 sha를 풀어 감사를 열었다)
 	k.check("이 기계 감사의 rev-parse가 늦으면 상한에 끊고 감사를 미룸", time.Since(t0) < 60*time.Second && strings.Contains(k.out, "시간 넘김 git") &&
 		strings.Contains(k.out, "자동 감사 미룸 lr: here 에서 완료 sha abc1234 를 풀지 못했다") && k.eQ15("audit=lr") == 0, time.Since(t0).String(), k.out)
 	k.run("run")
@@ -460,18 +482,8 @@ func secKReadFail(k *K) {
 // F01(아스트라)·F2(Fable): hc-lane 띄우기가 상한을 넘으면 첫 기계에서 이미 시작했을 수 있다 — 같은 바퀴에 다른 기계로 또 띄우지 않는다.
 // 다음 바퀴에 첫 기계의 터미널이 보이면 그것을 채택한다(시도 기록이 첫 기계 그대로라)
 func secKLaunchTimeout(k *K) {
-	k.fresh()
-	k.add("kl")
-	starts := func() int { // 실제 착수(--print-steps 빼고)만 적히는 landprio.log
-		n := 0
-		for _, l := range lines(read(k.T + "/landprio.log")) {
-			if strings.HasPrefix(l, "kl ") {
-				n++
-			}
-		}
-		return n
-	}
-	k.runE([]string{"HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1"}, "run")
+	starts := func() int { return k.kStarts("kl") }
+	k.kSlowLaunch("kl", "HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1")
 	k.check("띄우기 시간 넘김: 같은 바퀴에 다른 기계로 또 띄우지 않음(착수 한 번)", starts() == 1 && !strings.HasPrefix(k.where("kl"), "up box-2"),
 		k.where("kl"), read(k.T+"/landprio.log"), k.out)
 	try := k.DATA + "/try.tsv"
@@ -479,9 +491,7 @@ func secKLaunchTimeout(k *K) {
 	k.run("run") // 첫 기계는 연결됐는데 그 이름 터미널이 안 보임 → 안 떴다고 보고 다시 띄울 수 있다(같은 기계 차례부터)
 	k.check("띄우기 시간 넘김 뒤 첫 기계에 터미널이 없으면 미확정을 풀고 다시 띄움", starts() == 2 && k.where("kl") == "up box-1 box-1/kl", k.where("kl"), k.out)
 	// 떠 있는 kl을 지우고 다시: 첫 기계에 터미널이 보이면 채택
-	k.fresh()
-	k.add("kl")
-	k.runE([]string{"HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1"}, "run")
+	k.kSlowLaunch("kl", "HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1")
 	k.lj("box-1/kl:claude-code:kl:working:/home/me/src/app.wt/kl")
 	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/kl","state":"live","cwd":"/"}]}`)
 	k.run("run")
@@ -490,9 +500,7 @@ func secKLaunchTimeout(k *K) {
 		k.where("kl"), k.out)
 	// 첫 기계가 끊기면 다른 기계에 띄우지 않고 기다린다 — 시간 넘김(F01)과 띄운 직후 죽음(E02) 둘 다 미확정
 	for _, env := range [][]string{{"HC_FAKE_LANE_SLOW=box-1/kl=3", "HERDR_TIMEOUT_LANE=1"}, {"HC_FILL_CRASH_AT=after-launch"}} {
-		k.fresh()
-		k.add("kl")
-		k.runE(env, "run")
+		k.kSlowLaunch("kl", env...)
 		k.mj("box-2", "shared", "slow")
 		k.run("run")
 		k.check("미확정 시도의 기계가 끊기면 다른 기계에 띄우지 않음 ("+env[0]+")", starts() == 1 && k.where("kl") == "wait - -" && grep(k.out, "미확정 시도 기다림 kl"),

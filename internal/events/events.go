@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,6 +102,27 @@ func Parse(line string) (Event, bool) {
 		c = append(c, "")
 	}
 	return Event{c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]}, true
+}
+
+// submitIDRe: hc-lane land 제출 ID 꼴 <기계>-<UTC yyyymmddThhmmss>-<pid>(cmd/hc-lane/submit.go)
+var submitIDRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+-[0-9]{8}T[0-9]{6}-[0-9]+$`)
+
+// IsSubmitID: s가 제출 ID 꼴인가
+func IsSubmitID(s string) bool { return submitIDRe.MatchString(s) }
+
+// SubmitID: 「제출」 사건의 제출 ID — 12칸 submit:<ID>(hc-lane land만 적는다 — report가 손 제출을 거절)를 먼저, 키가 없는
+// 옛 줄은 한 줄 칸 첫 낱말이 ID 꼴일 때만. 손으로 적은 report 제출·다른 상태는 "" — 제출로 치지 않는다(2026-11-23 fix-inbox-submit-id)
+func (e Event) SubmitID() string {
+	if e.State != "제출" {
+		return ""
+	}
+	if id, ok := strings.CutPrefix(e.Key, "submit:"); ok && id != "" {
+		return id
+	}
+	if f := strings.Fields(e.Msg); len(f) > 0 && IsSubmitID(f[0]) {
+		return f[0]
+	}
+	return ""
 }
 
 // Scan: r의 줄을 차례로 fn에. fn이 false면 멈춘다. 7칸이 안 되는 줄은 건너뛴다

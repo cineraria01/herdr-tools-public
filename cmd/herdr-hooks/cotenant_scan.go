@@ -3,9 +3,7 @@ package main
 // cotenant-guard Go 판 — 남의 미커밋 임대 훑기(scan_foreign)·hc 에이전트 찾기·동거 판정·foreign_under (cotenant.go에서 옮김)
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -13,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 // scanForeign: FDIRTY = ROOT에서 다른 산 프로세스가 쥔 미커밋 파일 임대(rel\037name\037pid\037since 줄).
@@ -263,6 +263,7 @@ func (g *cg) hcWho() {
 	if err != nil {
 		return
 	}
+	end := time.Now().Add(2 * time.Second) // ls와 get 모두 이 2초 안에서(지금 상한)
 	out, _, rc := hookRun([]string{"hc", "ls"}, 2*time.Second, nil, "", hc, "ls", "--json")
 	terms, perr := hcTerminals(out)
 	if rc != 0 || perr != "" {
@@ -275,68 +276,71 @@ func (g *cg) hcWho() {
 		g.who += ", hc ls 실패(" + why + ") — 같은 트리의 hc 에이전트를 모름"
 		return
 	}
+	var rest []hcjson.Terminal
 	for _, t := range terms {
-		addr, agent, cwd, name := t[0], t[1], t[2], t[3]
-		if strings.Contains(addr, "/") || addr == g.hcTerm {
+		if strings.Contains(t.Address, "/") || t.Address == g.hcTerm {
 			continue
 		}
-		if !(strings.HasPrefix(agent, "claude") || strings.HasPrefix(agent, "codex") || agent == "agy" || strings.HasPrefix(agent, "grok") ||
-			agent == "cursor-agent" || strings.HasPrefix(agent, "gemini") || agent == "opencode") {
+		if !(strings.HasPrefix(t.Agent, "claude") || strings.HasPrefix(t.Agent, "codex") || t.Agent == "agy" || strings.HasPrefix(t.Agent, "grok") ||
+			t.Agent == "cursor-agent" || strings.HasPrefix(t.Agent, "gemini") || t.Agent == "opencode") {
 			continue
 		}
-		if g.intree(cwd) {
-			if name == "" {
-				name = agent
-			}
-			g.who += ", " + name + "[" + addr + "]"
+		if g.intree(t.CwdText) {
+			g.who += ", " + whoName(t) + "[" + t.Address + "]"
+		} else {
+			rest = append(rest, t)
+		}
+	}
+	if g.who != "" {
+		return
+	}
+	// 띄운 폴더로는 아무도 — 띄운 뒤 cd로 들어온 에이전트도 지금 폴더(hc get foreground.cwd)로 본다. 못 얻거나 2초를 넘기면 모름 =
+	// 동거(2026-11-23 cwd-now-inuse)
+	for _, t := range rest {
+		if time.Until(end) <= 0 { // hookRun은 0 이하 상한을 「없음」으로 읽는다 — 여기서 넘김으로
+			g.who += ", " + whoName(t) + "[" + t.Address + "] 지금 폴더 모름(시간 넘김)"
+			return
+		}
+		gout, gerr, grc := hookRun([]string{"hc", "get"}, time.Until(end), nil, "", hc, "get", t.Address, "--json")
+		if grc != 0 && strings.TrimSpace(gerr) != "" {
+			gout = gerr // 종료 3의 not_found 오류 객체는 표준 오류에 온다
+		}
+		gt, found, err := hcjson.ParseGet([]byte(gout), grc, t.Address)
+		switch {
+		case err != nil || (found && gt.State == "live" && gt.NowCwd == ""):
+			g.who += ", " + whoName(t) + "[" + t.Address + "] 지금 폴더 모름"
+			return
+		case !found || gt.State != "live":
+		case g.intree(gt.NowCwd):
+			g.who += ", " + whoName(t) + "[" + t.Address + "]"
+			return
 		}
 	}
 }
 
-// hcTerminals: hc ls --json 응답의 산(live) 터미널마다 {address, agent, cwd, name}. 완전한 목록만 읽는다 —
-// JSON 값 하나인 객체, terminals는 배열, 항목마다 객체·state 문자열, live면 address는 비지 않은 문자열이고 agent·cwd·name은
-// 없음·null·문자열. 하나라도 어긋나면 그 까닭(빈 값이 아님 = 모름. 재감사 R-H02: 빈 성공·terminals 없음·null·주소 없는 live를
-// 「hc 에이전트 없음」으로 읽어 미커밋 파일을 넘겼다)
-func hcTerminals(out string) ([][4]string, string) {
-	dec := json.NewDecoder(strings.NewReader(out))
-	var m map[string]any
-	if err := dec.Decode(&m); err != nil || m == nil {
-		return nil, "JSON 객체 하나가 아님"
+func whoName(t hcjson.Terminal) string {
+	if t.Name == "" {
+		return t.Agent
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, "JSON 값이 둘 이상"
+	return t.Name
+}
+
+// hcTerminals: hc ls --json 응답의 산(live) 터미널(hcjson.ParseList — A5, 2026-11-23 cwd-now-inuse로 판독을 한 곳에). 완전한
+// 목록만 읽는다 — 목록을 못 읽거나 이 기계 항목 하나라도 계약을 어기면(hcjson Unknown) 그 까닭(빈 값이 아님 = 모름. 재감사 R-H02:
+// 빈 성공·terminals 없음·null·주소 없는 live를 「hc 에이전트 없음」으로 읽어 미커밋 파일을 넘겼다)
+func hcTerminals(out string) ([]hcjson.Terminal, string) {
+	l, err := hcjson.ParseList([]byte(out))
+	if err != nil {
+		return nil, err.Error()
 	}
-	list, ok := m["terminals"].([]any)
-	if !ok {
-		return nil, "terminals 목록 없음"
-	}
-	var terms [][4]string
-	for _, e := range list {
-		t, ok := e.(map[string]any)
-		if !ok {
-			return nil, "터미널 항목이 객체가 아님"
+	var terms []hcjson.Terminal
+	for _, t := range l.Terminals {
+		if t.Unknown != "" && !strings.Contains(t.Address, "/") {
+			return nil, t.Unknown
 		}
-		st, ok := t["state"].(string)
-		if !ok {
-			return nil, "터미널 state 없음"
+		if t.Unknown == "" && t.State == "live" {
+			terms = append(terms, t)
 		}
-		if st != "live" {
-			continue
-		}
-		var f [4]string
-		for i, k := range []string{"address", "agent", "cwd", "name"} {
-			switch x := t[k].(type) {
-			case nil:
-			case string:
-				f[i] = x
-			default:
-				return nil, "터미널 " + k + " 꼴이 틀림"
-			}
-		}
-		if f[0] == "" {
-			return nil, "산 터미널에 address 없음"
-		}
-		terms = append(terms, f)
 	}
 	return terms, ""
 }

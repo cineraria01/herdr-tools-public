@@ -17,20 +17,25 @@ func secJ(k *K) {
 	secJPaste(k)
 }
 
-// 1. 가짜 git이 app 저장소의 remote 조회에서 멈춘다(2026-11-21 맥 바퀴 37분 멈춤 — 병합기 켬 표식 조회의 get-url): 상한(1초) 안에
-// 무리째 거두고 「모름」 — 그 바퀴는 이어서 대기열 줄을 띄우고, 다음 바퀴(멈춤 없음)에 켬 표식을 고친다
+// 1. 가짜 git이 app 저장소의 remote 조회에서 멈춘다(2026-11-21 맥 바퀴 37분 멈춤 — 병합기 켬 표식 조회의 get-url): 상한(3초) 안에
+// 무리째 거두고 「모름」 — 그 바퀴는 이어서 대기열 줄을 띄우고, 다음 바퀴(멈춤 없음)에 켬 표식을 고친다.
+// 상한은 그 바퀴의 다른 git에도 걸리고 proc의 띄우기 준비(ps·고아 기록)도 그 안에서 세니 1초는 부하(조각 여럿 -race)에서 모자랐다
+// (2026-11-23 shard-load-flaky). 멈춘 git이 손자 pid를 적기 전에 상한이 오면 준비가 안 된 것이라 다시 준비한다(5번까지)
 func secJTimeout(k *K) {
-	k.fresh()
-	rm(k.T + "/hang.pid")
-	k.cpConf()
-	k.confAppend("merger   app   box-2")
-	k.fill(nil, "add", "--name", "hg-app", "--project", "app", "--brief", k.brief("hg-app"), "--only", "here")
-	k.fill(nil, "add", "--name", "hg-tools", "--project", "tools", "--brief", k.brief("hg-tools"), "--only", "here")
-	t0 := time.Now()
-	k.runE([]string{"HC_FAKE_GIT_HANG=/Users/me/src/app", "HERDR_TIMEOUT_GIT=1"}, "run")
-	el := time.Since(t0)
+	var el time.Duration
+	for try := 0; try < 5 && (try == 0 || read(k.T+"/hang.pid") == ""); try++ {
+		k.fresh()
+		rm(k.T + "/hang.pid")
+		k.cpConf()
+		k.confAppend("merger   app   box-2")
+		k.fill(nil, "add", "--name", "hg-app", "--project", "app", "--brief", k.brief("hg-app"), "--only", "here")
+		k.fill(nil, "add", "--name", "hg-tools", "--project", "tools", "--brief", k.brief("hg-tools"), "--only", "here")
+		t0 := time.Now()
+		k.runE([]string{"HC_FAKE_GIT_HANG=/Users/me/src/app", "HERDR_TIMEOUT_GIT=3"}, "run")
+		el = time.Since(t0)
+	}
 	k.check("바깥 명령 상한: 멈춘 git을 상한 안에 거두고 「시간 넘김 <명령 앞부분> <초>」 한 줄", el < 25*time.Second &&
-		strings.Contains(k.out, "시간 넘김 git -C /Users/me/src/app remote get-url 1"), el.String(), k.out)
+		strings.Contains(k.out, "시간 넘김 git -C /Users/me/src/app remote get-url 3"), el.String(), k.out)
 	k.check("바깥 명령 상한: 그 조회는 모름(다음 바퀴에)이고 같은 바퀴의 대기열 줄은 띄움",
 		strings.Contains(k.out, "병합기 app: 원격을 못 읽음 — 켬 표식은 다음 바퀴에") && k.up("hg-app") && k.up("hg-tools"),
 		k.where("hg-app"), k.where("hg-tools"), k.out)

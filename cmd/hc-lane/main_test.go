@@ -131,6 +131,8 @@ func TestPick(t *testing.T) {
 		{[]string{"clean", "--repo", "/r"}, true, 2},
 		{[]string{"gc"}, true, 0},
 		{[]string{"park", "한 줄"}, true, 1},
+		{[]string{"park", "--help"}, false, 1}, // park-help-guard: 예전엔 관문 nil이라 실제로 주차했다
+		{[]string{"park", "글", "-h"}, false, 2},
 		// 기대값은 등록표에서 꺼내지 않고 적는다(gofix L16 — 등록이 빠지면 여기서 진다). merger는 곁의 hc-merger로 넘긴다
 		{[]string{"report", "완료"}, true, 1},
 		{[]string{"merger", "--once"}, true, 1},
@@ -162,7 +164,8 @@ func buildLane(t *testing.T, dir string) string {
 func TestBinaryUsage(t *testing.T) {
 	bin := buildLane(t, t.TempDir())
 	for _, a := range [][]string{{"-h"}, {"--help"}, {"report", "-h"}, {"send", "--help"}, {"merger", "-h"}, {"clean", "-h"},
-		{"land", "-h"}, {"guard", "-h"}, {"lease", "-h"}, {"fetch", "-h"}, {"coord", "-h"}, {"watch", "-h"}} {
+		{"land", "-h"}, {"guard", "-h"}, {"lease", "-h"}, {"fetch", "-h"}, {"coord", "-h"}, {"watch", "-h"},
+		{"gc", "-h"}, {"gc", "--help"}, {"clean", "--help"}, {"--name", "x", "--help"}} { // 관문 nil인 clean·gc·launch는 인자 읽기(parseStart)가 먼저 사용법으로 끝낸다
 		c := exec.Command(bin, a...)
 		var e strings.Builder
 		c.Stderr = &e

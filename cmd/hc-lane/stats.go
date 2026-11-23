@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/events"
 )
 
 func init() { register("stats", thenExit(statsCmd), noHelp) }
@@ -247,10 +249,11 @@ func statsReport(evl, jrl []string, since, until string) string {
 	for _, x := range evs {
 		switch x.st {
 		case "제출":
-			if id, ok := strings.CutPrefix(x.key, "submit:"); ok {
+			// 제출 ID가 없는 손 report 제출은 제출로 치지 않는다(그 실행의 직접 착지를 빼지 않게 — events.SubmitID)
+			if id := (events.Event{State: x.st, Msg: x.msg, Key: x.key}).SubmitID(); id != "" {
 				subEv[id] = x
+				hasSub[x.run] = true
 			}
-			hasSub[x.run] = true
 		case "완료":
 			dones[x.run] = append(dones[x.run], x)
 		}

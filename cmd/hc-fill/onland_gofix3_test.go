@@ -53,9 +53,11 @@ func onlandLanded(t *testing.T, d string) (local, sha string) {
 	return local, gitT(t, up, nil, "rev-parse", "HEAD")
 }
 
+// 접수초는 착지 커밋(onlandLanded)보다 앞이어야 그 착지로 센다 — 5분 앞으로(2026-11-23 verify-shard: 「지금-5초」였을 때 커밋 뒤
+// clitest.Bin 짓기·클론이 부하로 5초를 넘으면 커밋이 접수 전 것이 되어 명령이 안 돌았다)
 func onlandQueue(t *testing.T) {
 	t.Helper()
-	if err := os.WriteFile(DATA+"/onland.tsv", []byte(fmt.Sprintf("fix-a\tdev\tapp\tt9\t%d\n", nowUnix()-5)), 0o644); err != nil {
+	if err := os.WriteFile(DATA+"/onland.tsv", []byte(fmt.Sprintf("fix-a\tdev\tapp\tt9\t%d\n", nowUnix()-300)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

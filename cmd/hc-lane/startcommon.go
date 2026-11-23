@@ -157,6 +157,7 @@ func onp(a string) string {
 // termPairs: hc ls --json에서 터미널마다 「<주소> <cwd>」. 1 hc ls 실패, 2 꼴을 못 읽음, 3 대상 기계(--on)가 연결돼 있지 않음.
 // 2·3은 「터미널 없음」이 아니다 — 모르면 지우지 않는다(gofix E01, 재감사 R-06·R-07)
 func termPairs() ([][2]string, int) {
+	nowSeen = map[string]string{} // 새 목록이면 지금 폴더도 새로 본다(지우기 직전 재확인)
 	out, r := outOf(nil, []string{"hc", "ls", "--json"})
 	if r != 0 {
 		return nil, 1
@@ -186,7 +187,7 @@ func parsePairs(out, mach string) ([][2]string, int) {
 	}
 	ps := make([][2]string, 0, len(l.Terminals))
 	for _, t := range l.Terminals {
-		c := t.Cwd
+		c := t.CwdText // 원문 — busyTerms(hcjson.Uses)가 `..`를 디스크로 푼다(A3)
 		if t.Unknown != "" {
 			c = unkCwd // 모름 항목(R-3M01): cwd를 몰라 busyTerms가 어느 작업 폴더든 쓰는 것으로 본다
 		}
@@ -232,9 +233,10 @@ func gcNoteUnk(ps [][2]string) {
 
 // busyTerms: 대상 기계의 터미널이고 cwd가 작업 폴더(wt) 안인 것 「<주소> <cwd>」. skipSelf면 부른 터미널 자신은 뺀다(clean).
 // 이 기계면 디스크로 같은 폴더인지까지 본다(hcjson.Uses — 다른 철자 cwd, gofix5 lane/R-4A02). --on은 글자로만(그 기계 경로는 여기서
-// stat할 수 없다 — 한계, docs/hc-lane/gc.md)
+// stat할 수 없다 — 한계, docs/hc-lane/gc.md). 띄운 폴더로 아무도 안 쓰면 대상 기계의 나머지 터미널마다 지금 폴더(hc get
+// foreground.cwd — 띄운 뒤 cd로 들어온 터미널, 2026-11-23 cwd-now-inuse)도 본다. 못 얻으면 「<주소> ?(지금 폴더 모름: …)」 — 쓰는 중으로
 func busyTerms(ps [][2]string, skipSelf bool) []string {
-	var b []string
+	var b, rest []string
 	under := hcjson.Uses
 	if on != "" {
 		under = hcjson.Under
@@ -246,9 +248,44 @@ func busyTerms(ps [][2]string, skipSelf bool) []string {
 		}
 		if p[1] == unkCwd || under(p[1], wt) {
 			b = append(b, onp(a)+" "+p[1])
+		} else {
+			rest = append(rest, onp(a))
 		}
 	}
-	return b
+	if len(b) > 0 {
+		return b
+	}
+	for _, a := range rest {
+		if c, ok := nowCwd(a); !ok {
+			return []string{a + " ?(지금 폴더 모름: " + c + ")"}
+		} else if c != "" && under(c, wt) {
+			return []string{a + " " + c + "(지금 폴더)"}
+		}
+	}
+	return nil
+}
+
+// nowSeen: 이번 termPairs 목록에서 본 터미널마다 nowCwd 결과(앞 글자 「?」면 모름) — gc가 작업 트리마다 다시 묻지 않게
+var nowSeen = map[string]string{}
+
+// nowCwd: 터미널 a(onp 꼴)의 지금 폴더 — hc get 한 번(상한 10초). (폴더, true), 끝남·없음은 ("", true), 모르면(get 실패·꼴 틀림·
+// foreground.cwd 없는 판) (까닭, false)
+func nowCwd(a string) (string, bool) {
+	if v, ok := nowSeen[a]; ok {
+		return strings.TrimPrefix(v, "?"), !strings.HasPrefix(v, "?")
+	}
+	v := ""
+	switch t, found, err := hcGet(10, a); {
+	case err != nil:
+		v = "?hc get 실패"
+	case !found || t.State != "live":
+	case t.NowCwd == "":
+		v = "?hc get에 foreground.cwd 없음"
+	default:
+		v = t.NowCwd
+	}
+	nowSeen[a] = v
+	return strings.TrimPrefix(v, "?"), !strings.HasPrefix(v, "?")
 }
 
 // hook: 작업 폴더 안에서 .claude/herdr-<이름>.sh. 기록은 그 작업 폴더의 git 관리 폴더(worktree remove 때 같이 지워진다).

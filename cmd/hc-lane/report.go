@@ -133,6 +133,11 @@ func reportMain(a []string) int {
 		fmt.Fprintf(os.Stderr, "hc-lane report: --key 글자(A-Za-z0-9_.:/-): %s\n", key)
 		return 2
 	}
+	// 「제출」은 hc-lane land만 적는다(--key submit:<제출 ID>) — 손으로 적은 제출의 첫 낱말이 제출 ID로 읽혀 회신이 멈췄다(2026-11-23)
+	if id, ok := strings.CutPrefix(key, "submit:"); st == "제출" && (!ok || !events.IsSubmitID(id)) {
+		fmt.Fprintln(os.Stderr, "hc-lane report: 제출은 hc-lane land가 적는다(제출 ID 키 --key submit:<ID> 없음) — 감사·진행 글은 중간으로")
+		return 2
+	}
 	// 대문자 sha도 sha로(소문자로 적음). 7~40자가 아닌 16진 낱말(DB·CAFE)은 한 줄 칸으로 그대로
 	join := func(s string) string {
 		if msg == "" {

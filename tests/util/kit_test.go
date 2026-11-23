@@ -101,7 +101,13 @@ func TestRunBounded(t *testing.T) {
 	cmdMax = 500 * time.Millisecond
 	defer func() { cmdMax = old }()
 	T := tmpdir(t)
-	out, rc := run(T, isolated(T), "/bin/sh", "-c", `(sleep 1; : >"$2") & : >"$1"; wait`, "sh", T+"/start", T+"/late")
+	// 셸이 start를 쓴 뒤 상한에 걸려야 이 꼴이다 — 부하(조각 여럿 -race)에서 500ms가 셸 시작에 다 쓰이면 준비가 안 된 것이라 다시(5번까지,
+	// 2026-11-23 shard-load-flaky)
+	var out string
+	var rc int
+	for try := 0; try < 5 && (try == 0 || !clitest.Lexists(T+"/start")); try++ {
+		out, rc = run(T, isolated(T), "/bin/sh", "-c", `(sleep 1; : >"$2") & : >"$1"; wait`, "sh", T+"/start", T+"/late")
+	}
 	if rc != 124 {
 		t.Fatalf("rc %d out %q", rc, out)
 	}
@@ -122,7 +128,13 @@ func TestRunWithinTestDeadline(t *testing.T) {
 		return
 	}
 	T := tmpdir(t)
-	out, rc := run(T, isolated(T).With("UTIL_DEADLINE_DIR="+T), os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=1s", "-test.count=1")
+	// 안쪽 셸이 start를 쓴 뒤 바깥 마감(1초)에 걸려야 이 꼴이다 — 부하(조각 여럿 -race)에서 그 1초가 안쪽 시험 바이너리·셸 시작에 다 쓰이면
+	// 준비가 안 된 것이라 다시(5번까지, 2026-11-23 shard-load-flaky)
+	var out string
+	var rc int
+	for try := 0; try < 5 && (try == 0 || !clitest.Lexists(T+"/start")); try++ {
+		out, rc = run(T, isolated(T).With("UTIL_DEADLINE_DIR="+T), os.Args[0], "-test.run=^TestRunWithinTestDeadline$", "-test.timeout=1s", "-test.count=1")
+	}
 	if rc != 0 {
 		t.Fatalf("안쪽 시험이 마감 전에 끝나야(종료 0): rc %d\n%s", rc, out)
 	}

@@ -187,7 +187,7 @@ func secH(k *K) {
 	k.req(k.IS(), "same-in", "app", "-", "slow")
 	k.run("run")
 	ri := k.rid("same-in")
-	write(k.t, k.T+"/events", "2026-11-20T01:00:00Z\tm\tslow/same-in\tsame-in\t제출\tabc1234\told-id → 큐\t1\t-\tsame-in@1600000000000\n")
+	write(k.t, k.T+"/events", "2026-11-20T01:00:00Z\tm\tslow/same-in\tsame-in\t제출\tabc1234\tslow-20261120T010000-1 → 큐\t1\t-\tsame-in@1600000000000\n")
 	write(k.t, k.RP()+"/same-in."+ri+".md", "결과: 넘김 현재 요청\n")
 	k.runE([]string{"HC_FAKE_GONE=slow/same-in"}, "run")
 	a, b := k.RP()+"/same-in."+ri+".md", k.IS()+"/done/same-in.md"

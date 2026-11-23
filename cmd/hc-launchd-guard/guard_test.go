@@ -78,13 +78,28 @@ func (e *env) gArgs(args []string, kv ...string) string {
 	}
 	os.WriteFile(filepath.Join(e.T, "log"), nil, 0o644)
 	envs := append([]string{"XDG_STATE_HOME", "T_LOG=" + filepath.Join(e.T, "log"), "T_STATE=" + filepath.Join(e.T, "state"),
-		"HOME=" + e.home, "PATH=" + e.stub + ":" + os.Getenv("PATH"), "HC_LAUNCHD_GUARD_LS_SECS", "HC_LAUNCHD_GUARD_RUN_SECS"}, kv...)
+		"HOME=" + e.home, "PATH=" + e.stub + ":" + os.Getenv("PATH"), "HC_LAUNCHD_GUARD_LS_SECS", "HC_LAUNCHD_GUARD_RUN_SECS", "HC_LAUNCHD_GUARD_LOG_MAX"}, kv...)
 	r := clitest.Cmd{Env: envs, Max: 15 * time.Second}.Run(e.guard, args...)
 	e.t.Logf("지킴이 %v %v → %d\n%s", kv, args, r.RC, r.Err)
 	if r.Out == "" {
 		return "rc " + strconv.Itoa(r.RC)
 	}
 	return r.Out + "\nrc " + strconv.Itoa(r.RC)
+}
+
+// gHang: 멈춘 hc 흉내를 지킴이 상한(1초)이 끊는 한 번과 그 걸린 시간 — 흉내가 pid를 적은 뒤 끊겨야 「거둠」을 볼 수 있다. proc의 띄우기
+// 준비(ps·고아 기록)도 그 1초 안에서 세니 부하(조각 여럿 -race)에서는 흉내가 pid를 적기 전에 거둬질 수 있다 — 그때는 준비가 안 된
+// 것이라 다시(5번까지, 2026-11-23 shard-load-flaky)
+func (e *env) gHang(ga []string, kv ...string) (string, time.Duration) {
+	r, d := "", time.Duration(0)
+	for i := 0; i < 5; i++ {
+		s := time.Now()
+		r, d = e.g(ga, kv...), time.Since(s)
+		if clitest.Read(filepath.Join(e.T, "log.pid")) != "" {
+			break
+		}
+	}
+	return r, d
 }
 
 // gone: 멈춘 hc 흉내가 남긴 pid가 끝났는가(좀비가 거둬질 때까지 잠깐 기다림)
@@ -139,12 +154,13 @@ func TestGuard(t *testing.T) {
 	r := clitest.Cmd{Env: []string{"XDG_STATE_HOME", "T_LOG=" + filepath.Join(e.T, "log"), "HOME=" + e.home, "PATH=" + e.stub + ":" + os.Getenv("PATH")}}.Run(e.guard, append([]string{"job1", "--"}, ga...)...)
 	c.Ok("띄움에 성공하면 그 줄을 남김(Herdr 터미널로 띄움)", r.RC == 0 && strings.Contains(r.Err, "hc-launchd-guard job1: Herdr 터미널로 띄움"))
 	// 상한(B06·M3): hc ls·hc run이 멈춰도 지킴이는 끝나고, 멈춘 무리를 거둔다
-	s := time.Now()
-	c.Ok("hc ls가 멈추면 상한에서 끊고 모름(75)", e.g(ga, "HC_FAKE_LS_SLEEP=12", "HC_LAUNCHD_GUARD_LS_SECS=1") == "rc 75")
+	r1, d1 := e.gHang(ga, "HC_FAKE_LS_SLEEP=12", "HC_LAUNCHD_GUARD_LS_SECS=1")
+	c.Ok("hc ls가 멈추면 상한에서 끊고 모름(75)", r1 == "rc 75")
 	c.Ok("그 hc 무리를 거둠", e.gone() == "거둠")
-	c.Ok("hc run이 멈추면 상한에서 끊고(그사이 안 떴으면) 75", e.g(ga, "HC_FAKE_RUN_SLEEP=12", "HC_LAUNCHD_GUARD_RUN_SECS=1") == "rc 75")
+	r2, d2 := e.gHang(ga, "HC_FAKE_RUN_SLEEP=12", "HC_LAUNCHD_GUARD_RUN_SECS=1")
+	c.Ok("hc run이 멈추면 상한에서 끊고(그사이 안 떴으면) 75", r2 == "rc 75")
 	c.Ok("그 hc 무리를 거둠", e.gone() == "거둠")
-	c.Ok("두 멈춤 모두 바깥 상한 전에 끝남", time.Since(s) < 10*time.Second)
+	c.Ok("두 멈춤 모두 바깥 상한 전에 끝남", d1+d2 < 10*time.Second)
 	// python3로 감싼 진입점(B01·B08): 이미 깔린 plist가 python3로 넘겨도 산다. 파이썬 파일이면 해석기를 그대로
 	e.g([]string{"python3", filepath.Join(e.stub, "wrap"), "--watch"})
 	c.Ok("python3 + bash 포장: 해석기를 빼고 포장을 직접 띄움", clitest.HasLine(e.log(), runLine(e.home, e.envCmd(filepath.Join(e.stub, "wrap"), "--watch")...)))

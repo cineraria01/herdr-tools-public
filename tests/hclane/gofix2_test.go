@@ -65,8 +65,10 @@ func gfSlowRebase(k *K) {
 	k.seedp("m.txt", "1\n2\n3\n4\n5\n6\nM")
 	cd := k.git(k.R, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	write(k.t, cd+"/info/attributes", "m.txt merge=slow\n")
-	k.git(k.R, "config", "merge.slow.driver", "sleep 4; git merge-file %A %O %B")
-	k.lndE([]string{"HC_LANE=gfm2l", "HERDR_TIMEOUT_GIT=2"}, k.wt, "main")
+	// 상한은 착지의 다른 git에도 걸리고 proc의 띄우기 준비(ps·고아 기록)도 그 안에서 세니 부하(조각 여럿 -race)에 넉넉히 3초, 드라이버는 그보다 긴 5초
+	// (2026-11-23 shard-load-flaky)
+	k.git(k.R, "config", "merge.slow.driver", "sleep 5; git merge-file %A %O %B")
+	k.lndE([]string{"HC_LANE=gfm2l", "HERDR_TIMEOUT_GIT=3"}, k.wt, "main")
 	k.check("M2 land: 느린 병합 드라이버 rebase도 끊지 않고 착지(종료 0)", k.rc == 0 && !exists(k.git(k.wt, "rev-parse", "--git-dir")+"/rebase-merge"))
 	os.Remove(cd + "/info/attributes")
 }
@@ -87,16 +89,21 @@ func gfWaitStuckHc(k *K) {
 	// R-222: 손자 찾기(ps -A -o pid= -o ppid=)는 가짜 ps 등록부로 — 가짜 hc와 그 손자가 스스로 「pid ppid」를 올린다(호스트 ps 가시성과 무관).
 	// 경로는 따로 된 인자로 넘긴다
 	st, gs, gc, reg := filepath.Join(k.T, "m4-start"), filepath.Join(k.T, "m4-gc-start"), filepath.Join(k.T, "m4-grandchild"), filepath.Join(k.T, "m4-ps.reg")
-	for _, f := range []string{st, gs, gc} {
-		os.Remove(f)
-	}
-	write(k.t, reg, "")
 	p := k.gfBin(map[string]string{"hc": `case $1 in ls) printf '%s\t%s\talive\thc ls\n' $$ $PPID >>` + sq(reg) + `; : >` + sq(st) +
 		`; sh -c 'printf "%s\t%s\talive\tsh\n" $$ $PPID >>"$1"; : >"$2"; sleep 3; : >"$3"' sh ` + sq(reg) + " " + sq(gs) + " " + sq(gc) +
 		` & exec sleep 30 ;; get) echo '{"address":"t4m","name":"boss","pid":4242,"state":"live"}'; exit 0 ;; esac; exit 3`})
-	t0 := time.Now()
-	k.runE([]string{p, "HC_FAKE_PS_REG=" + reg, "HERDR_TIMEOUT_REMOTE=1", "HC_TERMINAL_ID=t4m", "XDG_STATE_HOME=" + filepath.Join(k.T, "wst-m4")}, "wait", "--timeout", "0")
-	el := time.Since(t0)
+	// 가짜 hc ls와 손자가 표식을 쓴 뒤 상한(1초)에 걸려야 이 꼴이다 — proc의 띄우기 준비(ps·고아 기록)도 그 1초 안에서 세니 부하(조각 여럿
+	// -race)에서는 표식 전에 거둬질 수 있다. 그때는 준비가 안 된 것이라 다시 준비한다(5번까지 — 2026-11-23 shard-load-flaky)
+	var el time.Duration
+	for try := 0; try < 5 && (try == 0 || !exists(st) || !exists(gs)); try++ {
+		for _, f := range []string{st, gs, gc} {
+			os.Remove(f)
+		}
+		write(k.t, reg, "")
+		t0 := time.Now()
+		k.runE([]string{p, "HC_FAKE_PS_REG=" + reg, "HERDR_TIMEOUT_REMOTE=1", "HC_TERMINAL_ID=t4m", "XDG_STATE_HOME=" + filepath.Join(k.T, "wst-m4")}, "wait", "--timeout", "0")
+		el = time.Since(t0)
+	}
 	k.check("M4 wait --timeout 0: 멈춘 hc ls는 상한 안에서 끊고 75(모름)로 돌아온다", exists(st) && el < 15*time.Second && k.rc == 75 && strings.Contains(k.errf(), "hc ls"))
 	time.Sleep(5 * time.Second) // 손자가 살아 있었다면 표식을 쓸 시간
 	k.check("R-23 wait: 상한에 걸린 hc ls의 손자도 거둬 표식이 안 생긴다(손자 시작·등록부 조회를 먼저 확인)",

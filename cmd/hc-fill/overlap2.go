@@ -190,12 +190,8 @@ func ownDone(n, a, start string) bool {
 	}
 	// 그 터미널이 아직 사건을 하나도 안 적었으면 같은 이름의 옛 착지로 풀지 않는다. 마지막 사건이 「제출」이면 그 제출 ID가 든 병합기
 	// 착지로도 푼다 — 시각과 상관없이
-	if sm := joblast(n, a, "제출"); sm != "" {
-		sid := ""
-		if f := fields(lcCut(sm, 7)); len(f) > 0 {
-			sid = f[0]
-		}
-		return lcCut(mgres(n, sid), 5) == "착지"
+	if sm := sublast(n, a); sm != "" {
+		return lcCut(mgres(n, evSid(sm)), 5) == "착지"
 	}
 	// 제출 ID가 없던 옛 형식은 레인의 완료·제출 보고와 ID 없는 병합기 착지만 잇는다
 	f57 := lx

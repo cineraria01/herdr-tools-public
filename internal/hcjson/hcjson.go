@@ -35,6 +35,11 @@ type Terminal struct {
 	// Unknown: (ls) 이 항목만 계약을 어김 — 까닭. 주소만 믿을 수 있고 State는 "live", 나머지 칸은 비운다.
 	// 부르는 쪽은 그 터미널을 「살아 있고 무엇을 하는지 모름」으로 본다: 자리 셈·정리·발송에서 건드리지 않는다(R-3M01)
 	Unknown string
+	// CwdText: cwd 원문(Clean 전). 이 기계 폴더 판정(Uses)은 이것으로 — Clean은 링크 너머 `..`를 글자로 접는다(A3, 2026-11-23)
+	CwdText string
+	// NowCwd: (get) foreground.cwd — 전경 프로세스의 지금 폴더(OS가 푼 철자. cwd는 띄울 때 폴더라 띄운 뒤 cd가 안 보인다).
+	// 없음·null·꼴 틀림이면 "" — 부르는 쪽은 「모름」으로(2026-11-23 cwd-now-inuse)
+	NowCwd string
 }
 
 // Machine: hc ls·machine ls의 기계 한 항목. 둘 다 필수 · 비지 않은 문자열
@@ -164,6 +169,14 @@ func terminal(r json.RawMessage) (Terminal, error) {
 		*f.p = s
 		if f.h != nil {
 			*f.h = ok
+		}
+	}
+	t.CwdText = t.Cwd
+	if fr, ok := m["foreground"]; ok && !isNull(fr) {
+		if fm, err := obj(fr); err == nil {
+			if s, ok, err := str(fm, "cwd"); err == nil && ok && (filepath.IsAbs(s) || winAbs(s)) {
+				t.NowCwd = s
+			}
 		}
 	}
 	if filepath.IsAbs(t.Cwd) {
@@ -401,6 +414,12 @@ func Uses(cwd, dir string) bool {
 				return false
 			}
 			p = up
+		}
+	}
+	if strings.Contains("/"+cwd+"/", "/../") { // A3: 원문의 `..`는 링크를 푼 뒤에 올라간다 — 글자로 접은 Clean과 다른 폴더일 수 있어 디스크로 푼 것으로도 견준다
+		q, err := filepath.EvalSymlinks(cwd)
+		if (err == nil && walk(q)) || (err != nil && !os.IsNotExist(err)) {
+			return true
 		}
 	}
 	p := filepath.Clean(cwd)

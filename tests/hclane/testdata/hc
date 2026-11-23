@@ -2,6 +2,14 @@
 if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널로 답한다(report의 turn 칸)
   echo "$2" >>"$HCLOG.get"
   [ ! -e "$HCLOG.getdown" ] || { echo "error: cannot reach the core" >&2; exit 1; }   # 코어 연결 실패(「없음」이 아님)
+  # $HC_FAKE_NOW=<주소>=<지금 폴더>: 그 주소는 띄운 폴더 /에서 cd로 옮긴 꼴 — foreground.cwd가 지금 폴더(cwd-now-inuse). 값이 FAIL이면
+  # 코어 연결 실패(종료 1), -이면 foreground에 cwd 칸이 없다(그 칸을 안 주는 판)
+  if [ -n "${HC_FAKE_NOW-}" ] && [ "$2" = "${HC_FAKE_NOW%%=*}" ]; then
+    v_=${HC_FAKE_NOW#*=}
+    [ "$v_" != FAIL ] || { echo "error: cannot reach the core" >&2; exit 1; }
+    c_=; [ "$v_" = - ] || c_=",\"cwd\":\"$v_\""
+    echo "{\"address\":\"$2\",\"cwd\":\"/\",\"foreground\":{\"name\":\"node\",\"pid\":7$c_},\"pid\":4243,\"state\":\"live\",\"status\":{\"state\":\"working\"}}"; exit 0
+  fi
   # 주소가 $HC_FAKE_GET_ADDR이면 $HC_FAKE_GET_BODY(JSON 한 줄)를 그대로(메인 폴더 앞당김의 status 없는 터미널 판정 시험)
   [ -z "${HC_FAKE_GET_ADDR-}" ] || [ "$2" != "$HC_FAKE_GET_ADDR" ] || { printf '%s\n' "$HC_FAKE_GET_BODY"; exit 0; }
   # $HC_FAKE_STATUS_AGE초 전에 status가 바뀐 쉬는 터미널(wait 유예 시험)

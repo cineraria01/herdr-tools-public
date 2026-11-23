@@ -43,7 +43,8 @@ func jrec(js string, keys ...string) [][]string {
 }
 
 // mainbusy: 그 기계에서 그 폴더(아래)를 cwd로 쓰는 일하는 터미널 주소들(끝에 빈칸). hc ls 실패·꼴을 못 읽으면 false.
-// 일하는 터미널: status가 working·blocked, 또는 status가 없는데 hc get의 foreground pid가 터미널 pid와 다름(셸 위에 무엇이 돎)
+// 일하는 터미널: status가 working·blocked, 또는 status가 없는데 hc get의 foreground pid가 터미널 pid와 다름(셸 위에 무엇이 돎).
+// 「그 폴더를 씀」은 띄운 폴더(ls cwd) 또는 지금 폴더(hc get foreground.cwd — 띄운 뒤 cd, 모르면 씀) — 2026-11-23 cwd-now-inuse
 func mainbusy(dir string) (string, bool) {
 	var b bytes.Buffer
 	if runCmd(cmdOpt{stdout: &b}, "hc", "ls", "--json") != 0 {
@@ -74,14 +75,34 @@ func mainbusy(dir string) (string, bool) {
 			out.WriteString(pre + a + " ")
 			continue
 		}
-		if s != "live" || !strings.HasPrefix(c+"/", dir+"/") {
+		if s != "live" || (ss != "working" && ss != "blocked" && ss != "-") {
 			continue
+		}
+		var gt hcjson.Terminal
+		got, found, gerr := false, false, error(nil)
+		if !strings.HasPrefix(c+"/", dir+"/") {
+			// 띄운 폴더는 딴 곳 — 띄운 뒤 cd로 들어왔는지 지금 폴더(hc get foreground.cwd)로 본다. 모르면 바쁨(2026-11-23 cwd-now-inuse)
+			gt, found, gerr = hcGet(10, pre+a)
+			got = true
+			if gerr == nil && (!found || gt.State != "live") {
+				continue // 그사이 끝남·사라짐
+			}
+			in := hcjson.Uses // 이 기계면 디스크로(다른 철자), --on은 글자로(그 기계 경로는 여기서 stat할 수 없다)
+			if on != "" {
+				in = hcjson.Under
+			}
+			if gerr == nil && gt.NowCwd != "" && !in(gt.NowCwd, dir) {
+				continue
+			}
 		}
 		switch ss {
 		case "working", "blocked":
 		case "-":
 			// 셸만 떠 있음(foreground pid = 터미널 pid)이 확인될 때만 안 바쁨 — 조회 실패·잘림은 바쁨으로 둔다(앞당기지 않는 쪽)
-			if gt, found, err := hcGet(10, pre+a); err == nil && found && gt.PID > 0 {
+			if !got {
+				gt, found, gerr = hcGet(10, pre+a)
+			}
+			if err := gerr; err == nil && found && gt.PID > 0 {
 				var fg struct {
 					PID int `json:"pid"`
 				}

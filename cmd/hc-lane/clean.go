@@ -16,7 +16,7 @@ import (
 
 func init() {
 	register("clean", cleanMain, nil)
-	register("park", parkMain, nil)
+	register("park", parkMain, noHelp) // --help·-h는 사용법(2026-11-23 park-help-guard — 예전엔 주차 글로 읽어 실제로 주차했다)
 }
 
 var (

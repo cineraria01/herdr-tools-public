@@ -8,6 +8,8 @@
   못 풀면(없음·여럿에 걸림) 사건을 쓰지 않고 「<sha>는 이 작업 트리에 없다 — HEAD는 <전체>」와 종료 2, 작업 트리 밖(도구가 `--name`으로 적는 사건)은 옛 꼴 그대로다.
   sha 자리에 `HEAD`를 주면 어느 상태든 이 작업 트리의 HEAD 전체 해시로 적고(밖이면 종료 2), 완료 sha가 HEAD가 아니면 경고 한 줄만 낸다(막지 않음 — 「그 뒤 커밋 n개」).
   hc-fill 「감사·착지」 부록과 `--print-steps`의 완료 보고 줄은 `hc-lane report 완료 HEAD …` 꼴이다.
+  `제출`은 `hc-lane land`만 적는다(12칸 키 `submit:<제출 ID>`, ID 꼴 `<기계>-<UTC yyyymmddThhmmss>-<pid>`) — 그 키가 없거나 ID 꼴이 아닌 report 제출은 사건을 쓰지 않고 「제출은 hc-lane land가 적는다 …」와 종료 2(2026-11-23 fix-inbox-submit-id — 레인이 손으로 적은 `report 제출 감사 완료 …`의 첫 낱말 「감사」가 제출 ID로 읽혀 받은편지 회신이 이틀 멈췄다).
+  읽는 쪽(hc-fill 회신·마지막 보고·겹침, `hc-lane stats`)도 제출 ID는 `events.SubmitID` 하나로 읽는다: 12칸 `submit:<ID>`를 먼저, 키 없는 옛 줄은 한 줄 칸 첫 낱말이 ID 꼴일 때만. ID 없는 `제출`은 제출로 치지 않고 그 앞의 진짜 제출을 본다(없으면 병합기 결과를 기다리지 않는다).
   그 기계 `${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv`에 한 줄을 더한다(지우지 않음).
   칸: 시각(UTC `2026-11-16T02:00:00Z`)·기계(`HC_LANE_MACHINE`, 없으면 hostname)·터미널(`$HC_TERMINAL_ID`)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·그때의 hc turn(`hc get`, 터미널 밖이면 `-`. 옛 7칸 줄도 읽는다).
   레인 이름은 `--name` → `$HC_LANE` → hc 터미널 이름(`hc get`) → 작업 트리 가지(기본 가지면 `-` — 작업 트리를 지운 뒤 메인 폴더에서 report해도 `main`이 레인이 되지 않게).

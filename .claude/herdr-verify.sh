@@ -1,8 +1,10 @@
 #!/bin/bash
 # herdr-tools 저장소 검증 — hc-lane land·병합기가 `bash .claude/herdr-verify.sh`로 부른다(종료 0만 통과). 저장소 간 계약이라 파일은 남기고,
-# 본문은 Go(tests/repo/verify): go vet ./... · go test ./tests/repo/(gofmt·셸 문법·줄 수 예산·개인 값·비밀 꼴) → go test -race ./...
-# (Go 계약 시험 전부), 단계마다 고아 검사. 인자 --cheap-only는 싼 검사까지(.claude/herdr-precheck.sh). 환경 HERDR_VERIFY_ALL·
-# HERDR_VERIFY_JOBS·HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·tests/repo/secrets_test.go 머리말.
+# 본문은 Go(tests/repo/verify): go vet ./... · go test ./tests/repo/(gofmt·셸 문법·줄 수 예산·개인 값·비밀 꼴) → go test -race
+# (Go 계약 시험 전부 — TestCotenantGuard 홀로, 그다음 조각 여럿 함께: 2026-11-23 verify-shard, 한 꾸러미 안 차례 실행이 검증 시간의
+# 거의 전부였다), 단계마다 고아 검사. 인자 --cheap-only는 싼 검사까지(.claude/herdr-precheck.sh). 환경 HERDR_VERIFY_ALL·
+# HERDR_VERIFY_JOBS(함께 도는 시험 바이너리 자리 수, 없으면 코어 수)·HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·
+# tests/repo/secrets_test.go 머리말, 조각 표는 docs/repo/tests.md 「검증의 조각 실행」.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 # 추측 검증 기록(docs/hc-lane/merger-spec-verify.md): hc-lane land는 같은 트리·같은 이 스크립트 blob의 원격 기록 refs/herdr/verified/<트리>가 있을 때만

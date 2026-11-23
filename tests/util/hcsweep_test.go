@@ -423,8 +423,10 @@ git -C "$R" fetch -q origin`, G, R)
 		"2026-11-21T10:00:00Z\tm\tt82\tland-d\t착지\tabc1234\t-\t3\n2026-11-21T10:00:00Z\tm\tt84\tland-u\t완료\tabc1234\t-\t3\n")
 	idle31 := (time.Now().Unix() - 31*60) * 1000
 	for _, x := range [][2]string{{"t81", "land-x"}, {"t82", "land-d"}, {"t83", "land-n"}, {"t84", "land-u"}} {
-		write(t, T+"/get-"+x[0]+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"done"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":5,"cwd":"%s"}`+"\n",
-			x[0], x[1], idle31, R+".wt/"+x[1]))
+		// foreground.cwd: 진짜 hc get 꼴(지금 폴더) — hc-lane clean이 다른 터미널의 지금 폴더도 본다(cwd-now-inuse, 없으면 모름 = 안 지움)
+		w := R + ".wt/" + x[1]
+		write(t, T+"/get-"+x[0]+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"done"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":5,"foreground":{"cwd":"%s"},"cwd":"%s"}`+"\n",
+			x[0], x[1], idle31, w, w))
 	}
 	script(t, T+"/bin/hc", T, `#!/bin/bash
 case $1 in

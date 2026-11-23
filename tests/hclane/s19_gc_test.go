@@ -107,6 +107,18 @@ func s19gc(k *K) {
 	k.check("gc: 기본 --min-age(24시간)면 방금 만든 폴더는 남김", k.rc == 0 && s19gwt(k, "g-new") && s19lineHas(k, k.R+".wt/g-new", "새것"))
 	k.runE([]string{"HC_FAKE_LS_FAIL=1"}, "gc", "--repo", k.R, "--min-age", "0")
 	k.check("gc: hc ls 실패면 아무것도 안 지우고 멈춤", k.rc != 0 && strings.Contains(k.errf(), "hc ls") && s19gwt(k, "g-new"))
+	// cwd-now-inuse(2026-11-23): 띄운 폴더는 딴 곳, 띄운 뒤 cd로 들어온 지금 폴더(hc get foreground.cwd)가 작업 트리 → 남김. 모름도 남김
+	s19gw(k, "g-now")
+	s19gcm(k, "g-now")
+	k.git(k.R+".wt/g-now", "push", "-q", "origin", "HEAD:main")
+	k.git(k.R, "fetch", "-q", "origin")
+	nowLS := "HC_FAKE_LS=" + fmt.Sprintf(`{"terminals":[{"address":"t6","agent":"claude-code","cwd":"%s","state":"live"}]}`, k.T)
+	for _, nw := range [][2]string{{"작업 트리", k.R + ".wt/g-now"}, {"모름", "FAIL"}} {
+		k.runE([]string{nowLS, "HC_FAKE_NOW=t6=" + nw[1]}, "gc", "--repo", k.R, "--min-age", "0")
+		k.check("gc: 지금 폴더가 "+nw[0]+"인 터미널 → 남김(주소)", s19gwt(k, "g-now") && s19gbr(k, "g-now") && s19lineHas(k, k.R+".wt/g-now", "t6"))
+	}
+	k.runE([]string{nowLS, "HC_FAKE_NOW=t6=" + k.T}, "gc", "--repo", k.R, "--min-age", "0")
+	k.check("gc: 띄운·지금 폴더 모두 딴 곳 → 지금처럼 지움", !s19gwt(k, "g-now") && !exists(k.R+".wt/g-now"))
 	// 감사 반영: 병합 커밋이 낀 가지·일부만 들어간 가지·잠긴 폴더·멈춘 rebase는 남김, 묵은 폴더는 status가 index를 다시 써도 새것이 아님
 	s19gw(k, "g-merge")
 	s19gcm(k, "g-merge")

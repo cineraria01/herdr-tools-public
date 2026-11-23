@@ -25,6 +25,16 @@ func lsVal(ls, ref string) (string, bool) {
 func parkMain(args []string) int {
 	cmdName = "park"
 	startSetup()
+	// 옵션 꼴(-로 시작) 인자는 주차 글로 읽지 않는다(오타 난 옵션이 주차되지 않게). -로 시작하는 글은 -- 뒤에
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	} else {
+		for _, a := range args {
+			if len(a) > 1 && a[0] == '-' {
+				die("park: 알 수 없는 인자: %s — 주차하지 않았다(-로 시작하는 글은 hc-lane park -- <글>)", a)
+			}
+		}
+	}
 	pmsg := strings.Join(args, " ")
 	git := func(a ...string) (string, int) { return outOf(os.Stderr, append([]string{"git"}, a...)) }
 	gitQ := func(a ...string) (string, int) { return outOf(nil, append([]string{"git"}, a...)) }

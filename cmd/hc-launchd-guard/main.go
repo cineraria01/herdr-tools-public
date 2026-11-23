@@ -8,6 +8,7 @@
 // 띄우지 않고 75 — launchd가 다시 부른다. hc run이 실패했는데 터미널도 없으면 75(까닭 한 줄). 그 자리에서 도구를 돌리는 길은 없다.
 // hc ls는 출력 수집까지 HC_LAUNCHD_GUARD_LS_SECS(20)초, hc run은 HC_LAUNCHD_GUARD_RUN_SECS(60)초 상한 — 넘으면 그 무리째 거둔다
 // (멈춘 hc에 지킴이가 안 끝나면 launchd가 다시 부르지 않는다). --log: 이 지킴이의 줄과 도구 출력을 그 파일 끝에 잇는다.
+// 띄우기 직전 그 파일이 HC_LAUNCHD_GUARD_LOG_MAX(8MB, 0 = 안 돌림) 바이트를 넘으면 <파일>.1로 옮기고 새로 연다(한 세대).
 // <도구>가 python·python3·python3.*이고 다음 인자가 파이썬 파일이 아니면(첫 줄 #!…python 아님) 해석기를 빼고 그 파일을 직접 돌린다 —
 // 이미 깔린 옛 plist가 `python3 ~/.local/bin/hc-sweep`으로 넘겨도 그 자리의 Go 바이너리가 돈다.
 //
@@ -89,11 +90,11 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s: HOME이 없다\n", me)
 		return 2
 	}
+	var lf *os.File
 	if log != "" {
 		if log, err = filepath.Abs(log); err == nil {
-			var f *os.File
-			if f, err = os.OpenFile(log, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644); err == nil {
-				os.Stdout, os.Stderr = f, f
+			if lf, err = os.OpenFile(log, logFlags, 0o644); err == nil {
+				os.Stdout, os.Stderr = lf, lf
 			}
 		}
 		if err != nil {
@@ -116,6 +117,7 @@ func run(args []string) int {
 	}
 	cmd := append([]string{"/usr/bin/env", "-u", "HC_TERMINAL_ID", "-u", "HC_SCOPE", "-u", "HC_TERMINAL_SOCKET", tool}, rest...)
 	if log != "" {
+		g.rotate(log, lf, logMax())
 		cmd = append([]string{"/bin/sh", "-c", `exec "$@" >>"$0" 2>&1`, log}, cmd...)
 	}
 	c := exec.Command("hc", append([]string{"run", "--bg", "--no-parent", "--outlive-parent", "--rm", "--name", name, "--cwd", home, "--"}, cmd...)...)
@@ -165,6 +167,42 @@ func secs(k string, def int) time.Duration {
 		fmt.Fprintf(os.Stderr, "%s: 경고 — %s=%q 를 읽지 못해 기본 %d초\n", me, k, v, def)
 	}
 	return time.Duration(def) * time.Second
+}
+
+const logFlags = os.O_WRONLY | os.O_APPEND | os.O_CREATE
+
+// logMax: --log 상한 바이트 HC_LAUNCHD_GUARD_LOG_MAX(기본 8MB, 0 = 돌리지 않음). 못 읽으면 경고하고 기본값
+func logMax() int64 {
+	const def = 8 << 20
+	if v := os.Getenv("HC_LAUNCHD_GUARD_LOG_MAX"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			return n
+		}
+		fmt.Fprintf(os.Stderr, "%s: 경고 — HC_LAUNCHD_GUARD_LOG_MAX=%q 를 읽지 못해 기본 %d바이트\n", me, v, def)
+	}
+	return def
+}
+
+// rotate: 띄우기 직전 --log 파일(f로 열려 있음)이 max 바이트를 넘으면 <log>.1로 옮기고(있던 .1은 덮음) 새로 열어 머리에 한 줄 —
+// 한 세대만. 터미널이 살아 있으면 부르지 않으니 상주 도구가 쥔 파일은 다음에 다시 뜰 때 돈다. 크기 조회·옮기기·새로 열기가
+// 실패하면 그대로 잇는다(지킴이가 도구를 못 띄우는 일이 없게)
+func (g guard) rotate(log string, f *os.File, max int64) {
+	st, err := f.Stat()
+	if max <= 0 || err != nil || st.Size() <= max {
+		return
+	}
+	if err := os.Rename(log, log+".1"); err != nil {
+		g.say(fmt.Sprintf("기록이 %d바이트(상한 %d)인데 옮기지 못해 그대로 잇는다: %v", st.Size(), max, err))
+		return
+	}
+	nf, err := os.OpenFile(log, logFlags, 0o644)
+	if err != nil {
+		g.say(fmt.Sprintf("기록을 %s.1로 옮겼는데 새로 열지 못해 옮긴 파일에 잇는다: %v", log, err))
+		return
+	}
+	f.Close()
+	os.Stdout, os.Stderr = nf, nf
+	g.say(fmt.Sprintf("기록이 %d바이트(상한 %d)라 %s.1로 옮기고 새로 연다", st.Size(), max, log))
 }
 
 type guard struct {

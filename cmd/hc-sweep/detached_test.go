@@ -5,6 +5,7 @@ package main
 // 멈춘 git 작업은 지금 규칙(작업 트리 남음)
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,9 @@ import (
 	"herdr-tools/internal/clitest"
 )
 
-// withLs: hc ls는 ls를 돌려주고(빈 글이면 실패) hc exec git은 진짜로 돌리는 실행기
+// withLs: hc ls는 ls를 돌려주고(빈 글이면 실패) hc exec git은 진짜로 돌리는 실행기. hc get <주소>는 ls의 그 항목에
+// foreground.cwd를 붙여 돌려준다 — 항목의 시험 칸 "now"가 지금 폴더(없으면 cwd와 같음, "FAIL"이면 get 실패, null이면 그 칸 없음 —
+// 옛 판 꼴), ls에 없는 주소는 not_found(종료 3)
 func withLs(ls string) runner {
 	return func(d time.Duration, env []string, name string, args ...string) result {
 		if name == "hc" && len(args) > 0 && args[0] == "ls" {
@@ -23,8 +26,40 @@ func withLs(ls string) runner {
 			}
 			return result{out: ls}
 		}
+		if name == "hc" && len(args) > 1 && args[0] == "get" {
+			return fakeGet(ls, args[1])
+		}
 		return j2HcExecGit(d, env, name, args...)
 	}
+}
+
+func fakeGet(ls, addr string) result {
+	var l struct{ Terminals []map[string]any }
+	json.Unmarshal([]byte(ls), &l)
+	for _, t := range l.Terminals {
+		if t["address"] != addr {
+			continue
+		}
+		now, has := t["now"]
+		if !has {
+			now = t["cwd"]
+		}
+		if now == "FAIL" {
+			return result{rc: 1, errs: "error: cannot reach the core"}
+		}
+		delete(t, "now")
+		fg := map[string]any{"name": "node", "pid": 7}
+		if now != nil {
+			fg["cwd"] = now
+		}
+		t["foreground"] = fg
+		if s, ok := t["status"].(string); ok {
+			t["status"] = map[string]any{"state": s}
+		}
+		b, _ := json.Marshal(t)
+		return result{out: string(b)}
+	}
+	return result{rc: 3, errs: `{"error":{"kind":"not_found"}}`}
 }
 
 const noTerms = `{"terminals":[]}`
@@ -155,6 +190,10 @@ func TestDetachedInUse(t *testing.T) {
 	}
 	list := func(ts ...string) string { return `{"terminals":[` + strings.Join(ts, ",") + `]}` }
 	owner := term("t1", W)
+	// cwd-now-inuse(2026-11-23): 띄운 폴더(cwd)는 G인데 띄운 뒤 cd로 들어온 지금 폴더(hc get foreground.cwd, 시험 칸 now)
+	moved := func(addr, now string) string {
+		return `{"address":"` + addr + `","state":"live","status":"working","cwd":"` + G + `","now":` + now + `}`
+	}
 
 	for _, c := range []struct {
 		name   string
@@ -168,8 +207,15 @@ func TestDetachedInUse(t *testing.T) {
 		{"다른 live 터미널이 그 링크 밑 폴더(S5-01)", []string{term("t2", G+"/lsub/deep")}, false},
 		{"다른 live 터미널이 다른 철자(대소문자)로 같은 폴더(R-4A03)", []string{term("t2", clitest.AltSpelling(t, W, false))}, false},
 		{"이 기계 모름 항목", []string{`{"address":"t3","state":"live","cwd":7}`}, false},
-		{"끝난 터미널·다른 기계·형제 폴더 이름 접두만", []string{`{"address":"t4","state":"finished","cwd":"` + W + `"}`,
-			term("m1/t5", W), term("t6", W+"2")}, true},
+		{"띄운 뒤 그 작업 트리로 들어온 터미널(지금 폴더)", []string{moved("t2", `"`+W+`"`)}, false},
+		{"띄운 뒤 그 아래 폴더로 들어온 터미널(지금 폴더)", []string{moved("t2", `"`+W+`/sub/deep"`)}, false},
+		{"지금 폴더를 모름(hc get 실패)", []string{moved("t2", `"FAIL"`)}, false},
+		{"지금 폴더를 모름(foreground.cwd 없음 — 옛 판)", []string{moved("t2", `null`)}, false},
+		{"띄운 폴더가 그 작업 트리, 지금은 딴 곳(지금처럼 쓰는 중)", []string{`{"address":"t2","state":"live","cwd":"` + W + `","now":"` + G + `"}`}, false},
+		// 지우는 장면은 맨 끝 하나만(지우고 나면 W가 없다). cwd-now-inuse: 띄운·지금 폴더 모두 딴 곳이면 지금처럼 지운다 —
+		// 다른 기계 터미널의 get 실패는 이 기계 후보를 막지 않는다
+		{"끝난 터미널·다른 기계·형제 폴더 이름 접두만·지금 폴더도 딴 곳", []string{`{"address":"t4","state":"finished","cwd":"` + W + `"}`,
+			term("m1/t5", W), term("t6", W+"2"), moved("t2", `"`+G+`"`), `{"address":"m1/t7","state":"live","cwd":"/x","now":"FAIL"}`}, true},
 	} {
 		judgeLs, closedLs := "", "" // 판정 때는 자신(t1)이 목록에 있고, 닫은 뒤에는 빠진다
 		if c.others != nil {

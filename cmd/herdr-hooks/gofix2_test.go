@@ -130,14 +130,15 @@ func TestHcTerminals(t *testing.T) {
 	for in, ok := range map[string]bool{
 		`{"terminals":[]}`: true,
 		`{"terminals":[{"state":"live","address":"t1","agent":"claude","cwd":"/r","name":null}]}`: true,
-		`{"terminals":[{"state":"finished"}]}`:                                                    true,
-		``:                                                                                        false,
-		`{}`:                                                                                      false,
-		`null`:                                                                                    false,
-		`{"terminals":null}`:                                                                      false,
-		`{"terminals":{}}`:                                                                        false,
-		`{"terminals":["t1"]}`:                                                                    false,
-		`{"terminals":[{"address":"t1"}]}`:                                                        false,
+		`{"terminals":[{"state":"finished"}]}`:                                                    false, // A5(cwd-now-inuse): hcjson 계약 — 주소 없는 항목은 목록 전체 모름(더 엄격 = 동거)
+		`{"terminals":[{"state":"live","address":"m1/t","cwd":7}]}`:                               true,  // 다른 기계 항목의 모름은 이 기계 동거와 상관없음
+		``:                                 false,
+		`{}`:                               false,
+		`null`:                             false,
+		`{"terminals":null}`:               false,
+		`{"terminals":{}}`:                 false,
+		`{"terminals":["t1"]}`:             false,
+		`{"terminals":[{"address":"t1"}]}`: false,
 		`{"terminals":[{"state":"live","agent":"claude"}]}`:      false,
 		`{"terminals":[{"state":"live","address":""}]}`:          false,
 		`{"terminals":[{"state":"live","address":"t","cwd":7}]}`: false,

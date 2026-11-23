@@ -121,3 +121,23 @@ func TestAppendAndScan(t *testing.T) {
 		t.Fatalf("fn이 false면 멈춘다: %v", got)
 	}
 }
+
+// SubmitID: 12칸 submit: 키를 먼저, 키 없는 옛 줄은 ID 꼴 첫 낱말만, 손 report 제출·다른 상태는 ""(fix-inbox-submit-id)
+func TestSubmitID(t *testing.T) {
+	id := "box-20261121T010203-4242"
+	for _, c := range []struct {
+		e    Event
+		want string
+	}{
+		{Event{State: "제출", Msg: id + " → refs/merge-queue/1-l", Key: "submit:" + id}, id},
+		{Event{State: "제출", Msg: "다른 글", Key: "submit:S1"}, "S1"},
+		{Event{State: "제출", Msg: id + " → refs/merge-queue/1-l"}, id},
+		{Event{State: "제출", Msg: "감사 완료(낮음 4) → 병합기에 넘김", Key: "-"}, ""},
+		{Event{State: "제출", Msg: "", Key: "submit:"}, ""},
+		{Event{State: "중간", Msg: id, Key: "submit:" + id}, ""},
+	} {
+		if got := c.e.SubmitID(); got != c.want {
+			t.Errorf("%+v: SubmitID = %q, 바람 %q", c.e, got, c.want)
+		}
+	}
+}

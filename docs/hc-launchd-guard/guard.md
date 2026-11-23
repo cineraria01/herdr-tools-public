@@ -13,6 +13,9 @@ Herdr 터미널(herdr-core가 띄움)과 `hc exec`에서는 창이 안 뜬다.
   지킴이 자신은 cwd를 `$HOME`으로 옮기고 `~/Documents`에 닿지 않아 launchd에서 돌아도 창이 안 뜬다(시험 `TestTCC`).
   옛 plist처럼 `python3 <파일>`로 넘겨도 그 파일이 파이썬이 아니면 해석기를 빼고 그 파일을 직접 돌린다.
   상주 작업은 `KeepAlive`+`ThrottleInterval 60`으로 60초마다 지킴이가 다시 불려 죽은 터미널을 다시 띄우고, 주기 작업(`StartInterval`)은 앞 판이 돌면 건너뛴다.
+  `--log` 파일은 띄우기 직전 `HC_LAUNCHD_GUARD_LOG_MAX` 바이트(기본 8MB, 0이면 안 돌림)를 넘으면 `<파일>.1`로 옮기고(있던 `.1`은 덮음, 한 세대) 새로 열어 머리에 돌렸다는 한 줄만 적는다(2026-11-23 guard-log-rotate — 지우는 규칙이 없어 hc-fill watch.log가 일주일에 14MB까지 자랐다).
+  도구 출력에는 끼어들지 않고, 크기 조회·옮기기가 실패하면 그대로 잇는다.
+  터미널이 살아 있으면 돌리지 않으니 그 파일을 열고 도는 상주 도구(`hc-fill watch` 등)는 다음에 다시 뜰 때에야 돌아간다 — 그때까지는 상한을 넘어 자란다.
   예시 plist `launchd/`(hc-fill·hc-sweep·herdr-balance).
   시험 `cmd/hc-launchd-guard/guard_test.go`.
 - 지킴이 없이 도구를 바로 띄우는 launchd 작업은 창에 멈출 수 있다.

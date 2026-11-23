@@ -1,0 +1,6 @@
+       hc-lane logs [--all | --on <기계>…] [--max <바이트>]
+  logs          도구 기록 모으기: 이 기계(와 --all이면 hc machine ls의 연결된 기계마다 hc exec --on 한 번)의 hc-lane·hc-fill·hc-sweep·
+                herdr-balance·운영 기록에서 지난번 받은 바이트 위치 뒤의 새 줄만 「기계<TAB>파일<TAB>줄」로, 병합기 로그는 새 파일의 실패 줄만,
+                launchd 작업의 마지막 종료·실행 파일 있음과 herdr-sync/bak 크기는 「(상태)」 줄로. 파일당·기계당 상한(기본 1MB)을 넘으면 뒤쪽만
+                (「잘림」). 위치는 출력을 다 쓴 뒤에만 앞당긴다. 수집 못 한 기계는 첫 줄에 적고 위치를 그대로 두며 종료 1. 읽기만 한다.
+                쓰는 법은 docs/hc-lane/logs.md

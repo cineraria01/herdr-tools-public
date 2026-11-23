@@ -67,6 +67,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane land: 착지 표식·착지 안전](docs/hc-lane/land.md)
 - [hc-lane 띄우기 (지시문 사본·신뢰 질문·시작 확인·fetch)](docs/hc-lane/launch.md)
 - [hc-lane 레인 임대](docs/hc-lane/lease.md)
+- [hc-lane logs (도구 기록 모으기)](docs/hc-lane/logs.md)
 - [hc-lane 병합기: 묶음](docs/hc-lane/merger-batch.md)
 - [hc-lane 병합기: 추측 검증 (병합기 병렬 검증)](docs/hc-lane/merger-spec-verify.md)
 - [hc-lane 병합기 (제출·merger, 최소판)](docs/hc-lane/merger.md)

@@ -23,7 +23,7 @@ for a in "$@"; do case $a in
   symbolic-ref) echo origin/main; exit 0 ;;
   # 완료 sha를 40자로: <sha>^{commit} → 뒤를 0으로 채운 40자($HC_FAKE_SHA40이면 그 값). $HC_FAKE_REVNONE과 같은 sha는 없음(종료 1, 출력 없음)
   *'^{commit}') s_=${a%'^{commit}'}; [ "$s_" != "${HC_FAKE_REVNONE-}" ] || exit 1
-    [ "$s_" != "${HC_FAKE_REVSLOW-}" ] || sleep 3   # REVSLOW: 그 sha 조회가 3초 늦음(상한 시험)
+    [ "$s_" != "${HC_FAKE_REVSLOW-}" ] || sleep 30   # REVSLOW: 그 sha 조회가 30초 늦음(상한 시험 — 상한이 무리째 거둔다)
     [ "$s_" != "${HC_FAKE_REVFAIL-}" ] || { echo "fatal: I/O error(가짜)" >&2; exit 128; }   # REVFAIL: 그 sha 조회가 실패(모름)
  [ -z "${HC_FAKE_SHA40-}" ] || { echo "$HC_FAKE_SHA40"; exit 0; }
     printf '%s%0*d\n' "$s_" $((40 - ${#s_})) 0; exit 0 ;;
