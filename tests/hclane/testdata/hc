@@ -81,15 +81,27 @@ case $1 in
        [ -z "$n_" ] || [ -z "$l_" ] || printf '%s' "$n_" >"$HCLOG.runname"
        [ -n "${HC_FAKE_RUN_FAIL-}" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; }
        echo "{\"address\":\"${HC_FAKE_RUN_ADDR:-t9zz}\",\"agent\":\"x\",\"state\":\"live\"}" ;;
-  exec) on=; while [ "$1" != -- ]; do [ "$1" != --on ] || on=$2; shift; done; shift
+  exec) on=; js=; while [ "$1" != -- ]; do [ "$1" != --on ] || on=$2; [ "$1" != --json ] || js=1; shift; done; shift
         # $HC_FAKE_LEASE_EXEC4: 임대 호출(hc-lane-lease)만 코어가 종료 4(machine_unknown) — 원격 없음(no-origin)과 가름
         case "$*" in *hc-lane-lease*) [ -z "${HC_FAKE_LEASE_EXEC4-}" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; } ;; esac
+        # $HC_FAKE_EXEC_FAIL(글 틀): 명령 줄이 맞으면 hc 자신의 실패 — 표준 출력 빔, 표준 오류에 오류 객체, 종료 1(--json 여부 같음, hc 0.1.21 꼴)
+        if [ -n "${HC_FAKE_EXEC_FAIL-}" ]; then
+          case "$*" in $HC_FAKE_EXEC_FAIL) echo '{"error":{"hint":"","kind":"unavailable","message":"fake core gone"}}' >&2; exit 1 ;; esac
+        fi
+        # --json에서 못 띄우는 프로그램: 진짜처럼 결과가 아니라 hc 실패(spawn_failed·종료 1)
+        if [ -n "$js" ] && ! command -v "$1" >/dev/null 2>&1; then
+          echo "{\"error\":{\"hint\":\"\",\"kind\":\"spawn_failed\",\"message\":\"cannot start $1: No such file or directory (os error 2)\"}}" >&2; exit 1
+        fi
         # $HC_FAKE_MACH_HOME가 있으면 기계마다 HOME을 <그 폴더>/<기계>로(폴더가 없으면 모르는 기계, 종료 4)
         if [ -n "$on" ] && [ -n "${HC_FAKE_MACH_HOME-}" ]; then
           [ -d "$HC_FAKE_MACH_HOME/$on" ] || { echo '{"error":{"kind":"machine_unknown"}}' >&2; exit 4; }
           # <기계>/.nosh: 프로그램을 띄우지 못하는 기계(Windows의 진짜 꼴 — 연결은 되고 sh·ps가 없음)
           [ ! -e "$HC_FAKE_MACH_HOME/$on/.nosh" ] || { echo "{\"error\":{\"hint\":\"\",\"kind\":\"spawn_failed\",\"message\":\"cannot start $1: program not found\"}}" >&2; exit 1; }
-          HOME=$HC_FAKE_MACH_HOME/$on exec env -u XDG_STATE_HOME "$@"   # 그 기계 집의 상태 폴더(이 기계 XDG_STATE_HOME 말고)
+          set -- env HOME="$HC_FAKE_MACH_HOME/$on" env -u XDG_STATE_HOME "$@"   # 그 기계 집의 상태 폴더(이 기계 XDG_STATE_HOME 말고)
         fi
-        exec "$@" ;;
+        [ -n "$js" ] || exec "$@"
+        # --json: 결과 하나(진짜 hc 0.1.21 꼴 — hc 종료 0, 프로그램의 종료·출력은 칸에)
+        d_=$(mktemp -d); "$@" >"$d_/o" 2>"$d_/e"; c_=$?
+        printf '{"code":%d,"ms":1,"signal":null,"stderr":"%s","stdout":"%s","timed_out":false,"truncated":false}\n' "$c_" "$(base64 <"$d_/e" | tr -d '\n')" "$(base64 <"$d_/o" | tr -d '\n')"
+        rm -rf "$d_"; exit 0 ;;
 esac

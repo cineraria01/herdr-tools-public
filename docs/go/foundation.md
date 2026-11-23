@@ -18,3 +18,10 @@
 - **셸 조각 끝 표식**(2026-11-22 gofix3-shx): Go가 `sh -c`·`hc exec`로 보내는 조각은 `internal/shx`로 감싸고, 출력은 `shx.Cut`이 ok일 때만 쓴다(rc 0이고 마지막 줄이 정확히 표식 — 잘림·중간 종료·rc≠0은 모름).
   `shx.Script`는 엄격 머리(`set -u`·`set -o pipefail`, 못 켜는 셸이면 97)를 붙이고 macOS에서만 도는 조각(hc-lane·hc-fill)에 쓴다.
   `shx.Tail`은 표식만 붙인다 — 리눅스 기계의 sh(dash 0.5.12)는 pipefail을 받지 않으니 herdr-sync 조회처럼 리눅스에서도 도는 조각은 결과를 바꾸는 단계를 파이프에 두지 않고 `|| exit N`으로 본다.
+- **`hc exec` 결과 판독**(2026-11-23 hc-exec-result — 「git이 답한 종료 1(없음)」과 「hc가 실패한 종료 1(모름)」을 못 갈라 모름을 없음으로 읽었다): 종료 코드에 뜻을 두는 자리는 `hc exec --json`으로 부르고 `hcjson.ParseExec(표준 출력, 표준 오류, hc 종료)`로 읽는다.
+  탐침(hc 0.1.21·0.1.22 두 판, 로컬·`--on` 같은 꼴 — 두 판의 견본이 `internal/hcjson/exec_test.go`에): 결과는 hc 종료 0 + 표준 출력에 `{code, signal, stdout(base64), stderr(base64), timed_out, truncated, ms}` 하나(0이 아닌 종료·시간 넘김·신호도 결과 — 시간 넘김·신호는 `code` null), hc 자신의 실패는 hc 종료 ≠0(띄우지 못함 1, 모르는 기계 4) + 표준 출력 빔 + 표준 오류에 `{"error":{kind,message,hint}}`.
+  `--json` 없이는 hc 실패도 종료 1이고 표준 오류의 오류 객체는 프로그램이 쓴 글과 섞여 가를 수 없다. 판독은 엄격하다 — 꼴이 다르면 모름(`ExecError`가 아닌 오류), hc 실패는 `*hcjson.ExecError`(kind) — 둘 다 그 바퀴에 아무것도 바꾸지 않는다.
+  옮긴 자리: hc-lane의 `xrun`·`xout`·`xoutQ`(`--on`·코어 문맥일 때 — clean·gc·띄우기의 있음·없음 조회가 다 이 길).
+  있음·없음을 읽는 자리는 0 있음·1 없음만 믿고 그 밖은 멈추거나 남긴다(띄우기의 가지·폴더 「이미 있나」도 — 감사 지적으로 `== 0`만 보던 것을 갈랐다).
+  결과면 프로그램의 출력과 종료 코드(시간 넘김 124, 신호 128+신호 — 예전 값 그대로), hc 실패·꼴 다름·잘린 출력이면 125(모름).
+  그대로 둔 자리(종료 0이 아니면 이미 모름이거나 표준 오류의 오류 객체로 가르는 자리): hc-lane `zx`·`xi`·`xRun`·`rexec`, hc-fill `onm`, hc-sweep `hcExec`, herdr-sync·omc-update·worker-mac-*.

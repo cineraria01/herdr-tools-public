@@ -5,7 +5,9 @@ package main
 // common.go·hcx.go·ffmain.go·lease.go·coord.go(land·report 레인)의 것을 쓴다.
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,14 +57,66 @@ func command(argv []string) *exec.Cmd { return exec.Command(argv[0], argv[1:]...
 
 // xrun: 대상 기계에서. stdout·stderr가 nil이면 버린다
 func xrun(stdout, stderr io.Writer, args ...string) int {
-	c := command(xargv(args))
+	if on != "" || core != "" {
+		return xjson(stdout, stderr, args)
+	}
+	c := command(args)
 	c.Stdout, c.Stderr = stdout, stderr
 	return code(proc.Run(c)) // git·hc는 상한 안에서만(proc.Limit) — 넘기면 124(모름, gofix M3·E02)
 }
 
+// rcHc: hc exec 자신의 실패·꼴이 다른 응답·잘린 출력 — 모름. 프로그램의 종료 코드(0 있음·1 없음 …)와 겹치지 않는 값
+const rcHc = 125
+
+// xjson: hc exec --json으로 돌려 hcjson.ParseExec로 읽는다(hc-exec-result, 2026-11-23 — --json 없이는 hc 실패도 종료 1이라
+// 「없음」과 못 갈랐다). 결과면 프로그램의 출력을 쓰고 그 종료 코드(시간 넘김 124, 신호 128+신호 — --json 없을 때와 같은 값),
+// hc 실패·꼴이 다름·잘림이면 rcHc
+func xjson(stdout, stderr io.Writer, args []string) int {
+	a := xargv(args)
+	c := command(append([]string{"hc", "exec", "--json"}, a[2:]...))
+	var ob, eb bytes.Buffer
+	c.Stdout, c.Stderr = &ob, &eb
+	err := proc.Run(c)
+	if errors.Is(err, proc.ErrTimeout) {
+		return 124
+	}
+	r, perr := hcjson.ParseExec(ob.Bytes(), eb.Bytes(), code(err))
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	if perr != nil {
+		fmt.Fprintf(stderr, "hc-lane: %v\n", perr)
+		return rcHc
+	}
+	stderr.Write(r.Stderr)
+	if r.Truncated {
+		fmt.Fprintln(stderr, "hc-lane: hc exec가 출력을 잘랐다 — 모름")
+		return rcHc
+	}
+	if stdout != nil {
+		stdout.Write(r.Stdout)
+	}
+	switch {
+	case r.TimedOut:
+		return 124
+	case r.Code < 0:
+		return 128 + r.Signal
+	}
+	return r.Code
+}
+
 // xout: $(x …) — 표준 출력(끝 줄바꿈 뺌)·종료 코드, 오류 출력은 화면. xoutQ는 오류 출력을 버림(2>/dev/null)
-func xout(args ...string) (string, int)  { return outOf(os.Stderr, xargv(args)) }
-func xoutQ(args ...string) (string, int) { return outOf(nil, xargv(args)) }
+func xout(args ...string) (string, int)  { return xoutTo(os.Stderr, args) }
+func xoutQ(args ...string) (string, int) { return xoutTo(nil, args) }
+
+func xoutTo(stderr io.Writer, args []string) (string, int) {
+	if on == "" && core == "" {
+		return outOf(stderr, args)
+	}
+	var b bytes.Buffer
+	rc := xjson(&b, stderr, args)
+	return trim(b.String()), rc
+}
 
 func outOf(stderr io.Writer, argv []string) (string, int) {
 	c := command(argv)

@@ -186,13 +186,25 @@ func launchMain(args []string) int {
 			die("git fetch 실패: %s", repo)
 		}
 		again := "다른 이름은 --branch <이름>"
-		if xrun(nil, os.Stderr, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/heads/"+branch) == 0 {
+		// 이미 있나: 0 있음, 1 없음만 잇는다. 그 밖(hc 실패 125·시간 넘김)은 모름 — 띄우지 않는다(hc-exec-result)
+		there := func(what string, args ...string) bool {
+			switch r := xrun(nil, os.Stderr, args...); r {
+			case 0:
+				return true
+			case 1:
+				return false
+			default:
+				die("%s 가 이미 있는지 확인하지 못했다(종료 %d) — 띄우지 않았다", what, r)
+				return false
+			}
+		}
+		if there("로컬 브랜치 "+branch, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/heads/"+branch) {
 			die("로컬 브랜치 %s 가 이미 있다. %s", branch, again)
 		}
-		if remote && xrun(nil, os.Stderr, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/remotes/origin/"+branch) == 0 {
+		if remote && there("원격 브랜치 origin/"+branch, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/remotes/origin/"+branch) {
 			die("원격 브랜치 origin/%s 가 이미 있다. %s", branch, again)
 		}
-		if xtest("-e", wt) {
+		if there("워크트리 폴더 "+wt, "test", "-e", wt) {
 			die("워크트리 폴더가 이미 있다: %s. %s", wt, again)
 		}
 		if xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", bref+"^{commit}") != 0 {
