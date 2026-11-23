@@ -220,8 +220,9 @@ func statusCmd(args []string) {
 		rows = append(rows, Row(f))
 	}
 	fmt.Println(stLine("레인", "기계", "넣은 뒤", "단계", "예상·근거"))
-	if len(rows) == 0 { // 병합기 한 줄(maPrint, mergeralive.go)은 표 끝에 — 줄이 없어도
+	if len(rows) == 0 { // 병합기 한 줄(maPrint, mergeralive.go)·바퀴 계측 줄(statusTick)은 표 끝에 — 줄이 없어도
 		maPrint()
+		statusTick()
 		exit(0)
 	}
 	// 터미널·연결은 한 번씩. 못 읽으면 살아 있음을 모르는 채로(끝남이 아니라 모름)
@@ -281,5 +282,13 @@ func statusCmd(args []string) {
 		fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stStage(in), ""))
 	}
 	maPrint()
+	statusTick()
 	exit(0)
+}
+
+// statusTick: 표 끝에 바퀴 계측 한 줄(tick.go — 지휘가 바퀴가 느려진 것을 바로 본다). 기록이 없으면 찍지 않는다
+func statusTick() {
+	if s := tickStatus(); s != "" {
+		fmt.Println(s)
+	}
 }

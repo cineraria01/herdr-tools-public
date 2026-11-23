@@ -178,7 +178,11 @@ func joblast(name, addr, state string) string {
 	if key := attemptRun(name, addr); key != "" {
 		return runlast(name, addr, key, state)
 	}
-	if pget(addr) == 0 && PNAME == name {
+	// 이번 바퀴 터미널 표에 없는 주소(끝난 떠 있음 줄)는 hc get 없이 주소·이름으로 — hc get이 끝남·모름일 때와 같은 길이다(lsGone, tick.go).
+	// 종료를 확정해야 하는 곳(받은편지 회신 등)은 pget을 직접 부르니 그대로 hc get으로 본다
+	if lsGone(addr) {
+		PRUN, PNAME = "", ""
+	} else if pget(addr) == 0 && PNAME == name {
 		return runlast(name, addr, PRUN, state)
 	}
 	return lastev(name, addr, state)
@@ -447,5 +451,6 @@ func aproj(aid string) string {
 func auSend(addr, msg string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	tickCall("hc", []string{"send"})
 	return exec.CommandContext(ctx, "hc", "send", addr, msg).Run() == nil
 }

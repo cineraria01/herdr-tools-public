@@ -156,6 +156,7 @@ type Cmd struct {
 
 // Run: 표준 출력(그대로 — 끝 줄바꿈 포함)과 셸 종료 코드
 func (c Cmd) Run() (string, int) {
+	tickCall(c.Name, c.Args)
 	x := exec.Command(c.Name, c.Args...)
 	x.Env = envWith(c.Env, c.Unset)
 	x.Stdin = c.In

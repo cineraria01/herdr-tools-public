@@ -20,6 +20,7 @@ func launchRows() {
 		ov = "block"
 	}
 	OVM, OWN, OVWAIT = ov, nil, nil
+	tickMark("owners")
 	syncOwners()
 	NDOLD, NDNOW = readLines(DATA+"/need.tsv"), nil
 	ELIST, UPNOW, ECAPHIT, ECAPM = "", "", false, ""
@@ -41,9 +42,12 @@ func launchRows() {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
 	}
+	tickMark("launch")
+	LSSNAP = false // 이제 띄운다 — 새 주소는 표에 없으니 pget이 다시 hc get으로 본다
 	for _, r := range ROWS {
 		waitRow(r)
 	}
+	tickMark("early")
 	earlyRows()
 	if !dry {
 		for _, w := range []struct {
@@ -55,9 +59,13 @@ func launchRows() {
 			}
 		}
 	}
+	tickMark("ownfinish")
 	ownFinish()
+	tickMark("after")
 	afterTick()
+	tickMark("idle")
 	idleTick()
+	tickMark("gc")
 	gcTick()
 }
 

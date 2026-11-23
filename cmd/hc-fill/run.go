@@ -31,6 +31,7 @@ func runHooks() {
 }
 
 func runRound() {
+	tickMark("migrate")
 	if !dry {
 		sweepTmp()
 		if withQ(func() {
@@ -41,10 +42,15 @@ func runRound() {
 			die("대기열 복구(받은편지 줄 옮기기) 실패, 이번 바퀴는 띄우지 않았다")
 		}
 	}
+	tickMark("inbox")
 	inboxTick()
+	tickMark("merger")
 	mergerTick()
+	tickMark("specverifiers")
 	specVerifiersTick()
+	tickMark("onland")
 	onlandTick() // 대기열이 비어도(착지한 줄이 빠진 뒤) 돈다
+	tickMark("conf")
 	idle := conf("idle")
 	if idle == "" {
 		idle = "10"
@@ -70,6 +76,7 @@ func runRound() {
 		say("대기열 비었음")
 		// idle 0은 놀고 있음 알림만 끈다 — 자동 다시 맞춤이 켜졌으면 병합기 반송을 읽고 처리하러 바퀴를 끝까지 돈다(R-16)
 		if IDLE == 0 && !relandOn() {
+			tickMark("gc")
 			gcTick()
 			exit(0)
 		}
@@ -106,7 +113,9 @@ func runRound() {
 			die("설정 audit 틀을 읽지 못함(%s): %s", why, AUD)
 		}
 	}
+	tickMark("tables")
 	readTables()
+	tickMark("conf")
 	aconf()
 	EV, EVBAD, MGM = nil, false, ""
 	OWNF, OWND = DATA+"/own.tsv", DATA+"/own"
@@ -122,14 +131,23 @@ func runRound() {
 	} else {
 		OSEED = true
 	}
+	tickMark("prune")
 	tryPrune()
+	tickMark("events")
 	evTick()
+	tickMark("park")
 	parkTick()
+	tickMark("reply")
 	replyTick() // 사건(EV) 뒤 — 제출한 받은편지 레인은 병합기 결과를 보고 회신한다
+	tickMark("audit")
 	auditTick()
+	tickMark("lows")
 	lowsTick() // 감사 통과 차수의 [낮음] 후속 레인(lows.go)
+	tickMark("stall")
 	stallTick()
+	tickMark("reland")
 	relandTick() // 병합기 rebase 충돌 반송 → 다시 맞춤 줄(이 바퀴에 띄울 수 있게 orderRows 앞)
+	tickMark("order")
 	auditSeats()
 	orderRows()
 	NOW, NOWL, OFF, FETCHED, FETCHBAD = nil, nil, "", "", ""
@@ -148,6 +166,7 @@ func runRound() {
 		h = "0"
 	}
 	HOLD = atoi10(h)
+	tickMark("seats")
 	countSeats()
 	ASEC = asecText
 	if AFIN != "" {
@@ -239,6 +258,7 @@ func readTables() {
 			CONN = append(CONN, m)
 		}
 	}
+	LSSNAP = true // 띄우기 전까지 「표에 없음 = 터미널 없음」(lsGone, tick.go)
 }
 
 // auditSeats: 자리에서 뺄 자동 감사 레인 이름(AUDN)과, 감사 줄이 자리를 쥔 동안의 쓰기 레인 주소(AWT)

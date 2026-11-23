@@ -17,6 +17,7 @@ import (
 // launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
 // 3 미확정(주소 모름) · 5 띄웠지만 시작 확인 실패(터미널은 남음) · 6 띄웠고 주소는 있으나 시작 확인 미확정(hc-lane 종료 8)
 func launch(lane, brief, m, repo, dest, owner string) int {
+	LSSNAP = false // 새 주소가 생긴다 — 터미널 표의 「없음」을 더 믿지 않는다(lsGone)
 	// 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다
 	raw, err := os.ReadFile(brief)
 	body := sub(string(raw))
@@ -241,6 +242,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 			for i := 0; ; {
 				// 상한 안에서만(proc.Limit이 모르는 명령 — Fable F3·아스트라 E01: 멈추면 run.lock을 쥔 채 끝없이 기다렸다).
 				// RunMax: 고아 기록이 쓰인 뒤에야 시작해 이 바퀴가 SIGKILL로 죽어도 다음 바퀴가 거둔다(재감사 fill R-06)
+				tickCall("herdr-balance", nil)
 				bc := exec.Command("herdr-balance", "--main", bco, "--add", ADDR)
 				if proc.Code(proc.RunMax(bc, balanceMax())) == 0 {
 					break

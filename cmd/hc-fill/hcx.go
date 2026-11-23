@@ -121,6 +121,7 @@ func connectedOf(raw string) ([]string, bool) {
 // hcGet: hc get <주소> --json 한 번(proc 상한)을 hcjson.ParseGet으로 — 표준 출력은 터미널 객체, 종료 3의 오류 객체는 표준 오류에 온다.
 // 오류는 모름(연결 실패·시간 넘김·잘림·찌꺼기·모르는 state·주소 다름)
 func hcGet(addr string) (hcjson.Terminal, bool, error) {
+	tickCall("hc", []string{"get"})
 	x := exec.Command("hc", "get", addr, "--json")
 	var o, e bytes.Buffer
 	x.Stdout, x.Stderr = &o, &e

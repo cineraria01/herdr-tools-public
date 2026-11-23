@@ -64,11 +64,27 @@ func watchCmd(args []string) {
 	}
 	for {
 		say("--- %s", stampLog())
+		t0 := time.Now()
 		c := exec.Command(SELF, "run")
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 		proc.WaitMax(c, "", roundMax)
-		time.Sleep(time.Duration(sec) * time.Second)
+		// 주기에 맞춰 쉰다(2026-11-24 fill-tick-cost — 옛 판은 바퀴를 다 돈 뒤 주기만큼 더 쉬어 간격이 주기 + 바퀴였다)
+		time.Sleep(restFor(time.Duration(sec)*time.Second, time.Since(t0), restMin()))
 	}
+}
+
+// restMin: 바퀴 사이 최소 쉼 — 설정 rest_min(초, 바퀴마다 설정 파일을 다시 읽어 바로 먹는다), 없거나 숫자가 아니면 5초
+func restMin() time.Duration {
+	s := 5
+	if text, ok := readFile(CONF); ok {
+		for _, l := range lines(text) {
+			if f := fields(l); len(f) == 2 && f[0] == "rest_min" && isDigits(f[1]) {
+				s = atoi10(f[1])
+				break
+			}
+		}
+	}
+	return time.Duration(s) * time.Second
 }
 
 func runCmd(args []string) {
@@ -90,7 +106,8 @@ func runCmd(args []string) {
 		exit(75)
 	}
 	heldLocks = append(heldLocks, f)
-	runHooks() // 신호 고루틴보다 먼저(R-20)
+	runHooks()  // 신호 고루틴보다 먼저(R-20)
+	tickStart() // 바퀴 계측(tick.go) — 끝내기 훅으로 찍으니 같은 자리
 	// 바퀴 상한·watch 멈춤으로 TERM을 받으면: 상한 걸고 따로 무리로 띄운 자식(git·hc 등 — 이 무리 신호가 안 닿는다)까지 거두고 끝낸다.
 	// 이 처리기 하나만(proc.TakeSignals — 재감사 R-H04: proc 처리기가 함께 받아 먼저 끝내면 아래 훅·거두기가 반쯤 끊겼다)
 	proc.TakeSignals()
