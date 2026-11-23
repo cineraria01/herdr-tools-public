@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 
 	"herdr-tools/internal/version"
@@ -34,8 +35,14 @@ func main() {
 		fmt.Println(version.String("hc-core-relaunch"))
 		return
 	}
-	if len(a) < 1 {
-		fmt.Fprintln(os.Stderr, "사용: hc-core-relaunch <기계>...")
+	const usage = "사용: hc-core-relaunch <기계>..."
+	if len(a) == 1 && (a[0] == "--help" || a[0] == "-h") {
+		fmt.Println(usage)
+		return
+	}
+	// -로 시작하는 이름은 ssh가 옵션으로 읽는다(-oProxyCommand=… 등) — 하나라도 있으면 아무 기계에도 손대지 않는다
+	if len(a) < 1 || slices.ContainsFunc(a, func(m string) bool { return strings.HasPrefix(m, "-") }) {
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(64)
 	}
 	rc := 0

@@ -68,7 +68,10 @@ type split struct {
 // 꾸러미 이름이 바뀌면 그 split은 그냥 안 쓰인다(그 꾸러미는 나머지 한 조각에서 통째로 돈다).
 // est는 조각들이 자리 10(코어 수)에서 함께 돌 때 잰 초(2026-11-23 verify-shard-tune) — 긴 것부터 띄우고, 짧은 조각이 끝물의 빈자리를
 // 채운다. 이름 범위 part(^TestRecovery[A-C] 등)는 새 시험이 이름대로 저절로 들고, 어디에도 안 맞으면 그 꾸러미 나머지 조각에 든다.
-// TestMergerContract·TestContract·s21b1은 최상위 시험(절) 하나라 표로는 더 못 나눈다 — 가장 긴 조각은 이것들이다.
+// 병합기·herdr-sync 계약 시험은 묶음마다 최상위 시험(TestMergerContractA~E·TestContractA~E, 2026-11-23 contract-split)이라 part
+// 하나씩 — 새 묶음은 이름대로 part를 더한다(안 더하면 그 꾸러미 나머지 조각에 든다). s21b1은 절 하나라 표로는 더 못 나눈다.
+// 나눈 뒤 실측(mini-m4 10코어 3회): 가장 긴 조각 538→305초(s21b1)지만 검증은 557~574초로 그대로 — 조각 초의 합(약 4800초)을
+// 자리 10으로 나눈 값이 바닥이다. 더 줄이려면 시험 일 자체(합)를 줄이거나 자리 수를 늘려 잰다.
 // part가 없는 split은 그 꾸러미 통째 한 조각(나머지 조각에서 뺀다).
 var splits = []split{
 	{mod + "tests/hclane", []part{
@@ -84,13 +87,18 @@ var splits = []split{
 		{run: "^TestHcFill$", est: 900, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}}},
 	}, 1},
 	{mod + "tests/merger", []part{
-		{run: "^TestMergerContract$", est: 464},
+		{run: "^TestMergerContractA$", est: 114},
+		{run: "^TestMergerContractB$", est: 99},
+		{run: "^TestMergerContractC$", est: 134},
+		{run: "^TestMergerContractD$", est: 126},
+		{run: "^TestMergerContractE$", est: 144},
 		{run: "^TestR4PipeHeldExitZero$", est: 67},
 		{run: "^TestRecovery[A-C]", est: 110},
 		{run: "^TestRecovery[D-N]", est: 115},
 		{run: "^TestRecovery[O-R]", est: 130},
-	}, 70},
-	{mod + "cmd/herdr-sync", []part{{run: "^TestContract$", est: 415}}, 34},
+	}, 76},
+	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 100}, {run: "^TestContractB$", est: 100}, {run: "^TestContractC$", est: 87},
+		{run: "^TestContractD$", est: 109}, {run: "^TestContractE$", est: 77}}, 33},
 	{mod + "cmd/hc-merger", []part{{run: "^TestResidentReportsKilledWorker$", est: 123}, {run: "^Test(Spec|Journal)", est: 155}}, 145},
 	{mod + "tests/util", nil, 140},
 	{mod + "cmd/herdr-tools-publish", nil, 69},

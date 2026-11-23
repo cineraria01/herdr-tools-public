@@ -2,7 +2,10 @@ package main
 
 // herdr-sync 계약 시험(옛 tests/herdr-sync.test.sh, 2026-11-21 go-tests-ops): 임시 HOME 셋(맥, 워커 맥 w1, 리눅스 lx — lx는 uname이
 // Linux이고 원격 조각을 dash로 돌린다), 가짜 hc(PATH 앞, machine ls·exec [-i] --on만), 임시 저장소 둘(범용 repo·개인 conf)과 그 bare
-// origin을 두고 herdr-sync 바이너리(clitest.Bin)를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 한 흐름이라 단계 순서대로 상태를 이어 쓴다.
+// origin을 두고 herdr-sync 바이너리(clitest.Bin)를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 묶음(TestContractA~C) 안에서는 단계
+// 순서대로 상태를 이어 쓰고, 묶음마다 newSX로 새로 준비한다(2026-11-23 contract-split — 한 시험이던 때 검증의 긴 조각이었다). 뒤 묶음(B~E)이
+// 기대는 상태(처음 맞춘 뒤의 base·레인 클론·나무 줄)는 준비에서 제품 명령을 실제로 돌려 만든다(synced·treePrep). 새 단계는 기대는 상태가
+// 있는 묶음에 넣는다.
 // 다른 사본은 HERDR_SYNC=<경로>(시험 전용). 진짜 herdr-settings-merge·herdr-tools-config를 범용 저장소에 넣어 쓴다(HERDR_SETTINGS_MERGE·HERDR_TOOLS_CONFIG_BIN=<경로>).
 // 가짜 저장소의 tools:bin/<이름> 줄은 일반 파일 맞추기의 보기다(그 저장소엔 cmd/가 없다) — 바이너리 줄은 16(release)
 
@@ -220,7 +223,8 @@ func copyExec(t *testing.T, src, dst string) {
 	ct.Chmod(t, dst, 0o755)
 }
 
-func TestContract(t *testing.T) {
+// newSX: 묶음 하나의 준비 — 임시 HOME 셋·가짜 hc·두 저장소와 origin·맥/w1/lx의 처음 파일(맞추기 전)
+func newSX(t *testing.T) *sx {
 	s := &sx{t: t, here: ct.Repo(t), sync: ct.Tool(t, "herdr-sync", "HERDR_SYNC")}
 	merge := ct.Tool(t, "herdr-settings-merge", "HERDR_SETTINGS_MERGE")   // 진짜 herdr-settings-merge를 기계에 깔아 쓴다
 	cfgtool := ct.Tool(t, "herdr-tools-config", "HERDR_TOOLS_CONFIG_BIN") // 개인 값 검사·prebuild 읽기에 진짜 도우미를 쓴다
@@ -317,12 +321,82 @@ open(p, "w").write(a + "<!-- codex-shared:start -->\ncodex built\n<!-- codex-sha
 	s.put(LX+"/.agents/skills/herdr-ovis/SKILL.md", "ovis\n")
 	s.put(LX+"/.claude/settings.json", `{"language":"한국어","model":"opus","effortLevel":"medium","permissions":{"allow":["y"]},"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"moshi-lx.sh"}]}]}}`+"\n")
 
+	return s
+}
+
+// synced: 뒤 묶음의 준비 — 처음 맞추기와 그 충돌 셋을 --take로 풀어(제품 명령) 모두 같게, 개인 저장소의 레인 클론(T/lane)
+func (s *sx) synced() {
+	s.run()
+	for _, p := range []string{"w1:.claude/docs/b.md", "lx:.claude/CLAUDE.md#body", "lx:.codex/AGENTS.md#codex-shared"} {
+		s.run("--take", p)
+	}
+	s.run("--check")
+	if s.r.RC != 0 {
+		s.t.Fatalf("준비: 맞춘 뒤 --check 종료 %d\n%s", s.r.RC, s.r.Out)
+	}
+	s.git(s.T, "clone", "-q", s.T+"/conf.git", s.T+"/lane")
+}
+
+// treePrep: 실패 주입(나무 파일 읽기 실패)·gofix4(나무 파일 --pull·나무 모음 SIGKILL)가 쓰는 나무 줄 둘(15와 같은 줄)과 그 아래 맥 파일 —
+// 레인 착지로 줄을 더하고 맞춘다
+func (s *sx) treePrep() {
+	s.lane("tree", func() {
+		ct.Append(s.t, s.T+"/lane/sync.list", "스킬나무 .agents/skills/**             skills/agents/          macos\n"+
+			"스킬나무 .claude/skills/**             skills/claude/          all\n")
+	})
+	s.A, s.C = s.MAC+"/.agents/skills", s.MAC+"/.claude/skills"
+	s.put(s.A+"/alpha/SKILL.md", "alpha 1\n")
+	s.put(s.C+"/beta/SKILL.md", "beta 1\n")
+	s.run()
+	if s.r.RC != 0 {
+		s.t.Fatalf("준비: 나무 줄을 더해 맞추기 종료 %d\n%s", s.r.RC, s.r.Out)
+	}
+}
+
+// TestContractA: 1~12 — 맥 확인·개인 저장소 없음·prebuild·처음 맞추기·충돌·--take·--pull·레인 착지·실행 권한·push 거절·깨진 전송·
+// 연결 실패·다른 OS·설정·고른 기계·더러운 저장소·개인 값
+func TestContractA(t *testing.T) {
+	s := newSX(t)
 	s.firstRuns()   // 1~4
 	s.repoAndMore() // 5~12
-	s.trees()       // 15(나무)
+	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(s.T+"/tmp"))
+	s.c.Done()
+}
+
+// TestContractB: 15(나무 줄 — 모음·씀·hc 호출 수·--take·--pull·깖·깨진 전송·8MB 나누기·줄 옮김·.gitignore·되돌리기)
+func TestContractB(t *testing.T) {
+	s := newSX(t)
+	s.synced()
+	s.trees() // 15(나무)
+	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(s.T+"/tmp"))
+	s.c.Done()
+}
+
+// TestContractC: 13·14·15(공개)·16 — 잠금·걷힌 셸 판 줄·config.example·공개 내보내기·바이너리 줄과 릴리스
+func TestContractC(t *testing.T) {
+	s := newSX(t)
+	s.synced()
 	s.lockAndRest() // 13·14·15(공개)·16
-	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(T+"/tmp"))
+	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(s.T+"/tmp"))
+	s.c.Done()
+}
+
+// TestContractD: 17(실패 주입 — 나무 파일 읽기 실패는 treePrep의 나무 줄을 쓴다)
+func TestContractD(t *testing.T) {
+	s := newSX(t)
+	s.synced()
+	s.treePrep()
+	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(s.T+"/tmp"))
 	s.failures() // 17(실패 주입 — SIGKILL한 실행은 임시 폴더를 남기니 위 확인 뒤에)
-	s.gofix4()   // 18(재감사 바퀴 3)
+	s.c.Done()
+}
+
+// TestContractE: 18(재감사 바퀴 3 — sh 띄우기 실패·나무 파일 --pull 255·나무 모음 도중 SIGKILL, treePrep의 나무 줄을 쓴다)
+func TestContractE(t *testing.T) {
+	s := newSX(t)
+	s.synced()
+	s.treePrep()
+	s.ok("임시 파일이 남지 않는다 (맥·기계 쪽 조각 모두)", ct.Empty(s.T+"/tmp"))
+	s.gofix4() // 18(나무 모음 도중 SIGKILL은 임시 폴더를 남길 수 있으니 위 확인 뒤에)
 	s.c.Done()
 }

@@ -48,6 +48,7 @@ type ev struct {
 	wuLogged     bool
 	self         string // watch가 뜰 때의 실행 파일과 그 stat(reexecIfNew)
 	selfSt       os.FileInfo
+	selfNew      os.FileInfo // 지난 바퀴에 본 바뀐 stat(두 바퀴 같아야 exec)
 	wpar         bool
 	tl           string
 	tls          hcjson.List // tl을 hcjson.ParseList로 읽은 것(lsok일 때만)

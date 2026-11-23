@@ -359,6 +359,13 @@ func gcMain(args []string) int {
 			gcKeepf(wt, "기본·현재 가지 "+branch)
 			continue
 		}
+		// HEAD 0000…: 가지가 정말 없으면(종료 1) 깨진 작업 트리로 남긴다(지우지 않음). 조회 실패는 아래 gin이 확인 못 함(오류)으로
+		if strings.Trim(h, "0") == "" && branch != "" {
+			if _, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", x.b); r == 1 {
+				gcKeepf("깨진 작업 트리 "+wt, "— HEAD가 없는 가지 "+branch+"을 가리킴(사람이 본다)")
+				continue
+			}
+		}
 		switch _, r := gin(h); r {
 		case 0:
 		case 1:

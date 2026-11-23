@@ -26,7 +26,7 @@ func secOrphanSkip(k *K) {
 		k.t.Fatal(err)
 	}
 	pg := c.Process.Pid
-	st, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pg)).Output()
+	st, err := lstart(pg)
 	if err != nil {
 		k.t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func secOrphanSkip(k *K) {
 	}
 	kpg := kc.Process.Pid
 	defer func() { syscall.Kill(-kpg, syscall.SIGKILL); kc.Wait() }()
-	kst, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(kpg)).Output()
+	kst, err := lstart(kpg)
 	if err != nil {
 		k.t.Fatal(err)
 	}
@@ -105,6 +105,14 @@ func secOrphanSkip(k *K) {
 	k.run("run")
 	k.check("무리가 사라지면 바퀴가 돈다", k.rc != 75, fmt.Sprint(k.rc), k.out)
 	rm(rec)
+}
+
+// lstart: 그 pid의 시작 시각 — 제품(proc.startTimeBy)과 같은 LC_ALL=C 꼴로. 세션 로캘(ko_KR)로 읽으면 한국어 날짜라 기록이
+// 「번호를 다른 프로세스가 씀」으로 지워졌다(small-usage-fixes 2026-11-23, 작업 중 발견)
+func lstart(pid int) ([]byte, error) {
+	c := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	c.Env = append(os.Environ(), "LC_ALL=C")
+	return c.Output()
 }
 
 // aliveFile: 파일에 적힌 pid가 산다

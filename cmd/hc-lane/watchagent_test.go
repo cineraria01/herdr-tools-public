@@ -2,7 +2,7 @@ package main
 
 // watch-agent-guard(2026-11-23): 지휘 에이전트가 끝나 대화형 셸만 남은 터미널은 pid·이름이 그대로라 coordCheck를 통과했고,
 // watch가 사건 글을 그 셸 프롬프트에 붙여 넣었다(셸이 명령으로 실행). 받는 터미널에 에이전트가 있는지 hc get으로 가른다.
-// 견본은 testdata/agent — mini-m4 hc 0.1.21에서 잰 것(1·2·3·4·6)과 지휘 맥 hc 0.1.22 것(v22-), 경로·계정은 지어낸 값.
+// 견본은 testdata/agent — 워커 기계 hc 0.1.21에서 잰 것(1·2·3·4·6)과 지휘 맥 hc 0.1.22 것(v22-), 경로·계정은 지어낸 값.
 
 import (
 	"encoding/json"
@@ -102,6 +102,15 @@ func TestAgentState(t *testing.T) {
 			t.Errorf("대화형 셸 %q: 판정 %d, 바람 1", sh, got)
 		}
 	}
+	// 중첩 셸(small-usage-fixes): 맨 위 zsh -l, 전경은 pid가 다른 대화형 bash — 맨 위 셸과 같은 판정(status null 없음 · 남음 모름)
+	nest := map[string]any{"argv": []string{"bash"}, "pid": 7}
+	for st, want := range map[string]int{"null": 1, `{"app":"claude-code","state":"working"}`: 2} {
+		b := agentEdit(t, ex, map[string]any{"foreground": nest, "status": json.RawMessage(st)})
+		tm, _, _ := parseSample(t, b)
+		if got, why := agentState(tm); got != want {
+			t.Errorf("중첩 셸, status %s: 판정 %d(%s), 바람 %d", st, got, why, want)
+		}
+	}
 	// 전경 pid가 셸과 다르면 argv 없이도 있음, 판정 칸(foreground·argv)이 둘 다 없으면 확인을 건너뜀(옛 동작 — 가짜 hc 꼴)
 	for n, b := range map[string][]byte{
 		"전경 pid만 다름":         agentEdit(t, ex, map[string]any{"foreground": map[string]any{"pid": 7}}),
@@ -118,6 +127,38 @@ func TestAgentState(t *testing.T) {
 		if got, _ := agentState(tm); got != 0 {
 			t.Errorf("셸이 터미널을 읽지 않는 꼴 %q: 판정 %d, 바람 0", sh, got)
 		}
+	}
+}
+
+// 새 판 exec는 바뀐 stat이 두 바퀴 연속 같을 때만 — 쓰는 중(바퀴마다 또 바뀜)이면 exec하지 않는다
+func TestReexecSettled(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "hc-lane")
+	put := func(s string) {
+		if err := os.WriteFile(f, []byte(s), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("v1")
+	st, _ := os.Stat(f)
+	n := 0
+	defer func(o func(string, []string, []string) error) { reexec = o }(reexec)
+	reexec = func(string, []string, []string) error { n++; return os.ErrInvalid }
+	e := &ev{self: f, selfSt: st}
+	e.reexecIfNew()
+	put("v2-반쯤") // 첫 바퀴: 바뀜
+	e.reexecIfNew()
+	put("v2-다 쓴 판") // 둘째 바퀴: 또 바뀜
+	e.reexecIfNew()
+	if n != 0 {
+		t.Fatalf("쓰는 중인 판으로 exec했다(%d번)", n)
+	}
+	e.reexecIfNew() // 셋째 바퀴: 둘째와 같음
+	if n != 1 {
+		t.Fatalf("다 쓴 판으로 exec하지 않았다(%d번)", n)
+	}
+	e.reexecIfNew() // exec 실패 뒤에는 그 판을 지금 판으로 — 다시 시도하지 않는다
+	if n != 1 {
+		t.Fatalf("exec 실패 뒤 다시 시도했다(%d번)", n)
 	}
 }
 

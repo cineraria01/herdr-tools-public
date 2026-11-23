@@ -298,6 +298,15 @@ esac
 	c.ok("[E10] setup mesh: -로 시작하는 이름 → 64", rc == 64 && read(TLOG+"/ssh.log") == "")
 
 	// ── hc-core-relaunch ──
+	// --help·-h는 사용법(0), -로 시작하는 이름은 64 — 어느 쪽도 ssh를 부르지 않는다(여럿 중 하나만 그래도 아무 기계에도 손대지 않음)
+	for _, a := range []string{"--help", "-h"} {
+		newhome()
+		tool(e, "hc-core-relaunch", a)
+		c.ok("relaunch "+a+": 사용법·0, 접속 안 함", rc == 0 && has("사용: hc-core-relaunch") && read(TLOG+"/ssh.log") == "")
+	}
+	newhome()
+	tool(e, "hc-core-relaunch", "w1", "-oProxyCommand=x")
+	c.ok("relaunch: -로 시작하는 이름 → 64, 접속 안 함", rc == 64 && read(TLOG+"/ssh.log") == "")
 	// 원격에 남긴 core-restart.sh를 가짜 로그인 셸로 직접 돌려, 코어 재시작이 로그인 환경에서 --fresh로 가는지 본다.
 	newcfg()
 	newhome()

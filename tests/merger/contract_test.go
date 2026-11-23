@@ -1,7 +1,9 @@
 package merger_test
 
 // 병합기 계약 시험(옛 tests/hc-lane-merger.test.sh — 121단언, 이름·차례 그대로): 임시 bare origin + 레인 클론 둘(a·b) + 병합기 전용
-// 클론(m), 가짜 hc. 앞 절의 큐·main·사건이 다음 절로 이어지는 한 줄기라 시험 하나로 차례대로 돈다.
+// 클론(m), 가짜 hc. 묶음 안에서는 앞 절의 큐·main·사건이 다음 절로 이어진다. 묶음(TestMergerContractA~E)은 저마다 newM으로 새로
+// 준비하니 혼자서도·어떤 차례로도 돈다(2026-11-23 contract-split — 한 시험이던 때 검증의 가장 긴 조각이었다). 새 절은 기대는 상태가
+// 있는 묶음에 넣는다(A 끝의 「병합기 일지」 확인은 A의 l-a·l-d·l-live를 본다).
 // bash 병합기(HC_LANE_MERGER_IMPL=bash) 갈래는 그 판이 없어져 버렸다(재제출 경합·우선 순서는 Go 판 단언만).
 
 import (
@@ -94,7 +96,8 @@ func (m *M) delRefs(s string, prefixes []string, more ...string) {
 	}
 }
 
-func TestMergerContract(t *testing.T) {
+// newM: 묶음 하나의 준비 — 시험 폴더·가짜 hc·검증 스크립트·bare origin과 클론 a·b·m. 켬 표식은 없다(꺼짐)
+func newM(t *testing.T) *M {
 	k := newK(t)
 	m := &M{K: k, W: filepath.Join(k.T, "공백 있는 폴더")}
 	m.O = filepath.Join(m.W, "origin.git")
@@ -102,7 +105,7 @@ func TestMergerContract(t *testing.T) {
 	m.LE = filepath.Join(k.T, ".local/state/hc-lane/land-events.tsv")
 	m.MJ = filepath.Join(k.T, ".local/state/hc-lane/merger-journal.tsv")
 	m.verify, m.failG = filepath.Join(k.T, "verify.log"), filepath.Join(k.T, "fail/git")
-	T, W, rg := k.T, m.W, k.realGit
+	T, W := k.T, m.W
 	mkdirs(t, W, filepath.Join(T, "vf"), filepath.Join(T, "fail"))
 	k.stub(filepath.Join(T, "bin/hc"), `#!/bin/bash
 case $1 in
@@ -130,6 +133,26 @@ echo "verify $b" >>"$T/verify.log"
 `)
 	k.sh(W, `git init -q --bare -b main "$1" && cd seed && git init -q -b main && printf 'base\n' >shared.txt && git add -A && git commit -qm base &&
 git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "$1" a/proj && git clone -q "$1" b/proj && git clone -q "$1" m/proj`, m.O)
+	return m
+}
+
+// cntV: verify.log에서 그 줄(「verify <가지>」)의 수
+func (m *M) cntV(s string) int {
+	n := 0
+	for _, l := range lines(read(m.verify)) {
+		if l == s {
+			n++
+		}
+	}
+	return n
+}
+
+// TestMergerContractA: 끔·제출·병합기 기본·충돌·검증 실패·이어 받기·잠금·더러움·git 실패·응답 유실·이름 꼴·clean(1~15),
+// 결과 알림(37)·병합기 일지
+func TestMergerContractA(t *testing.T) {
+	m := newM(t)
+	k := m.K
+	T, rg, cntV := k.T, k.realGit, m.cntV
 
 	// 1. 설정이 없으면 land는 예전 그대로(제출 없이 main에 착지)
 	m.lane("a", "l-old", "old.txt", "old")
@@ -246,15 +269,6 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	m.land("a", "l-h2")
 	m.lane("b", "l-h3", "h3.txt", "h3")
 	m.land("b", "l-h3")
-	cntV := func(s string) int {
-		n := 0
-		for _, l := range lines(read(m.verify)) {
-			if l == s {
-				n++
-			}
-		}
-		return n
-	}
 	vb := cntV("verify l-h")
 	m.merge()
 	k.check("이어 받기: 앞 실행이 넣은 제출은 다시 넣지 않고 정리(착지 사건 「앞 병합기 실행이 넣었음」), 새 둘도 들어감",
@@ -336,6 +350,53 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	k.check("clean: 이름을 바꿔 낸 제출도 제출됨으로 지움", m.rc == 0 && c.RC == 0 && !k.gitOK(m.proj("b"), "show-ref", "-q", "--verify", "refs/heads/l-rn-fix") &&
 		strings.Contains(c.Out+c.Err, "제출됨: 브랜치 l-rn-fix 은 큐 표식 refs/merge-queue/") && strings.Contains(c.Out+c.Err, "-l-rn "), m.dl(), c.Out, c.Err)
 	m.delRefs("l-rn", []string{"refs/merge-queue/", "refs/merge-queue-meta/"}, "refs/heads/lane/l-rn")
+
+	// 37. 결과 알림: 제출한 레인 터미널이 이 기계에 살아 있고 이름이 맞으면 hc send, 사건은 제출 때 적은 지휘(--to)로
+	m.lane("a", "l-live", "live.txt", "live")
+	m.landA("a", []string{"HC_TERMINAL_ID=t-live", "HC_LANE_OWNER=t-own", "HC_LANE_JOB=j1120-abc", "HC_LANE=l-live"})
+	m.merge()
+	sent := read(T + "/hc.send")
+	k.check("알림: 레인 터미널에 hc send, 착지 사건 --to 지휘", func() bool {
+		for _, l := range lines(sent) {
+			if strings.Contains(l, "t-live\t") && strings.Contains(l, "착지") {
+				for _, r := range rows(m.EV) {
+					if col(r, 4) == "l-live" && col(r, 5) == "착지" && col(r, 9) == "t-own" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}(), sent, strings.Join(m.ev("l-live", "착지"), "\n"))
+
+	// 병합기 일지: 제출마다 12칸 한 줄
+	k.check("병합기 일지: 착지는 후보 40자·묶음 크기·착지 시작/끝·작업 ID, 돌려보냄은 후보 -", func() bool {
+		a, l, d := false, false, false
+		for _, r := range rows(m.MJ) {
+			switch {
+			case col(r, 3) == "l-a" && len(r) == 12 && col(r, 10) == "착지" && grepE(col(r, 11), `^[0-9a-f]{40}$`) && col(r, 7) == "1" && col(r, 8) != "-" && col(r, 9) != "-":
+				a = true
+			}
+			if col(r, 3) == "l-live" && col(r, 5) == "j1120-abc" && col(r, 4) != "-" {
+				l = true
+			}
+			if col(r, 3) == "l-d" && col(r, 10) == "돌려보냄" && col(r, 11) == "-" {
+				d = true
+			}
+		}
+		return a && l && d
+	}(), read(m.MJ))
+
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
+}
+
+// TestMergerContractB: 재제출 경합·큐 받기 실패·켬 모름·선행·인자·report 착지·이름·일시 실패·착지 뒤 fetch 실패·rebase 충돌·멈춤·
+// 고아·SIGKILL(17~30)
+func TestMergerContractB(t *testing.T) {
+	m := newM(t)
+	k := m.K
+	m.on()
+	T, rg, cntV := k.T, k.realGit, m.cntV
 
 	// 17. 재제출 경합: Go 병합기는 착지 직전 원격 refs/herdr/landing/<큐>를 올려 착지 중 재제출을 hc-lane land가 종료 2로 거절한다 —
 	//     옛 제출이 막힘 없이 들어가고 큐는 빈다
@@ -491,6 +552,17 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	os.Remove(T + "/inverify")
 	os.Remove(T + "/go")
 
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
+}
+
+// TestMergerContractC: 다른 기본 브랜치·빠른 병합기·이름 다른 제출·report 착지·새 파일·묶음 크기 1·보낼 함·옮기기 끊김(31~39),
+// 아스트라 2차 지적
+func TestMergerContractC(t *testing.T) {
+	m := newM(t)
+	k := m.K
+	m.on()
+	T, rg := k.T, k.realGit
+
 	// 31. 다른 기본 브랜치로 낸 제출은 건드리지 않는다
 	m.og("update-ref", "refs/heads/release", "main")
 	m.lane("a", "l-rel", "rel.txt", "rel")
@@ -514,7 +586,7 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	m.land("b", "l-bry")
 	m.merge()
 	k.sh(m.proj("b"), `git checkout -q --detach && git fetch -q origin`)
-	c = m.K.lane(T, nil, "clean", "--repo", m.proj("b"), "--branch", "l-brx")
+	c := m.K.lane(T, nil, "clean", "--repo", m.proj("b"), "--branch", "l-brx")
 	k.check("clean: 레인 이름이 다른 제출도 병합기가 넣은 뒤엔 지움", m.rc == 0 && m.inMain("l-brx") && c.RC == 0 &&
 		!k.gitOK(m.proj("b"), "show-ref", "-q", "--verify", "refs/heads/l-brx"), c.Out, c.Err)
 
@@ -543,45 +615,9 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	m.land("a", "l-d1")
 	m.lane("a", "l-d2", "d2.txt", "d2")
 	m.land("a", "l-d2")
-	v0 = m.vcount()
+	v0 := m.vcount()
 	m.merge()
 	k.check("묶음 크기 1: 검증 두 번", m.mrc == 0 && m.vcount()-v0 == 2 && m.qrefs() == "", m.dm())
-
-	// 37. 결과 알림: 제출한 레인 터미널이 이 기계에 살아 있고 이름이 맞으면 hc send, 사건은 제출 때 적은 지휘(--to)로
-	m.lane("a", "l-live", "live.txt", "live")
-	m.landA("a", []string{"HC_TERMINAL_ID=t-live", "HC_LANE_OWNER=t-own", "HC_LANE_JOB=j1120-abc", "HC_LANE=l-live"})
-	m.merge()
-	sent := read(T + "/hc.send")
-	k.check("알림: 레인 터미널에 hc send, 착지 사건 --to 지휘", func() bool {
-		for _, l := range lines(sent) {
-			if strings.Contains(l, "t-live\t") && strings.Contains(l, "착지") {
-				for _, r := range rows(m.EV) {
-					if col(r, 4) == "l-live" && col(r, 5) == "착지" && col(r, 9) == "t-own" {
-						return true
-					}
-				}
-			}
-		}
-		return false
-	}(), sent, strings.Join(m.ev("l-live", "착지"), "\n"))
-
-	// 병합기 일지: 제출마다 12칸 한 줄
-	k.check("병합기 일지: 착지는 후보 40자·묶음 크기·착지 시작/끝·작업 ID, 돌려보냄은 후보 -", func() bool {
-		a, l, d := false, false, false
-		for _, r := range rows(m.MJ) {
-			switch {
-			case col(r, 3) == "l-a" && len(r) == 12 && col(r, 10) == "착지" && grepE(col(r, 11), `^[0-9a-f]{40}$`) && col(r, 7) == "1" && col(r, 8) != "-" && col(r, 9) != "-":
-				a = true
-			}
-			if col(r, 3) == "l-live" && col(r, 5) == "j1120-abc" && col(r, 4) != "-" {
-				l = true
-			}
-			if col(r, 3) == "l-d" && col(r, 10) == "돌려보냄" && col(r, 11) == "-" {
-				d = true
-			}
-		}
-		return a && l && d
-	}(), read(m.MJ))
 
 	// 38. 보낼 함: 원격을 고친 뒤 사건을 쓰기 전에 죽어도 다음 바퀴가 보낸다
 	write(t, m.mg()+"/out/1700000000-l-ob", "착지\n-\n보낼 함 시험\nl-ob\n-\n-\n-\n")
@@ -645,7 +681,7 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	srb := k.git(m.proj("a"), "rev-parse", "HEAD")
 	m.og("update-ref", "refs/heads/main", srb)
 	k.sh(m.proj("a"), `git fetch -q origin`)
-	rr = m.K.lane(m.proj("a"), nil, "report", "착지", srb, "x", "--name", "l-rb")
+	rr := m.K.lane(m.proj("a"), nil, "report", "착지", srb, "x", "--name", "l-rb")
 	k.check("report 착지: release로 낸 제출은 main에 들어도 안 적음", m.rc == 0 && strings.Contains(rr.Out+rr.Err, "제출만") && len(m.ev("l-rb", "착지")) == 0, rr.Out, rr.Err)
 	m.delRefs("l-rb", []string{"refs/merge-queue/", "refs/merge-queue-meta/"}, "refs/heads/lane/l-rb", "refs/heads/release")
 	k.sh(m.proj("m"), `git fetch -q origin && git checkout -q --detach origin/main`)
@@ -709,6 +745,17 @@ git remote add origin "$1" && git push -q origin main && cd .. && git clone -q "
 	// 가짜 git이 실제로 응답 유실을 한 번 넣었는지도 본다
 	k.check("내장 착지 응답 유실: 주입 한 번, 착지 처리(merge-failed 아님)", countNonEmpty(read(T+"/inj")) == 1 && m.mrc == 0 && m.inMain("l-lost3") &&
 		m.qrefs() == "" && !strings.Contains(m.failed(), "l-lost3") && len(m.ev("l-lost3", "착지")) > 0, m.dm())
+
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
+}
+
+// TestMergerContractD: 아스트라 3차 지적(철회된 제출·제출 ID 표식·git-path·임시 작업 트리·다시 land·큐 이름·이미 든 제출·제출 기록·
+// push 끊김·알림·이름·순서·우선·작업 표식)
+func TestMergerContractD(t *testing.T) {
+	m := newM(t)
+	k := m.K
+	m.on()
+	T, rg := k.T, k.realGit
 
 	// ---- 아스트라 3차 지적 ----
 	// 높음 4: 재시작 때 제출 ID 표식으로만 완료를 본다 — 다시 제출해 철회된 옛 제출이 같은 패치로 main에 있어도 완료로 치지 않는다
@@ -872,6 +919,16 @@ mkdir -p "$PWD.merger-wt" && git worktree add -q --detach "$PWD.merger-wt/c-left
 	m.og("update-ref", "-d", "refs/hc-landed/j-jx")
 	m.merge()
 
+	t.Logf("%d개 중 실패 %d개", k.n, k.fails)
+}
+
+// TestMergerContractE: 끄기(16)·묶음·착지 스크립트(2단계)·준비 훅·이미 든 내용·격리·사전 검사
+func TestMergerContractE(t *testing.T) {
+	m := newM(t)
+	k := m.K
+	m.on()
+	T := k.T
+
 	// 16. 끄기: 원격 참조를 지우면 다음 land부터 예전처럼 착지
 	m.off()
 	m.lane("a", "l-off2", "off2.txt", "off2")
@@ -885,7 +942,7 @@ mkdir -p "$PWD.merger-wt" && git worktree add -q --detach "$PWD.merger-wt/c-left
 		m.lane("a", "l-b"+s, "b"+s+".txt", "b"+s)
 		m.land("a", "l-b"+s)
 	}
-	v0 = m.vcount()
+	v0 := m.vcount()
 	bmerge()
 	k.check("묶음 3: 셋이 검증 한 번·push 한 번으로 main에(제출 순서), 큐 비고 merge-done 셋, 일지 묶음 크기 3", m.mrc == 0 && head(m.mainlog(), 3) == "l-b3,l-b2,l-b1" &&
 		m.vcount() == v0+1 && m.qrefs() == "" && len(lines(m.og("for-each-ref", "refs/merge-done/l-b1", "refs/merge-done/l-b2", "refs/merge-done/l-b3"))) == 3 &&

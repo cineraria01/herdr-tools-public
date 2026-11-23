@@ -217,8 +217,18 @@ func TestPlan(t *testing.T) {
 	shardsWant := []string{ // 조각은 함께 돌아 차례가 없다
 		"test -race -count=1 -timeout 40m -p " + p + " -skip ^TestCotenantGuard$ herdr-tools/a herdr-tools/b",
 	}
-	var prev []string // tests/merger의 part: 앞 part는 -skip
-	for _, r := range []string{"^TestMergerContract$", "^TestR4PipeHeldExitZero$", "^TestRecovery[A-C]", "^TestRecovery[D-N]", "^TestRecovery[O-R]"} {
+	var prev, runs []string // tests/merger의 part(표 splits 차례): 앞 part는 -skip
+	for _, sp := range splits {
+		if sp.pkg == mod+"tests/merger" {
+			for _, pt := range sp.parts {
+				runs = append(runs, pt.run)
+			}
+		}
+	}
+	if len(runs) == 0 {
+		t.Fatal("splits에 tests/merger가 없다")
+	}
+	for _, r := range runs {
 		s := "test -race -count=1 -timeout 40m -run " + r
 		if len(prev) > 0 {
 			s += " -skip " + strings.Join(prev, "|")

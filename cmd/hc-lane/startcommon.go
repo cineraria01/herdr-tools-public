@@ -109,6 +109,21 @@ func xjson(stdout, stderr io.Writer, args []string) int {
 func xout(args ...string) (string, int)  { return xoutTo(os.Stderr, args) }
 func xoutQ(args ...string) (string, int) { return xoutTo(nil, args) }
 
+// xoutHc: xout과 같되 hc 자신의 실패(rcHc)면 그 한 줄로 끝낸다 — 뒤에 「git 저장소가 아니다」 같은 엉뚱한 까닭을 잇지 않게
+func xoutHc(args ...string) (string, int) {
+	var eb bytes.Buffer
+	out, r := xoutTo(&eb, args)
+	e := strings.TrimRight(eb.String(), "\n")
+	if r != rcHc {
+		os.Stderr.WriteString(eb.String())
+		return out, r
+	}
+	i := strings.LastIndex(e, "\n") + 1 // hc 실패 줄은 끝 줄 — 앞(프로그램의 오류 출력)은 그대로
+	os.Stderr.WriteString(e[:i])
+	die("%s", strings.TrimPrefix(e[i:], "hc-lane: "))
+	return "", r
+}
+
 func xoutTo(stderr io.Writer, args []string) (string, int) {
 	if on == "" && core == "" {
 		return outOf(stderr, args)

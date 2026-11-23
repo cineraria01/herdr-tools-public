@@ -204,7 +204,7 @@ func checkArgs(cmd string, rest []string) {
 func resolveRepo(cmd string) string {
 	rdir := ""
 	if cmd == "launch" && read {
-		d, r := xout("sh", "-c", `cd "$1" && pwd -P`, "hc-lane", repo)
+		d, r := xoutHc("sh", "-c", `cd "$1" && pwd -P`, "hc-lane", repo)
 		if r != 0 || d == "" {
 			die("폴더가 없다: %s%s", repo, onNote())
 		}
@@ -217,7 +217,7 @@ func resolveRepo(cmd string) string {
 		repo, remote, base, bref, blab = rdir, false, "", "", ""
 		return rdir
 	}
-	wl, _ := xout("git", "-C", repo, "worktree", "list", "--porcelain")
+	wl, _ := xoutHc("git", "-C", repo, "worktree", "list", "--porcelain") // hc 실패면 그 한 줄로 끝(저장소 탓이 아니다)
 	top = ""
 	if first, _, _ := strings.Cut(wl, "\n"); strings.HasPrefix(first, "worktree ") {
 		top = strings.TrimPrefix(first, "worktree ")

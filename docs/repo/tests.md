@@ -24,6 +24,9 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
   마지막 묶음은 소스의 `reg(<차례>, "<이름>", …)`에서 읽은 나머지 절 전부다(글자 그대로가 아닌 reg 호출이 있으면 나누지 않는다).
 - `tests/hclane`의 `TestHcLane`은 하위 시험 묶음으로 나눈다.
   앞 절 상태에 기대는 절(`s20c`←`s20b`, `s21a2`~`s21a4`←`s21a1`)은 떼지 않는다 — 새 절이 떼어 낸 절의 상태에 기대면 그 묶음에 넣는다.
+- 두 계약 시험은 최상위 시험 여럿이다(2026-11-23 contract-split — 시험 하나일 때 가장 긴 조각이라 표로 못 나눴다): 병합기 `TestMergerContractA`~`E`(`tests/merger`), herdr-sync `TestContractA`~`E`(`cmd/herdr-sync`).
+  묶음마다 자기 준비를 스스로 하니(뒤 묶음이 기대는 상태는 준비에서 제품 명령을 돌려 만든다) 혼자서도·어떤 차례로도 돈다.
+  새 장면은 기대는 상태가 있는 묶음에 넣는다.
 - `TestSplitsCoverRepo`가 표를 지킨다: 표의 꾸러미·part가 다 있고, 그 꾸러미의 최상위 시험(나눈 시험은 절마다)이 정확히 조각 하나에서 돈다.
   `TestShardsRealGo`는 진짜 `go test`로 같은 꼴의 조각을 돌려 시험마다 한 번씩 도는지 본다.
 - 함께 도는 자리 수는 `HERDR_VERIFY_JOBS=<수>`이고, 없으면 코어 수다.
