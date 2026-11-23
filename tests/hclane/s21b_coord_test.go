@@ -139,9 +139,9 @@ func s21b1(k *K) {
 		os.Remove(p)
 	}
 	write(k.t, live, "ta1 1111\ntb2 2222\n")
-	k.runE([]string{"HC_TERMINAL_ID=ta1", "HC_FAKE_RUN_ADDR=t9aa"}, "--direct", "--name", "lane-ma", "--repo", k.R, "--", "claude")
+	k.runE([]string{"HC_TERMINAL_ID=ta1", "HC_FAKE_RUN_ADDR=t9aa"}, "--start-wait", "0", "--direct", "--name", "lane-ma", "--repo", k.R, "--", "claude")
 	pause(1100) // 띄운 시각(초)이 달라야 「가장 최근」이 갈린다
-	k.runE([]string{"HC_TERMINAL_ID=tb2", "HC_FAKE_RUN_ADDR=t9bb"}, "--direct", "--name", "lane-mb", "--repo", k.R, "--", "claude")
+	k.runE([]string{"HC_TERMINAL_ID=tb2", "HC_FAKE_RUN_ADDR=t9bb"}, "--start-wait", "0", "--direct", "--name", "lane-mb", "--repo", k.R, "--", "claude")
 	k.check("지휘 둘: 지휘마다 지휘 정보 파일, 레인 기록에 띄운 지휘", s21bCut(WD+"/coord.ta1", 3) == "ta1\t1111\tta1" &&
 		s21bCut(WD+"/coord.tb2", 3) == "tb2\t2222\ttb2" && contains(s21bLines(lanes), "t9aa\tlane-ma\tta1\tdirect") &&
 		contains(s21bLines(lanes), "t9bb\tlane-mb\ttb2\tdirect"))
@@ -201,7 +201,7 @@ func s21b1(k *K) {
 	k.check("보내지 못한 사건은 events에 남아 지휘가 wait를 걸면 받음", k.rc == 0 && strings.Contains(k.out, "아무도없음"))
 	// wait로 받은 사건도 「보냄」: 그 지휘가 끝난 뒤 다른 지휘의 watch가 다시 보내지 않음
 	write(k.t, live, "ta1 1111\ntb2 2222\n")
-	k.runE([]string{"HC_TERMINAL_ID=tb2", "HC_FAKE_RUN_ADDR=t9ee"}, "--direct", "--name", "lane-me", "--repo", k.R, "--", "claude")
+	k.runE([]string{"HC_TERMINAL_ID=tb2", "HC_FAKE_RUN_ADDR=t9ee"}, "--start-wait", "0", "--direct", "--name", "lane-me", "--repo", k.R, "--", "claude")
 	rep("t9ee", "lane-me", "중간", "-", "비웨이트")
 	k.runE([]string{"HC_TERMINAL_ID=tb2"}, "wait", "--timeout", "0")
 	k.check("wait로 받음(tb2)", k.rc == 0 && strings.Contains(k.out, "비웨이트"))
@@ -252,7 +252,7 @@ func s21b1(k *K) {
 	// 6차 감사 [중간] 1(R6): 「보낸 것」 = sent ∪ 그 레인의 옛 주인 seen
 	write(k.t, live, "ta1 1111\ntb2 2222\n")
 	os.Remove(send)
-	k.runE([]string{"HC_TERMINAL_ID=ta1", "HC_FAKE_RUN_ADDR=t9ff"}, "--direct", "--name", "lane-mf", "--repo", k.R, "--", "claude")
+	k.runE([]string{"HC_TERMINAL_ID=ta1", "HC_FAKE_RUN_ADDR=t9ff"}, "--start-wait", "0", "--direct", "--name", "lane-mf", "--repo", k.R, "--", "claude")
 	rep("t9ff", "lane-mf", "완료", "ffff6666", "에프하나")
 	k.runE([]string{"HC_TERMINAL_ID=ta1"}, "wait", "--timeout", "0")
 	k.check("R6: ta1이 wait로 에프하나를 받음", k.rc == 0 && strings.Contains(k.out, "에프하나"))

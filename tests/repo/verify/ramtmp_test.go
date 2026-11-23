@@ -162,6 +162,11 @@ func TestRAMOn(t *testing.T) {
 			t.Errorf("조각 밖 단계는 메모리 디스크가 아니어야: %s", l)
 		}
 	}
+	for _, l := range strings.Split(out, "\n") {
+		if (strings.HasPrefix(l, "== [") || strings.HasPrefix(l, "-- [")) && (strings.Contains(l, vol) || strings.Contains(l, "HERDR_VERIFY_BOOT_TMPDIR")) {
+			t.Errorf("조각 이름표에 메모리 디스크 환경이 없어야(단계 앞 한 줄이 알린다): %s", l)
+		}
+	}
 	if _, err := os.Stat(vol + "/.metadata_never_index"); err != nil {
 		t.Errorf(".metadata_never_index가 있어야: %v", err)
 	}

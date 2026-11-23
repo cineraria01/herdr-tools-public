@@ -71,14 +71,18 @@ type split struct {
 // est는 조각들이 자리 10(코어 수)에서 함께 돌 때 잰 초(2026-11-23 verify-shard-tune) — 긴 것부터 띄우고, 짧은 조각이 끝물의 빈자리를
 // 채운다. 이름 범위 part(^TestRecovery[A-C] 등)는 새 시험이 이름대로 저절로 들고, 어디에도 안 맞으면 그 꾸러미 나머지 조각에 든다.
 // 병합기·herdr-sync 계약 시험은 묶음마다 최상위 시험(TestMergerContractA~E·TestContractA~E, 2026-11-23 contract-split)이라 part
-// 하나씩 — 새 묶음은 이름대로 part를 더한다(안 더하면 그 꾸러미 나머지 조각에 든다). s21b1은 절 하나라 표로는 더 못 나눈다.
+// 하나씩 — 새 묶음은 이름대로 part를 더한다(안 더하면 그 꾸러미 나머지 조각에 든다). s21b1은 절 하나라 표로는 못 나누지만 나눌
+// 까닭도 없어졌다: 약 290초가 디스크가 아니라 기다림 — 레인 띄우기 넷이 가짜 hc에서 시작 확인 상한(lane.start_wait 60초)을 끝까지
+// 돌았다 — 이라 --start-wait 0을 주어 약 50~70초다(2026-11-24 s21b1-trim, 남은 기다림은 「다시 안 감」을 보는 고정 pause 약 29초).
 // 나눈 뒤 실측(워커 맥 10코어 3회): 가장 긴 조각 538→305초(s21b1)지만 검증은 557~574초로 그대로 — 조각 초의 합(약 4800초)을
 // 자리 10으로 나눈 값이 바닥이다. 12코어 병합기 기계에서도 같다(나누기 전 493·500초 → 나눈 뒤 512초, 2026-11-24 첫 착지 — 가장 긴
 // 조각은 472→334초로 줄었으나 전체는 그대로). 더 줄이려면 시험 일 자체(합)를 줄이거나 자리 수를 늘려 잰다.
+// 메모리 디스크·s21b1 줄인 뒤(2026-11-24 s21b1-trim, 워커 맥 10코어): 검증 324초(가장 긴 조각 s21b1 289초, 합 2181초) → 311·327초
+// (s21b1 47~51초, 가장 긴 조각은 나머지 조각 159~179초, 합 2286~2467초) — 다시 합 ÷ 자리(약 230~250초)가 바닥이다.
 // part가 없는 split은 그 꾸러미 통째 한 조각(나머지 조각에서 뺀다).
 var splits = []split{
 	{mod + "tests/hclane", []part{
-		{run: "^TestHcLane$/^s21b1$", est: 299},
+		{run: "^TestHcLane$/^s21b1$", est: 65},
 		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 150},
 		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 165},
 		{run: "^TestHcLane$/^(s13-14|s19)$", est: 110},
@@ -320,10 +324,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	} else {
 		sh = shards(root, pkgs, base, splits, n)
 	}
-	for i := range sh {
-		sh[i].env = append(sh[i].env[:len(sh[i].env):len(sh[i].env)], ram.env()...)
-	}
-	rc = runShards(root, sh, n, stop, w)
+	rc = runShards(root, sh, ram.env(), n, stop, w)
 	if rc >= 128 {
 		return rc
 	}
@@ -514,9 +515,10 @@ func checkOrphans(root string, pgs []int, before map[int]pinfo, rc int, what str
 
 // runShards: 조각들을 차례대로, 도는 조각의 자리(w, 없으면 1) 합이 n을 넘지 않게 함께 돌린다(아무것도 안 돌면 하나는 띄운다).
 // 빈자리가 앞 조각에 모자라면 그 뒤에서 들어가는 조각을 먼저 띄운다.
-// 조각마다 띄울 때 「== [i/n] …」, 끝나면 「-- [i/n] … 끝」과 그 출력.
+// 조각마다 띄울 때 「== [i/n] …」, 끝나면 「-- [i/n] … 끝」과 그 출력. common은 모든 조각에 더하는 환경(메모리 디스크 TMPDIR 등)
+// — 띄울 때만 넘기고 이름표에는 조각마다 다른 env만 찍는다(단계 앞 「메모리 디스크 …」 한 줄이 이미 알린다).
 // 고아 검사: 조각마다 끝나자마자 그 무리, 다 끝난 뒤 떼어 띄운 것(부모 1) 한 번. 종료 코드: 0 통과 · 1 실패(조각 하나라도·고아) · 128+신호 끊김
-func runShards(root string, sh []shard, n int, stop <-chan os.Signal, w *os.File) int {
+func runShards(root string, sh []shard, common []string, n int, stop <-chan os.Signal, w *os.File) int {
 	before, err := procs()
 	if err != nil {
 		fmt.Fprintf(w, "실패 고아 검사 준비: %v\n", err)
@@ -560,7 +562,7 @@ func runShards(root string, sh []shard, n int, stop <-chan os.Signal, w *os.File
 				continue
 			}
 			fmt.Fprintf(w, "== %s\n", label(i))
-			c, err := start(root, sh[i].argv, sh[i].env, f)
+			c, err := start(root, sh[i].argv, append(sh[i].env[:len(sh[i].env):len(sh[i].env)], common...), f)
 			if err != nil {
 				fmt.Fprintf(w, "실패 %s: %v\n", label(i), err)
 				f.Close()

@@ -416,7 +416,7 @@ func TestRunShards(t *testing.T) {
 		{argv: []string{"sh", "-c", "echo ok-c"}},
 		{argv: []string{"sh", "-c", "sleep 2; echo slow-ok"}}, // 다른 조각이 끝나며 고아 검사를 해도 함께 도는 이 조각은 그대로
 	}
-	rc := runShards(R, sh, 4, make(chan os.Signal), f)
+	rc := runShards(R, sh, nil, 4, make(chan os.Signal), f)
 	out := read()
 	p := readPid(t, P+"/bg")
 	if rc != 1 || !strings.Contains(out, "--- FAIL: TestX (s1)") || !regexp.MustCompile(`끝 [0-9]+초 종료 3\n--- FAIL`).MatchString(out) ||
@@ -434,7 +434,7 @@ func TestRunShards(t *testing.T) {
 	}{{two, 2, 0, 3500}, {two, 1, 4000, 60000}, {heavy, 2, 4000, 60000}, {heavy, 3, 0, 3500}, {ahead, 2, 4000, 5800}} {
 		f, read := outFile(t)
 		t0 := time.Now()
-		rc := runShards(R, c.sh, c.n, make(chan os.Signal), f)
+		rc := runShards(R, c.sh, nil, c.n, make(chan os.Signal), f)
 		if ms := int(time.Since(t0).Milliseconds()); rc != 0 || ms < c.lo || ms > c.hi {
 			t.Errorf("n=%d: 통과·%d~%dms여야 rc=%d %dms\n%s", c.n, c.lo, c.hi, rc, ms, read())
 		}
@@ -451,7 +451,7 @@ func TestRunShardsStop(t *testing.T) {
 		{argv: []string{"sh", "-c", "sleep 300 </dev/null >/dev/null 2>&1 & echo $! >'" + P + "/a'; wait"}},
 		{argv: []string{"sh", "-c", "sleep 300 </dev/null >/dev/null 2>&1 & echo $! >'" + P + "/b'; wait"}},
 	}
-	go func() { rcc <- runShards(R, sh, 2, stop, f) }()
+	go func() { rcc <- runShards(R, sh, nil, 2, stop, f) }()
 	a, b := readPid(t, P+"/a"), readPid(t, P+"/b")
 	stop <- syscall.SIGTERM
 	select {
@@ -501,7 +501,7 @@ func TestShardsRealGo(t *testing.T) {
 	}
 	sh := shards(M, pkgs, []string{"go", "test", "-count=1"}, sp, 4)
 	f, read := outFile(t)
-	if rc := runShards(M, sh, 4, make(chan os.Signal), f); rc != 0 || len(sh) != 9 {
+	if rc := runShards(M, sh, nil, 4, make(chan os.Signal), f); rc != 0 || len(sh) != 9 {
 		t.Fatalf("조각 9개 통과여야 rc=%d 조각 %d\n%s", rc, len(sh), read())
 	}
 	b, _ := os.ReadFile(atoms)
