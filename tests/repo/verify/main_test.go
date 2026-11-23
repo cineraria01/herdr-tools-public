@@ -41,6 +41,8 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// 시험의 verify()는 진짜 hdiutil·diskutil을 부르지 않는다 — 메모리 디스크 시험(ramtmp_test.go)은 가짜 명령을 PATH 앞에 두고 켠다
+	os.Setenv("HERDR_VERIFY_RAMTMP", "0")
 	os.Exit(m.Run())
 }
 

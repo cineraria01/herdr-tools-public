@@ -42,6 +42,21 @@ func mkdbSQL(wal bool, at string, roots ...string) string {
 
 func TestHcSweep(t *testing.T) { run1(t, testHcSweep) }
 
+// bootTmp: 부팅 볼륨의 임시 폴더 아래 새 폴더(실제 경로) — 검증이 TMPDIR을 메모리 디스크로 줄 때 원래 임시 폴더를
+// HERDR_VERIFY_BOOT_TMPDIR로 넘긴다(tests/repo/verify ramtmp.go). 없으면 os.TempDir()
+func bootTmp(t *testing.T) string {
+	t.Helper()
+	d, err := os.MkdirTemp(os.Getenv("HERDR_VERIFY_BOOT_TMPDIR"), "hcsweep-ix.")
+	if err == nil {
+		d, err = filepath.EvalSymlinks(d)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(d) })
+	return d
+}
+
 func testHcSweep(t *testing.T, T string, e Env) {
 	SWEEP := tool(t, "hc-sweep")
 	P := T + "/pids"
@@ -123,28 +138,31 @@ exit 1
 
 	// 색인 쓸기: 원본(root_path)이 모두 사라진 codebase-memory 색인 DB만 지운다. 고아·터미널이 없는 상태에서 먼저 본다
 	IX := T + "/cache/codebase-memory-mcp"
-	mkdirs(t, IX+"/logs", T+"/repo-live")
+	// 색인의 원본(root_path)은 부팅 볼륨 쪽 폴더 RB에 둔다: hc-sweep은 /Volumes/ 아래 원본을 빠진 디스크로 보고 지우지 않으니(제품 규칙),
+	// 검증이 TMPDIR을 메모리 디스크(/Volumes/…)로 주면 T 아래 원본은 「없음」이 되지 못한다(2026-11-24 verify-ramdisk)
+	RB := bootTmp(t)
+	mkdirs(t, IX+"/logs", RB+"/repo-live")
 	mkdb := func(n string, roots ...string) {
 		bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/"+n+".db", mkdbSQL(false, "2026-11-12T07:51:04Z", roots...))
 	}
-	mkdb("live", T+"/repo-live")
-	mkdb("gone", T+"/repo.wt/audit-x")
+	mkdb("live", RB+"/repo-live")
+	mkdb("gone", RB+"/repo.wt/audit-x")
 	write(t, IX+"/gone.db-wal", "w")
 	write(t, IX+"/gone.db-shm", "s")
-	mkdb("gone2", T+"/repo.wt/audit-y")
+	mkdb("gone2", RB+"/repo.wt/audit-y")
 	write(t, IX+"/gone2.db-journal", "") // 실제 색인은 롤백 저널 방식
-	if err := os.Symlink("/Volumes/hcsweep-test-없음", T+"/usblink"); err != nil {
+	if err := os.Symlink("/Volumes/hcsweep-test-없음", RB+"/usblink"); err != nil {
 		t.Fatal(err)
 	}
-	mkdb("vlink", T+"/usblink/repo") // 링크를 거쳐 /Volumes(빠진 디스크) — 남김
-	bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/walgone.db", mkdbSQL(true, "2026", T+"/repo.wt/audit-w"))
-	mkdb("bad", T+"/repo.wt/audit-bad")
+	mkdb("vlink", RB+"/usblink/repo") // 링크를 거쳐 /Volumes(빠진 디스크) — 남김
+	bash(t, T, e, `exec sqlite3 "$1" "$2" >/dev/null`, IX+"/walgone.db", mkdbSQL(true, "2026", RB+"/repo.wt/audit-w"))
+	mkdb("bad", RB+"/repo.wt/audit-bad")
 	mkdirs(t, IX+"/bad.db-shm") // 곁 파일을 못 지움(폴더 — 롤백 방식이라 SQLite는 안 봄) — 이 DB만 실패하고 나머지는 계속
-	mkdb("recent", T+"/repo.wt/new")
+	mkdb("recent", RB+"/repo.wt/new")
 	mkdb("vol", "/Volumes/hcsweep-test-없음/repo")
 	mkdb("empty", "")
-	mkdb("mixed", T+"/repo-live", T+"/repo.wt/audit-z")
-	mkdb("_config", T+"/repo.wt/cfg")
+	mkdb("mixed", RB+"/repo-live", RB+"/repo.wt/audit-z")
+	mkdb("_config", RB+"/repo.wt/cfg")
 	write(t, IX+"/broken.db", "not a db")
 	write(t, IX+"/logs/a.log", "x")
 	old2026 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
@@ -184,7 +202,7 @@ exit 1
 		ix("live.db") && ix("recent.db") && ix("vol.db") && ix("vlink.db") && ix("empty.db") && ix("mixed.db") && ix("broken.db") && ix("_config.db") && ix("logs/a.log"))
 	log := read(LOG)
 	c.ok("색인: closed.log에 이름·root·크기 한 줄씩",
-		grepc(log, "\t색인:gone\t.*색인 지움\\(원본 없음\\)\t"+q(T+"/repo.wt/audit-x")+"\t-\t크기 ") == 1 &&
+		grepc(log, "\t색인:gone\t.*색인 지움\\(원본 없음\\)\t"+q(RB+"/repo.wt/audit-x")+"\t-\t크기 ") == 1 &&
 			strings.Contains(log, "\t색인:gone2\t") && !strings.Contains(log, "\t색인:bad\t"))
 	c.ok("색인: 요약 한 줄", has("색인 쓸기: 지움 3개"))
 	os.Remove(IX + "/bad.db-shm")

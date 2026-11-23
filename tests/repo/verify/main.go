@@ -19,6 +19,8 @@
 // 조각 출력은 끝날 때 한 덩이로(「-- [i/n] … 끝」 다음) 찍는다. 함께 도는 자리 수는 HERDR_VERIFY_JOBS=<수>(없으면 코어 수)다:
 // 조각은 한 자리, 나머지 조각은 go test -p <그 1/3>로 그만큼 자리를 쓴다(그 값을 주면 cotenant 단계의 -p에도).
 // go list가 실패하면 옛 꼴 한 번(-skip ^TestCotenantGuard$ ./...).
+// macOS면 조각 단계 앞에 메모리 디스크를 만들어 조각의 TMPDIR로 주고 끝에 뗀다(ramtmp.go — HERDR_VERIFY_RAMTMP=0 끔·=<MB> 크기,
+// 못 만들면 한 줄 알림 뒤 보통 임시 폴더로).
 //
 // 고아 검사: 단계마다 go 명령을 새 프로세스 무리로 띄운다(함께 도는 조각들은 한 단계 — 무리는 조각이 끝나자마자, 떼어 띄운 것은
 // 다 끝난 뒤 한 번). 끝난 뒤 그 무리에 남은
@@ -70,7 +72,7 @@ type split struct {
 // 채운다. 이름 범위 part(^TestRecovery[A-C] 등)는 새 시험이 이름대로 저절로 들고, 어디에도 안 맞으면 그 꾸러미 나머지 조각에 든다.
 // 병합기·herdr-sync 계약 시험은 묶음마다 최상위 시험(TestMergerContractA~E·TestContractA~E, 2026-11-23 contract-split)이라 part
 // 하나씩 — 새 묶음은 이름대로 part를 더한다(안 더하면 그 꾸러미 나머지 조각에 든다). s21b1은 절 하나라 표로는 더 못 나눈다.
-// 나눈 뒤 실측(mini-m4 10코어 3회): 가장 긴 조각 538→305초(s21b1)지만 검증은 557~574초로 그대로 — 조각 초의 합(약 4800초)을
+// 나눈 뒤 실측(워커 맥 10코어 3회): 가장 긴 조각 538→305초(s21b1)지만 검증은 557~574초로 그대로 — 조각 초의 합(약 4800초)을
 // 자리 10으로 나눈 값이 바닥이다. 12코어 병합기 기계에서도 같다(나누기 전 493·500초 → 나눈 뒤 512초, 2026-11-24 첫 착지 — 가장 긴
 // 조각은 472→334초로 줄었으나 전체는 그대로). 더 줄이려면 시험 일 자체(합)를 줄이거나 자리 수를 늘려 잰다.
 // part가 없는 split은 그 꾸러미 통째 한 조각(나머지 조각에서 뺀다).
@@ -277,6 +279,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	}
 	if jobs == "" {
 		n = runtime.NumCPU() // 2026-11-23 실측: 코어 수의 7/10보다 빨랐다(10코어 487 대 542·544초, 8코어 612 대 761초)
+		// 자리를 코어 수의 2~3배로 늘려도 그대로다(디스크의 작은 쓰기에 묶임 — 2026-11-24 실측 546·530·527초). 그래서 메모리 디스크(ramtmp.go)
 	}
 	cheap, alone, base := plan(jobs)
 	t0, fail := time.Now(), false
@@ -308,6 +311,8 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		return rc
 	}
 	fail = fail || rc != 0
+	ram := ramSetup(w) // 조각들의 TMPDIR(ramtmp.go). 못 만들면 nil — 보통 임시 폴더로 그대로
+	defer ram.teardown(w)
 	var sh []shard
 	if pkgs, err := goList(root); err != nil {
 		fmt.Fprintf(w, "알림 go list 실패(%v) — 조각 없이 한 번에 돈다\n", err)
@@ -315,11 +320,15 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	} else {
 		sh = shards(root, pkgs, base, splits, n)
 	}
+	for i := range sh {
+		sh[i].env = append(sh[i].env[:len(sh[i].env):len(sh[i].env)], ram.env()...)
+	}
 	rc = runShards(root, sh, n, stop, w)
 	if rc >= 128 {
 		return rc
 	}
 	fail = fail || rc != 0
+	ram.teardown(w)
 	fmt.Fprintf(w, "검증 시간 %d초 — %s\n", int(time.Since(t0).Seconds()), map[bool]string{false: "통과", true: "실패"}[fail])
 	return b2i(fail)
 }
