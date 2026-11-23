@@ -23,6 +23,18 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
   시간 넘김을 보는 장면은 상한 손잡이를 줄이되 부하에서 흔들리면 되돌린다.
   「N초 안에 끝남」 같은 시간 단언은 새로 만들거나 조이지 않는다.
 
+## 새 명령을 더할 때
+
+`cmd/<도구>`를 새로 만들면 함께 고칠 곳이다.
+싼 단계의 `TestNewCmd`(`tests/repo/newcmd_test.go`, 파일 읽기만)가 도구마다 보고, 빠지면 「<무엇>이 빠졌다 — <어느 파일>에 <어떤 줄>을 더하라」로 실패한다(2026-11-24 newcmd-cheap — 바이너리 줄 확인이 무거운 조각의 herdr-sync 계약 시험에서만 돌아, 새 명령을 더한 레인이 병합기 검증 뒤에야 반송됐다. 그 계약 시험의 확인도 그대로 있다).
+
+- `config.example/sync.list`에 바이너리 줄 「`<묶음>  .local/bin/<도구>  tools:cmd/<도구>  <대상>`」(대상은 도는 곳대로 `all`·`macos`·`local`, [바이너리 줄](../herdr-sync/binary-lines.md)).
+- README 도구 표(`## 목차` 앞)에 `` `<도구>` ``가 든 줄.
+- 문서 `docs/<도구>/<기능>.md`와 README 목차 한 줄(이름순 자리). 다른 문서가 그 도구를 설명하면 대신 `newcmd_test.go`의 `docsElsewhere`에 그 문서를 적는다(그 문서가 있고 도구 이름이 나와야 한다).
+- `--version`은 `version.String("<도구>")`(꼴 「<도구> (Go …)」, `internal/version`). 다른 꼴을 쓰는 도구는 `versionOwn`에 까닭과 함께 적는다.
+- 곁 도구(다른 도구가 부르는 것)면 `cmd/<곁>/OWNER`에 부르는 도구 이름, 바이너리 줄은 부르는 도구와 같은 대상(`config.example/sync.list` 머리 주석 — `sync-lint`가 본다).
+- 예외 목록(`docsElsewhere`·`versionOwn`)에 있는데 `cmd/`에 없는 도구는 실패한다(도구를 지우면 그 줄도 지운다).
+
 ## 검증의 조각 실행
 
 - 2026-11-23 verify-shard: 꾸러미 안 시험은 차례로 돌아, 검증 한 번(병합기 기계 970초)이 거의 `tests/hclane` 하나(927초)의 시간이었고 처음 5분쯤 뒤로는 코어 대부분이 놀았다.
