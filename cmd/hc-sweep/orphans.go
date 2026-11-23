@@ -170,6 +170,7 @@ func under(c, root string) bool { return c == root || strings.HasPrefix(c, root+
 type orphan struct {
 	pid, age  int
 	root, cmd string
+	roots     []string // 걸린 작업 트리 모두(root는 그 대표)
 	why       string
 	kill      bool
 }
@@ -248,7 +249,7 @@ func findOrphans(procs map[int]procInfo, cwdOf map[int]string, termCwds []string
 				}
 			}
 		}
-		o := orphan{pid: pid, age: pi.age, cmd: pi.cmd, kill: true}
+		o := orphan{pid: pid, age: pi.age, cmd: pi.cmd, roots: roots, kill: true}
 		switch {
 		case mainUsed:
 			o.why, o.kill = "보류: 본 저장소 터미널 있음", false
@@ -451,17 +452,30 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) (int, err
 		keep[k] = true
 	}
 	found := findOrphans(procs, cwds(ones, run), liveCwds, suffix, minAge, os.Getpid(), only, exists, keep, exeOf)
-	termPids, pidsOK := map[int]bool{}, true
+	// 자손에 live 터미널 프로세스(코어·에이전트)가 있으면 끄지 않는다. hc ls 뒤 끝난 터미널(not_found·finished — 터미널 쓸기가
+	// 이번 바퀴에 닫은 것)은 live가 아니라 pid 모음에서 빼고, 그 cwd의 작업 트리에 걸린 후보만 보류한다(다음 바퀴에 원래 판정).
+	// 그 밖의 실패(hc 실패·pid 없음)는 바퀴 전체 보류, 까닭(<주소>: <무엇>)은 한 줄
+	termPids, pidsWhy := map[int]bool{}, ""
+	var ended []string
 	for _, o := range found {
 		if !o.kill {
 			continue
 		}
-		// 자손에 live 터미널 프로세스(코어·에이전트)가 있으면 끄지 않는다
 		for _, t := range local {
-			g, err := hc("get", str(t, "address"))
+			a := str(t, "address")
+			g, err := hc("get", a)
+			if isNotFound(err) || err == nil && str(g, "state") == "finished" {
+				ended = append(ended, realpath(str(t, "cwd")))
+				continue
+			}
 			p, isNum := g["pid"].(float64)
-			if err != nil || !isNum {
-				pidsOK = false
+			if err != nil {
+				pidsWhy = a + ": " + err.Error()
+			} else if !isNum {
+				pidsWhy = a + ": pid 없음"
+			}
+			if pidsWhy != "" {
+				fmt.Println("고아 쓸기: 터미널 pid를 못 읽음 —", pidsWhy)
 				break
 			}
 			termPids[int(p)] = true
@@ -470,7 +484,14 @@ func sweepOrphans(termsAny any, dry bool, minAge float64, only string) (int, err
 	}
 	targets := 0
 	for _, o := range found {
-		if o.kill && !pidsOK {
+		for _, c := range ended {
+			for _, r := range o.roots {
+				if o.kill && under(c, realpath(r)) {
+					o.why, o.kill = "보류: 이번 바퀴에 끝난 터미널의 작업 트리", false
+				}
+			}
+		}
+		if o.kill && pidsWhy != "" {
 			o.why, o.kill = "보류: 터미널 pid를 못 읽음", false
 		} else if o.kill {
 			for p := range tree([]int{o.pid}, procs) {
