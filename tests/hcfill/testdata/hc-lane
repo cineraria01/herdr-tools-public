@@ -7,7 +7,7 @@ if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기:
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
 if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi
-if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; sleep "${HC_FAKE_GC_SLEEP:-0}"; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록
+if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; i=0; while [ "$i" -lt "$((${HC_FAKE_GC_SLEEP:-0} * 10))" ] && [ ! -e "$T_LOG/gc.release" ]; do sleep 0.1; i=$((i + 1)); done; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록 — $HC_FAKE_GC_SLEEP초 걸림, $T_LOG/gc.release가 생기면 그때 끝남
 { echo "---"; for a in "$@"; do echo "$a"; done; } >>"$T_LOG/lane.log"
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)

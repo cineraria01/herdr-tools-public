@@ -452,7 +452,9 @@ func submitCmd() {
 		die("land(제출): %s 가 제출 커밋(%s)에 없다(추적 안 됨·무시됨) — 커밋하거나 지운 뒤 같은 줄을 다시", precheck, cut(sh, 9))
 	}
 	if inCommit == 0 {
-		if rc := lrun("bash", precheck); rc != 0 {
+		if at, ok := verifiedTree(sh); ok {
+			fmt.Printf("hc-lane land: 사전 검사 건너뜀 — 이 트리는 전체 검증 통과(%s)\n", at)
+		} else if rc := lrun("bash", precheck); rc != 0 {
 			lfail(rc)
 			die("land(제출): 사전 검사(%s)가 실패해 큐에 넣지 않았다(종료 %d) — 고쳐 커밋한 뒤 같은 줄을 다시", precheck, rc)
 		}

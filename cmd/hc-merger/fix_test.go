@@ -316,8 +316,12 @@ func TestRoundBadArgsReports(t *testing.T) {
 func TestResidentReportsKilledWorker(t *testing.T) {
 	f := newFx(t)
 	self, log := recorder(t)
+	// 바퀴 사이 쉼(workerRetryWait 30초 × 4번)은 PATH의 sleep으로 돈다 — 쉼 동안 시험이 보는 것(종료 코드·막힘 사건)은 그대로라
+	// 바로 끝나는 가짜 sleep을 앞에 둔다(2026-11-24 tests-wait-trim, 약 120초 → 1초). 쉼 값은 기록만
+	sb := t.TempDir()
+	os.WriteFile(sb+"/sleep", []byte("#!/bin/sh\necho \"$*\" >>"+sb+"/sleeps\n"), 0o777)
 	rc, out := sub(t, "HC_MERGER_TEST_HELPER=resident", "HC_MERGER_TEST_ARGS=--once --repo "+f.clone, "HC_MERGER_TEST_ROUND=kill",
-		"HC_LANE_SELF="+self, "HERDR_PROC_DIR="+t.TempDir())
+		"HC_LANE_SELF="+self, "HERDR_PROC_DIR="+t.TempDir(), "PATH="+sb+":"+os.Getenv("PATH"))
 	b, _ := os.ReadFile(log)
 	if rc != 1 || !strings.Contains(string(b), "report|막힘|") {
 		t.Fatalf("rc %d 사건 %q\n%s", rc, b, out)

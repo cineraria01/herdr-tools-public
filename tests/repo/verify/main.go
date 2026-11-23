@@ -79,36 +79,43 @@ type split struct {
 // 조각은 472→334초로 줄었으나 전체는 그대로). 더 줄이려면 시험 일 자체(합)를 줄이거나 자리 수를 늘려 잰다.
 // 메모리 디스크·s21b1 줄인 뒤(2026-11-24 s21b1-trim, 워커 맥 10코어): 검증 324초(가장 긴 조각 s21b1 289초, 합 2181초) → 311·327초
 // (s21b1 47~51초, 가장 긴 조각은 나머지 조각 159~179초, 합 2286~2467초) — 다시 합 ÷ 자리(약 230~250초)가 바닥이다.
+// 시험의 기다림 걷은 뒤(2026-11-24 tests-wait-trim): 병합기 상주 시험(일꾼 재시작 쉼 30초 × 4 → PATH의 가짜 sleep)이 122→1초라
+// 따로 떼지 않고 hc-merger 나머지 조각에 든다. est는 그 전 실측(워커 맥 10코어·메모리 디스크 3회 평균, hc-fill a,b,c는 gc 배경 32초를
+// 뺀 값)으로 맞췄다 — 옛 est(s15s 165·Spec|Journal 155·hc-fill 묶음마다 150)가 실제(87·84·10~65)보다 커 긴 것부터의 차례가 틀렸다.
+// hc-fill은 묶음마다 같은 est(part est ÷ 묶음 수)라 평균값이다. 실측(워커 맥 10코어, 다른 레인이 함께 돌아 전·후를 번갈아 3쌍):
+// 조각 초 합 2680·2724·2347 → 2508·2481·2191초, 조각 단계 326·335·289 → 307·302·279초. 바닥은 가중 합(나머지 조각은 자리 3)
+// ÷ 자리이고 차례 모의도 그와 맞는다 — 나머지 조각에서 가장 긴 cmd/hc-fill(약 70초)을 떼면 모의로 약 3초라 떼지 않았다.
+// 전체 검증 시간은 바깥 부하에 TestCotenantGuard(부하를 재는 시험, 홀로)가 17~244초로 흔들리는 쪽이 더 크다.
 // part가 없는 split은 그 꾸러미 통째 한 조각(나머지 조각에서 뺀다).
 var splits = []split{
 	{mod + "tests/hclane", []part{
-		{run: "^TestHcLane$/^s21b1$", est: 65},
-		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 150},
-		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 165},
-		{run: "^TestHcLane$/^(s13-14|s19)$", est: 110},
-		{run: "^TestHcLane$/^(s22-23|s08-11|s17-18|s24-keepoff)$", est: 140},
-		{run: "^TestHcLane$", est: 140},
-		{run: "^TestGofix", est: 130},
-	}, 80},
+		{run: "^TestHcLane$/^s21b1$", est: 48},
+		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 131},
+		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 87},
+		{run: "^TestHcLane$/^(s13-14|s19)$", est: 66},
+		{run: "^TestHcLane$/^(s22-23|s08-11|s17-18|s24-keepoff)$", est: 62},
+		{run: "^TestHcLane$", est: 70},
+		{run: "^TestGofix", est: 92},
+	}, 54},
 	{mod + "tests/hcfill", []part{
-		{run: "^TestHcFill$", est: 900, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}}},
+		{run: "^TestHcFill$", est: 252, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}}},
 	}, 1},
 	{mod + "tests/merger", []part{
-		{run: "^TestMergerContractA$", est: 114},
-		{run: "^TestMergerContractB$", est: 99},
-		{run: "^TestMergerContractC$", est: 134},
-		{run: "^TestMergerContractD$", est: 126},
-		{run: "^TestMergerContractE$", est: 144},
-		{run: "^TestR4PipeHeldExitZero$", est: 67},
-		{run: "^TestRecovery[A-C]", est: 110},
-		{run: "^TestRecovery[D-N]", est: 115},
-		{run: "^TestRecovery[O-R]", est: 130},
-	}, 76},
-	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 100}, {run: "^TestContractB$", est: 100}, {run: "^TestContractC$", est: 87},
-		{run: "^TestContractD$", est: 109}, {run: "^TestContractE$", est: 77}}, 33},
-	{mod + "cmd/hc-merger", []part{{run: "^TestResidentReportsKilledWorker$", est: 123}, {run: "^Test(Spec|Journal)", est: 155}}, 145},
-	{mod + "tests/util", nil, 140},
-	{mod + "cmd/herdr-tools-publish", nil, 69},
+		{run: "^TestMergerContractA$", est: 48},
+		{run: "^TestMergerContractB$", est: 47},
+		{run: "^TestMergerContractC$", est: 40},
+		{run: "^TestMergerContractD$", est: 61},
+		{run: "^TestMergerContractE$", est: 57},
+		{run: "^TestR4PipeHeldExitZero$", est: 57},
+		{run: "^TestRecovery[A-C]", est: 61},
+		{run: "^TestRecovery[D-N]", est: 61},
+		{run: "^TestRecovery[O-R]", est: 53},
+	}, 31},
+	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 67}, {run: "^TestContractB$", est: 79}, {run: "^TestContractC$", est: 45},
+		{run: "^TestContractD$", est: 55}, {run: "^TestContractE$", est: 41}}, 31},
+	{mod + "cmd/hc-merger", []part{{run: "^Test(Spec|Journal)", est: 84}}, 135},
+	{mod + "tests/util", nil, 114},
+	{mod + "cmd/herdr-tools-publish", nil, 53},
 }
 
 // shard: 함께 도는 go test 하나. w는 차지하는 자리(나머지 조각은 -p 수만큼 — 시험 바이너리를 그만큼 함께 띄운다)
@@ -287,6 +294,10 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	}
 	cheap, alone, base := plan(jobs)
 	t0, fail := time.Now(), false
+	tree0 := ""
+	if !cheapOnly {
+		tree0 = cleanTree(root) // 통과 표식(mark.go)은 시작과 끝이 같은 깨끗한 트리일 때만
+	}
 	for _, a := range cheap {
 		rc := runStep(root, a, stop, w)
 		if rc >= 128 {
@@ -331,6 +342,9 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	fail = fail || rc != 0
 	ram.teardown(w)
 	fmt.Fprintf(w, "검증 시간 %d초 — %s\n", int(time.Since(t0).Seconds()), map[bool]string{false: "통과", true: "실패"}[fail])
+	if !fail {
+		markPassed(root, tree0, w)
+	}
 	return b2i(fail)
 }
 

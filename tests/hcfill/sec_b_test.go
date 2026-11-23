@@ -224,8 +224,12 @@ func secB(k *K) {
 	k.run("run")
 	el = int(time.Since(s0).Seconds())
 	k.check("gc 배경: 앞 정리가 돌면 다음 바퀴는 안 띄우고 막히지도 않음, 시각 그대로", k.rc == 0 && el < 5 && k.state("gs2") == "up" && in(k.out, "gc: 앞 정리가 아직 돈다") && strings.TrimRight(read(last), "\n") == "0", "걸린 초 "+strconv.Itoa(el))
+	// 둘째 바퀴가 앞 정리가 도는 것을 봤으니 놓아준다 — 가짜 gc는 대상마다 8초(넷이면 32초)를 끝까지 자지 않고 바로 끝난다
+	// (2026-11-24 tests-wait-trim). 아래 확인은 끝난 뒤 남은 출력·잠금만 본다
+	write(k.t, k.T+"/gc.release", "")
 	k.out = gslow
 	k.gcwait()
+	rm(k.T + "/gc.release")
 	_, lrc := k.exe(k.T, nil, "lockf", "-k", "-t", "0", k.DATA+"/gc.lock", "true")
 	k.check("gc 배경: 끝나면 출력이 gc.log에, 잠금이 풀려 다음 정리를 띄울 수 있음", hasF(k.GCL, "gc app @box-1: 지움 0 · 남김 0") && lrc == 0)
 	k.fresh()

@@ -302,11 +302,11 @@ func residentMain(args []string) {
 			base = a
 		}
 	}
-	// 「쉬지 않고 ls-remote」를 막는 값 — 명시한 값이 정수가 아니면 bash 판처럼 멈춘다(E10), 없으면 30초
+	// 「쉬지 않고 ls-remote」를 막는 값 — 명시한 값이 정수가 아니면 bash 판처럼 멈춘다(E10), 없으면 idleTick초
 	if tickSet && !digits.MatchString(tickArg) {
 		die("merger: --tick은 초(정수): %s", tickArg)
 	}
-	tick := intSetting("--tick", tickArg, 30, 0)
+	tick := intSetting("--tick", tickArg, idleTick, 0)
 	batch := intSetting("HC_LANE_MERGER_BATCH", os.Getenv("HC_LANE_MERGER_BATCH"), 3, 1)
 	if repo == "" {
 		die("merger: --repo <병합기 전용 클론> 이 필요하다")
@@ -427,6 +427,10 @@ func residentMain(args []string) {
 		proc.Wait(s, "")
 	}
 }
+
+// idleTick: 빈 바퀴 쉼 기본(초). 30초였을 때 제출 → 집어 듦의 대부분이 이 쉼이었다(submit-fast 2026-11-24 — 최근 착지 10건 10~39초).
+// 빈 바퀴는 ls-remote 한 번(약 0.8초)뿐이라 10초여도 하루 8,640번이다. 일을 한 바퀴(76)는 원래 쉬지 않고 다음 바퀴
+const idleTick = 10
 
 const (
 	workerMaxFails  = 5  // 바퀴 일꾼이 이만큼 이어서 뜻밖에 끝나면 막힘·멈춤
