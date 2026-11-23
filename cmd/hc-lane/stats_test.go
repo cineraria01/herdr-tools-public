@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -163,6 +164,22 @@ func clitestPut(t *testing.T, p, s string, mode os.FileMode) {
 	}
 	if err := os.WriteFile(p, []byte(s), mode); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 원격 수집 글이 중간에 실패해도(가짜 awk가 1로 끝남) 임시 파일이 남지 않는다(hc-lane-logs-polish)
+func TestStatsRemoteNoTempLeft(t *testing.T) {
+	d := t.TempDir()
+	clitestPut(t, d+"/bin/awk", "#!/bin/sh\nexit 1\n", 0o755)
+	clitestPut(t, d+"/st/hc-lane/events.tsv", "e\n", 0o644)
+	tmp := fakeMktemp(t, d+"/bin")
+	c := exec.Command("sh", "-c", stRemote)
+	c.Env = append(os.Environ(), "PATH="+d+"/bin:"+os.Getenv("PATH"), "XDG_STATE_HOME="+d+"/st")
+	if err := c.Run(); err == nil {
+		t.Fatal("가짜 awk인데 성공")
+	}
+	if es, _ := os.ReadDir(tmp); len(es) > 0 {
+		t.Errorf("임시 파일이 남았다: %v", es)
 	}
 }
 

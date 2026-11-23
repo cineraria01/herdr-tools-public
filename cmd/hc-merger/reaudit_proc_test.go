@@ -126,7 +126,7 @@ func TestGofix2SpecWriteTrunc(t *testing.T) {
 	f := newFx(t)
 	fakeGitIn(t, `[ "$1" = ls-remote ] && { printf 'abcdef012345\trefs/x\n'; exit 0; }`)
 	r := specRow{id: "s1", commit: strings.Repeat("a", 40), tree: strings.Repeat("b", 40)}
-	if rc := specWrite(f.clone, r, resPass, t.TempDir()+"/log"); rc != 1 {
+	if rc := specWrite(f.clone, r, resPass, specEvidence{}, t.TempDir()+"/log"); rc != 1 {
 		t.Fatalf("잘린 ls-remote는 모름(1): %d", rc)
 	}
 }

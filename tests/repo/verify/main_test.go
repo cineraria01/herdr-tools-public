@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -276,8 +277,8 @@ func TestPlan(t *testing.T) {
 		t.Fatalf("잠금 파일이 시험 폴더 밖: %s", lockPath())
 	}
 	held := hold(t, lockPath())
-	go func(f *os.File) { time.Sleep(1500 * time.Millisecond); f.Close() }(held)
-	if rc, out, calls = run(); rc != 0 || !strings.Contains(out, "다른 검증을 1초 기다렸다") && !strings.Contains(out, "다른 검증을 2초 기다렸다") ||
+	releaseOnBlock(t, held)
+	if rc, out, calls = run(); rc != 0 || !waitedRe.MatchString(out) ||
 		!strings.HasPrefix(calls, want) || strings.Index(out, "기다렸다") > strings.Index(out, "TestCotenantGuard") {
 		t.Errorf("잠금을 쥔 동안: 기다린 초 한 줄 뒤 무거운 단계여야 rc=%d\n%s\n%s", rc, calls, out)
 	}
@@ -288,6 +289,20 @@ func TestPlan(t *testing.T) {
 	if rc, out, _ = run(); rc != 0 || strings.Contains(out, "잠금") || time.Since(t0) > 5*time.Second {
 		t.Errorf("HERDR_VERIFY_NO_LOCK=1: 잠금을 안 보고 바로 돈다 rc=%d %v\n%s", rc, time.Since(t0), out)
 	}
+}
+
+// waitedRe: 기다린 줄 — 초 값은 0보다 크기만 본다(부하에서 타이머가 밀려도)
+var waitedRe = regexp.MustCompile(`다른 검증을 [1-9][0-9]*초 기다렸다`)
+
+// releaseOnBlock: 쥔 쪽(held)을 시간이 아니라 순서로 놓는다 — 둘째가 그 잠금에 막힌 것(lockBlocked)을 본 뒤에만 닫는다.
+// 막히지 않으면(잠금을 안 보면) 놓지 않아 기다린 줄이 없다. 돌려주는 함수(시험 끝에도 불림)가 고리를 걷고 닫는다
+func releaseOnBlock(t *testing.T, held *os.File) func() {
+	t.Helper()
+	var once sync.Once
+	lockBlocked = func() { once.Do(func() { held.Close() }) }
+	undo := func() { lockBlocked = func() {}; once.Do(func() { held.Close() }) }
+	t.Cleanup(undo)
+	return undo
 }
 
 // hold: 다른 검증처럼 path에 배타 flock을 쥔다(닫으면 풀린다)
@@ -308,12 +323,12 @@ func hold(t *testing.T, path string) *os.File {
 func TestVerifyLock(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "d", "verify.lock")
 	held := hold(t, p)
-	go func(f *os.File) { time.Sleep(1200 * time.Millisecond); f.Close() }(held)
+	unhook := releaseOnBlock(t, held)
 	f, read := outFile(t)
-	t0 := time.Now()
 	release, rc := verifyLock(p, time.Minute, make(chan os.Signal), f)
-	if d := time.Since(t0); rc != 0 || d < time.Second || !regexp.MustCompile(`다른 검증을 [12]초 기다렸다`).MatchString(read()) {
-		t.Errorf("풀리면 얻음: 기다린 초 한 줄이어야 rc=%d %v\n%s", rc, d, read())
+	unhook()
+	if rc != 0 || !waitedRe.MatchString(read()) {
+		t.Errorf("풀리면 얻음: 기다린 초 한 줄이어야 rc=%d\n%s", rc, read())
 	}
 	if f2, err := os.OpenFile(p, os.O_RDWR, 0); err != nil || syscall.Flock(int(f2.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
 		t.Errorf("얻은 잠금은 남을 막아야 err=%v", err)
@@ -325,7 +340,7 @@ func TestVerifyLock(t *testing.T) {
 	held = hold(t, p)
 	defer held.Close()
 	f, read = outFile(t)
-	t0 = time.Now()
+	t0 := time.Now()
 	release, rc = verifyLock(p, 1500*time.Millisecond, make(chan os.Signal), f)
 	release()
 	if d := time.Since(t0); rc != 0 || d < 1500*time.Millisecond || d > 10*time.Second || !strings.Contains(read(), "상한을 넘겼다 — 잠금 없이 진행한다") {

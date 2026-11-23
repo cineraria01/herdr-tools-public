@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 )
 
@@ -416,6 +417,7 @@ func exit(code int) {
 		panic(lockExit{code})
 	}
 	runExitHooks()
+	oplog.Exited("hc-fill", code)
 	os.Exit(code)
 }
 
@@ -432,12 +434,16 @@ func runExitHooks() {
 }
 
 func die(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "hc-fill: %s\n", fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintf(os.Stderr, "hc-fill: %s\n", msg)
+	oplog.Fatal("hc-fill", "", oplog.Die, DRC, msg)
 	exit(DRC)
 }
 
 func refuse(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "hc-fill: %s\n", fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintf(os.Stderr, "hc-fill: %s\n", msg)
+	oplog.Fatal("hc-fill", "", oplog.Refuse, 2, msg)
 	exit(2)
 }
 

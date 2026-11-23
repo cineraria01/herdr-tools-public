@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
 
 func init() {
@@ -37,12 +39,14 @@ const (
 )
 
 // lgScript: 수집(sh, 인자 「<상한> <병합기 mtime> (<파일> <위치>)…」). 구획마다 「== <이름> <위치> <시작> <바이트>」, 그 바이트, 「\nEND <이름>」.
-// 끝은 「ALL <병합기 mtime>」. 위치보다 파일이 작으면(돌림) 처음부터. 새 바이트가 파일당·기계당 남은 상한을 넘으면 뒤쪽만(시작 > 위치 = 잘림).
-// 병합기 로그는 mtime이 지난번보다 늦은 파일의 실패 줄만(시작 = 상한에 잘려 건너뛴 바이트). 상태는 launchd 작업(이름에 herdr·.hc-)의
+// 끝은 「ALL <병합기 mtime>」. 위치보다 파일이 작으면(돌림) 처음부터. 새 바이트가 파일당·기계당 남은 상한을 넘으면 뒤쪽만.
+// 시작이 0보다 크면 새 바이트 바로 앞 1바이트부터 보낸다(그 바이트가 줄바꿈이 아니면 줄 중간 — logsTake가 첫 줄바꿈까지 버린다).
+// 병합기 로그는 mtime이 지난번보다 늦은 파일의 실패 줄만(위치 0, 시작 = 상한에 잘려 건너뛴 곳). 임시 파일은 어느 길로 끝나도 trap이 지운다.
+// 상태는 launchd 작업(이름에 herdr·.hc-)의
 // 마지막 종료와 실행 파일(/bin/ 든 절대 경로 낱말)이 있나, herdr-sync/bak 크기
 // ponytail: 돌림은 크기로만 안다 — 돌린 새 파일이 지난 위치보다 커진 뒤에 보면 앞쪽을 놓친다. 그러면 위치 파일에 inode를 더한다
 // ponytail: 병합기 로그는 mtime 초 단위 — 가장 늦은 파일과 같은 초에 처음 생긴 파일은 놓칠 수 있고, 다시 고친 파일은 실패 줄을 처음부터 또 받는다
-const lgScript = `max=$1 wm=$2; shift 2; left=$max; t=$(mktemp) || exit 1; t2=$(mktemp) || exit 1
+const lgScript = `max=$1 wm=$2; shift 2; left=$max t2=; t=$(mktemp) || exit 1; trap 'rm -f "$t" ${t2:+"$t2"}' EXIT; t2=$(mktemp) || exit 1
 sec() { n=$(wc -c < "$t" | tr -d ' ') || exit 1; echo "== $1 $2 $3 $n"; cat "$t" || exit 1; echo; echo "END $1"; }
 while [ $# -ge 2 ]; do
   rel=$1 pos=$2; shift 2; f=$HOME/$rel; s=0 p0=0; : > "$t" || exit 1
@@ -50,8 +54,9 @@ while [ $# -ge 2 ]; do
     [ -r "$f" ] || exit 1
     sz=$(wc -c < "$f" | tr -d ' ') || exit 1
     [ "$sz" -lt "$pos" ] && pos=0
-    lim=$max; [ "$left" -lt "$lim" ] && lim=$left
+    lim=$max; [ "$left" -lt "$lim" ] && lim=$left; [ "$lim" -lt 0 ] && lim=0
     s=$pos; [ $((sz - s)) -gt "$lim" ] && s=$((sz - lim))
+    [ "$s" -gt 0 ] && s=$((s - 1))
     if [ "$sz" -gt "$s" ]; then tail -c +$((s + 1)) "$f" | head -c $((sz - s)) > "$t" || exit 1; fi
     p0=$pos
   fi
@@ -68,8 +73,8 @@ if [ -d "$d" ]; then
     [ "$m" -gt "$top" ] && top=$m
     grep -F -e '--- FAIL' -e "FAIL$tb" -e 'panic:' "$f" > "$t2"; [ $? -le 1 ] || exit 1
     n=$(wc -c < "$t2" | tr -d ' ') || exit 1; [ "$n" -gt 0 ] || continue
-    lim=$max; [ "$left" -lt "$lim" ] && lim=$left; s=0
-    if [ "$n" -gt "$lim" ]; then s=$((n - lim)); tail -c "$lim" "$t2" > "$t" || exit 1; else cat "$t2" > "$t" || exit 1; fi
+    lim=$max; [ "$left" -lt "$lim" ] && lim=$left; [ "$lim" -lt 0 ] && lim=0; s=0
+    if [ "$n" -gt "$lim" ]; then s=$((n - lim - 1)); tail -c $((lim + 1)) "$t2" > "$t" || exit 1; else cat "$t2" > "$t" || exit 1; fi
     sec "merger-logs/${f##*/}" 0 "$s"; left=$((left - n))
   done
 fi
@@ -90,7 +95,7 @@ fi
 b=$HOME/.local/state/herdr-sync/bak
 if [ -d "$b" ]; then echo "herdr-sync/bak $(du -sk "$b" | awk '{print $1}')KB" >> "$t"; else echo "herdr-sync/bak 없음" >> "$t"; fi
 sec "` + lgStatus + `" 0 0
-echo "ALL $top"; rm -f "$t" "$t2"`
+echo "ALL $top"`
 
 // lgSec: 수집 구획 하나
 type lgSec struct {
@@ -140,9 +145,9 @@ func logsRun(w io.Writer, a []string) int {
 	var bad, lines []string
 	got, want := 0, 1
 	next := map[string]int64{}
-	take := func(m string, o string, rc int) {
+	take := func(m string, o string, rc int, why string) {
 		if rc != 0 {
-			bad = append(bad, fmt.Sprintf("%s(hc exec 종료 %d)", m, rc))
+			bad = append(bad, m+"("+why+")")
 			return
 		}
 		secs, wm, err := logsParse(o)
@@ -154,7 +159,11 @@ func logsRun(w io.Writer, a []string) int {
 		lines = append(lines, logsTake(m, secs, wm, next)...)
 	}
 	o, rc := captTo(90, false, nil, "sh", logsArgs(cur, me, max)...)
-	take(me, o, rc)
+	why := fmt.Sprintf("sh 종료 %d", rc) // 이 기계는 hc exec를 거치지 않는다
+	if rc == proc.TimeoutCode {
+		why = "sh 시간 넘김(90초)"
+	}
+	take(me, o, rc, why)
 	if e.pbad {
 		bad = append(bad, "기계 목록(hc machine ls 실패)")
 	}
@@ -172,7 +181,7 @@ func logsRun(w io.Writer, a []string) int {
 			continue
 		}
 		want++
-		take(m, o, rc)
+		take(m, o, rc, fmt.Sprintf("hc exec 종료 %d", rc))
 	}
 	bw := bufio.NewWriter(w)
 	line := fmt.Sprintf("수집: %d/%d대", got, want)
@@ -248,7 +257,9 @@ func logsParse(o string) (secs []lgSec, wm int64, err error) {
 	}
 }
 
-// logsTake: 한 기계의 구획 → 출력 줄(「기계<TAB>파일<TAB>줄」), 다음 위치는 next에. 파일 구획은 끝 줄바꿈까지만 받고 그 뒤 반쪽 줄은 다음에
+// logsTake: 한 기계의 구획 → 출력 줄(「기계<TAB>파일<TAB>줄」), 다음 위치는 next에. 파일 구획은 끝 줄바꿈까지만 받고 그 뒤 반쪽 줄은 다음에.
+// 시작이 0보다 크면 본문 첫 바이트는 새 바이트 바로 앞 것 — 첫 줄바꿈까지(없으면 전부) 버리고, 위치보다 더 간 만큼이 건너뜀이다.
+// 그래서 잘린 뒤 첫 줄도, 줄 중간에 남은 위치(0바이트로 잘림) 다음 실행 첫 줄도 조각이 아니다
 func logsTake(m string, secs []lgSec, wm int64, next map[string]int64) []string {
 	var out []string
 	add := func(name, body string) {
@@ -261,20 +272,24 @@ func logsTake(m string, secs []lgSec, wm int64, next map[string]int64) []string 
 	}
 	for _, s := range secs {
 		file := s.name != lgStatus && !strings.HasPrefix(s.name, lgMergerKey+"/")
-		skip := s.start
-		if file {
-			skip = s.start - s.pos
+		body, off := s.body, s.start
+		if s.start > 0 {
+			d := strings.IndexByte(body, '\n') + 1
+			if d == 0 {
+				d = len(body)
+			}
+			body, off = body[d:], off+int64(d)
 		}
-		if skip > 0 {
+		if skip := off - s.pos; skip > 0 {
 			out = append(out, fmt.Sprintf("%s%s%s(잘림 — 앞 %d바이트 건너뜀)", m+tab, s.name, tab, skip))
 		}
 		if !file {
-			add(s.name, s.body)
+			add(s.name, body)
 			continue
 		}
-		i := strings.LastIndexByte(s.body, '\n') + 1
-		next[m+tab+s.name] = s.start + int64(i)
-		add(s.name, s.body[:i])
+		i := strings.LastIndexByte(body, '\n') + 1
+		next[m+tab+s.name] = off + int64(i)
+		add(s.name, body[:i])
 	}
 	next[m+tab+lgMergerKey] = wm
 	return out

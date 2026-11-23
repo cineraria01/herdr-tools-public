@@ -194,3 +194,61 @@ func TestLogsMaxArg(t *testing.T) {
 		t.Errorf("--max 1048576: %d %v", n, ok)
 	}
 }
+
+// fakeMktemp: bin에 둔 가짜 mktemp는 돌려준 폴더에 빈 파일을 만든다(macOS mktemp는 인자 없이 TMPDIR을 안 따른다)
+func fakeMktemp(t *testing.T, bin string) string {
+	t.Helper()
+	tmp := t.TempDir()
+	clitestPut(t, bin+"/mktemp", "#!/bin/sh\nn=0; while [ -e "+tmp+"/t$n ]; do n=$((n+1)); done; : > "+tmp+"/t$n && echo "+tmp+"/t$n\n", 0o755)
+	return tmp
+}
+
+// 수집 글이 중간에 실패해도(가짜 tr이 1로 끝남 — 첫 구획에서 exit 1) 임시 파일이 남지 않고, 이 기계의 까닭은 「sh 종료 n」
+func TestLogsFailNoTempLeft(t *testing.T) {
+	d := logsSetup(t)
+	clitestPut(t, d+"/bin/tr", "#!/bin/sh\nexit 1\n", 0o755)
+	tmp := fakeMktemp(t, d+"/bin")
+	out, rc := logsRunT(t)
+	if rc != 1 || !strings.HasPrefix(out, "수집: 0/1대 · 수집 못 한 기계: me(sh 종료 1)") {
+		t.Errorf("종료 %d:\n%s", rc, out)
+	}
+	if es, _ := os.ReadDir(tmp); len(es) > 0 {
+		t.Errorf("임시 파일이 남았다: %v", es)
+	}
+}
+
+// 상한에 줄 중간에서 잘려도 조각 줄은 안 나온다 — 건너뛴 구획은 첫 줄바꿈까지 버리고 건너뜀 수에 더한다.
+// 기계당 상한을 다 써 0바이트로 잘린 파일(끝이 반쪽 줄)도 다음 실행 첫 줄이 조각이 아니다
+func TestLogsTruncNoFragment(t *testing.T) {
+	d := logsSetup(t)
+	clitestPut(t, d+"/home-me/.local/state/herdr-tools/ops.tsv", "aaaa\nbbbb\ncccc\n", 0o644)
+	clitestPut(t, d+"/home-me/"+lgEv, "x\npart", 0o644)
+	out, rc := logsRunT(t, "--max", "8")
+	if rc != 0 {
+		t.Fatalf("종료 %d:\n%s", rc, out)
+	}
+	logsEq(t, "줄 중간 잘림", logsOf(out, "me"),
+		"me\t.local/state/herdr-tools/ops.tsv\t(잘림 — 앞 10바이트 건너뜀)",
+		"me\t.local/state/herdr-tools/ops.tsv\tcccc",
+		"me\t"+lgEv+"\t(잘림 — 앞 6바이트 건너뜀)")
+	appendTo(t, d+"/home-me/"+lgEv, "ial\ny\n")
+	out, _ = logsRunT(t, "--max", "8")
+	logsEq(t, "0바이트로 잘린 뒤", logsOf(out, "me"),
+		"me\t"+lgEv+"\t(잘림 — 앞 4바이트 건너뜀)",
+		"me\t"+lgEv+"\ty")
+}
+
+// 구획 머리의 바이트 수·이름과 끝 표식이 어긋난 출력(손으로 만든 것)은 버린다 — 끝 표식 검사가 없으면 둘 다 받아 버린다
+func TestLogsParseBadMarker(t *testing.T) {
+	for _, o := range []string{
+		"== f 0 0 9\nab\nEND f\nALL 0", // 바이트 수가 끝 표식까지 삼킴
+		"== f 0 0 2\nab\nEND g\nALL 0", // 끝 표식 이름이 다름
+	} {
+		if secs, _, err := logsParse(o); err == nil {
+			t.Errorf("받아 버렸다 %q → %+v", o, secs)
+		}
+	}
+	if secs, wm, err := logsParse("== f 0 0 2\nab\nEND f\nALL 7"); err != nil || len(secs) != 1 || secs[0].body != "ab" || wm != 7 {
+		t.Errorf("맞는 출력: %+v %d %v", secs, wm, err)
+	}
+}

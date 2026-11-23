@@ -15,10 +15,18 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/oplog"
 )
 
 // Who: 경고 줄 앞에 붙는 이름(도구가 main에서 정한다)
 var Who = "herdr-tools"
+
+// note: 「<Who>: <글>」 한 줄을 표준 오류에, 같은 글을 운영 기록(oplog, 종류 kind)에 — 이 꾸러미가 알리는 곳은 모두 여기로
+func note(kind, format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Who, msg)
+	oplog.Log(Who, "", kind, -1, msg)
+}
 
 // Code: 명령 결과를 셸 종료 코드로 — 신호로 끝나면 128+신호, 못 띄우면 127, 상한·출력 관 기다림 넘김(모름)이면 TimeoutCode
 func Code(err error) int {
@@ -35,7 +43,7 @@ func Code(err error) int {
 		}
 		return ee.ExitCode()
 	}
-	fmt.Fprintf(os.Stderr, "%s: 명령을 띄우지 못했다: %v\n", Who, err)
+	note(oplog.Warn, "명령을 띄우지 못했다: %v", err)
 	return 127
 }
 
@@ -90,7 +98,7 @@ func WaitFor(c *exec.Cmd, record string, max time.Duration, keep bool) (rc int, 
 		if past(deadline) || errors.Is(err, ErrTimeout) {
 			return TimeoutCode, false // 「모름 … 띄우지 않음」 줄은 launch가 적었다
 		}
-		fmt.Fprintf(os.Stderr, "%s: %s 를 띄우지 못했다: %v\n", Who, path, err)
+		note(oplog.Warn, "%s 를 띄우지 못했다: %v", path, err)
 		return 127, false
 	}
 	pid := c.Process.Pid
@@ -103,7 +111,7 @@ func WaitFor(c *exec.Cmd, record string, max time.Duration, keep bool) (rc int, 
 			curMu.Lock()
 			fired = true
 			curMu.Unlock()
-			fmt.Fprintf(os.Stderr, "%s: %s\n", Who, &TimeoutError{Head: head(c.Args), D: max})
+			note(oplog.Timeout, "%s", &TimeoutError{Head: head(c.Args), D: max})
 			if grouped {
 				Stop(pid, 5*time.Second)
 			} else {
@@ -121,7 +129,7 @@ func WaitFor(c *exec.Cmd, record string, max time.Duration, keep bool) (rc int, 
 	}
 	if record != "" {
 		if err := os.Remove(record); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "%s: 경고 — 자식 기록을 지우지 못했다: %v\n", Who, err)
+			note(oplog.Warn, "경고 — 자식 기록을 지우지 못했다: %v", err)
 		}
 	}
 	finish(pid) // 멈추는 중이면 돌아오지 않는다 — 신호로 끈 자식의 종료 코드를 부른 쪽이 결과(착지 실패 등)로 읽지 않게
@@ -165,7 +173,7 @@ func StopGroup(pg int, grace time.Duration) {
 		}
 	}
 	if err := killGroup(pg, sigKill); err != nil && !isNoProcess(err) {
-		fmt.Fprintf(os.Stderr, "%s: 자식 무리 %d 를 끄지 못했다: %v\n", Who, pg, err)
+		note(oplog.Warn, "자식 무리 %d 를 끄지 못했다: %v", pg, err)
 		return
 	}
 	for end := time.Now().Add(2 * time.Second); time.Now().Before(end) && !groupGone(pg); time.Sleep(50 * time.Millisecond) {
@@ -308,13 +316,13 @@ func ChildCheck(record string) (ChildState, int) {
 		return ChildNone, 0
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: 자식 기록을 읽지 못했다(도는 것으로 친다): %v\n", Who, err)
+		note(oplog.Warn, "자식 기록을 읽지 못했다(도는 것으로 친다): %v", err)
 		return ChildUnknown, 0
 	}
 	f := strings.SplitN(strings.TrimRight(string(b), "\n"), "\t", 2)
 	pid, err := strconv.Atoi(f[0])
 	if err != nil || pid <= 1 {
-		fmt.Fprintf(os.Stderr, "%s: 자식 기록 %s 의 꼴이 틀렸다(도는 것으로 친다)\n", Who, record)
+		note(oplog.Warn, "자식 기록 %s 의 꼴이 틀렸다(도는 것으로 친다)", record)
 		return ChildUnknown, 0
 	}
 	start := ""
@@ -327,18 +335,18 @@ func ChildCheck(record string) (ChildState, int) {
 		}
 		st, serr := StartTime(pid)
 		if serr != nil {
-			fmt.Fprintf(os.Stderr, "%s: 자식 %d 의 시작 시각을 읽지 못했다(도는 것으로 친다): %v\n", Who, pid, serr)
+			note(oplog.Warn, "자식 %d 의 시작 시각을 읽지 못했다(도는 것으로 친다): %v", pid, serr)
 			return ChildUnknown, pid
 		}
 		if st == start {
 			return ChildRunning, pid
 		}
 	} else if !groupGone(pid) {
-		fmt.Fprintf(os.Stderr, "%s: 앞 실행의 자식 %d 는 끝났는데 그 무리가 남았다 — 소유를 입증할 수 없어 신호 없이 기다린다\n", Who, pid)
+		note(oplog.Warn, "앞 실행의 자식 %d 는 끝났는데 그 무리가 남았다 — 소유를 입증할 수 없어 신호 없이 기다린다", pid)
 		return ChildLeft, pid
 	}
 	if err := os.Remove(record); err != nil && !errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(os.Stderr, "%s: 자식 기록을 지우지 못했다(도는 것으로 친다): %v\n", Who, err)
+		note(oplog.Warn, "자식 기록을 지우지 못했다(도는 것으로 친다): %v", err)
 		return ChildUnknown, pid
 	}
 	return ChildNone, 0

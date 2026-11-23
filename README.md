@@ -31,6 +31,7 @@ README에는 아래 목차 줄만 둔다.
 새 기능은 새 파일과 목차 한 줄이고, 목차 줄은 경로 이름순이다(끝에 덧붙이지 않는다 — `tests/repo`의 `TestDocsIndex`가 본다).
 
 - [Go 바탕](docs/go/foundation.md)
+- [운영 기록 (ops.tsv)](docs/go/oplog.md)
 - [Go 운영 도구](docs/go/ops-tools.md)
 - [Go 릴리스 바이너리](docs/go/release-binaries.md)
 - [Go 작은 도구](docs/go/small-tools.md)

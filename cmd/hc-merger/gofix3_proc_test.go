@@ -32,7 +32,7 @@ func TestGofix3SpecHelper(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
-	specRunVerify(d+"/wt", d+"/log", d, "main", strings.Repeat("a", 40), strings.Repeat("b", 40))
+	specRunVerify(d+"/wt", d+"/log", d, "main", strings.Repeat("a", 40), strings.Repeat("b", 40), &specEvidence{})
 	time.Sleep(time.Minute)
 }
 

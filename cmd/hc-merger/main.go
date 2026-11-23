@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/version"
 )
@@ -73,6 +74,7 @@ func evdir() string {
 func die(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
+	oplog.Log("hc-merger", "", oplog.Die, 1, msg)
 	if gRun {
 		top := gTop
 		if top == "" {

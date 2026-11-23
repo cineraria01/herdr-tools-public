@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"herdr-tools/internal/argp"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/pyjson"
 	"herdr-tools/internal/version"
@@ -94,6 +95,7 @@ func uuid4() string {
 
 func die(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "ovis-split: "+format+"\n", a...)
+	oplog.Log("ovis-split", "", oplog.Die, 1, fmt.Sprintf(format, a...))
 	os.Exit(1)
 }
 

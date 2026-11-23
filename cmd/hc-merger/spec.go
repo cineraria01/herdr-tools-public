@@ -192,6 +192,7 @@ const (
 	specLand      specDecision = iota // 지금처럼 착지(병합기 기계 검증)
 	specLandFast                      // 착지 — 기록이 있어 착지가 검증을 건너뛴다
 	specWaitFront                     // 맨 앞 추측이 도는 중 — 이 바퀴는 착지하지 않는다
+	specCulprit                       // 묶음 실패 뒤 맨 앞 혼자 추측이 시험 실패 — 착지 없이 반송(specrun.go specCulpritWhy)
 )
 
 func specFront(st []specStep) specDecision {

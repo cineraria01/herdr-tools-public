@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/oplog"
 )
 
 var (
@@ -228,7 +229,7 @@ func deadRecords(deadline time.Time) (r []orphanRec, unknown []string) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		fmt.Fprintf(os.Stderr, "%s: 경고 — 고아 기록 폴더를 읽지 못했다(모름): %v\n", Who, err)
+		note(oplog.Warn, "경고 — 고아 기록 폴더를 읽지 못했다(모름): %v", err)
 		return nil, []string{"기록 폴더 " + d + "(읽지 못함)"}
 	}
 	for _, e := range es {
@@ -251,7 +252,7 @@ func deadRecords(deadline time.Time) (r []orphanRec, unknown []string) {
 			if err == nil {
 				err = errors.New("꼴이 틀림")
 			}
-			fmt.Fprintf(os.Stderr, "%s: 경고 — 고아 기록 %s 를 읽지 못했다(모름, 그대로 둔다): %v\n", Who, p, err)
+			note(oplog.Warn, "경고 — 고아 기록 %s 를 읽지 못했다(모름, 그대로 둔다): %v", p, err)
 			unknown = append(unknown, "기록 "+p+"(읽지 못함)")
 			continue
 		}
@@ -311,7 +312,7 @@ func sweep(deadline time.Time) (reaped int, left []string) {
 	}
 	for _, o := range rs {
 		if beforeBoot(o.path, boot) {
-			fmt.Fprintf(os.Stderr, "%s: 부팅 전에 쓰인 고아 기록 %s 를 지운다(그 무리는 재부팅으로 없다)\n", Who, o.path)
+			note(oplog.Warn, "부팅 전에 쓰인 고아 기록 %s 를 지운다(그 무리는 재부팅으로 없다)", o.path)
 			os.Remove(o.path)
 			continue
 		}
@@ -328,7 +329,7 @@ func sweep(deadline time.Time) (reaped int, left []string) {
 		case groupNone:
 			os.Remove(o.path)
 		case groupMine:
-			fmt.Fprintf(os.Stderr, "%s: 죽은 실행(pid %d)이 남긴 자식 무리 %d 를 거둔다\n", Who, o.ppid, o.pg)
+			note(oplog.Warn, "죽은 실행(pid %d)이 남긴 자식 무리 %d 를 거둔다", o.ppid, o.pg)
 			StopGroup(o.pg, Grace)
 			if groupGone(o.pg) {
 				os.Remove(o.path)
@@ -360,7 +361,7 @@ func Orphans() int { return len(Left()) }
 // Left: Orphans가 세는 것들의 글(무리 번호·기록 경로, 기록 이름순) — 같은 기록이면 같은 글이라 부른 쪽이 같은 까닭으로 쉰 바퀴를 센다
 func Left() []string {
 	if err := prepare(time.Time{}); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: 경고 — 준비를 마치지 못했다: %v\n", Who, err)
+		note(oplog.Warn, "경고 — 준비를 마치지 못했다: %v", err)
 	}
 	_, left := sweep(time.Time{})
 	return left

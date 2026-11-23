@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/oplog"
 )
 
 func init() { register("add", addCmd) }
@@ -287,6 +289,7 @@ func thenLocked(tl, pre, prj, brief string) {
 
 func usage() {
 	fmt.Fprint(os.Stderr, usageText)
+	oplog.Usage() // 사용법은 이상이 아니다 — exit 줄을 남기지 않는다
 	exit(2)
 }
 

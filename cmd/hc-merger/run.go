@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 )
 
@@ -120,7 +121,9 @@ func writeVia(dst, content string) error {
 // F6). 그 밖의 실패는 die
 func dieGit(rc int, format string, a ...any) {
 	if rc == proc.TimeoutCode {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: %s — git 시간 넘김(모름), 바꾼 것 없이 다음 바퀴에\n", fmt.Sprintf(format, a...))
+		msg := fmt.Sprintf(format, a...)
+		fmt.Fprintf(os.Stderr, "hc-lane merger: %s — git 시간 넘김(모름), 바꾼 것 없이 다음 바퀴에\n", msg)
+		oplog.Log("hc-merger", "", oplog.Timeout, 75, msg)
 		os.Exit(75)
 	}
 	die(format, a...)

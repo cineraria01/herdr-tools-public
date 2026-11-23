@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
@@ -105,6 +106,7 @@ func mkOwnedTmp() (string, error) {
 
 func die(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.Die, 1, fmt.Sprintf(f, a...))
 	exit(1)
 }
 

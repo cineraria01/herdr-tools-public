@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 )
 
@@ -31,7 +32,11 @@ var (
 // startSetup: selfPath = 이 바이너리(링크를 따른 실제 경로)
 func startSetup() { selfPath = selfExe() }
 
-func errf(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }
+func errf(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprint(os.Stderr, msg)
+	oplog.Log("hc-lane", "", oplog.Warn, -1, strings.TrimSuffix(msg, "\n"))
+}
 
 // j: JSON 문자열 속 \ 와 " 만 막는다(셸 판 j와 같다)
 func j(s string) string { return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) }

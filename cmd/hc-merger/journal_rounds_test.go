@@ -188,3 +188,39 @@ func TestJournalSpecWaitOneLine(t *testing.T) {
 		t.Fatalf("착지 줄은 그대로 둘:\n%s", jdump())
 	}
 }
+
+// 감사 atoy0ft-aprr7a 낮음 둘: 추측 판정까지 못 간 바퀴(켬 표식이 잠깐 없음)가 기다림을 두 줄로 쪼개지 않고, 기다림이 끝난 바퀴는
+// 「추측 기다림」 줄을 그 바퀴의 착지 줄보다 먼저 적는다
+func TestJournalSpecWaitEarlyRoundAndOrder(t *testing.T) {
+	s := specFx(t)
+	s.sub(1000000001, "a", false)
+	s.sub(1000000002, "b", false)
+	s.round(1)
+	d := s.dispatched()
+	if len(d) != 1 {
+		t.Fatalf("B 띄움: %v", d)
+	}
+	s.round(1)
+	s.round(1)
+	s.git(s.seed, "push", "-q", "origin", ":refs/herdr/merger/box")
+	s.round(1) // 켬 표식 없음 — 큐를 보기 전에 끝남
+	s.git(s.seed, "push", "-q", "origin", "main:refs/herdr/merger/box")
+	s.round(1)
+	if rc := s.verifyOn(d[0]); rc != 0 {
+		t.Fatalf("일꾼 종료 %d", rc)
+	}
+	s.round(1)
+	rows := jrows(t, "추측 기다림")
+	if len(rows) != 1 || !strings.Contains(rows[0][11], "3바퀴") {
+		t.Fatalf("기다림 한 번 = 한 줄(3바퀴):\n%s", jdump())
+	}
+	var order []string
+	for _, l := range strings.Split(jdump(), "\n") {
+		if c := strings.Split(l, "\t"); len(c) == 12 && c[2] == "b" {
+			order = append(order, c[9])
+		}
+	}
+	if strings.Join(order, ",") != "추측 기다림,착지" {
+		t.Fatalf("b 줄 차례 = 기다림 → 착지: %v", order)
+	}
+}

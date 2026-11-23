@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +50,12 @@ func (m *M) spec() (specDecision, string) {
 	groups := m.specGroups()
 	now := time.Now().Unix()
 	busy := specBusy(c.rows)
-	var st []specStep
+	st := specWalk(m.btree, groups, c.rows)
+	if m.specCulpritWhy(c, st) { // 뒤 추측은 반송할 맨 앞을 품었다 — 더 짓지 않고 치운다
+		m.specClean(c, st)
+		return specCulprit, ""
+	}
+	m.specSolo(c, busy, now)
 	for {
 		st = specWalk(m.btree, groups, c.rows)
 		last := st[len(st)-1]
@@ -81,6 +85,75 @@ func (m *M) spec() (specDecision, string) {
 		fmt.Printf("hc-lane merger: 추측 검증 도는 중 — %s (%s) 결과를 기다린다\n", st[0].g.lanes, st[0].row.machine)
 	}
 	return d, ""
+}
+
+// specSolo: 묶음이 실패해 줄인 바퀴(cap)에 앞 k−1(≥2)을 병합기가 직접 검증하는 동안 「맨 앞 혼자」를 빈 검증 기계에 먼저 맡긴다
+// (merger-batch-culprit). 아이디는 다음 바퀴 맨 앞이 혼자일 때의 무리(기준 트리 + 맨 앞)와 같아, 그 바퀴 specWalk가 결과를 그대로 읽는다.
+// 기계가 없거나 바쁘거나 이미 그 추측이 있으면 아무것도 안 한다(지금 그대로)
+func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64) {
+	if m.capN() == 0 || len(m.b) < 2 {
+		return
+	}
+	g := newGroup(m.b[:1])
+	id := specID(m.btree, g.key)
+	for _, r := range c.rows {
+		if r.id == id {
+			return
+		}
+	}
+	v := m.specFree(c.vers, busy)
+	if v.Machine == "" {
+		return
+	}
+	r, ok := m.specBuild([]specStep{{g: g, parent: m.btree}}, v, now)
+	if !ok {
+		return
+	}
+	c.rows = append(c.rows, r)
+	if r.state == specRun {
+		busy[v.Machine] = true
+		m.jmembers(m.b[:1], jSolo, fmt.Sprintf("묶음 실패 뒤 맨 앞 혼자를 %s 에 추측 검증으로 맡김(앞 %d개는 병합기가 직접)", v.Machine, len(m.b)), "", m.r0, now)
+	}
+}
+
+// specCulpritWhy: 묶음이 실패해 줄인 바퀴(cap)의 맨 앞 혼자 추측이 같은 기준에서 시험 실패로 끝났나 — 그렇다면 반송 까닭(m.cwhy·m.clog)을
+// 채우고 true. 실패 기록에 시험 실패 근거(test=1)가 없거나(옛 판·환경 문제와 가를 수 없음) 그 기록을 못 읽으면 false(지금처럼 직접 검증)
+func (m *M) specCulpritWhy(c *specCtx, st []specStep) bool {
+	if m.capN() == 0 || len(st) == 0 || st[0].row == nil || st[0].row.state != specFail || len(st[0].g.shas) != 1 {
+		return false
+	}
+	ref := specFails + st[0].row.id
+	sha := c.refs[ref]
+	if fetchr(true, "-q", "origin", ref) != 0 { // 받기만(FETCH_HEAD) — 로컬 참조를 남기지 않는다
+		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측의 실패 기록을 받지 못했다 — 지금처럼 직접 검증")
+		return false
+	}
+	body, rc := out("cat-file", "commit", sha)
+	if rc != 0 {
+		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측의 실패 기록을 읽지 못했다 — 지금처럼 직접 검증")
+		return false
+	}
+	_, msg, _ := strings.Cut(body, "\n\n")
+	subj, test, _ := strings.Cut(msg, "\n\n")
+	kv := map[string]string{}
+	for _, f := range strings.Fields(subj) {
+		if k, v, ok := strings.Cut(f, "="); ok {
+			kv[k] = v
+		}
+	}
+	test = strings.TrimSpace(test)
+	if !strings.HasPrefix(subj, "hc-merger-spec-fail ") || kv["test"] != "1" || test == "" || kv["exit"] == "" {
+		fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측 실패는 시험 실패와 환경 문제를 가를 수 없다 — 지금처럼 직접 검증\n", st[0].g.lanes)
+		return false
+	}
+	lg := ""
+	if _, rest, ok := strings.Cut(subj, " log="); ok {
+		lg, _, _ = strings.Cut(rest, " exit=")
+	}
+	m.clog = kv["machine"] + ":" + lg
+	m.cwhy = fmt.Sprintf("착지 실패(종료 %s, 추측 검증 — %s 에서 맨 앞 혼자 기준 %s 위 시험 실패, 첫 실패 「%s」)", kv["exit"], kv["machine"], first8(m.B), test)
+	fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측이 시험 실패(%s) — 병합기 검증 없이 반송\n", st[0].g.lanes, kv["machine"])
+	return true
 }
 
 // specLoad: m.qs(바퀴의 ls-remote)에서 추측 참조를 읽는다. 목록도 추측도 없거나 못 읽으면 ok=false(지금 그대로)
@@ -167,10 +240,8 @@ func (m *M) specIdle() {
 func (m *M) specGroups() []specGroup {
 	gs := []specGroup{newGroup(m.b)}
 	n := m.batch
-	if c, err := os.ReadFile(m.mj + "/cap"); err == nil {
-		if k, err := strconv.Atoi(strings.TrimSpace(string(c))); err == nil && k > 0 && k < n {
-			n = k
-		}
+	if k := m.capN(); k > 0 && k < n {
+		n = k
 	}
 	in := map[string]bool{}
 	for _, e := range m.b {

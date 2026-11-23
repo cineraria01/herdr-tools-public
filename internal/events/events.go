@@ -158,11 +158,16 @@ func Append(path string, e Event) error {
 	if err := e.Check(); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
+	return AppendLine(path, e.Line(), 0o666)
+}
+
+// AppendLine: path 뒤에 line+줄바꿈을 한 번의 쓰기로(O_APPEND, 없으면 perm으로 만든다) — 운영 기록(internal/oplog)도 쓴다
+func AppendLine(path, line string, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, perm)
 	if err != nil {
 		return fmt.Errorf("사건 파일 열기: %w", err)
 	}
-	if _, err := f.WriteString(e.Line() + "\n"); err != nil {
+	if _, err := f.WriteString(line + "\n"); err != nil {
 		f.Close()
 		return fmt.Errorf("사건 쓰기: %w", err)
 	}

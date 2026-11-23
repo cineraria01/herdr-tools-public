@@ -26,10 +26,10 @@ const statsDef = "정의: 착지 1건 = 기본 브랜치가 한 번 옮겨 간 �
 // stRemote: 원격 수집(sh) — 두 파일을 임시 사본에서 읽어 줄 수를 맞춘다(읽는 사이 더해진 줄이 수를 어긋나게 하지 않게)
 // ponytail: --since와 상관없이 파일 전부를 hc exec 출력 한 번으로 받는다(2026-11-23 기계마다 50~200KB, 사건 파일은 돌려 쓰지 않아 계속 큼).
 // 출력이 잘리면 END 줄 수가 어긋나 그 기계를 통째로 빼고 종료 1 — 그렇게 되면 원격 sh에서 --since 이후 줄만 보내게 바꾼다
-const stRemote = `d=${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane; t=$(mktemp) || exit 1
+const stRemote = `d=${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane; t=$(mktemp) || exit 1; trap 'rm -f "$t"' EXIT
 for f in events.tsv merger-journal.tsv; do echo "== $f"; : > "$t" || exit 1
 if [ -f "$d/$f" ]; then cat "$d/$f" > "$t" || exit 1; fi
-awk 1 "$t" || exit 1; echo "END $f $(awk 'END{print NR}' "$t")"; done; rm -f "$t"`
+awk 1 "$t" || exit 1; echo "END $f $(awk 'END{print NR}' "$t")"; done`
 
 func statsCmd(a []string) int {
 	e := &ev{ec: "stats", ed: evdir()}

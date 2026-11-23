@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/shx"
 )
@@ -33,6 +34,7 @@ func exit(code int) {
 	for i := len(cleanups) - 1; i >= 0; i-- {
 		cleanups[i]()
 	}
+	oplog.Exited("hc-lane", code)
 	os.Exit(code)
 }
 
@@ -48,6 +50,7 @@ func die(format string, a ...any) {
 		msg += " (바로 앞 바깥 명령이 시간 상한에 걸림 — 결과 모름, 같은 줄을 다시)"
 	}
 	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
+	oplog.Fatal("hc-lane", "", oplog.Die, rc, msg)
 	if dieHook != nil {
 		dieHook(msg)
 	}

@@ -15,6 +15,7 @@ import (
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/ojson"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/version"
 )
 
@@ -22,11 +23,13 @@ const me = "herdr-settings-merge"
 
 func die2(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.Die, 2, fmt.Sprintf(f, a...))
 	os.Exit(2)
 }
 
 func die1(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.Die, 1, fmt.Sprintf(f, a...))
 	os.Exit(1)
 }
 

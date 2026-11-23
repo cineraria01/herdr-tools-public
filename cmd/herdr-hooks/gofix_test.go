@@ -85,6 +85,28 @@ func TestPanicExitCode(t *testing.T) {
 	}
 }
 
+// ht-oplog: 훅 패닉은 운영 기록에 panic 줄 — 표준 오류 한 줄·종료 코드(판정)는 그대로
+func TestPanicGoesToOpLog(t *testing.T) {
+	ops := t.TempDir() + "/ops.tsv"
+	t.Setenv("HERDR_TOOLS_OPLOG", ops)
+	saved := hooks["hc-lane-wait-guard"]
+	t.Cleanup(func() { hooks["hc-lane-wait-guard"] = saved })
+	hooks["hc-lane-wait-guard"] = func([]byte, io.Writer, io.Writer) int { panic("터짐") }
+	var e bytes.Buffer
+	if rc := call("hc-lane-wait-guard", nil, io.Discard, &e); rc != 0 || e.String() != "hc-lane-wait-guard: 내부 오류(터짐) — 종료 0\n" {
+		t.Fatalf("rc=%d err=%q", rc, e.String())
+	}
+	b, err := os.ReadFile(ops)
+	if err != nil {
+		t.Fatalf("운영 기록이 없다: %v", err)
+	}
+	c := strings.Split(strings.TrimSuffix(string(b), "\n"), "\t")
+	if len(c) != 8 || c[1] != "herdr-hooks" || c[2] != "hc-lane-wait-guard" || c[4] != "panic" || c[5] != "0" ||
+		c[7] != "hc-lane-wait-guard: 내부 오류(터짐) — 종료 0" {
+		t.Fatalf("panic 줄 하나: %q", c)
+	}
+}
+
 // FuzzCgAnalyze: 어떤 명령 글도 낱말 가르기를 패닉시키지 않는다(패닉은 훅 종료 2 — 판정이 아니라 사고).
 func FuzzCgAnalyze(f *testing.F) {
 	for _, s := range []string{"bash -O > a", "git -C x push -f", "ssh -o", "hc run --on", "env -u", "timeout -s", "xargs -I", "cd", "sed -i", "cp a", `bash -c "rm x"`, "eval", "hc --json exec"} {

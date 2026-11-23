@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"herdr-tools/internal/oplog"
 )
 
 // Run: c.Run() 자리 — Limit(c.Args) 상한 안에서 기다린다. 상한이 있으면 새 무리로 띄우고(표준 입력이 이 프로세스의 것이면 무리를
@@ -107,7 +109,7 @@ func run(ctx context.Context, c *exec.Cmd, d time.Duration) error {
 		if errors.Is(err, exec.ErrWaitDelay) || !o.drainedBy(by, cancel) {
 			// 자식은 끝났는데 출력 관이 마감 안에 안 닫혔다 — 종료 코드와 반쪽 출력으로 결과를 정하지 않는다(모름)
 			e := &TimeoutError{Head: h, D: d, Pipe: true}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
+			note(oplog.Timeout, "%s", e)
 			if grouped {
 				Stop(pid, Grace) // 관을 쥔 손자가 그 무리에 있으면 함께(무리가 이미 사라졌으면 bounded에 없어 신호 0)
 			}
@@ -130,11 +132,11 @@ func run(ctx context.Context, c *exec.Cmd, d time.Duration) error {
 	case <-cancel:
 	}
 	e := &TimeoutError{Head: h, D: d}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
+	note(oplog.Timeout, "%s", e)
 	if grouped {
 		Stop(pid, Grace)
 	} else if err := c.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		fmt.Fprintf(os.Stderr, "%s: %d 를 끄지 못했다: %v\n", Who, pid, err)
+		note(oplog.Warn, "%d 를 끄지 못했다: %v", pid, err)
 	}
 	// ponytail: 신호도 안 먹는 커널 대기(D 상태)면 거두지 못한다 — 몇 초만 더 기다리고 놓아 둔다(c.Wait 고루틴은 그 프로세스와 함께 남는다.
 	// 출력은 이 함수의 관이라 abandon 뒤에는 부른 쪽 쓰개에 새로 쓰지 않는다)
@@ -283,7 +285,7 @@ func launch(c *exec.Cmd, grouped bool, deadline time.Time, h string, d time.Dura
 // refuse: 띄우지 않음(모름) 한 줄을 적고 그 오류
 func refuse(h string, d time.Duration, why error) error {
 	e := &TimeoutError{Head: h, D: d, Why: why.Error()}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Who, e)
+	note(oplog.Refuse, "%s", e)
 	return e
 }
 

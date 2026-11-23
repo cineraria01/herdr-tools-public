@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
 )
@@ -28,6 +29,7 @@ const me = "herdr-tools-config"
 
 func die2(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.Die, 2, fmt.Sprintf(f, a...))
 	os.Exit(2)
 }
 

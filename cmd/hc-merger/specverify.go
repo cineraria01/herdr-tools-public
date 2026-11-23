@@ -70,8 +70,9 @@ func specVerifyMain(a []string) int {
 		return 1
 	}
 	defer specRmWT(wt)
-	res := specRunVerify(wt, lg, top, base, id, tree)
-	return specWrite(top, r, res, lg)
+	var ev specEvidence
+	res := specRunVerify(wt, lg, top, base, id, tree, &ev)
+	return specWrite(top, r, res, ev, lg)
 }
 
 type specResult int
@@ -82,8 +83,8 @@ const (
 	resLost
 )
 
-// specRunVerify: 준비 훅 → 부하 기다림 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지
-func specRunVerify(wt, lg, top, base, id, tree string) specResult {
+// specRunVerify: 준비 훅 → 부하 기다림 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지. 실패면 ev에 근거
+func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specResult {
 	lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err != nil {
 		return resLost
@@ -104,6 +105,10 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 		fmt.Fprintf(lf, "hc-lane merger: 추측 트리에 %s 가 없다 — 모름\n", verified.Script)
 		return resLost
 	}
+	var off int64 // 이 검증의 출력만 본다(같은 아이디의 로그에 앞 실행이 남았을 수 있다)
+	if fi, err := lf.Stat(); err == nil {
+		off = fi.Size()
+	}
 	c := shellCmd(wt, "bash", verified.Script)
 	c.Stdout, c.Stderr = lf, lf
 	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=")
@@ -120,9 +125,21 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 		return resLost
 	}
 	if rc != 0 {
+		ev.rc = rc
+		// 시험 실패로 가르는 기준(merger-batch-culprit): 보통 종료(1~125 — 75 기다림 상한 뺌, 126·127 실행 못 함과 신호는 범위 밖)이고
+		// 이 검증의 출력에 실패한 시험 줄(failLine)이 있다. 아니면 환경 문제와 가를 수 없다 — 병합기는 그 실패를 반송 근거로 쓰지 않는다
+		if rc >= 1 && rc <= 125 && rc != 75 {
+			ev.test = firstFail(lg, off)
+		}
 		return resFail
 	}
 	return resPass
+}
+
+// specEvidence: 추측 실패의 근거 — 검증 종료 코드와, 시험 실패로 가를 수 있으면 그 첫 실패 시험 줄(가를 수 없으면 test 빈 값)
+type specEvidence struct {
+	rc   int
+	test string
 }
 
 // shellCmd: 이 기계의 셸 환경에서 wt 안의 명령 — 일꾼은 hc run --on으로 떠 hc 코어 PATH(bun 등이 없다)를 물려받으니, 같은 기계에서
@@ -140,7 +157,7 @@ for d in $PATH; do [ -f "$d/codebase-memory-mcp" ] && [ -x "$d/codebase-memory-m
 PATH=$p; export PATH; exec "$@"`
 
 // specWrite: 결과를 원격에. spec 참조가 그대로일 때만
-func specWrite(top string, r specRow, res specResult, lg string) int {
+func specWrite(top string, r specRow, res specResult, ev specEvidence, lg string) int {
 	ref := specRefs + r.id
 	now, rc := lsRemote("origin", ref) // 잘린 줄은 모름(1) — 「병합기가 버렸다」로 읽지 않는다(재감사 R-H03과 같은 꼴, 작업 중 발견)
 	if rc != 0 {
@@ -162,7 +179,15 @@ func specWrite(top string, r specRow, res specResult, lg string) int {
 		if rc != 0 {
 			return 1
 		}
-		msg := fmt.Sprintf("hc-merger-spec-fail id=%s machine=%s at=%d log=%s", r.id, machine(), at, lg)
+		// exit·test는 끝에 덧붙인다(옛 판 기록은 test가 없다 = 가를 수 없음). 시험 실패면 본문 = 첫 실패 시험 줄(specCulprit이 읽는다)
+		test := 0
+		if ev.test != "" {
+			test = 1
+		}
+		msg := fmt.Sprintf("hc-merger-spec-fail id=%s machine=%s at=%d log=%s exit=%d test=%d", r.id, machine(), at, lg, ev.rc, test)
+		if ev.test != "" {
+			msg += "\n\n" + ev.test
+		}
 		fc, ok := commitTree("", et, "", msg)
 		if !ok || runO("push", "-q", "--force-with-lease="+specFails+r.id+":", "origin", fc+":"+specFails+r.id) != 0 {
 			return 1

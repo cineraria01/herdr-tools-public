@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"herdr-tools/internal/oplog"
 )
 
 const version = "herdr-hooks 1"
@@ -53,7 +55,9 @@ func call(name string, in []byte, stdout, stderr io.Writer) (code int) {
 			if name == "cotenant-guard" {
 				code = 1
 			}
-			fmt.Fprintf(stderr, "%s: 내부 오류(%v) — 종료 %d\n", name, r, code)
+			msg := fmt.Sprintf("%s: 내부 오류(%v) — 종료 %d", name, r, code)
+			fmt.Fprintln(stderr, msg)
+			oplog.Log("herdr-hooks", name, oplog.Panic, code, msg)
 		}
 	}()
 	return hooks[name](in, stdout, stderr)

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/oplog"
 )
 
 // TimeoutCode: 상한에 걸린 명령의 종료 코드(coreutils timeout과 같은 124) — 부른 쪽 셋 결과에서는 모름이다
@@ -54,7 +56,7 @@ func envSec(name string, def int) time.Duration {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			return time.Duration(n) * time.Second
 		}
-		fmt.Fprintf(os.Stderr, "%s: 경고 — %s=%q 를 읽지 못해 기본 %d초\n", Who, name, v, def)
+		note(oplog.Warn, "경고 — %s=%q 를 읽지 못해 기본 %d초", name, v, def)
 	}
 	return time.Duration(def) * time.Second
 }

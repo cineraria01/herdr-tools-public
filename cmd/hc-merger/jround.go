@@ -3,12 +3,14 @@ package main
 // 일지에 바퀴마다 흔적(merger-journal-rounds, 2026-11-23 — 지휘가 일지만 보고 「줄이 있는데 병합기가 쉰 틈」으로 잘못 읽었다: 그 틈은
 // 모두 일지에 안 남는 바퀴였다). 검증을 돌았거나 줄을 붙잡은 바퀴는 착지·돌려보냄이 아니어도 결과 칸에 아래 값으로 구성원마다 한 줄
 // (jrec과 같은 12칸). 같은 바퀴의 줄은 7칸(바퀴 시작)·8칸(바퀴 끝)이 같다 — 착지를 불렀으면 착지 시작·끝, 아니면 이 바퀴 시작 ~ 지금.
-// 추측 기다림은 한 번의 기다림(같은 구성원이 이어 기다린 바퀴들)을 한 줄로: $mj/specwait에 모았다가 기다리지 않은 바퀴가 끝날 때 적는다.
+// 추측 기다림은 한 번의 기다림(맨 앞 제출이 같은 바퀴들 — 뒤 구성원은 견주지 않는다)을 한 줄로: $mj/specwait에 모았다가, 추측 판정이
+// 기다림이 아니면 그 자리에서(그 바퀴의 착지·반송 줄보다 먼저) 적는다. 판정 전에 끝난 바퀴는 고른 맨 앞이 바뀌었을 때만 적는다.
 // 쓰기 실패는 경고만 — 바퀴의 판정·종료를 바꾸지 않는다.
 
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -23,6 +25,9 @@ const (
 	jFront     = "맨 앞 충돌"   // 묶음 맨 앞을 기준 위로 다시 얹으면 충돌 — 착지 없이 묶음 크기 1로
 	jSpecWait  = "추측 기다림"   // 맨 앞 추측이 검증 기계에서 도는 중 — 착지 없이 쉼(한 번의 기다림 = 한 줄, 까닭에 되풀이 횟수)
 )
+
+// jSolo: 묶음 실패 뒤 앞 k−1을 직접 검증하는 동안 맨 앞 혼자를 검증 기계에 맡긴 바퀴(merger-batch-culprit)
+const jSolo = "맨 앞 혼자 추측"
 
 // jround: 지금 묶음(m.b)의 구성원마다 한 줄. what = 무슨 바퀴였나, tail = 구성원 뒤에 붙일 근거(로그·첫 실패 줄)
 func (m *M) jround(result, what, tail string) {
@@ -51,31 +56,63 @@ func (m *M) jmembers(b []entry, result, what, tail string, t0, t1 int64) {
 // 실패한 시험의 첫 줄(go test 「--- FAIL」·「FAIL」, bun 「(fail)」)
 var failLine = regexp.MustCompile(`^\s*(--- FAIL|FAIL\b)|\(fail\)`)
 
-// runTail: 착지 로그 경로와 첫 근거(실패한 시험 첫 줄 — 없으면 까닭 앞의 종료 코드가 근거)
+// 시험 실패로 세지 않는 줄(merger-culprit-env-gap, 2026-11-23): 꾸러미를 못 불러온 go test 「FAIL <꾸러미> [setup failed]」(네트워크·모듈
+// 캐시)와 맨 「FAIL」(요약 — 실패한 꾸러미가 있으면 그 줄이 따로 있다). 「[build failed]」는 제출이 컴파일을 깨뜨린 것이라 센다
+var envFail = regexp.MustCompile(`^\s*FAIL\s*$|^\s*FAIL\s+\S+\s+\[setup failed\]\s*$`)
+
+// runTail: 착지 로그 경로와 첫 근거(실패 줄 첫 줄 — 없으면 까닭 앞의 종료 코드가 근거). 일지 근거라 환경 실패 줄도 그대로 보인다
 func (m *M) runTail() string {
 	t := ", 로그 " + m.lgf
-	f, err := os.Open(m.lgf)
-	if err != nil {
-		return t
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		if l := sc.Text(); failLine.MatchString(l) {
-			return t + ", 첫 실패 「" + bcut(120, flat(strings.TrimSpace(l))) + "」"
-		}
+	if l := scanFail(m.lgf, 0, false); l != "" {
+		return t + ", 첫 실패 「" + l + "」"
 	}
 	return t
 }
 
-// specWaitNote: 이 바퀴가 맨 앞 추측을 기다렸다 — 모아 둔 기다림과 구성원이 같으면 횟수만 늘리고, 다르면 앞 기다림을 적고 새로 센다
+// firstFail: 추측 검증의 시험 실패 근거 — 로그의 off바이트 뒤에서 실패한 시험 첫 줄. 환경 실패 줄(envFail)과, go test 시간 넘김
+// (「panic: test timed out」 — 느린 기계와 가를 수 없다) 뒤 그 꾸러미의 「FAIL」 줄은 세지 않는다. 없거나 못 읽으면 빈 값(모름 — 병합기가 직접 검증)
+func firstFail(path string, off int64) string { return scanFail(path, off, true) }
+
+// scanFail: 로그의 off바이트 뒤에서 실패 줄 첫 줄(한 줄로 펴 120바이트 안). test면 firstFail의 규칙으로 건너뛴다. 없거나 못 읽으면 빈 값
+func scanFail(path string, off int64, test bool) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return ""
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	timedOut := false
+	for sc.Scan() {
+		l := sc.Text()
+		if test {
+			switch {
+			case strings.HasPrefix(l, "panic: test timed out"):
+				timedOut = true
+				continue
+			case envFail.MatchString(l):
+				continue
+			case timedOut && strings.HasPrefix(l, "FAIL\t"):
+				timedOut = false
+				continue
+			}
+		}
+		if failLine.MatchString(l) {
+			return bcut(120, flat(strings.TrimSpace(l)))
+		}
+	}
+	return ""
+}
+
+// specWaitNote: 이 바퀴가 맨 앞 추측을 기다렸다 — 모아 둔 기다림과 맨 앞이 같으면 횟수만 늘리고, 다르면 앞 기다림을 적고 새로 센다
 func (m *M) specWaitNote() {
-	m.swait = true
 	now := time.Now().Unix()
 	first, n := now, 0
 	if f, l, k, b, ok := m.specWaitRead(); ok {
-		if sameMembers(b, m.b) {
+		if sameFront(b, m.b) {
 			first, n = f, k
 		} else {
 			m.specWaitLine(f, l, k, b)
@@ -91,14 +128,22 @@ func (m *M) specWaitNote() {
 	}
 }
 
-// specWaitEnd: 기다리지 않은 바퀴가 끝날 때(round의 defer) — 모아 둔 기다림이 있으면 한 줄로 적고 지운다
+// specWaitEnd: 추측 판정이 기다림이 아닐 때 바로(그 바퀴의 착지·반송 줄보다 먼저) — 모아 둔 기다림이 있으면 한 줄로 적고 지운다
 func (m *M) specWaitEnd() {
-	if m.swait {
-		return
-	}
 	if f, l, k, b, ok := m.specWaitRead(); ok {
 		m.specWaitLine(f, l, k, b)
 		removeQuiet(m.mj + "/specwait")
+	}
+}
+
+// specWaitEarly: 추측 판정 전에 끝난 바퀴(round의 defer) — 고른 묶음의 맨 앞이 모아 둔 기다림과 다를 때만(그 기다림은 끝났다) 적는다.
+// 묶음을 고르지 못한 바퀴(원격 실패·꺼짐 등)나 맨 앞이 같은 바퀴는 기다림을 건드리지 않는다(감사 atoy0ft-aprr7a — 한 기다림이 두 줄로 쪼개졌다)
+func (m *M) specWaitEarly() {
+	if len(m.sfront) == 0 {
+		return
+	}
+	if _, _, _, b, ok := m.specWaitRead(); ok && !sameFront(b, m.sfront) {
+		m.specWaitEnd()
 	}
 }
 
@@ -135,14 +180,7 @@ func (m *M) specWaitRead() (first, last int64, n int, b []entry, ok bool) {
 	return first, last, n, b, true
 }
 
-func sameMembers(a, b []entry) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].q != b[i].q || a[i].s != b[i].s {
-			return false
-		}
-	}
-	return true
+// sameFront: 같은 기다림인가 — 맨 앞 제출(큐 참조·SHA)만 본다(뒤 구성원이 바뀌어도 같은 맨 앞을 기다린다)
+func sameFront(a, b []entry) bool {
+	return len(a) > 0 && len(b) > 0 && a[0].q == b[0].q && a[0].s == b[0].s
 }

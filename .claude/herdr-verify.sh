@@ -3,7 +3,9 @@
 # 본문은 Go(tests/repo/verify): go vet ./... · go test ./tests/repo/(gofmt·셸 문법·줄 수 예산·개인 값·비밀 꼴) → go test -race
 # (Go 계약 시험 전부 — TestCotenantGuard 홀로, 그다음 조각 여럿 함께: 2026-11-23 verify-shard, 한 꾸러미 안 차례 실행이 검증 시간의
 # 거의 전부였다), 단계마다 고아 검사. 인자 --cheap-only는 싼 검사까지(.claude/herdr-precheck.sh). 환경 HERDR_VERIFY_ALL·
-# HERDR_VERIFY_JOBS(함께 도는 시험 바이너리 자리 수, 없으면 코어 수)·HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·
+# HERDR_VERIFY_JOBS(함께 도는 시험 바이너리 자리 수, 없으면 코어 수, 자리가 모자란 조각 뒤의 들어가는 조각을 먼저 띄운다)·
+# HERDR_VERIFY_NO_LOCK=1(기계 단위 검증 잠금 — 사용자 캐시 herdr-tools/verify.lock, 무거운 단계 앞, 30분 상한 뒤 그대로 진행 — 을 안 본다)·
+# HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·
 # tests/repo/secrets_test.go 머리말, 조각 표는 docs/repo/tests.md 「검증의 조각 실행」.
 set -u
 cd "$(dirname "$0")/.." || exit 1

@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"herdr-tools/internal/helptext"
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 )
 
@@ -69,5 +70,6 @@ func main() {
 // usage: 사용법 글을 오류 출력에, 종료 2
 func usage() {
 	fmt.Fprint(os.Stderr, usageText)
+	oplog.Usage() // 사용법은 이상이 아니다 — exit 줄을 남기지 않는다
 	exit(2)
 }

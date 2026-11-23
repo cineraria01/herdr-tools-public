@@ -315,6 +315,9 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	return b2i(fail)
 }
 
+// lockBlocked: 시험 고리 — verifyLock이 남이 쥔 잠금에 막혀 기다리기 직전마다 부른다(시험이 「둘째가 막힌 뒤에만 놓기」로 순서를 묶게)
+var lockBlocked = func() {}
+
 // lockLimit: 검증 잠금을 기다리는 상한 — 넘기면 경고 한 줄 뒤 잠금 없이 진행(잠금이 검증을 영영 막지 않게)
 const lockLimit = 30 * time.Minute
 
@@ -360,6 +363,7 @@ func verifyLock(path string, limit time.Duration, stop <-chan os.Signal, w *os.F
 			fmt.Fprintf(w, "경고 검증 잠금: 다른 검증을 %d초 기다려 상한을 넘겼다 — 잠금 없이 진행한다 (%s)\n", waited, path)
 			return nop, 0
 		}
+		lockBlocked()
 		select {
 		case s := <-stop:
 			f.Close()

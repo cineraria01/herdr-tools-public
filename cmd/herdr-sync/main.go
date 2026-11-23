@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
@@ -83,12 +84,16 @@ func exit(code int) {
 
 func die(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "herdr-sync: "+f+"\n", a...)
+	oplog.Log("herdr-sync", "", oplog.Die, 1, fmt.Sprintf(f, a...))
 	exit(1)
 }
 
 func say(f string, a ...any) { fmt.Printf(f+"\n", a...) }
 
-func warn(f string, a ...any) { fmt.Fprintf(os.Stderr, "herdr-sync: "+f+"\n", a...) }
+func warn(f string, a ...any) {
+	fmt.Fprintf(os.Stderr, "herdr-sync: "+f+"\n", a...)
+	oplog.Log("herdr-sync", "", oplog.Warn, -1, fmt.Sprintf(f, a...))
+}
 
 func main() {
 	proc.Who = "herdr-sync"

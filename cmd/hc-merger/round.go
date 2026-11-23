@@ -29,9 +29,8 @@ type M struct {
 	mer                             bool   // 원격 오류 등으로 못 본 것이 있음(--once는 75)
 	mbn                             string // 그 착지에 든 제출 수
 	ls0, ls1, r0                    int64  // 착지 시작·끝(유닉스 초, 0 = 모름) · 이 바퀴 시작
-	swait                           bool   // 이 바퀴가 맨 앞 추측을 기다렸다(jround.go)
 	qs                              string // 이번 바퀴의 원격 큐 목록(ls-remote)
-	b                               []entry
+	b, sfront                       []entry
 	bj, bd, bv, bp                  string // 맨 앞 제출의 작업 표식·제출 ID·판정·patch-id
 	B, btree, hb                    string // 기준(origin/<기본>)·그 트리·기준에 착지 스크립트가 있음
 	solo                            []string
@@ -40,6 +39,7 @@ type M struct {
 	O, lk2, hs                      string
 	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
 	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
+	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -118,6 +118,16 @@ func (m *M) jwrite() {
 	if err := writeVia(m.mj+"/cur", sb.String()); err != nil {
 		die("merger: 일지를 쓰지 못했다")
 	}
+}
+
+// capN: 앞 묶음이 실패해 줄인 크기($mj/cap). 없거나 꼴이 틀리면 0
+func (m *M) capN() int {
+	if c, err := os.ReadFile(m.mj + "/cap"); err == nil {
+		if k, err := strconv.Atoi(strings.TrimSpace(string(c))); err == nil && k > 0 {
+			return k
+		}
+	}
+	return 0
 }
 
 func (m *M) writeCap(n int) {
@@ -204,11 +214,8 @@ func (m *M) queue() (q [][2]string, ok bool) {
 // pickBatch: 큐 앞에서 묶음 크기만큼 담는다. 계속하면 true, 이 바퀴를 여기서 끝내면 false
 func (m *M) pickBatch() bool {
 	n := m.batch
-	// 앞 묶음이 실패해 줄인 크기($mj/cap). 꼴이 틀리면 무시
-	if c, err := os.ReadFile(m.mj + "/cap"); err == nil {
-		if k, err := strconv.Atoi(strings.TrimSpace(string(c))); err == nil && k > 0 && k < n {
-			n = k
-		}
+	if k := m.capN(); k > 0 && k < n { // 앞 묶음이 실패해 줄인 크기
+		n = k
 	}
 	q, ok := m.queue()
 	if !ok {
@@ -287,8 +294,8 @@ func (m *M) pickBatch() bool {
 
 // round: 한 바퀴(bash mround)
 func (m *M) round() {
-	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.swait = "", false, "", 0, 0, time.Now().Unix(), false
-	defer m.specWaitEnd()
+	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.sfront = "", false, "", 0, 0, time.Now().Unix(), nil
+	defer m.specWaitEarly()
 	m.flush()
 	// 병합기 클론은 병합기만 쓴다 — 앞 실행이 남긴 멈춘 rebase는 풀고, 그래도 깨끗하지 않으면 멈춘다(모르는 변경을 지우지 않음)
 	if !m.rbabort() {
@@ -343,7 +350,7 @@ func (m *M) round() {
 		}
 		return
 	}
-	m.mq = m.b[0].q
+	m.mq, m.sfront = m.b[0].q, m.b[:1:1]
 	if fetchr(false, "-q", "origin", "+refs/heads/"+m.base+":refs/remotes/origin/"+m.base, "+refs/merge-queue/*:refs/hc-merger/q/*") != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: git fetch 실패 — 다음 바퀴에")
 		m.mer, m.mq = true, ""
@@ -419,6 +426,18 @@ func (m *M) round() {
 		m.specWaitNote()
 		m.fin()
 		m.mq, m.mer = "", true
+		return
+	}
+	// 기다림이 끝났다 — 이 바퀴의 착지·반송 줄보다 먼저
+	m.specWaitEnd()
+	if sd == specCulprit { // 혼자 착지가 실패했을 때와 같은 길(judge 끝) — 검증 한 바퀴를 더 쓰지 않는다
+		if !m.fin() {
+			return
+		}
+		removeQuiet(m.mj + "/cap")
+		if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.clog, m.cwhy) {
+			m.mer = true
+		}
 		return
 	}
 	labs := make([]string, len(m.b))
