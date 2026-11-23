@@ -12,6 +12,8 @@
   그 사이 main이 움직였거나 rebase 결과가 다르면 기록이 없어 지금처럼 병합기 기계에서 검증한다(그 뒤 추측은 버리고 새 기준에서 다시).
 - **실패·모름**: 추측이 실패하면 그 후보는 맨 앞이 될 때 지금처럼 병합기가 직접 검증해 지금 규칙대로 반송하고(검증 기계 한 대의 흔들림으로 반송하지 않는다), 그 후보를 품은 뒤 추측은 버리고 그것을 뺀 추측(main+A+C)을 다시 띄운다.
   못 띄움·시간 넘김(`HC_LANE_SPEC_TIMEOUT`, 기본 3600초)·준비 훅 실패·검증이 트리를 바꿈은 「모름」 — 그 후보는 직접 검증.
+- **셸 환경**(2026-11-23 merger-journal-rounds B — 한 검증 기계에서 준비 훅이 `bun: command not found`(종료 127)로 「모름」이었다. 일꾼은 hc 코어가 물려준 PATH로 돌았고, 같은 기계에서 hc-lane이 띄우는 레인은 zsh·`~/.zshrc`를 읽고 돌아 괜찮았다): 일꾼의 준비 훅과 검증은 hc-lane 레인의 준비 단계와 같은 길(`internal/shx`의 `ZX` — zsh·`~/.zshrc`가 있으면 로그인 zsh로 그걸 읽은 셸, 없으면 지금 환경)로 돈다.
+  준비 훅은 `~/.zshrc`가 PATH를 짠 뒤 코드 색인 도구(`codebase-memory-mcp`)가 든 폴더를 PATH에서 뺀다(그 전과 같이 색인을 건너뜀). 시험 `TestSpecSetupUsesShellEnv`.
 - **검증 기계 부하**: 한 기계에 추측 하나씩, 병합기 기계는 빼고, 일꾼은 1분 부하가 코어 수를 넘으면 30초씩 기다린다(`HC_LANE_SPEC_LOAD_WAIT`, 기본 900초).
   검증 자리는 저장소 검증 스크립트의 기계 잠금(기계별 검증 자리 수 등)이 레인 검증과 나눠 쓴다.
 - **원격 참조가 일지다**(병합기가 죽어도 다음 병합기가 바퀴의 ls-remote로 이어 간다): `refs/herdr/spec-verifiers`(검증 기계 목록 — hc-fill이 씀), `refs/hc-merger/spec/<아이디>`(추측 — 트리 = 후보 트리, 제목 `hc-merger-spec parent=… group=… machine=… at=… state=run|local|lost|conflict`), `refs/hc-merger/spec-fail/<아이디>`(실패), `refs/hc-merger/spec-run/<아이디>`(일꾼이 떴다는 표식 — 띄운 뒤 `HC_LANE_SPEC_START`(기본 300초) 안에 없으면 모름), `refs/herdr/verified/<트리>`(통과 기록, `internal/verified`).

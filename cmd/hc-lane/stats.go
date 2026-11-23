@@ -266,7 +266,8 @@ func statsReport(evl, jrl []string, since, until string) string {
 	jseen := map[string]bool{}
 	for _, l := range jrl {
 		f := strings.Split(l, tab)
-		if len(f) < 12 || jseen[f[1]+tab+f[3]+tab+f[9]] {
+		// 착지·돌려보냄 밖의 바퀴 줄(묶음 실패·lease 바뀜·일시 실패·맨 앞 충돌·추측 기다림 — merger-journal-rounds)은 이 표에 넣지 않는다
+		if len(f) < 12 || (f[9] != "착지" && f[9] != "돌려보냄") || jseen[f[1]+tab+f[3]+tab+f[9]] {
 			continue
 		}
 		jseen[f[1]+tab+f[3]+tab+f[9]] = true

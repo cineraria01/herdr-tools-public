@@ -28,7 +28,8 @@ type M struct {
 	mq                              string // 처리한 큐 참조(일을 했으면 빈 값 아님 — 바로 다음 바퀴)
 	mer                             bool   // 원격 오류 등으로 못 본 것이 있음(--once는 75)
 	mbn                             string // 그 착지에 든 제출 수
-	ls0, ls1                        int64  // 착지 시작·끝(유닉스 초, 0 = 모름)
+	ls0, ls1, r0                    int64  // 착지 시작·끝(유닉스 초, 0 = 모름) · 이 바퀴 시작
+	swait                           bool   // 이 바퀴가 맨 앞 추측을 기다렸다(jround.go)
 	qs                              string // 이번 바퀴의 원격 큐 목록(ls-remote)
 	b                               []entry
 	bj, bd, bv, bp                  string // 맨 앞 제출의 작업 표식·제출 ID·판정·patch-id
@@ -286,7 +287,8 @@ func (m *M) pickBatch() bool {
 
 // round: 한 바퀴(bash mround)
 func (m *M) round() {
-	m.mq, m.mer, m.mbn, m.ls0, m.ls1 = "", false, "", 0, 0
+	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.swait = "", false, "", 0, 0, time.Now().Unix(), false
+	defer m.specWaitEnd()
 	m.flush()
 	// 병합기 클론은 병합기만 쓴다 — 앞 실행이 남긴 멈춘 rebase는 풀고, 그래도 깨끗하지 않으면 멈춘다(모르는 변경을 지우지 않음)
 	if !m.rbabort() {
@@ -414,6 +416,7 @@ func (m *M) round() {
 	// 추측 병렬 검증(specrun.go) — 맨 앞 추측이 검증 기계에서 도는 중이면 착지하지 않고 쉰다
 	var sd specDecision
 	if sd, m.stree = m.spec(); sd == specWaitFront {
+		m.specWaitNote()
 		m.fin()
 		m.mq, m.mer = "", true
 		return

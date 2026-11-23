@@ -228,7 +228,12 @@ func submitConflict(ob, sh string) {
 		return
 	}
 	// 기준에 같은 patch-id 커밋이 든 제출은 rebase가 그 커밋을 건너뛰어 깨끗할 수 있다 — 거절하지 않고 차례에 맡긴다(감사 atoxvrv-yecgh5 낮음 3)
-	if eq, rc := gitx.CherryEquivalent("", ob, sh); rc != 0 || eq {
+	eq, rc := gitx.CherryEquivalent("", ob, sh)
+	if rc != 0 {
+		eprintf("hc-lane land(제출): origin/%s 와의 충돌을 판정하지 못했다(같은 patch-id 조회 git 종료 %d) — 판정 없이 제출한다(병합기가 차례에 본다)\n", base, rc)
+		return
+	}
+	if eq {
 		return
 	}
 	j := events.Flat(strings.Join(fs, " "))

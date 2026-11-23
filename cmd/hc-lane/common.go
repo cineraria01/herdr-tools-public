@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/shx"
 )
 
 var (
@@ -249,17 +250,9 @@ func xOut(args ...string) (string, int) {
 	return trim(b.String()), rc
 }
 
-// zxScript: 셸 zx — 대상 기계의 그 폴더에서. --on(hc 코어 환경)이면 로그인 zsh로 ~/.zshrc까지 읽고 돈다
-const zxScript = `cd "$1" || exit 1
-    if [ -n "$2" ] && [ -f "$HOME/.zshrc" ] && command -v zsh >/dev/null 2>&1; then
-      d=$1; shift 2
-      exec zsh -lc "source \"\$HOME/.zshrc\" >/dev/null 2>&1; cd \"\$1\" && shift && exec \"\$@\"" zsh "$d" "$@"
-    fi
-    shift 2; exec "$@"`
-
-// zxArgs: zx <폴더> <명령…>의 명령 줄
+// zxArgs: zx <폴더> <명령…>의 명령 줄 — 대상 기계의 그 폴더에서. --on(hc 코어 환경)이면 로그인 zsh로 ~/.zshrc까지 읽고 돈다(shx.ZX)
 func zxArgs(dir string, args ...string) []string {
-	return xArgs(append([]string{"sh", "-c", zxScript, "hc-lane", dir, on + core}, args...)...)
+	return xArgs(append([]string{"sh", "-c", shx.ZX, "hc-lane", dir, on + core}, args...)...)
 }
 
 var lockContention = regexp.MustCompile(`cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다|\.lock'을 만들 수 없습니다`)

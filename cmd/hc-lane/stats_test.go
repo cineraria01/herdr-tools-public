@@ -97,6 +97,19 @@ func TestStatsReport(t *testing.T) {
 	}
 }
 
+// merger-journal-rounds A: 병합기 일지의 새 결과 값 줄(착지·돌려보냄이 아닌 바퀴 — 시작·끝 시각이 있다)을 만나도 표는 지금과 같다
+func TestStatsReportIgnoresRoundRows(t *testing.T) {
+	ev, jr := statsFixture()
+	want := statsReport(ev, jr, "2026-11-22T00:00:00Z", "2026-11-23T00:00:00Z")
+	for _, res := range []string{"묶음 실패", "lease 바뀜", "일시 실패", "맨 앞 충돌", "추측 기다림"} {
+		jr = append(jr, stJ("11:30", "b", "S3", "11:05", "2", "11:00", "11:30", res, "-", "구성원 b+c"),
+			stJ("11:30", "c", "S4", "11:06", "2", "11:00", "11:30", res, "-", "구성원 b+c"))
+	}
+	if got := statsReport(ev, jr, "2026-11-22T00:00:00Z", "2026-11-23T00:00:00Z"); got != want {
+		t.Errorf("새 결과 값 줄이 표를 바꿨다\n--- 받음\n%s--- 바람\n%s", got, want)
+	}
+}
+
 // 감사 atoxryx-kxtet1: 병합기가 「병합기 착지」 아닌 까닭으로 보낸 착지 사건(10칸은 병합기 터미널 실행)을 레인 직접으로 또 세지 않는다 ·
 // 「이미 … 에 있음」 일지 착지는 기본 브랜치가 안 옮겨 가 따로 · 다른 기계에서 받은 같은 일지 줄은 한 번 · 제출 시각이 빈 줄은 모름
 func TestStatsReportMergerReasons(t *testing.T) {

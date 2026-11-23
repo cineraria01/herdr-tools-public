@@ -43,20 +43,25 @@ func dashIf(s string) string {
 }
 
 // jrec: 병합기 일지 …/hc-lane/merger-journal.tsv에 제출마다 한 줄(12칸): 적은 시각 · 큐 이름 · 레인 · 제출 ID · 작업 ID · 제출 시각 ·
-// 묶음 크기 · 착지 시작 · 착지 끝 · 결과(착지|돌려보냄) · 후보 SHA(돌려보냄은 -) · 까닭. 한 번 O_APPEND(1000바이트 안)
+// 묶음 크기 · 착지 시작 · 착지 끝 · 결과(착지|돌려보냄, 그 밖의 바퀴는 jround.go의 값) · 후보 SHA(돌려보냄은 -) · 까닭. 한 번 O_APPEND(1000바이트 안)
 func (m *M) jrec(mt meta, n, ln, result, cand, why string) bool {
+	return m.jline(mt, n, ln, result, cand, why, m.ls0, m.ls1, m.mbn)
+}
+
+// jline: jrec의 한 줄 — 시작·끝(유닉스 초, 0 = 모름)과 묶음 크기를 받는다
+func (m *M) jline(mt meta, n, ln, result, cand, why string, s0, s1 int64, bn string) bool {
 	t0, t1, sub := "-", "-", ""
-	if m.ls0 != 0 {
-		t0 = utc(time.Unix(m.ls0, 0))
+	if s0 != 0 {
+		t0 = utc(time.Unix(s0, 0))
 	}
-	if m.ls1 != 0 {
-		t1 = utc(time.Unix(m.ls1, 0))
+	if s1 != 0 {
+		t1 = utc(time.Unix(s1, 0))
 	}
 	head, _, _ := strings.Cut(n, "-")
 	if sec, err := strconv.ParseInt(head, 10, 64); err == nil {
 		sub = utc(time.Unix(sec, 0))
 	}
-	line := strings.Join([]string{utc(time.Now()), n, ln, dashIf(mt.id), dashIf(mt.job), sub, dashIf(m.mbn), t0, t1, result, cand, bcut(300, flat(why))}, "\t") + "\n"
+	line := strings.Join([]string{utc(time.Now()), n, ln, dashIf(mt.id), dashIf(mt.job), sub, dashIf(bn), t0, t1, result, cand, bcut(300, flat(why))}, "\t") + "\n"
 	f, err := os.OpenFile(gEvdir+"/merger-journal.tsv", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err == nil {
 		_, err = f.WriteString(line)

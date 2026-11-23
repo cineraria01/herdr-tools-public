@@ -89,12 +89,14 @@ func (m *M) judge() {
 		m.lr = "0(그런데 " + m.base + " 에 없음)"
 	case "6":
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 함께 실은 lease 참조가 바뀜(그새 다시 제출함, 또는 승인 묶음의 기준이 움직임) — 후보를 버리고 다음 바퀴에")
+		m.jround(jLease, "함께 실은 lease 참조가 바뀜(종료 6) — 후보를 버리고 다음 바퀴에", m.runTail())
 		m.fin()
 		return
 	}
 	if m.trans() && m.try(m.b[0].q, m.b[0].l) {
 		// 일시 실패(기다림 상한·push 거절 횟수·원격 받기 실패)는 큐에 그대로 두고 쉰다(3번 넘으면 돌려보냄)
 		fmt.Fprintf(os.Stderr, "hc-lane merger: %s 일시 실패(종료 %s, 로그 %s) — 큐에 두고 다음 바퀴에\n", m.b[0].l, m.lr, m.lgf)
+		m.jround(jTrans, "일시 실패(종료 "+m.lr+") — 큐에 두고 다음 바퀴에", m.runTail())
 		m.fin()
 		m.mq, m.mer = "", true
 		return
@@ -102,6 +104,7 @@ func (m *M) judge() {
 	// 묶음이 실패하면(일시 실패 아님) 아무도 돌려보내지 않고 마지막 것을 빼고 다시. 혼자일 때 실패해야 그 제출을 돌려보낸다
 	if len(m.b) > 1 {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 묶음 %d(%s) 실패(종료 %s, 로그 %s) — 마지막 %s 빼고 다시\n", len(m.b), m.mlab, m.lr, m.lgf, m.b[len(m.b)-1].l)
+		m.jround(jBatchFail, fmt.Sprintf("묶음 %d 실패(종료 %s) — 마지막 %s 빼고 다시", len(m.b), m.lr, m.b[len(m.b)-1].l), m.runTail())
 		m.writeCap(len(m.b) - 1)
 		if m.fin() {
 			m.mq = "x"

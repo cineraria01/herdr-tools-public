@@ -28,6 +28,16 @@ func Tail(body string) string {
 	return body + "printf '\\036herdr-shx-end\\n'\n"
 }
 
+// ZX: 그 기계의 셸 환경에서 명령 — `sh -c ZX <이름> <폴더> <셸 환경> <명령…>`. <셸 환경>이 비어 있지 않고 zsh·~/.zshrc가 있으면
+// 로그인 zsh로 ~/.zshrc까지 읽고(hc 코어 PATH에는 bun 등이 없다) <폴더>에서, 아니면 지금 환경 그대로 <폴더>에서 exec.
+// hc-lane 레인의 준비 단계·fetch(zx)와 병합기 추측 일꾼의 준비 훅·검증이 함께 쓴다(merger-journal-rounds B, 2026-11-23)
+const ZX = `cd "$1" || exit 1
+    if [ -n "$2" ] && [ -f "$HOME/.zshrc" ] && command -v zsh >/dev/null 2>&1; then
+      d=$1; shift 2
+      exec zsh -lc "source \"\$HOME/.zshrc\" >/dev/null 2>&1; cd \"\$1\" && shift && exec \"\$@\"" zsh "$d" "$@"
+    fi
+    shift 2; exec "$@"`
+
 // Cut: 조각 출력에서 표식을 떼고 본문을. rc 0이고 마지막 줄이 정확히 Mark(+LF)일 때만 ok.
 // 끝 LF는 없어도 된다(부르는 쪽이 끝 줄바꿈을 뺀 출력) — 표식 글자가 다 왔으면 본문은 온전하다
 func Cut(out string, rc int) (body string, ok bool) {

@@ -60,6 +60,11 @@ func (r *lastRep) rep(s, h, t, k string) {
 	if k == "" {
 		k = "x"
 	}
+	// 제출·주차로 넘긴 뒤의 중간(「병합기에 제출함 … clean 멈춤」 같은 덧말)은 넘김을 지우지 않는다 — 넘긴 레인이 쉬거나 닫혀도 조용.
+	// 완료·막힘·착지·판정은 다시 일을 맡은 것이라 그대로 덮는다. 2026-11-23 stall-after-submit-note
+	if s == "중간" && handedOff(r.lst[k]) {
+		return
+	}
 	if sh, ok := r.lsh[k]; ok && s == "완료" && samesha(h, sh) && num(t) && num(r.lt0[k]) && atoi(t) <= atoi(r.lt0[k]) {
 		r.ltn[k] = t
 		return

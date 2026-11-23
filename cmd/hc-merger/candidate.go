@@ -23,6 +23,7 @@ func (m *M) stack() bool {
 	// 뒤 제출이 더 새 기준에서 되돌린 변경을 옛 트리에 얹으면 빈 커밋으로 사라진다 — 첫 후보를 이번 기준으로 맞춘다.
 	// 충돌하면 원래 제출 하나로 착지의 rerere 절차를 탄다
 	if inLog(m.mwt, m.lgf, "rebase", "-q", "--reapply-cherry-picks", m.B) != 0 {
+		m.jround(jFront, "맨 앞 "+m.b[0].l+" 를 기준 위로 다시 얹으면 충돌 — 착지 없이 묶음 크기 1로", ", 로그 "+m.lgf)
 		m.writeCap(1)
 		m.fin()
 		return false

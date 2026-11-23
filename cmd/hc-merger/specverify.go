@@ -18,6 +18,7 @@ import (
 
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/shx"
 	"herdr-tools/internal/verified"
 )
 
@@ -90,9 +91,9 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 	defer lf.Close()
 	env := append(os.Environ(), "LANE_REPO="+top, "LANE_BASE="+base)
 	if _, err := os.Stat(wt + "/.claude/herdr-setup.sh"); err == nil {
-		c := exec.Command("bash", ".claude/herdr-setup.sh")
-		c.Dir, c.Stdout, c.Stderr = wt, lf, lf
-		c.Env = append(env, "PATH="+pathWithout("codebase-memory-mcp"))
+		c := shellCmd(wt, "sh", "-c", noIndexSh, "hc-merger", "bash", ".claude/herdr-setup.sh")
+		c.Stdout, c.Stderr = lf, lf
+		c.Env = env
 		if rc := proc.WaitMax(c, "", setupMax()); rc != 0 {
 			fmt.Fprintf(lf, "hc-lane merger: 추측 준비 훅 실패(종료 %d) — 모름\n", rc)
 			return resLost
@@ -103,8 +104,8 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 		fmt.Fprintf(lf, "hc-lane merger: 추측 트리에 %s 가 없다 — 모름\n", verified.Script)
 		return resLost
 	}
-	c := exec.Command("bash", verified.Script)
-	c.Dir, c.Stdout, c.Stderr = wt, lf, lf
+	c := shellCmd(wt, "bash", verified.Script)
+	c.Stdout, c.Stderr = lf, lf
 	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=")
 	max := time.Duration(specTimeout()) * time.Second
 	rc, ran := proc.WaitFor(c, "", max, max <= 0)
@@ -123,6 +124,20 @@ func specRunVerify(wt, lg, top, base, id, tree string) specResult {
 	}
 	return resPass
 }
+
+// shellCmd: 이 기계의 셸 환경에서 wt 안의 명령 — 일꾼은 hc run --on으로 떠 hc 코어 PATH(bun 등이 없다)를 물려받으니, 같은 기계에서
+// hc-lane이 레인의 준비 단계를 돌리는 길(shx.ZX — zsh·~/.zshrc가 있으면 그걸 읽은 셸)을 그대로 쓴다(merger-journal-rounds B, 2026-11-23)
+func shellCmd(wt string, args ...string) *exec.Cmd {
+	c := exec.Command("sh", append([]string{"-c", shx.ZX, "hc-merger", wt, "1"}, args...)...)
+	c.Dir = wt
+	return c
+}
+
+// noIndexSh: 코드 색인 도구(codebase-memory-mcp)가 든 폴더를 PATH에서 빼고 exec — 준비 훅의 색인을 건너뛰게(곧 지울 폴더를 색인하면
+// 검증과 CPU를 다툰다). ~/.zshrc가 PATH를 다시 짠 뒤에 빼야 해서 셸 안에서 한다(병합기 기계 쪽은 pathWithout과 같은 규칙)
+const noIndexSh = `p=; IFS=:; set -f
+for d in $PATH; do [ -f "$d/codebase-memory-mcp" ] && [ -x "$d/codebase-memory-mcp" ] && continue; p=${p:+$p:}$d; done
+PATH=$p; export PATH; exec "$@"`
 
 // specWrite: 결과를 원격에. spec 참조가 그대로일 때만
 func specWrite(top string, r specRow, res specResult, lg string) int {
