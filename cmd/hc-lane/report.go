@@ -251,6 +251,9 @@ func reportMain(a []string) int {
 		die("report: 쓰지 못했다: %s", evf)
 	}
 	fmt.Printf("%s %s: %s %s\n", f[3], st, sha, f[6])
+	if st == "완료" && rn == "" && key == "" { // 자기 작업 트리의 완료만(도구가 --name으로 적는 사건은 아님) — reportpre.go
+		prePost(lane, sha)
+	}
 	return 0
 }
 

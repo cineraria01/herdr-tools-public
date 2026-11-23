@@ -5,7 +5,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+
+	"herdr-tools/internal/verified"
 )
 
 // legacyParked: 대상 기계(--on이면 그 기계, 아니면 이 기계) 사건(events.tsv)에서 그 레인의 마지막 주차·제출 사건이 그 커밋(sha,
@@ -68,7 +71,48 @@ func cleanOwner() bool {
 	return true
 }
 
-// keepOffSelf: 자기 레인(HC_LANE이 이 가지·이름)을 정리했으면 자기 터미널(HC_TERMINAL_ID)의 hc keep을 끈다. Herdr 창에 붙인
+// cleanPre: 정리한 레인의 미리 검증 표식(refs/merge-pre/<레인>, reportpre.go)을 본 값 lease로 지운다 — 정리한 레인은 그 sha를 더
+// 제출하지 않으니 병합기가 기준이 움직일 때마다 미리 검증을 다시 돌리지 않게(preverify-wait-cap). 제출된 레인의 추측은 표식이 아니라
+// 추측 참조로 찾으니 지워도 그대로다. 실패는 알리기만 한다(정리는 성공 — 병합기가 나이 상한 HC_LANE_PRE_MAX에 치운다)
+func cleanPre() {
+	lanes := []string{owner}
+	if l := os.Getenv("HC_LANE"); l != "" && l != owner && os.Getenv("LANE_BRANCH") == branch {
+		lanes = append(lanes, l) // 자기 정리 — 표식은 report가 HC_LANE 이름으로 올렸다
+	}
+	var refs []string
+	for _, l := range lanes {
+		if lnameOK(l) {
+			refs = append(refs, verified.PreRefs+l)
+		}
+	}
+	if len(refs) == 0 {
+		return
+	}
+	o, r := xoutQ(append([]string{"git", "-C", repo, "ls-remote", "origin"}, refs...)...)
+	if r != 0 {
+		errf("hc-lane clean: 미리 검증 표식 조회 실패 — 두면 병합기가 나이 상한에 치운다\n")
+		return
+	}
+	args := []string{"git", "-C", repo, "push", "-q", "origin"}
+	var gone []string
+	for _, ln := range strings.Split(o, "\n") {
+		if f := strings.Fields(ln); len(f) == 2 && slices.Contains(refs, f[1]) {
+			args = append(args, "--force-with-lease="+f[1]+":"+f[0], ":"+f[1])
+			gone = append(gone, f[1])
+		}
+	}
+	switch {
+	case len(gone) == 0:
+	case dry:
+		fmt.Printf("[dry-run] 미리 검증 표식 지움: %s\n", strings.Join(gone, " "))
+	case xrun(nil, os.Stderr, args...) != 0:
+		errf("hc-lane clean: 미리 검증 표식을 지우지 못했다 — 두면 병합기가 나이 상한에 치운다\n")
+	default:
+		fmt.Printf("미리 검증 표식 지움: %s\n", strings.Join(gone, " "))
+	}
+}
+
+// keepOffSelf:자기 레인(HC_LANE이 이 가지·이름)을 정리했으면 자기 터미널(HC_TERMINAL_ID)의 hc keep을 끈다. Herdr 창에 붙인
 // 터미널은 keep이 켜져 에이전트가 끝나면 셸로 남아 그 기계 hc-fill 자리를 붙잡았다(2026-11-21 mini-m4 land-claim-net 13시간).
 // 다른 레인 정리(hc-sweep·gc)·dry-run은 건드리지 않는다. 실패는 알리기만 한다(정리는 이미 끝남)
 func keepOffSelf() {
@@ -90,6 +134,7 @@ func cleanLease() {
 		errf("hc-lane clean: 임대 기록 조회 실패 — 임대를 보존한다\n")
 		return
 	}
+	cleanPre()
 	token := saved
 	if os.Getenv("HC_LANE") == owner && os.Getenv("HC_LANE_LEASE") != "" {
 		token = os.Getenv("HC_LANE_LEASE")

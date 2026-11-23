@@ -36,12 +36,21 @@ func specVerifiersTick() {
 	for _, x := range readRows(sf) {
 		ps = append(ps, x.F(1))
 	}
+	// 미리 줄(preverify) 끄기: 「merger_preverify <프로젝트> off」 — 목록 커밋에 verified.PreOffLine 한 줄(기본 켬)
+	off := map[string]bool{}
+	for _, f := range confRows("merger_preverify") {
+		if len(f) >= 3 && f[2] == "off" {
+			off[f[1]] = true
+		} else {
+			say("미리 검증 줄 꼴: merger_preverify <프로젝트> off")
+		}
+	}
 	var keep []string
 	for _, p := range uniq(ps) {
 		if p == "" {
 			continue
 		}
-		if !specVerifiersOne(p, want[p]) {
+		if !specVerifiersOne(p, want[p], off[p]) {
 			keep = append(keep, p) // 못 고쳤다 — 다음 바퀴에 다시
 		} else if len(want[p]) > 0 {
 			keep = append(keep, p)
@@ -62,7 +71,7 @@ func specVerifiersTick() {
 }
 
 // specVerifiersOne: 한 프로젝트의 원격 표식을 맞춘다. 맞췄으면(또는 이미 맞으면) true
-func specVerifiersOne(p string, vs []verified.Verifier) bool {
+func specVerifiersOne(p string, vs []verified.Verifier, preOff bool) bool {
 	r := repoOf(p, LOCAL)
 	if r == "" {
 		say("추측 검증 %s: 설정에 %s repo 줄이 없다 — 표식을 못 고침", p, LOCAL)
@@ -83,7 +92,11 @@ func specVerifiersOne(p string, vs []verified.Verifier) bool {
 		}
 		env := []string{"GIT_AUTHOR_NAME=hc-fill", "GIT_AUTHOR_EMAIL=hc-fill@localhost", "GIT_AUTHOR_DATE=@0 +0000",
 			"GIT_COMMITTER_NAME=hc-fill", "GIT_COMMITTER_EMAIL=hc-fill@localhost", "GIT_COMMITTER_DATE=@0 +0000"}
-		o, rc := Cmd{Name: "git", Args: []string{"-C", r, "commit-tree", sub(et), "-m", verified.FormatVerifiers(vs)}, Env: env}.Run()
+		msg := verified.FormatVerifiers(vs)
+		if preOff {
+			msg += verified.PreOffLine + "\n"
+		}
+		o, rc := Cmd{Name: "git", Args: []string{"-C", r, "commit-tree", sub(et), "-m", msg}, Env: env}.Run()
 		if rc != 0 {
 			return false
 		}

@@ -80,7 +80,7 @@ func (m *M) judge() {
 			m.mer, m.mq = true, ""
 			return
 		}
-		removeQuiet(m.mj + "/cap")
+		m.capEnd()
 		m.fin()
 		return
 	}
@@ -117,7 +117,7 @@ func (m *M) judge() {
 	if !m.fin() {
 		return
 	}
-	removeQuiet(m.mj + "/cap")
+	m.capEnd()
 	why := "착지 실패(종료 " + m.lr + ")"
 	if m.lr == "3" { // rebase 충돌 — hc-fill이 이 꼴(「종료 3, 충돌 」)을 보고 다시 맞춤 레인을 넣는다(cmd/hc-fill/reland.go)
 		why = "착지 실패(종료 3, 충돌 " + m.conflicts(m.b[0].s) + ")"
@@ -151,6 +151,13 @@ func ids(b []entry) []string {
 		s[i] = e.d
 	}
 	return s
+}
+
+// capEnd: 묶음 실패로 줄인 바퀴(cap)가 끝났다 — 그 바퀴의 맨 앞 혼자 표식(solo, specrun.go specSolo)도 함께 지운다. 남기면 같은 sha
+// 재제출 + 기준 그대로 + 다음 묶음 실패 때 옛 solo가 같은 아이디의 미리 줄 추측 실패를 반송 근거로 믿게 한다(preverify 2차 감사 낮음 2-나)
+func (m *M) capEnd() {
+	removeQuiet(m.mj + "/cap")
+	removeQuiet(m.mj + "/solo")
 }
 
 func removeQuiet(p string) {

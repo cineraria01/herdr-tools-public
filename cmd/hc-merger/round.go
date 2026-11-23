@@ -434,7 +434,7 @@ func (m *M) round() {
 		if !m.fin() {
 			return
 		}
-		removeQuiet(m.mj + "/cap")
+		m.capEnd()
 		if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.clog, m.cwhy) {
 			m.mer = true
 		}

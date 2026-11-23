@@ -22,7 +22,7 @@ const (
 )
 
 // specLsPatterns: 바퀴의 ls-remote에 함께 싣는 추측 참조(round.go)
-var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", verified.Prefix + "*"}
+var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", verified.Prefix + "*", verified.PreRefs + "*"}
 
 // specStartMax: HC_LANE_SPEC_START(초, 기본 300). 띄운 뒤 이만큼 지나도 일꾼의 떴다는 표식이 없으면 모름
 func specStartMax() int64 {
@@ -34,11 +34,21 @@ func specTimeout() int64 {
 	return int64(intSetting("HC_LANE_SPEC_TIMEOUT", os.Getenv("HC_LANE_SPEC_TIMEOUT"), 3600, 60))
 }
 
+// specFrontWait: HC_LANE_SPEC_FRONT_WAIT(초, 기본 600, 60 이상). 맨 앞 무리의 추측이 띄운 때(at)부터 이만큼 넘게 「도는 중」이면
+// 맨 앞 판정은 모름 — 병합기 기계가 직접 검증한다(preverify-wait-cap). 미리 줄·큐 어느 쪽에서 온 추측이든 같다. 뒤쪽 무리와
+// 일꾼 쪽 상한(HC_LANE_SPEC_TIMEOUT)은 그대로
+func specFrontWait() int64 {
+	return int64(intSetting("HC_LANE_SPEC_FRONT_WAIT", os.Getenv("HC_LANE_SPEC_FRONT_WAIT"), 600, 60))
+}
+
 // specCtx: 이번 바퀴에 읽은 원격 추측 상태
 type specCtx struct {
-	vers []verified.Verifier
-	rows []specRow
-	refs map[string]string // 추측·결과 참조 → SHA(ls-remote)
+	vers   []verified.Verifier
+	rows   []specRow
+	refs   map[string]string // 추측·결과 참조 → SHA(ls-remote)
+	pre    []preMark         // 미리 줄 표식(specpre.go)
+	preOff bool              // 검증 기계 목록이 미리 줄을 껐다
+	preDel [][2]string       // 치울 표식(참조, 본 값)
 }
 
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
@@ -51,8 +61,8 @@ func (m *M) spec() (specDecision, string) {
 	now := time.Now().Unix()
 	busy := specBusy(c.rows)
 	st := specWalk(m.btree, groups, c.rows)
-	if m.specCulpritWhy(c, st) { // 뒤 추측은 반송할 맨 앞을 품었다 — 더 짓지 않고 치운다
-		m.specClean(c, st)
+	if m.specCulpritWhy(c, st) { // 뒤 추측은 반송할 맨 앞을 품었다 — 더 짓지 않고 치운다(미리 줄 추측은 지킨다)
+		m.specClean(c, append(st[:len(st):len(st)], m.specPre(c, busy, now)...))
 		return specCulprit, ""
 	}
 	m.specSolo(c, busy, now)
@@ -75,8 +85,15 @@ func (m *M) spec() (specDecision, string) {
 			busy[v.Machine] = true
 		}
 	}
-	m.specClean(c, st)
+	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go)
+	m.specClean(c, append(st[:len(st):len(st)], m.specPre(c, busy, now)...))
 	d := specFront(st)
+	if w := specFrontWait(); d == specWaitFront && now-st[0].row.at > w {
+		// 기다릴 값어치는 남은 시간이 직접 검증보다 짧을 때뿐 — 검증 기계가 죽었거나 바쁘거나 느리면 그 뒤 큐 전체가 멈춘다.
+		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
+		fmt.Printf("hc-lane merger: 미리 검증이 %d초 넘게 도는 중 — 병합기가 직접 검증한다(%s)\n", w, st[0].row.machine)
+		d = specLand
+	}
 	switch d {
 	case specLandFast:
 		fmt.Printf("hc-lane merger: 추측 검증 통과 — %s (트리 %s, %s) 착지가 검증을 건너뛴다\n", st[0].g.lanes, first8(st[0].row.tree), st[0].row.machine)
@@ -112,6 +129,10 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64) {
 	c.rows = append(c.rows, r)
 	if r.state == specRun {
 		busy[v.Machine] = true
+		// 반송 근거로 믿는 것은 이렇게 cap 바퀴에 지은 추측뿐(같은 아이디의 미리 줄 추측은 아님 — specCulpritWhy, 감사 atoz3el-ese56i)
+		if err := writeVia(m.mj+"/solo", id+"\n"); err != nil {
+			fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측 표식을 적지 못했다 — 실패해도 지금처럼 직접 검증한다")
+		}
 		m.jmembers(m.b[:1], jSolo, fmt.Sprintf("묶음 실패 뒤 맨 앞 혼자를 %s 에 추측 검증으로 맡김(앞 %d개는 병합기가 직접)", v.Machine, len(m.b)), "", m.r0, now)
 	}
 }
@@ -120,6 +141,10 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64) {
 // 채우고 true. 실패 기록에 시험 실패 근거(test=1)가 없거나(옛 판·환경 문제와 가를 수 없음) 그 기록을 못 읽으면 false(지금처럼 직접 검증)
 func (m *M) specCulpritWhy(c *specCtx, st []specStep) bool {
 	if m.capN() == 0 || len(st) == 0 || st[0].row == nil || st[0].row.state != specFail || len(st[0].g.shas) != 1 {
+		return false
+	}
+	if b, err := os.ReadFile(m.mj + "/solo"); err != nil || strings.TrimSpace(string(b)) != st[0].row.id {
+		fmt.Printf("hc-lane merger: 맨 앞 %s 의 실패한 추측은 이 cap 바퀴에 지은 혼자 추측이 아니다(미리 줄 등) — 지금처럼 직접 검증\n", st[0].g.lanes)
 		return false
 	}
 	ref := specFails + st[0].row.id
@@ -159,7 +184,7 @@ func (m *M) specCulpritWhy(c *specCtx, st []specStep) bool {
 // specLoad: m.qs(바퀴의 ls-remote)에서 추측 참조를 읽는다. 목록도 추측도 없거나 못 읽으면 ok=false(지금 그대로)
 func (m *M) specLoad() (*specCtx, bool) {
 	c := &specCtx{refs: map[string]string{}}
-	vsha := ""
+	vsha, pre := "", map[string]string{}
 	for _, line := range strings.Split(m.qs, "\n") {
 		f := strings.Fields(line)
 		if len(f) != 2 {
@@ -171,13 +196,15 @@ func (m *M) specLoad() (*specCtx, bool) {
 		case strings.HasPrefix(f[1], specRefs), strings.HasPrefix(f[1], specFails), strings.HasPrefix(f[1], specStarts),
 			strings.HasPrefix(f[1], verified.Prefix):
 			c.refs[f[1]] = f[0]
+		case strings.HasPrefix(f[1], verified.PreRefs):
+			pre[f[1]] = f[0]
 		}
 	}
-	if vsha == "" && len(c.refs) == 0 {
+	if vsha == "" && len(c.refs) == 0 && len(pre) == 0 {
 		return nil, false
 	}
 	// 추측 커밋(제목·트리)과 목록 커밋을 받는다. 원격에 없는 추측의 로컬 사본은 --prune이 거둔다
-	args := []string{"-q", "--prune", "origin", "+" + specRefs + "*:" + specRefs + "*"}
+	args := []string{"-q", "--prune", "origin", "+" + specRefs + "*:" + specRefs + "*", "+" + verified.PreRefs + "*:" + preLocal + "*"}
 	if vsha != "" {
 		args = append(args, "+"+verified.VerifiersRef+":"+verified.VerifiersRef)
 	}
@@ -191,7 +218,11 @@ func (m *M) specLoad() (*specCtx, bool) {
 			return nil, false
 		}
 		_, msg, _ := strings.Cut(body, "\n\n")
-		c.vers = verified.ParseVerifiers(msg)
+		c.vers, c.preOff = verified.ParseVerifiers(msg), verified.PreOff(msg)
+	}
+	var ok bool
+	if c.pre, ok = preRead(pre); !ok {
+		return nil, false
 	}
 	list, rc := out("for-each-ref", "--format=%(refname) %(objectname) %(tree) %(contents:subject)", specRefs)
 	if rc != 0 {
@@ -230,9 +261,18 @@ func (m *M) specLoad() (*specCtx, bool) {
 
 // specIdle: 큐가 비었다 — 도는 중이 아닌 추측과 짝 없는 결과를 치운다(추측 참조가 없으면 원격 호출 없음)
 func (m *M) specIdle() {
-	if c, ok := m.specLoad(); ok {
-		m.specClean(c, nil)
+	c, ok := m.specLoad()
+	if !ok {
+		return
 	}
+	var keep []specStep
+	if len(c.pre) > 0 { // 미리 줄은 큐가 빈 바퀴에도 본다 — 기준을 못 받으면 이 바퀴는 치우지도 않는다(미리 줄 추측을 길 밖으로 읽지 않게)
+		if !m.preBase() {
+			return
+		}
+		keep = m.specPre(c, specBusy(c.rows), time.Now().Unix())
+	}
+	m.specClean(c, keep)
 }
 
 // specGroups: 맨 앞은 이번 묶음, 그 뒤는 큐 차례(이번 묶음·반송 중·다른 기본 브랜치 뺌)를 묶음 크기씩. 제출 ID 없는 손 제출은 혼자.
@@ -437,6 +477,9 @@ func (m *M) specClean(c *specCtx, st []specStep) {
 	}
 	var args []string
 	del := func(ref, sha string) { args = append(args, "--force-with-lease="+ref+":"+sha, ":"+ref) }
+	for _, p := range c.preDel {
+		del(p[0], p[1])
+	}
 	for _, r := range c.rows {
 		if stale[r.id] && c.refs[specRefs+r.id] == r.commit {
 			del(specRefs+r.id, r.commit)
