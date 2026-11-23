@@ -31,6 +31,7 @@ Go           .local/lib/herdr-go/internal/**                  tools:internal/   
 도구         .local/bin/hc-sweep                              tools:cmd/hc-sweep                              macos
 도구         .local/bin/ovis-split                            tools:cmd/ovis-split                            macos
 도구         .local/bin/hc-launchd-guard                      tools:cmd/hc-launchd-guard                      macos
+도구         .local/bin/hc-job-server                         tools:cmd/hc-job-server                         macos
 도구         .local/bin/herdr-settings-merge                  tools:cmd/herdr-settings-merge                  all
 설정         .local/share/herdr-sync/keys.json                settings/keys.json                              all
 패턴         .local/share/herdr-tools/private-patterns.txt    private-patterns.txt                            macos

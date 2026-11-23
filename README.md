@@ -14,7 +14,7 @@
 | `herdr-tools-publish` | 범용 저장소를 기록 없이 공개 저장소로 내보내기(herdr-sync가 부른다) | 맥 |
 | `herdr-balance` | Herdr 창에서 지휘 pane 옆 worker 높이 맞추기(`--watch`) | 맥 |
 | `hc-launchd-guard` | launchd 작업을 Herdr 터미널에서 돌리는 지킴이([launchd 작업](docs/hc-launchd-guard/guard.md)) | macOS 기계 |
-| `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `worker-mac-check`·`worker-mac-setup`, `omc-update` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 워커 맥 점검·설정(`worker-mac-setup mesh`: 워커끼리 ssh·hc 연결), OMC 플러그인·omc CLI를 기계마다 같은 판으로(`--all`·`--check`) | 맥·macOS 기계 |
+| `hc-sweep`, `ovis-split`, `hc-core-relaunch`, `hc-job-server`, `worker-mac-check`·`worker-mac-setup`, `omc-update` | 끝난 터미널 정리, Ovis 분할, 코어 다시 띄우기, 자동 루프 감독(끝났거나 멈춘 루프를 같은 세션으로 다시 띄움), 워커 맥 점검·설정(`worker-mac-setup mesh`: 워커끼리 ssh·hc 연결), OMC 플러그인·omc CLI를 기계마다 같은 판으로(`--all`·`--check`) | 맥·macOS 기계 |
 | `herdr-hooks` | Claude Code PreToolUse 훅 다섯(`herdr-hooks <훅>`): 같은 작업 트리 동거 편집 가드(`cotenant-guard`), 무인 루프 질문 창 막기, `hc-lane wait` 분리(&) 실행 막기, 조회로 고른 pid kill 막기, 레인 세션의 셸 파일 고치기·heredoc 커밋·zsh 확장 경로 막기(`lane-no-shell-edit`) | macOS 기계 |
 
 ## 설치
@@ -62,6 +62,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 자리 세기](docs/hc-fill/slots.md)
 - [hc-fill: --then (같은 일의 앞뒤 단계는 한 레인)](docs/hc-fill/then.md)
 - [hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)](docs/hc-fill/usage.md)
+- [hc-job-server (자동 루프를 Herdr 터미널 하나로 지키는 감독)](docs/hc-job-server/usage.md)
 - [hc-lane 사건 (report·events·wait — 레인이 적고 지휘는 그것만 읽는다)](docs/hc-lane/events.md)
 - [hc-lane gc (끝난 레인 정리)](docs/hc-lane/gc.md)
 - [hc-lane: Go 구현](docs/hc-lane/go-impl.md)
