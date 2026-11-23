@@ -136,6 +136,9 @@ func editCmd(args []string) {
 		exit(rc)
 	}
 	say("바꿈 %s (%s)", name, strings.TrimPrefix(note, ", "))
+	if rejDrop(name) > 0 { // 띄우기 거절로 멈춘 줄은 고친 뒤 다시 시도(reject.go)
+		say("다시 시도 %s — 띄우기 거절 멈춤을 풀었다", name)
+	}
 	// 떠 있는 레인: 이미 병합기 큐에 냈으면 그 큐 메타도(prio와 같은 길)
 	if prio != "" && st != "wait" && prioMeta(name, prj, plabel(prio)) == 1 {
 		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 edit --priority 하면 큐 메타를 고친다", name)

@@ -76,6 +76,7 @@ func (m *M) judge() {
 		if len(m.b) > 1 {
 			why += fmt.Sprintf("(묶음 %d: %s)", len(m.b), m.mlab)
 		}
+		why += m.vtag() // 검증 길(why.go — merger-journal-why)
 		if !m.doneAll(C, why) {
 			m.mer, m.mq = true, ""
 			return
@@ -118,8 +119,9 @@ func (m *M) judge() {
 		return
 	}
 	m.capEnd()
-	why := "착지 실패(종료 " + m.lr + ")"
-	if m.lr == "3" { // rebase 충돌 — hc-fill이 이 꼴(「종료 3, 충돌 」)을 보고 다시 맞춤 레인을 넣는다(cmd/hc-fill/reland.go)
+	why := "착지 실패(종료 " + m.lr + ")" + m.vtag()
+	if m.lr == "3" { // rebase 충돌 — hc-fill이 이 꼴(「종료 3, 충돌 」 바로 뒤 「) — 」)을 보고 다시 맞춤 레인을 넣는다(cmd/hc-fill/reland.go).
+		// 검증 전에 멈췄으니 검증 길을 붙이지 않는다
 		why = "착지 실패(종료 3, 충돌 " + m.conflicts(m.b[0].s) + ")"
 	}
 	if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.lgf, why) {
@@ -417,14 +419,25 @@ func (m *M) existing(C, why string) {
 var transLog = regexp.MustCompile(`git fetch( origin)? 실패|push 결과 모름|push 실패\(다른 쪽`)
 
 // trans: 다시 하면 될 착지 실패인가 — 종료 75(기다림 상한)·4(push 거절 횟수)·7(rebase로 기본 브랜치에 막 생긴 착지 스크립트를 만남)·
-// 124(착지 안 명령의 시간 넘김 — 모름, M01), 원격 받기 실패·push 전송만 끊김(로그). 충돌·검증 실패는 아니다
+// 124(착지 안 명령의 시간 넘김 — 모름, M01), 원격 받기 실패·push 전송만 끊김(로그). 충돌·검증 실패는 아니다.
+// 로그는 착지 자신의 마지막 멈춤 줄(줄머리 「hc-lane: 」 — die, 「▸ 착지 멈춤: 」 — 저장소 착지 스크립트)만 본다: 로그에는 검증 출력이
+// 함께 들어가고 시험은 실패할 때 대상 출력을 그대로 찍으므로, 그 글이 든 시험의 진짜 실패를 일시 실패로 읽지 않게(merger-journal-why)
 func (m *M) trans() bool {
 	switch m.lr {
 	case "75", "4", "7", "124":
 		return true
 	}
 	b, err := os.ReadFile(m.lgf)
-	return err == nil && transLog.Match(b)
+	if err != nil {
+		return false
+	}
+	ls := strings.Split(string(b), "\n")
+	for i := len(ls) - 1; i >= 0; i-- {
+		if strings.HasPrefix(ls[i], "hc-lane: ") || strings.HasPrefix(ls[i], "▸ 착지 멈춤: ") {
+			return transLog.MatchString(ls[i])
+		}
+	}
+	return false
 }
 
 // try: 그 제출의 일시 실패를 하나 세어 3번까지면 true(큐에 두고 쉼), 넘으면 false(돌려보냄)

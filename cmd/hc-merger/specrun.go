@@ -53,6 +53,7 @@ type specCtx struct {
 
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
 func (m *M) spec() (specDecision, string) {
+	m.vw = vwhy{why: "모름"}
 	c, ok := m.specLoad()
 	if !ok {
 		return specLand, ""
@@ -88,15 +89,19 @@ func (m *M) spec() (specDecision, string) {
 	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go)
 	m.specClean(c, append(st[:len(st):len(st)], m.specPre(c, busy, now)...))
 	d := specFront(st)
+	over := false
 	if w := specFrontWait(); d == specWaitFront && now-st[0].row.at > w {
+		over = true
 		// 기다릴 값어치는 남은 시간이 직접 검증보다 짧을 때뿐 — 검증 기계가 죽었거나 바쁘거나 느리면 그 뒤 큐 전체가 멈춘다.
 		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
 		fmt.Printf("hc-lane merger: 미리 검증이 %d초 넘게 도는 중 — 병합기가 직접 검증한다(%s)\n", w, st[0].row.machine)
 		d = specLand
 	}
+	m.vw.why = frontWhy(st, c.rows, over)
 	switch d {
 	case specLandFast:
 		fmt.Printf("hc-lane merger: 추측 검증 통과 — %s (트리 %s, %s) 착지가 검증을 건너뛴다\n", st[0].g.lanes, first8(st[0].row.tree), st[0].row.machine)
+		m.vw = vwhy{why: "통과", id: first8(st[0].row.id), mach: st[0].row.machine}
 		return d, st[0].row.tree
 	case specWaitFront:
 		fmt.Printf("hc-lane merger: 추측 검증 도는 중 — %s (%s) 결과를 기다린다\n", st[0].g.lanes, st[0].row.machine)
@@ -201,6 +206,7 @@ func (m *M) specLoad() (*specCtx, bool) {
 		}
 	}
 	if vsha == "" && len(c.refs) == 0 && len(pre) == 0 {
+		m.vw.why = "추측 없음"
 		return nil, false
 	}
 	// 추측 커밋(제목·트리)과 목록 커밋을 받는다. 원격에 없는 추측의 로컬 사본은 --prune이 거둔다

@@ -50,6 +50,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--spec-verify" { // 추측 검증 일꾼(specverify.go)
 		os.Exit(specVerifyMain(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--why" { // 일지의 검증 길 요약(why.go)
+		os.Exit(whyMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--round" {
 		roundMain(os.Args[2:])
 		return

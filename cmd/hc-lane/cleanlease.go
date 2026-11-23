@@ -3,7 +3,9 @@ package main
 // clean의 레인 주인·임대(셸 판 lib/hc-lane/clean.sh의 clean_owner·clean_lease와 같은 판정)
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -15,20 +17,27 @@ import (
 // 7자 이상 앞부분도)의 「주차」인가 — 옛 판 주차(원격 lane/<레인>)를 반송된 제출 가지와 가른다(gofix L07). 주차 사건은 레인이 돈
 // 기계에 적히니 --on이면 그 기계 것을 읽는다(재감사 R-24). 못 읽으면 false(멈춤 쪽)
 func legacyParked(lane, sha string) bool {
+	p, _ := legacyParkedK(lane, sha)
+	return p
+}
+
+// legacyParkedK: legacyParked와 같고, 사건을 읽었나(known)를 함께 — 띄우기는 못 읽음을 확정 거절(종료 11)로 읽지 않는다(fill-reject-hold 감사 중간-1)
+func legacyParkedK(lane, sha string) (parked, known bool) {
 	var ls []string
 	if on != "" {
 		out, r := xoutQ("sh", "-c", evrd, "hc-lane", "0")
 		if r != 0 {
-			return false
+			return false, false
 		}
 		ls = lines(out)
 	} else {
 		var err error
-		if ls, err = readLines(evdir() + "/events.tsv"); err != nil {
-			return false
+		// 파일 없음은 사건 없음(원격 evrd도 없으면 빈 출력·종료 0) — 그 밖의 읽기 실패만 모름
+		if ls, err = readLines(evdir() + "/events.tsv"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, false
 		}
 	}
-	return lastParkIs(ls, lane, sha)
+	return lastParkIs(ls, lane, sha), true
 }
 
 // lastParkIs: 사건 줄들에서 그 레인의 마지막 주차·제출 사건이 그 커밋의 「주차」인가

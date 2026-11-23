@@ -15,9 +15,11 @@ import (
 )
 
 // launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
-// 3 미확정(주소 모름) · 5 띄웠지만 시작 확인 실패(터미널은 남음) · 6 띄웠고 주소는 있으나 시작 확인 미확정(hc-lane 종료 8)
+// 3 미확정(주소 모름) · 4 입력 거절(hc-lane 종료 11 — 다시 해도 같음, 까닭 REJWHY) · 5 띄웠지만 시작 확인 실패(터미널은 남음) ·
+// 6 띄웠고 주소는 있으나 시작 확인 미확정(hc-lane 종료 8)
 func launch(lane, brief, m, repo, dest, owner string) int {
 	LSSNAP = false // 새 주소가 생긴다 — 터미널 표의 「없음」을 더 믿지 않는다(lsGone)
+	LFWHY = ""
 	// 본문을 먼저 읽어 둔다: 못 읽으면 착지 줄만 든 빈 레인을 띄우지 않는다
 	raw, err := os.ReadFile(brief)
 	body := sub(string(raw))
@@ -196,8 +198,14 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	case 0, 5, 6, 7, 8:
 	case proc.TimeoutCode:
 		say("모름 %s @%s: hc-lane 띄우기 시간 넘김 — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, mm)
+		LFWHY = "hc-lane 띄우기 시간 넘김 @" + mm
 		return 3
+	case rejHC: // 입력 거절 — 아무것도 안 만들었다(확정 실패). 다른 기계·다음 바퀴에 되풀이하지 않게 place가 줄을 멈춘다
+		tryMark(lane, mm, "")
+		REJWHY = runeCut(strings.TrimPrefix(lastLine(out), "hc-lane: "), 200)
+		return 4
 	default:
+		LFWHY = runeCut(fmt.Sprintf("hc-lane 종료 %d @%s: %s", lr, mm, strings.TrimSpace(lcTail3(out))), 200)
 		if launchUnsure(lr, out) { // 발사가 나갔을 수 있다 — 확정 실패가 아니라 미확정(?)(재감사 R-01)
 			say("모름 %s @%s: hc-lane 띄우기 결과 미확정(종료 %d) — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다): %s", lane, mm, lr, lcTail3(out))
 			return 3
@@ -342,7 +350,20 @@ func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, boo
 // placed 띄움 · bad 지시문을 못 읽어 이 바퀴엔 그만. stuck을 고쳐 적는다. 쓰기 줄은 터미널 주소를 받은 때 실행 기록에 적고 GOTADDR
 func place(lane, p, brief, only, reply, owner, after string) {
 	placed, bad, GOTADDR = false, false, false
+	if why := rejHeld(lane, owner, reply); why != "" { // 띄우기 거절로 멈춘 줄 — 지휘가 retry·edit·rm 할 때까지(reject.go)
+		say("멈춤 %s: 띄우기 거절 — %s (hc-fill retry %s)", lane, why, lane)
+		bad = true
+		return
+	}
 	isa := strings.HasPrefix(dash(AK), "audit=")
+	failed := false
+	defer func() {
+		if placed || GOTADDR {
+			rejOK(lane)
+		} else if failed {
+			rejFail(lane, LFWHY, owner, reply)
+		}
+	}()
 	for _, mc := range machines() {
 		m := mc.Name
 		if only != "-" && !inlist(m, only) {
@@ -405,6 +426,12 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			EARLYF = "early"
 		}
 		lr := launch(lane, brief, m, repo, reply, owner)
+		if lr == 4 { // 입력 거절: 다른 기계로 넘기지 않고 줄을 멈춘다
+			rejHold(lane, m, REJWHY, owner, reply)
+			bad = true
+			break
+		}
+		failed = failed || lr == 1 || lr == 2 || lr == 3
 		if lr == 2 {
 			bad = true
 			break

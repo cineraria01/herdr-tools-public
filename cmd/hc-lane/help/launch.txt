@@ -3,6 +3,8 @@
   기본          fetch → <저장소>.wt/<브랜치>에 origin/<기본> 기준 워크트리 → .claude/herdr-setup.sh(있으면) → hc run --bg
                 쓰기 레인은 hc run 직전에 레인 임대 refs/hc-lanes/<레인>을 없을 때만 잡는다(아래 lease): 이미 있으면 「이미 돎」 종료 10,
                 조회·push 실패면 종료 1 — 둘 다 띄우지 않고 방금 만든 워크트리를 되돌린다. 레인 환경 HC_LANE_LEASE = 그 임대 값
+                입력 거절 종료 11(다시 해도 같음, 아무것도 안 만듦): 로컬·원격(origin/<브랜치>) 브랜치나 워크트리 폴더가 이미 있음, --brief
+                지시문 없음, {brief} 자리와 --brief가 안 맞음, --resume 주차 가지 없음(원격 없음 포함). 확인 실패·git·hc 실패는 종료 1(일시)
                 원격 origin이 없는 저장소는 fetch 없이 로컬 <기본>(main, 없으면 master) 기준
                 (모든 git fetch는 같은 클론의 참조 잠금 경합(cannot lock ref 등)이면 1·2·4초 쉬고 3번까지 다시)
                 메인 폴더 앞당김: fetch 뒤(--read도 fetch 뒤)와 land 착지 뒤, 메인 폴더가 기본 브랜치이고 추적 파일 변경·진행 중인

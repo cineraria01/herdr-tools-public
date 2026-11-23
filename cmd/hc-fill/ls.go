@@ -160,6 +160,9 @@ func lsCmd(args []string) {
 		switch state {
 		case "wait":
 			s, a = "대기", "-"
+			if w := rejWhy(name, f[16]); w != "" {
+				s = "띄우기 거절 — " + w
+			}
 		case "sent":
 			s, a = "되돌려줌", addr
 		default:

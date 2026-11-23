@@ -135,7 +135,7 @@ func launchMain(args []string) int {
 	}
 	if brief != "" {
 		if st, err := os.Stat(brief); err != nil || !st.Mode().IsRegular() {
-			die("지시문 파일이 없다: %s", brief)
+			refuse("지시문 파일이 없다: %s", brief)
 		}
 		if len(rest) == 0 {
 			tpl := cfg("lane.run", "")
@@ -164,10 +164,10 @@ func launchMain(args []string) int {
 		}
 	}
 	if brief != "" && !k {
-		die("실행 명령에 {brief} 자리가 없다(지시문 사본 경로를 넣을 곳)")
+		refuse("실행 명령에 {brief} 자리가 없다(지시문 사본 경로를 넣을 곳)")
 	}
 	if brief == "" && k {
-		die("실행 명령에 {brief} 자리가 있는데 --brief <지시문>이 없다")
+		refuse("실행 명령에 {brief} 자리가 있는데 --brief <지시문>이 없다")
 	}
 
 	if read {
@@ -199,13 +199,13 @@ func launchMain(args []string) int {
 			}
 		}
 		if there("로컬 브랜치 "+branch, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/heads/"+branch) {
-			die("로컬 브랜치 %s 가 이미 있다. %s", branch, again)
+			refuse("로컬 브랜치 %s 가 이미 있다. %s", branch, again)
 		}
 		if remote && there("원격 브랜치 origin/"+branch, "git", "-C", repo, "show-ref", "--verify", "-q", "refs/remotes/origin/"+branch) {
-			die("원격 브랜치 origin/%s 가 이미 있다. %s", branch, again)
+			refuse("원격 브랜치 origin/%s 가 이미 있다. %s", branch, again)
 		}
 		if there("워크트리 폴더 "+wt, "test", "-e", wt) {
-			die("워크트리 폴더가 이미 있다: %s. %s", wt, again)
+			refuse("워크트리 폴더가 이미 있다: %s. %s", wt, again)
 		}
 		if xrun(nil, os.Stderr, "git", "-C", repo, "rev-parse", "-q", "--verify", bref+"^{commit}") != 0 {
 			die("%s 가 없다: %s", blab, repo)
@@ -214,54 +214,9 @@ func launchMain(args []string) int {
 			ffmain(repo, base)
 		}
 	}
-	// --resume: park가 원격 refs/park/<레인>에 둔 가지를 직접 받는다(제출 가지 lane/<레인>과 다른 이름 — 병합기·clean이 헷갈리지 않게).
-	// 옛 판이 주차한 lane/<레인>은 refs/park/<레인>이 없을 때만 받는다(바꾼 날 주차해 둔 레인)
 	wfrom := bref
 	if resume {
-		if !remote {
-			die("--resume: 원격(origin)이 없는 저장소에는 주차한 가지가 없다: %s", repo)
-		}
-		wfrom = "refs/hc-park/" + name
-		// 모의 실행도 원격을 본다(읽기만 — 참조를 쓰지 않고 시작점을 알린다, gofix L08)
-		ls, r := xout("git", "-C", repo, "ls-remote", "origin", "refs/park/"+name, "refs/heads/lane/"+name)
-		if r != 0 {
-			die("--resume: 원격을 읽지 못했다(git ls-remote) — 주차한 가지 refs/park/%s 를 모른다: %s", name, repo)
-		}
-		// 응답 줄은 「<40자 SHA><탭><참조>」만 받는다 — 깨진 줄은 주차 SHA가 아니다(R-15)
-		got := map[string]string{}
-		for _, ln := range strings.Split(ls, "\n") {
-			if ln == "" {
-				continue
-			}
-			s, rf, ok := strings.Cut(ln, "\t")
-			if !ok || !sha40.MatchString(s) || strings.ContainsAny(rf, " \t") {
-				die("--resume: 원격 응답을 읽지 못했다(git ls-remote 줄 꼴: %q) — 주차한 가지를 모른다: %s", cut(ln, 80), repo)
-			}
-			got[rf] = s
-		}
-		src, ssha := "", ""
-		if s, ok := got["refs/park/"+name]; ok {
-			src, ssha = "refs/park/"+name, s
-		} else if s, ok := got["refs/heads/lane/"+name]; ok {
-			// 옛 판 주차: 같은 레인·SHA의 마지막 주차·제출 사건이 「주차」일 때만 — 반송된 옛 제출 가지에서 재개하지 않는다(R-15)
-			if !legacyParked(name, s) {
-				die("--resume: refs/park/%s 가 없고 lane/%s(%s)는 주차 사건이 없는 제출 가지다 — 재개하지 않는다: %s", name, name, cut(s, 12), repo)
-			}
-			src, ssha = "refs/heads/lane/"+name, s
-		}
-		switch {
-		case src == "":
-			die("--resume: 주차한 가지 refs/park/%s 가 없다: %s", name, repo)
-		case dry:
-			fmt.Printf("[dry-run] 주차한 가지 %s (%s) 에서 시작\n", src, cut(ssha, 12))
-		case xfetch(repo, "-q", "origin", "+"+src+":"+wfrom) != 0:
-			die("--resume: 주차한 가지 refs/park/%s 를 받지 못했다: %s", name, repo)
-		default:
-			// 받은 것이 판정한 그 SHA여야 한다(그사이 움직였으면 판정이 맞지 않는다)
-			if v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", wfrom+"^{commit}"); r != 0 || v != ssha {
-				die("--resume: 받은 주차 가지 %s 가 판정한 %s 와 다르거나 없다 — 같은 줄을 다시: %s", src, cut(ssha, 12), repo)
-			}
-		}
+		wfrom = resumeFrom() // --resume: 주차한 가지를 받아 그 참조에서 시작(launchresume.go)
 	}
 
 	// --brief: 지시문(+착지·정리 절차)을 대상 기계 사본 자리에 두고, 실행 명령의 {brief}를 그 경로로

@@ -39,6 +39,7 @@ type M struct {
 	O, lk2, hs                      string
 	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
 	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
+	vw                              vwhy   // 이번 착지의 검증 길(일지 까닭 칸 — why.go)
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
 }
 

@@ -50,7 +50,7 @@
     `hc-lane land`(`HERDR_MERGER=1`일 때만)는 그 기록이 있고 제목의 `script`가 그 트리의 검증 스크립트 blob과 같을 때만 검증 스크립트(내장 길) 또는 저장소 착지 스크립트(`.claude/herdr-land.sh` — 그 스크립트가 검증 자식에 물려준다)에 **`HERDR_VERIFIED_TREE=<트리>`** 를 넘긴다.
     내장 길은 rebase한 트리가 그 값과 다르면 넘기지 않는다.
     물려받은 `HERDR_VERIFIED_TREE`는 착지가 늘 지운다.
-  - 검증 스크립트는 **지금 `git rev-parse HEAD^{tree}`가 그 값과 같고, `git status --porcelain --untracked-files=no`가 비고, `git ls-remote origin refs/herdr/verified/<그 값>`이 있을 때만** 검증 없이 종료 0(한 줄 「건너뜀 검증」).
+  - 검증 스크립트는 **지금 `git rev-parse HEAD^{tree}`가 그 값과 같고, `git status --porcelain --untracked-files=no`가 비고, `git ls-remote origin refs/herdr/verified/<그 값>`이 있을 때만** 검증 없이 종료 0(한 줄 「건너뜀 검증」 또는 「▸ 건너뜀 — 검증 기록」 — 줄머리 그대로: 병합기 일지가 이 줄로 「검증 건너뜀」을 적고, 둘 다 안 찍는 스크립트의 건너뜀은 「직접 검증(모름)」으로 적힌다, `merger.md` 「검증 길」).
     하나라도 아니면 그대로 검증한다.
     사전 검사(`--cheap-only`)는 늘 돈다.
     이 저장소의 `.claude/herdr-verify.sh`가 본보기다.

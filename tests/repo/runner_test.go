@@ -22,7 +22,6 @@ var runnerAllow = map[string]string{
 	"cmd/herdr-hooks/hookexec.go":       "훅 감독 — 1바퀴 R-M01 고침, 2바퀴 지적 없음",
 	"cmd/herdr-hooks/hookexec_unix.go":  "훅 감독 — 1바퀴 R-M01 고침, 2바퀴 지적 없음",
 	"cmd/herdr-hooks/cotenant_scan.go":  "휴지통 rm을 뒤에서 놓아 보냄(기다리지 않음, 결과를 읽지 않음) — 다른 레인 몫",
-	"cmd/hc-core-relaunch/main.go":      "점검 출력 줄 흘려 읽기(StdoutPipe) — 다른 레인 몫(gofix3-small)",
 	"cmd/hc-fill/gc.go":                 "바퀴와 따로 도는 정리 실행기(무리·잠금) — 다른 레인 몫",
 	"cmd/hc-fill/onland.go":             "착지 뒤 실행기 — gofix3-proc 몫(proc 기록으로)",
 	"cmd/hc-fill/audit.go":              "hc send 20초 — 다른 레인 몫",

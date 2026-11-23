@@ -12,8 +12,22 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 )
+
+// rcRefuse: 띄우기의 입력 거절 — 다시 해도 같은 결과(가지·작업 트리가 이미 있음, 지시문 없음, 주차 가지 없음 등). hc-fill은 이 코드를
+// 받으면 그 대기열 줄을 멈춰 두고 주인 지휘에 한 번 알린다(2026-11-24 fill-reject-hold — 「원격 브랜치가 이미 있다」로 2시간 18분
+// 동안 278번 다시 띄웠다). 일시 실패(git·hc·연결·시간 넘김)는 지금처럼 1
+const rcRefuse = 11
+
+// refuse: 「hc-lane: <글>」 한 줄 뒤 종료 11(die와 같은 기록). 확정된 답 뒤에만 부른다 — 시간 넘김 바꿈(die의 75)이 없다
+func refuse(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
+	oplog.Fatal("hc-lane", "", oplog.Die, rcRefuse, msg)
+	exit(rcRefuse)
+}
 
 // shellWords: 설정 lane.run 틀을 셸 문법으로 나눈다(셸 판 eval "set -- $tpl" — 설정 파일은 믿는다)
 func shellWords(tpl string) []string {

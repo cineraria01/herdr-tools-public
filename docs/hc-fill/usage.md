@@ -10,5 +10,6 @@ hc-fill merger restart <프로젝트>   # 병합기를 지금 띄우는 길 그�
 hc-fill run --dry-run           # 무엇을 어디에 띄울지만. --dry-run 없이 한 바퀴 띄운다
 hc-fill watch --every 60        # 계속(한 번에 하나만, 이미 돌면 종료 75). 바퀴 시작 간격이 60초 — 쉼은 60초 − 바퀴에 든 시간, 하한 설정 rest_min
 hc-fill rm <레인> [--force]     # 대기열에서만 뺀다(떠 있는 터미널은 그대로). 주차 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 거절(종료 2)
+hc-fill retry <레인>            # 띄우기 거절(hc-lane 종료 11)로 멈춘 줄을 다음 바퀴에 다시(edit도 풂, 대기열에 없으면 종료 2)
 hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로)
 ```

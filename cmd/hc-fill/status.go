@@ -279,7 +279,11 @@ func statusCmd(args []string) {
 			fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stStage(in), stEstimate(in.Pos, x.landed)))
 			continue
 		}
-		fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stStage(in), ""))
+		stage := stStage(in)
+		if w := rejWhy(name, r.F(17)); in.State == "wait" && w != "" {
+			stage = "띄우기 거절 — " + w
+		}
+		fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stage, ""))
 	}
 	maPrint()
 	statusTick()
