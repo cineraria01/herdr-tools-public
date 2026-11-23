@@ -44,6 +44,10 @@ type ev struct {
 	whmax        int64
 	wh0          int64
 	whLogged     bool
+	wu0          int64 // 지휘 확인 모름이 이어진 첫 시각(wcheck)
+	wuLogged     bool
+	self         string // watch가 뜰 때의 실행 파일과 그 stat(reexecIfNew)
+	selfSt       os.FileInfo
 	wpar         bool
 	tl           string
 	tls          hcjson.List // tl을 hcjson.ParseList로 읽은 것(lsok일 때만)
@@ -359,6 +363,11 @@ func (e *ev) loop(to int64) int {
 	}
 	if e.ec == "watch" {
 		e.watchLock()
+		if p, err := os.Executable(); err == nil {
+			if st, err := os.Stat(p); err == nil {
+				e.self, e.selfSt = p, st
+			}
+		}
 	}
 	if tid := os.Getenv("HC_TERMINAL_ID"); tid != "" {
 		if e.ec == "wait" {
@@ -429,6 +438,7 @@ func (e *ev) loop(to int64) int {
 	wsleep := func() { time.Sleep(tk) }
 	for {
 		if e.ec == "watch" {
+			e.reexecIfNew()
 			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13, hcjson.ParseGet)
 			if st := getState(hcGet(10, e.wto)); st == 0 {
 				gone = 0

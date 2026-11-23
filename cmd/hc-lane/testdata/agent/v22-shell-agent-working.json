@@ -1,0 +1,1 @@
+{"address":"t2","argv":["/bin/zsh","-l"],"cwd":"/Users/u/repo","foreground":{"argv":["/x/Python","/x/hud/launcher.py","--claude"],"cwd":"/Users/u/repo","name":"Python","pid":16510},"name":null,"parent":null,"pid":80177,"state":"live","status":{"app":"claude-code","msg":"…","state":"working"},"status_ms":1795438958405,"turn":79}

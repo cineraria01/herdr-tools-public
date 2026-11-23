@@ -344,9 +344,21 @@ func (e *ev) wcheck() bool {
 		}
 	}
 	if c == 2 {
-		fmt.Fprintf(os.Stderr, "hc-lane watch: 지휘 %s 확인 못 함(hc get 실패) — 다음 바퀴에 다시\n", e.wto)
+		fmt.Fprintf(os.Stderr, "hc-lane watch: 지휘 %s 확인 못 함(%s) — 다음 바퀴에 다시\n", e.wto, why)
+		// 모름이 lane.watch_hold_max 넘게 이어지면 watch.log에 한 번 — 보내지도 끝내지도 않는다(모름을 있음·없음으로 읽지 않는다)
+		n := time.Now().Unix()
+		if e.wu0 == 0 {
+			e.wu0 = n
+		}
+		if !e.wuLogged && n-e.wu0 >= e.whmax {
+			e.wuLogged = true
+			l := fmt.Sprintf("%s hc-lane watch: 지휘 %s 확인 못 함 %d분째 — 보내지 않고 계속 본다(%s, 사건은 hc-lane wait로도 받음)", utcNow(), e.wto, (n-e.wu0)/60, why)
+			fmt.Fprintln(os.Stderr, l)
+			_ = appendLines(e.ed+"/watch.log", l) // 알림 기록일 뿐
+		}
 		return false
 	}
+	e.wu0, e.wuLogged = 0, false
 	if c != 0 {
 		l := fmt.Sprintf("%s hc-lane watch: 지휘 없음 %s — %s. 보내지 않고 끝낸다(사건은 events에 남음, 지휘가 wait/watch를 걸면 받음)", utcNow(), e.wto, why)
 		fmt.Fprintln(os.Stderr, l)
@@ -369,7 +381,8 @@ func (e *ev) watchLock() {
 	}
 	watchLockFile = lf
 	if os.Mkdir(e.lk, 0o777) != nil {
-		if op, ok := watchAlive(e.lk); ok {
+		// 자기 pid의 잠금 폴더는 새 판으로 exec한 이 watch 자신의 것(reexecIfNew) — 넘겨받는다
+		if op, ok := watchAlive(e.lk); ok && op != strconv.Itoa(os.Getpid()) {
 			fmt.Fprintf(os.Stderr, "hc-lane watch: %s 감시가 이미 돈다(pid %s)\n", e.wto, op)
 			exit(75)
 		}
@@ -397,6 +410,24 @@ func (e *ev) watchLock() {
 		proc.StopCurrent(proc.Grace) // 상한으로 따로 무리가 된 자식(hc ls 등)도 함께 거둔다
 		exit(code)
 	}()
+}
+
+// reexecIfNew: watch가 뜰 때의 실행 파일(e.self·e.selfSt)이 바뀌었으면(새 판이 깔림) 같은 인자·환경으로 다시 exec — 오래 떠 있는
+// watch가 옛 코드로 돌지 않게(watch-agent-guard, 2026-11-23 11시간짜리 옛 판). 커서·보냄 표시는 파일이고 바퀴 사이(보내기 밖)에서만
+// 부르니 같은 사건을 두 번 보내거나 건너뛰지 않는다. 커널 잠금 파일은 CLOEXEC라 exec 때 풀리고 새 판이 다시 쥔다(잠금 폴더는 같은 pid).
+// 메모리 상태(쉼·질문 창 보류 시각, 「연결 안 됨」 알린 기계)는 처음부터 — 「연결 안 됨」 알림이 한 번 더 갈 수 있다
+func (e *ev) reexecIfNew() {
+	if e.self == "" || e.selfSt == nil {
+		return
+	}
+	st, err := os.Stat(e.self)
+	if err != nil || os.SameFile(st, e.selfSt) && st.ModTime().Equal(e.selfSt.ModTime()) && st.Size() == e.selfSt.Size() {
+		return // 못 읽음(까는 중)은 다음 바퀴에
+	}
+	fmt.Fprintf(os.Stderr, "hc-lane watch: %s 새 판이 깔렸다 — 새 판으로 이어 돈다\n", e.self)
+	err = execve(e.self, os.Args, os.Environ())
+	fmt.Fprintf(os.Stderr, "hc-lane watch: 새 판으로 exec 실패(%v) — 이 판으로 계속\n", err)
+	e.selfSt = st
 }
 
 // watchAlive: 그 잠금의 pid가 살아 있는 hc-lane watch면 참(그 pid)

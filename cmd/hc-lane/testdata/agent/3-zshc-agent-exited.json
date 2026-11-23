@@ -1,0 +1,1 @@
+{"address":"t8p2","argv":["zsh","-c","agent-cli run -- --model claude-haiku-5-5; echo done-nc; sleep 600"],"created_ms":1795439765059,"cwd":"/Users/u/repo","foreground":{"argv":["sleep","600"],"cwd":"/Users/u/repo","name":"sleep","pid":51039},"name":"wag-nc","parent":null,"pid":51039,"state":"live","status":null,"status_ms":1795440145623,"turn":0}

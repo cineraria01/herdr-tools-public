@@ -284,7 +284,8 @@ func ownerCheck(own string) (int, string) {
 		return 0, ""
 	case rc != 1:
 		return 2, fmt.Sprintf("종료 %d %s", rc, why)
-	case strings.Contains(why, "지휘 정보(") && strings.Contains(why, "와 다름"):
+	case strings.Contains(why, "지휘 정보(") && strings.Contains(why, "와 다름"),
+		strings.Contains(why, "에이전트가 끝나 셸만 남음"): // 대화형 셸만 남은 지휘(hc-lane coordCheck — watch-agent-guard)
 		return 1, why
 	}
 	pr, pn := PRUN, PNAME // pget이 채우는 실행 키는 부른 쪽 것 그대로
