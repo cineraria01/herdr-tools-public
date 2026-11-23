@@ -308,7 +308,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = lsRemote(append([]string{"origin", "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
+	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
@@ -334,6 +334,7 @@ func (m *M) round() {
 			return
 		}
 	}
+	m.prescan() // 줄 전체를 지금 기준과 견줘 실제 rebase로도 충돌하는 것을 차례 전에 반송(prescan.go)
 	if !m.pickBatch() {
 		if m.mq == "" && !m.mer {
 			m.specIdle()

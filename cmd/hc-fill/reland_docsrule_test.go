@@ -62,7 +62,7 @@ func TestRelandDocsRule(t *testing.T) {
 				if !strings.Contains(b, "\n## 이 저장소의 문서 규칙\n"+strings.TrimSpace(rule)+"\n") {
 					t.Errorf("지시문에 문서 규칙 절 없음:\n%s", b)
 				}
-				if !strings.Contains(sends, "hc-lane land main 다시 — 이 저장소의 문서 규칙: README에는 목차만. / 새 문서는 목차 이름순 자리에 한 줄.|") {
+				if !strings.Contains(sends, "hc-lane land main 다시(전체 검증은 병합기가 돈다) — 이 저장소의 문서 규칙: README에는 목차만. / 새 문서는 목차 이름순 자리에 한 줄.|") {
 					t.Errorf("보낸 글에 문서 규칙 없음: %q", sends)
 				}
 			} else if strings.Contains(b, "문서 규칙") || strings.Contains(sends, "문서 규칙") {

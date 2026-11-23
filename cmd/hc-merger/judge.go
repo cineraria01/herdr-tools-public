@@ -5,7 +5,6 @@ package main
 // 완료(패치 일치로 판정하지 않는다). 제출 기록이 없는 큐 항목(손으로 넣음)만 후보 가지 끝으로 본다.
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -129,20 +128,12 @@ func (m *M) judge() {
 // 3자 합침은 깨끗한데 rebase 중간 커밋만 부딪혔거나 못 보면 「파일 모름(로그)」. 이름은 -z(NUL 구분)로 읽어 git 따옴표·팔진 이스케이프
 // 없이 실제 이름 그대로(R-L01 — 다시 맞춤 지시문에 간다)
 func (m *M) conflicts(s string) string {
-	var o bytes.Buffer
-	if gitx.Run("", &o, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", m.B, s) != 1 {
+	fs, rc := gitx.MergeConflicts("", m.B, s)
+	if rc != 1 || len(fs) == 0 {
 		return "파일 모름(로그)"
 	}
-	var fs []string
-	seen := map[string]bool{}
-	for i, l := range strings.Split(o.String(), "\x00") {
-		if l = flat(l); i > 0 && l != "" && !seen[l] { // 첫 칸은 트리
-			seen[l] = true
-			fs = append(fs, l)
-		}
-	}
-	if len(fs) == 0 {
-		return "파일 모름(로그)"
+	for i := range fs {
+		fs[i] = flat(fs[i])
 	}
 	j := strings.Join(fs, " ")
 	if c := bcut(200, j); c != j {

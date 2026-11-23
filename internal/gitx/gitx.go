@@ -213,6 +213,38 @@ func SplitZ(out string) ([]string, bool) {
 	return r, true
 }
 
+// MergeConflicts: a와 b를 3자 합침(merge-tree --write-tree)할 때 충돌하는 파일 — 이름은 -z로 읽어 git 따옴표·이스케이프 없이 그대로,
+// 겹침 없이 차례대로. rc 0 깨끗 · 1 충돌(files) · 그 밖은 모름(git 실패·시간 넘김·옛 git — 충돌로 읽지 않는다)
+func MergeConflicts(dir, a, b string) (files []string, rc int) {
+	var o bytes.Buffer
+	if rc = Run(dir, &o, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", a, b); rc != 1 {
+		return nil, rc
+	}
+	seen := map[string]bool{}
+	for i, l := range strings.Split(o.String(), "\x00") {
+		if i > 0 && l != "" && !seen[l] { // 첫 칸은 트리
+			seen[l] = true
+			files = append(files, l)
+		}
+	}
+	return files, 1
+}
+
+// CherryEquivalent: b..s 커밋 가운데 b 쪽에 같은 patch-id 커밋이 있는 것이 있나(rev-list --cherry-mark --right-only의 「=」 줄) —
+// 그런 커밋은 일반 rebase가 건너뛰고 --reapply-cherry-picks는 다시 얹어, 두 rebase의 충돌 판정이 갈린다. rc 0이 아니면 모름
+func CherryEquivalent(dir, b, s string) (bool, int) {
+	o, rc := Out(dir, nil, "rev-list", "--cherry-mark", "--right-only", b+"..."+s)
+	if rc != 0 {
+		return false, rc
+	}
+	for _, l := range strings.Split(o, "\n") {
+		if strings.HasPrefix(l, "=") {
+			return true, 0
+		}
+	}
+	return false, 0
+}
+
 // Int: 출력 전체가 10진 정수 하나(끝 줄바꿈 하나만 허용) — 부호·빈칸·빈 값·여러 줄·넘침은 거절
 func Int(out string) (int64, bool) {
 	s := strings.TrimSuffix(out, "\n")

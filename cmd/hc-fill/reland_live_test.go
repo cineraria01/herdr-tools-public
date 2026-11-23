@@ -116,7 +116,7 @@ func TestRelandLiveLane(t *testing.T) {
 		t.Fatalf("살아 있는 원래 레인은 다시 맞춤을 넣지 않는다: %v", qRows())
 	}
 	sends, _ := readFile(DATA + "/sends")
-	if strings.Count(sends, "\n") != 2 || !strings.Contains(sends, "send|here/t1|병합기 반송(rebase 충돌 README.md, refs/merge-failed/100-l-live) — origin/main으로 rebase해 양쪽 살려 풀고 검증 뒤 hc-lane land main 다시|") ||
+	if strings.Count(sends, "\n") != 2 || !strings.Contains(sends, "send|here/t1|병합기 반송(rebase 충돌 README.md, refs/merge-failed/100-l-live) — origin/main으로 rebase해 양쪽 살려 풀고 푼 파일 둘레의 빌드·시험만 돌린 뒤 hc-lane land main 다시(전체 검증은 병합기가 돈다)|") ||
 		!strings.Contains(sends, "send|here/t5|") {
 		t.Fatalf("원래 레인에 보냄: %q", sends)
 	}

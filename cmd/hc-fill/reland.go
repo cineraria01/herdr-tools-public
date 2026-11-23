@@ -386,7 +386,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 	if live {
 		switch a, st := relandLive(lane, p, n); st {
 		case "살아 있음":
-			msg := fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 검증 뒤 hc-lane land main 다시", files, n)
+			msg := relandSendMsg(files, n)
 			if rule != "" { // hc send 글은 한 줄 — 규칙 줄마다 「 / 」
 				var ls []string
 				for _, l := range lines(rule) {
@@ -531,6 +531,12 @@ func relandDocsRule(p string) string {
 	return ""
 }
 
+// relandSendMsg: 살아 있는 원래 레인에 보내는 한 줄. 전체 검증은 넣지 않는다(conflict-fast C, 2026-11-23 — 레인 쪽 전체 검증 뒤 병합기가
+// 같은 전체 검증을 또 돌았다. 기본 브랜치 관문은 병합기 검증 그대로)
+func relandSendMsg(files, n string) string {
+	return fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 푼 파일 둘레의 빌드·시험만 돌린 뒤 hc-lane land main 다시(전체 검증은 병합기가 돈다)", files, n)
+}
+
 // relandBrief: 다시 맞춤 레인 지시문(착지·정리 절차는 hc-fill이 run 지시문 끝에 붙인다). rule이 있으면 「## 이 저장소의 문서 규칙」 절로
 func relandBrief(name, lane, n, mach, files, lg, ev, rule string) string {
 	if rule != "" {
@@ -547,7 +553,7 @@ func relandBrief(name, lane, n, mach, files, lg, ev, rule string) string {
 1. 이 작업 트리(가지 %[1]s, origin/main에서 시작)를 반송된 제출로 옮긴다: git fetch origin refs/merge-failed/%[3]s 뒤 git reset --keep FETCH_HEAD
 2. git rebase origin/main — 충돌은 양쪽 내용을 살려 풀고 고친 파일을 경로로 git add 한 뒤 git rebase --continue. git stash·rebase --skip·rebase --abort 금지.
 3. 커밋 제목은 원래 그대로 둔다(머리 %[2]s: — 이 이름을 --after로 기다리는 레인이 풀리게). 풀이로 새 커밋을 더하면 머리는 %[1]s:.
-4. 저장소 검증(.claude/herdr-verify.sh). 실패하면 원인을 고쳐 커밋하고 다시.
+4. 충돌을 푼 파일 둘레의 빌드·시험만 돌린다(그 파일이 든 묶음·꾸러미의 빌드와 그 파일을 다루는 시험). 실패하면 원인을 고쳐 커밋하고 다시. 전체 검증은 병합기가 착지 때 돈다 — 레인에서 다시 돌리지 않는다.
 5. 충돌을 풀며 기능 코드의 뜻(동작)을 바꿔야 했으면 착지하지 말고 hc-lane report 막힘 - "<까닭>" 을 부르고 멈춘다. 아니면 아래 착지·정리 절차(hc-lane land main → hc-lane clean)대로.
 6. 또 rebase 충돌로 반송되면 hc-fill이 설정 횟수까지 다시 넣고, 넘으면 지휘에 막힘으로 넘긴다 — 이 레인은 따로 할 일 없다.
 

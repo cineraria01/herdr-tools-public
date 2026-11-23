@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/landing"
 )
@@ -212,6 +213,40 @@ func metaPrio(ref, old, pl string, refs map[string]string) bool {
 	return true
 }
 
+// submitConflict <origin/<기본> 커밋> <제출 커밋>(conflict-fast A, 2026-11-23 — 병합기 충돌 반송 28건 가운데 8건은 제출할 때 이미
+// 기본 브랜치와 충돌했는데 줄에서 중앙값 29분을 기다린 뒤 반송됐다): 3자 합침으로 충돌하면 큐에 넣지 않고 종료 3(직접 착지의 rebase
+// 충돌과 같은 「양쪽 살려 풀고 같은 줄을 다시」 — 다만 rebase는 시작하지 않았다). 판정을 못 하면(git 실패·시간 넘김·옛 git) 지금처럼 낸다.
+// rebase를 마치면 origin/<기본>이 제출 커밋의 조상이라 3자 합침은 늘 깨끗하다 — 같은 줄을 다시 부르면 이 검사는 통과한다
+func submitConflict(ob, sh string) {
+	fs, rc := gitx.MergeConflicts("", ob, sh)
+	switch rc {
+	case 0:
+		return
+	case 1:
+	default:
+		eprintf("hc-lane land(제출): origin/%s 와의 충돌을 판정하지 못했다(git merge-tree 종료 %d) — 판정 없이 제출한다(병합기가 차례에 본다)\n", base, rc)
+		return
+	}
+	// 기준에 같은 patch-id 커밋이 든 제출은 rebase가 그 커밋을 건너뛰어 깨끗할 수 있다 — 거절하지 않고 차례에 맡긴다(감사 atoxvrv-yecgh5 낮음 3)
+	if eq, rc := gitx.CherryEquivalent("", ob, sh); rc != 0 || eq {
+		return
+	}
+	j := events.Flat(strings.Join(fs, " "))
+	if c := events.Bcut(200, j); c != j { // 글자 중간을 자르지 않는다
+		j = c + " …"
+	}
+	if j == "" {
+		j = "파일 모름"
+	}
+	eprintf("hc-lane land(제출): 제출 커밋(%s)이 origin/%s 와 충돌한다(충돌 %s) — 큐에 넣지 않았다. git rebase origin/%s 로 양쪽 내용을 살려 풀고(고친 파일을 경로로 git add → git rebase --continue) 푼 파일 둘레의 빌드·시험만 돌린 뒤 같은 줄(hc-lane land %s)을 다시 — 전체 검증은 병합기가 돈다\n",
+		cut(sh, 9), base, j, base, base)
+	if lvd != "" {
+		// rebase하면 승인 커밋이 바뀐다 — 병합기 반송 뒤 다시 맞춤과 같은 길(--verdict 없이 다시 냄, 새 감사 없음)
+		eprintf("hc-lane land(제출): 판정 %s 가 붙은 제출이다 — rebase하면 승인 커밋이 바뀌니 다시 낼 때는 --verdict 없이 hc-lane land %s (병합기 충돌 반송 뒤 다시 맞춤과 같다)\n", lvd, base)
+	}
+	exit(3)
+}
+
 func mreserved(l string) bool {
 	switch l {
 	case base, "merge-batch", "batch", "main", "master":
@@ -390,6 +425,7 @@ func submitCmd() {
 		exit(0)
 	}
 	submitGuard(lq, cur, sh)
+	submitConflict(ob, sh)
 	// 제출 전 싼 사전 검사(go-followups): 병합기의 긴 검증 뒤에야 반송될 것을 몇 초 안에 — 실패면 큐에 넣지 않는다
 	// 돌리는 것은 제출 커밋 속 판만(무시·추적 안 된 로컬 파일을 돌리지 않는다 — committedHook, gofix L12)
 	// 후보 트리에서 훅의 있음·없음·조회 실패를 가른다 — 조회 실패를 「선택 훅 없음」으로 읽고 제출하지 않는다(R-16)
