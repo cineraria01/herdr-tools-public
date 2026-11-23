@@ -148,7 +148,10 @@ func lfail(rc int) {
 	}
 	eprintf("hc-lane land: 전체 로그 %s\n", llog)
 	if os.Getenv("HC_LANE") != "" {
+		// 알림의 결과가 실패한 명령의 모름(lastTimeout — die가 75로)을 덮지 않게(4바퀴 lane/R-4M01)
+		lt := lastTimeout
 		reportCmd(nil, nil, "중간", "-", fmt.Sprintf("land 실패(종료 %d) — 전체 로그 %s", rc, llog))
+		lastTimeout = lt
 	}
 }
 

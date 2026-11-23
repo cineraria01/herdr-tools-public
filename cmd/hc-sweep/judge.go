@@ -56,9 +56,9 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 	st := str(status, "state")
 	// 착지로 끝난 keep 셸 레인: hc keep이 켜진 레인 터미널은 에이전트가 끝나면 셸로 바뀌어 status 없이 live로 남는다(2026-11-21
 	// mini-m4 land-claim-net 13시간). 레인이 제출·착지로 끝났고 작업 트리가 없으면 상태 없음 보호를 풀어 R2로 본다. 사람 keep 목록·
-	// 이름 보호·착지 전 커밋은 아래 그대로 막는다
-	endedKeep := t["status"] == nil && t["keep"] == true && worker && f.worktree == no && f.submitted &&
-		shellName(str(obj(t, "foreground"), "name"))
+	// 이름 보호·착지 전 커밋은 아래 그대로 막는다. 실제 hc는 대체 셸로 위 argv도 바꾼다(["/bin/zsh","-l"] — 셸 칸 꼴, R-4C01)라
+	// 이 경우는 셸 칸 보호도 푼다. 전경이 터미널 자신(쉬는 셸)일 때만 — 그 셸에서 스크립트·bash -c가 돌면 pid가 다르다(R-4A09)
+	endedKeep := t["status"] == nil && t["keep"] == true && worker && f.worktree == no && f.submitted && keepShellIdle(t)
 	guards := []struct {
 		bad bool
 		why string
@@ -70,7 +70,7 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 		{keep[name] || keep[str(t, "address")], "보호: keep 목록"},
 		{strings.HasPrefix(name, "lane-watch-") || str(labels, "hc-lane-watch") == "1", "보호: hc-lane 감시"},
 		{(truthy(t["where"]) || truthy(labels["where"])) && !worker, "보호: 사람이 연 칸(where)"},
-		{truthy(t["shell"]), "보호: 셸 칸"},
+		{truthy(t["shell"]) && !endedKeep, "보호: 셸 칸"},
 	}
 	for _, g := range guards {
 		if g.bad {
@@ -119,6 +119,12 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 		return "R3", ""
 	}
 	return "", fmt.Sprintf("%s, 쉰 지 %d분(R3 6시간 전)", why, idle)
+}
+
+// keepShellIdle: 전경이 셸이고 터미널 자신인가(hc()가 남긴 foreground.self — 쉬는 keep 대체 셸)
+func keepShellIdle(t map[string]any) bool {
+	fg := obj(t, "foreground")
+	return shellName(str(fg, "name")) && fg["self"] == true
 }
 
 // shellName: 전경 프로그램이 셸인가(hc keep이 잃은 프로그램 대신 띄우는 것)
@@ -235,12 +241,6 @@ func thisRun(t map[string]any, row []string) bool {
 // afterCreated: 초 단위 시각 sec이 created_ms가 든 초보다 뒤인가(같은 초면 앞뒤를 모른다)
 func afterCreated(sec int64, created float64) bool {
 	return created > 0 && sec > int64(created)/1000
-}
-
-// hcGit: cwd에서 git(hc exec — launchd가 띄운 git은 ~/Documents에서 TCC에 멈춘다)
-func hcGit(r runner, cwd string, secs int, args ...string) result {
-	a := append([]string{"exec", "--cwd", cwd, "--env", "LC_ALL=C", "--timeout", strconv.Itoa(secs), "--", "git"}, args...)
-	return r(time.Duration(secs+20)*time.Second, nil, "hc", a...)
 }
 
 // unlanded: cwd 저장소에 origin/main에 없는 커밋이 있나(로컬 origin/main, fetch 안 함). cwd 폴더가 없거나(파일로 확인) 저장소가
@@ -478,7 +478,7 @@ func sameRun(t, g map[string]any) bool {
 	shape := t["status"] != nil && (st == "idle" || st == "done")
 	if t["status"] == nil {
 		fg := str(obj(g, "foreground"), "name")
-		shape = g["status"] == nil && g["keep"] == true && shellName(fg) && fg == str(obj(t, "foreground"), "name")
+		shape = g["status"] == nil && g["keep"] == true && keepShellIdle(g) && fg == str(obj(t, "foreground"), "name")
 	}
 	return ok1 && ok2 && c1 == c2 && s1 == s2 && str(g, "name") == str(t, "name") && str(g, "address") == str(t, "address") &&
 		str(g, "state") == "live" && shape

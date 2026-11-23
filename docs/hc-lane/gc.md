@@ -8,6 +8,7 @@
 
 - `hc-lane gc [--on <기계>] --repo <저장소> [--dry-run] [--integ[=<접두>]] [--remote-branches] [--min-age <시간>]`. 먼저 `--dry-run`으로 본다(`origin/<기본>`은 fetch하지 않고 지금 값으로 판정, `--integ` 판정용 커밋 객체만 받는다 — 참조·작업 폴더·index는 그대로).
 - 작업 폴더·가지: 메인 폴더가 아닌 연결된 작업 트리마다 HEAD가 `origin/<기본>`에 다 들어갔고(조상이거나 `git cherry`에 `+` 없음 — rebase로 들어간 것도), 깨끗하고(추적 변경·untracked 없음, 무시된 보관물 `.qa/` 없음), 그 폴더를 cwd로 쓰는 hc 터미널이 없고, 마지막 git 활동이 `--min-age`(기본 24h)보다 오래됐고 멈춘 rebase·merge·cherry-pick·bisect가 없을 때만 teardown → `worktree remove --force` → `branch -D`. 하나라도 아니면 `남김 <폴더> <까닭>`.
+- 「그 폴더를 cwd로 쓰는 터미널」(gc·clean)은 이 기계면 글자가 아니라 디스크로 본다(`hcjson.Uses` — 작업 폴더를 stat하고 cwd에서, 또 cwd의 심볼릭 링크를 푼 실제 경로에서 위로 올라가며 `os.SameFile`, stat·링크 풀기가 「없음」 말고 다른 오류면 쓰는 중. 2026-11-23 gofix5 lane/R-4A02: macOS 기본 파일 시스템은 대소문자·한글 정규화를 가리지 않아 다른 철자로 띄운 터미널을 놓쳤다). `--on`은 그 기계 경로를 여기서 stat할 수 없어 글자로만 견준다(한계).
 - 작업 폴더 없이 남은 로컬 가지: 기본 가지·현재 HEAD·작업 폴더에 붙은 가지·설정 `gc.keep_branches`(빈칸으로 나눈 glob 무늬, 기록용 가지)는 빼고, 같은 판정(병합 커밋이 끼면 안 들어감)에 마지막 커밋과 가지 reflog가 `--min-age`보다 오래됐으면 `branch -D`하고 `지움 가지 <가지> <sha>`를 찍는다.
   안 들어간 가지는 지우지 않고 `남김 가지 <가지> 안 들어감 <n>개 · 마지막 <날짜>`.
 - `--remote-branches`(기본 꺼짐): 원격 `refs/heads/*` 가운데 기본 가지·`gc.keep_branches`를 빼고 같은 판정이면 ls-remote 때 값 그대로일 때만 지운다.

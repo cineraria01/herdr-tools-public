@@ -230,15 +230,21 @@ func gcNoteUnk(ps [][2]string) {
 	}
 }
 
-// busyTerms: 대상 기계의 터미널이고 cwd가 작업 폴더(wt) 안인 것 「<주소> <cwd>」. skipSelf면 부른 터미널 자신은 뺀다(clean)
+// busyTerms: 대상 기계의 터미널이고 cwd가 작업 폴더(wt) 안인 것 「<주소> <cwd>」. skipSelf면 부른 터미널 자신은 뺀다(clean).
+// 이 기계면 디스크로 같은 폴더인지까지 본다(hcjson.Uses — 다른 철자 cwd, gofix5 lane/R-4A02). --on은 글자로만(그 기계 경로는 여기서
+// stat할 수 없다 — 한계, docs/hc-lane/gc.md)
 func busyTerms(ps [][2]string, skipSelf bool) []string {
 	var b []string
+	under := hcjson.Uses
+	if on != "" {
+		under = hcjson.Under
+	}
 	for _, p := range ps {
 		a, ok := localAddr(p[0])
 		if !ok || (skipSelf && on == "" && a == selfTerm) {
 			continue
 		}
-		if p[1] == unkCwd || hcjson.Under(p[1], wt) {
+		if p[1] == unkCwd || under(p[1], wt) {
 			b = append(b, onp(a)+" "+p[1])
 		}
 	}

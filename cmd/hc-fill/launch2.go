@@ -423,6 +423,15 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		}
 		if ss == 2 { // 시작 확인(hc get)을 못 함 — 띄운 주소가 있으니 시작했을 수 있다: 미확정(?)으로 두고 다른 기계에 또 띄우지 않는다(재감사 R-01·R-05)
 			say("모름 %s @%s %s: 시작 확인(hc get)을 못 함 — 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, m, ADDR)
+			// 받은 주소를 시도 기록 8칸에 — 다음 바퀴가 hc get으로 확정한다(fill/R-4M01). 못 적으면 주소 모름 미확정 그대로
+			if !dry && tryEdit(lane, func(r Row) Row {
+				if r.F(2) == RID && r.F(3) == m && r.F(6) == "?" {
+					return r.Set(8, ADDR)
+				}
+				return r
+			}) != 0 {
+				say("경고 %s: 시도 기록에 받은 주소를 적지 못함", lane)
+			}
 			NOW = append(NOW, m)
 			bad = true
 			break

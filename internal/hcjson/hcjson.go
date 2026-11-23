@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -360,13 +361,66 @@ func (l List) Machine(name string) (Machine, bool) {
 }
 
 // Under: cwd가 dir이거나 그 아래인가 — 글자로(filepath.Clean, 대소문자 그대로, `/a/wt`가 `/a/wt2`에 걸리지 않게 경계까지).
-// 심볼릭 링크는 부르는 쪽이 푼다(원격 경로는 이 기계에서 풀 수 없다). hc-lane busyTerms와 hc-sweep 분리 작업 트리 지우기가 같이 쓴다
+// 이 기계 경로는 Uses(디스크로 같은 폴더인지까지)를 쓴다 — Under만 쓰는 것은 원격 기계 경로(이 기계에서 stat할 수 없다)
 func Under(cwd, dir string) bool {
 	if cwd == "" || dir == "" {
 		return false
 	}
 	c, d := filepath.Clean(cwd), filepath.Clean(dir)
 	return c == d || strings.HasPrefix(c, strings.TrimSuffix(d, string(filepath.Separator))+string(filepath.Separator))
+}
+
+// Uses: 이 기계 터미널의 cwd가 dir이거나 그 아래인가 — 글자(Under)와 디스크로(gofix5 lane/R-4A02·merger/R-4A03: macOS 기본 파일
+// 시스템은 대소문자·한글 정규화를 가리지 않아 다른 철자가 같은 폴더다. hc는 띄울 때 준 글자 그대로 돌려준다). 디스크는 dir을 stat하고
+// cwd에서 글자로 위로 올라가며 os.SameFile로 견주고, 아니면 cwd의 가장 깊은 「있는」 조상을 filepath.EvalSymlinks로 푼 실제 경로에서도
+// 위로 올라가며 견준다(S5-01 — 링크가 dir 맨 위가 아니라 그 아래 폴더를 가리키면 글자 조상 어디도 dir과 같지 않다). dir이 없으면 글자만,
+// dir을 stat하지 못하거나(없음 말고) cwd 쪽 stat·링크 풀기가 「없음」 말고 다른 오류면 true(모르면 쓰는 중). 원격 기계 경로는 여기서
+// stat할 수 없다 — 부르는 쪽이 Under만 쓴다
+func Uses(cwd, dir string) bool {
+	if Under(cwd, dir) {
+		return true
+	}
+	if cwd == "" || dir == "" {
+		return false
+	}
+	di, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	walk := func(p string) bool { // p와 그 글자 조상 가운데 dir과 같은 폴더가 있거나 모르면 true
+		for {
+			st, err := os.Stat(p)
+			if (err == nil && os.SameFile(st, di)) || (err != nil && !os.IsNotExist(err)) {
+				return true
+			}
+			up := filepath.Dir(p)
+			if up == p {
+				return false
+			}
+			p = up
+		}
+	}
+	p := filepath.Clean(cwd)
+	if walk(p) {
+		return true
+	}
+	for {
+		q, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return walk(q)
+		}
+		if !os.IsNotExist(err) {
+			return true
+		}
+		up := filepath.Dir(p)
+		if up == p {
+			return false
+		}
+		p = up
+	}
 }
 
 // ByAddress: 주소가 addr인 항목 전부(둘이면 둘 다 — 부르는 쪽이 모름으로)

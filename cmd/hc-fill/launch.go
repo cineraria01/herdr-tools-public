@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -383,9 +384,14 @@ func tryOldBusy(name, rid string) bool {
 	return false
 }
 
+// unsureWarn: 미확정 시도 기다림이 이만큼 바퀴 이어지면 키로 한 번 막힘 사건(fill/R-4M01 — 사건 없이 끝없이 wait였다)
+const unsureWarn = 5
+
 // tryUnsure: 같은 줄 ID의 미확정 시도(주소 칸 ? — 띄우기 시간 넘김·주소 못 읽음·띄운 직후 죽음)가 있으면 그 기계가 끊겼거나
-// 그 이름의 터미널이 보이는 동안 기다린다(참 — 다른 기계에 또 띄우지 않는다, gofix-fill F01·E02). 연결된 기계에 그 이름 터미널이
-// 없으면 안 떴다 — 기록을 확정 실패(-)로 고치고 거짓
+// 그 시도일 수 있는 터미널이 보이는 동안 기다린다(참 — 다른 기계에 또 띄우지 않는다, gofix-fill F01·E02). 그 시도일 수 있는 것:
+// 같은 이름, 받은 주소(8칸 — hc-lane 종료 8 등에서 받음), 주소를 못 받았으면 라벨 목록(hc-lane=1)의 이름 모를 터미널(재감사3
+// fill/R-202). 받은 주소는 hc get으로 확정한다 — 모름·살아 있음은 기다림, 없음(또는 다른 이름)이면 안 떴다: 확정 실패(-)로
+// 고치고 거짓. 무관한 이름 없는 터미널은 보지 않는다(재감사4 fill/R-4M01). 기다림 바퀴 수는 9칸
 func tryUnsure(name, rid string) bool {
 	var r Row
 	for _, x := range readRows(DATA + "/try.tsv") {
@@ -397,22 +403,63 @@ func tryUnsure(name, rid string) bool {
 	if r == nil {
 		return false
 	}
-	m := r.F(3)
-	if m != LOCAL && !connHas(m) {
-		say("미확정 시도 기다림 %s @%s: 연결 안 됨 — 떴는지 몰라 다른 기계에 띄우지 않음", name, m)
+	m, a := r.F(3), dash(r.F(8))
+	wait := func(f string, v ...any) bool {
+		say(f, v...)
+		n, _ := strconv.Atoi(r.F(9))
+		n++
+		if !dry && tryEdit(name, func(x Row) Row {
+			if x.F(2) == rid && x.F(6) == "?" {
+				return x.Set(8, a).Set(9, strconv.Itoa(n))
+			}
+			return x
+		}) == 0 && n >= unsureWarn { // 키가 같으면 hc-lane이 한 번만 남긴다
+			aesc(name, qown(name), fmt.Sprintf("미확정 시도 %s @%s 기다림 %d바퀴 — 떴는지 확정 못 함(그 기계 터미널을 확인·정리)", name, m, n), "hf:unsure:"+rid)
+		}
 		return true
 	}
+	if m != LOCAL && !connHas(m) {
+		return wait("미확정 시도 기다림 %s @%s: 연결 안 됨 — 떴는지 몰라 다른 기계에 띄우지 않음", name, m)
+	}
 	for _, t := range TERMS {
-		// 이름 칸 모름(-)도 그 시도일 수 있다(재감사3 fill/R-202)
-		if t.M == m && (t.Name == name || t.Name == "-") {
-			say("미확정 시도 기다림 %s @%s: 같은 이름(또는 이름 모를) 터미널 %s 가 있다(채택하지 못함 — 지휘가 정리)", name, m, t.Addr)
-			return true
+		if t.M == m && (t.Name == name || (a != "-" && t.Addr == a) || (a == "-" && t.Name == "-" && has(LANEADDR, t.Addr))) {
+			return wait("미확정 시도 기다림 %s @%s: 그 시도일 수 있는 터미널 %s 가 있다(채택하지 못함 — 지휘가 정리)", name, m, t.Addr)
+		}
+	}
+	if a != "-" {
+		t, found, err := hcGet(a)
+		switch {
+		case err != nil:
+			return wait("미확정 시도 기다림 %s @%s: 받은 주소 %s 를 확인하지 못함(%v)", name, m, a, err)
+		case found && (!t.HasName || t.Name == name):
+			return wait("미확정 시도 기다림 %s @%s: 받은 주소 %s 가 살아 있다(목록엔 아직 없음)", name, m, a)
 		}
 	}
 	if !dry && tryput(name, rid, m, r.F(4), r.F(5), "", "") != 0 {
 		return true
 	}
 	return false
+}
+
+// tryEdit: 그 이름의 시도 기록 줄을 f로 고쳐 쓴다(다른 줄은 그대로). 못 읽거나 못 쓰면 1 — 고치지 않는다
+func tryEdit(name string, f func(Row) Row) int {
+	file := DATA + "/try.tsv"
+	text, ok := readFile(file)
+	if !ok {
+		return 1
+	}
+	var b strings.Builder
+	for _, l := range lines(text) {
+		if r := splitRow(l); r.F(1) == name {
+			l = f(r).Line()
+		}
+		b.WriteString(l + "\n")
+	}
+	if err := writeAtomic(file, b.String()); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // try_prune: 대기열에 없고, 연결된 기계에서 그 이름 터미널도 없는 시도 기록을 지운다

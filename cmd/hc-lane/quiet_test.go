@@ -65,7 +65,7 @@ func TestCleanedEvent(t *testing.T) {
 			strings.Join([]string{"2026-11-22T00:30:00Z", "m", "m/t1", "lane-a", "정리됨", "-", "hc-sweep R2", c.tn}, tab),
 		}
 		got := false
-		for _, l := range e.newEvents(cand, "") {
+		for _, l := range e.newEvents(nil, cand, "") {
 			if strings.Contains(l, tab+"멈춤"+tab) {
 				got = true
 				if !strings.Contains(l, "뜻밖의 종료(정리됨) hc-sweep R2") {

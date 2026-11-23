@@ -56,8 +56,38 @@ func secOrphanSkip(k *K) {
 	k.check("다른 도구(herdr-sync)가 남긴 무리 → hc-fill 바퀴는 돈다", k.rc != 75 && !strings.Contains(k.out, "건너뜀"), fmt.Sprint(k.rc), k.out)
 	k.check("다른 도구의 기록은 그대로(신호 없음)", nonEmpty(p) && syscall.Kill(pg, 0) != nil && aliveFile(k.T+"/os-bg"), p)
 
+	// keep 기록(끝까지 가게 둔 일 — 우두머리가 살아 있다): 다른 도구의 것이면 hc-fill 바퀴는 돈다(재감사4 fill/R-4M02 — 이 갈래를 보는 시험이 없어
+	// orphan.go keep 갈래의 o.mine()을 지워도 통과했다). 대조: hc-fill의 keep 기록이면 75
+	kc := exec.Command("sh", "-c", "sleep 60")
+	kc.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := kc.Start(); err != nil {
+		k.t.Fatal(err)
+	}
+	kpg := kc.Process.Pid
+	defer func() { syscall.Kill(-kpg, syscall.SIGKILL); kc.Wait() }()
+	kst, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(kpg)).Output()
+	if err != nil {
+		k.t.Fatal(err)
+	}
+	kp := fmt.Sprintf("%s/%d", rec, kpg)
+	keep := func(who string) {
+		write(k.t, kp, fmt.Sprintf("%d\t%s\t1999999\tx\tkeep\t%s\n", kpg, strings.TrimSpace(string(kst)), who))
+	}
+	os.Remove(p)
+	keep("herdr-sync")
+	rcs := []int{}
+	for i := 0; i < 3; i++ {
+		k.run("run")
+		rcs = append(rcs, k.rc)
+	}
+	k.check("다른 도구의 keep 기록(우두머리 삶) → hc-fill 바퀴는 돈다", !strings.Contains(fmt.Sprint(rcs), "75") && nonEmpty(kp), fmt.Sprint(rcs), k.out)
+	keep("hc-fill")
+	k.run("run")
+	k.check("대조: hc-fill의 keep 기록이면 75", k.rc == 75 && nonEmpty(kp), fmt.Sprint(k.rc), k.out)
+	os.Remove(kp)
+
 	put("") // 옛 꼴 — 누구 것인지 모른다
-	var rcs []int
+	rcs = nil
 	for i := 0; i < 9; i++ {
 		k.run("run")
 		rcs = append(rcs, k.rc)

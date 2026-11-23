@@ -96,17 +96,19 @@ func runCmd(o cmdOpt, name string, args ...string) int {
 	if o.noLimit {
 		err = c.Run()
 	} else if proc.Limit(c.Args) == 0 {
-		// 상한 없는 명령(검증·착지 훅 — bash 등)도 끝난 뒤 출력 관은 유예만큼만 기다린다. 남긴 배경 프로세스가 관을 쥐면 모름(재감사
-		// 3바퀴 merger/R-3M07 — 옛 판은 그 배경 프로세스가 끝날 때까지 hc-lane land가 끝나지 않았다)
+		// 상한 없는 명령(검증·착지 훅 — bash 등)도 끝난 뒤 출력 관은 유예만큼만 기다린다(재감사 3바퀴 merger/R-3M07 — 옛 판은 남긴
+		// 배경 프로세스가 끝날 때까지 hc-lane land가 끝나지 않았다). 관을 쥔 것이 남아도 우두머리는 끝났고 그 출력은 다 받았다 — 결과는
+		// 우두머리의 종료 코드 그대로(ErrWaitDelay는 그것이 0일 때만 온다, 0 아니면 ExitError). 잘린 것은 남은 프로세스의 뒤 출력뿐
+		// (4바퀴 merger/R-4M01 · lane/R-4M01 — 124로 두면 통과한 검증이 land 1·반송이 됐다)
 		err = proc.RunPipeGrace(c, pipeGrace)
+		if errors.Is(err, exec.ErrWaitDelay) && c.ProcessState != nil && c.ProcessState.Success() {
+			eprintf("hc-lane: 경고 — %s 은 0으로 끝났는데 남은 배경 프로세스가 출력 관을 %v 넘게 쥐어 관을 닫았다(그 뒤 출력은 버림)\n", name, pipeGrace)
+			err = nil
+		}
 	} else {
 		err = proc.Run(c) // git·hc·ssh 등은 상한 안에서만(proc.Limit)
 	}
-	held := errors.Is(err, exec.ErrWaitDelay)
-	if held {
-		eprintf("hc-lane: %s 이 끝났는데 남은 배경 프로세스가 출력 관을 %v 넘게 쥐었다 — 결과 모름\n", name, pipeGrace)
-	}
-	lastTimeout = held || errors.Is(err, proc.ErrTimeout)
+	lastTimeout = errors.Is(err, exec.ErrWaitDelay) || errors.Is(err, proc.ErrTimeout)
 	return code(err)
 }
 

@@ -31,8 +31,9 @@ func RunMax(c *exec.Cmd, d time.Duration) error {
 }
 
 // RunPipeGrace: 상한 없이(RunMax(c, 0)처럼 무리도 없이) 기다리되, 자식이 끝난 뒤 출력 관은 grace만 기다린다 — 남은 배경 프로세스가
-// 관을 쥐면 exec.ErrWaitDelay(Code → TimeoutCode, 모름). 검증·착지 훅처럼 기다림이 일인 명령(재감사 3바퀴 merger/R-3M07 — 옛 판은
-// 그 배경 프로세스가 끝날 때까지 돌아오지 않았다)
+// 관을 쥐면 exec.ErrWaitDelay(자식이 0으로 끝났을 때만 — 0 아니면 ExitError). 검증·착지 훅처럼 기다림이 일인 명령(재감사 3바퀴
+// merger/R-3M07 — 옛 판은 그 배경 프로세스가 끝날 때까지 돌아오지 않았다). 그 ErrWaitDelay를 통과로 볼지는 부르는 쪽이 정한다
+// (hc-lane runCmd는 c.ProcessState가 성공이면 0 + 경고 — 4바퀴 merger/R-4M01)
 func RunPipeGrace(c *exec.Cmd, grace time.Duration) error {
 	c.WaitDelay = grace
 	return c.Run()

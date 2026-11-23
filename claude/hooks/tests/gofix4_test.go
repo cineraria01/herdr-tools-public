@@ -2,11 +2,17 @@ package tests
 
 // gofix4-hooks(2026-11-23 Go 전환 재감사 바퀴 3): 고치기 전 코드에서 실패하는 시험. 지적 ID는 재감사 보고서의 것.
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
-// R-3A01: 대소문자만 바꾼 이름 변경 뒤에도 옛 철자 글롭이 산 주인 A의 미커밋 파일(새 철자·옛 철자 둘 다)에 맞아 막힌다
+// R-3A01: 대소문자만 바꾼 이름 변경 뒤에도 옛 철자 글롭이 산 주인 A의 미커밋 파일(새 철자·옛 철자 둘 다)에 맞아 막힌다.
+// 재감사4 hooks/R-4M01: 새 철자 글롭·글자 경로도 — 옛 철자 하나만 남기는 틀린 고침(열쇠마다 철자 하나)이 통과하지 않게
 func TestCotenantCaseRenameGlob(t *testing.T) {
-	for _, cmd := range []string{"git add 'N*.txt'", "git commit -m x -- 'Docs/*.md'", "git add 'D*'"} {
+	for _, cmd := range []string{"git add 'N*.txt'", "git commit -m x -- 'Docs/*.md'", "git add 'D*'",
+		"git add 'n*.txt'", "git commit -m x -- 'docs/*.md'", "git add n.txt", "git commit -m x -- docs"} {
 		t.Run(cmd, func(t *testing.T) {
 			c := newCG(t)
 			R, A, _ := repoAB(c)
@@ -22,8 +28,8 @@ func TestCotenantCaseRenameGlob(t *testing.T) {
 			c.git(R, "mv", "Docs", "docs.tmp") // 대소문자를 무시하는 파일시스템은 폴더 이름을 한 번에 못 바꾼다
 			c.git(R, "mv", "docs.tmp", "docs")
 			c.run("sb", "Bash", cmd)
-			if c.RC != 2 {
-				t.Errorf("rc=%d(want 2 — A의 미커밋 이름 변경) err=[%s]", c.RC, c.ERR)
+			if own := fmt.Sprintf("owner-%d", A); c.RC != 2 || !strings.Contains(c.ERR, own) {
+				t.Errorf("rc=%d(want 2 — 임대 주인 %s의 미커밋 이름 변경) err=[%s]", c.RC, own, c.ERR)
 			}
 		})
 	}

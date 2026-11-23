@@ -262,39 +262,62 @@ func rexec(m string, args ...string) (string, int) {
 
 func nf7(l string) bool { return l != "" && strings.Count(l, tab) >= 6 }
 
+// 바퀴 창: 새 사건 후보는 기계마다 끝 evWin줄, 그 앞 evCtx줄은 판정 문맥(마지막 report)으로만 — 착지가 창 밖으로 빠진
+// 정리됨이 거짓 「멈춤 뜻밖의 종료(정리됨)」이 되지 않게(watch-window-stale-stop, 2026-11-23)
+// ponytail: 문맥도 끝 evWin+evCtx줄까지 — 앞 report와 정리됨 사이가 evCtx줄을 넘으면 다시 거짓 멈춤. 바퀴마다 기계마다 최대 2000줄(줄 평균 약 210바이트 ≈ 420KB)
+const evWin, evCtx = 500, 1500
+
 // evread: 이 기계와 ems 기계의 사건(7칸 이상 줄만). 원격 줄은 기계·터미널 칸을 hc 이름으로. 못 읽은 기계는 「모름 <기계>」
 func (e *ev) evread(n int) []string {
-	var out []string
-	ls, _ := tailFileLines(e.ed+"/events.tsv", n)
-	for _, l := range ls {
-		if nf7(l) {
-			out = append(out, l)
-		}
+	_, w := e.evreadCtx(n, 0)
+	return w
+}
+
+// evreadCtx: 기계마다 끝 n+c줄을 읽어 끝 n줄은 win, 그 앞(있는 만큼)은 ctx로. n이 0이면 전부 win
+func (e *ev) evreadCtx(n, c int) (ctx, win []string) {
+	nr := n
+	if n > 0 {
+		nr = n + c
 	}
-	for _, m := range e.unk {
-		out = append(out, "모름 "+m)
-	}
-	for _, m := range e.ems {
-		o, rc := rexec(m, "sh", "-c", evrd, "hc-lane", strconv.Itoa(n))
-		if rc != 0 {
-			if rc != 9 {
-				out = append(out, "모름 "+m)
-			}
-			continue
+	add := func(raw []string, fix func(string) string) {
+		k := 0
+		if n > 0 && len(raw) > n {
+			k = len(raw) - n
 		}
-		for _, l := range strings.Split(o, "\n") {
+		for i, l := range raw {
 			if !nf7(l) {
 				continue
 			}
+			if i < k {
+				ctx = append(ctx, fix(l))
+			} else {
+				win = append(win, fix(l))
+			}
+		}
+	}
+	ls, _ := tailFileLines(e.ed+"/events.tsv", nr)
+	add(ls, func(l string) string { return l })
+	for _, m := range e.unk {
+		win = append(win, "모름 "+m)
+	}
+	for _, m := range e.ems {
+		o, rc := rexec(m, "sh", "-c", evrd, "hc-lane", strconv.Itoa(nr))
+		if rc != 0 {
+			if rc != 9 {
+				win = append(win, "모름 "+m)
+			}
+			continue
+		}
+		add(strings.Split(strings.TrimRight(o, "\n"), "\n"), func(l string) string {
 			f := strings.Split(l, tab)
 			f[1] = m
 			if f[2] != "-" && !strings.Contains(f[2], "/") {
 				f[2] = m + "/" + f[2]
 			}
-			out = append(out, strings.Join(f, tab))
-		}
+			return strings.Join(f, tab)
+		})
 	}
-	return out
+	return ctx, win
 }
 
 // inseen: 그 파일들에 같은 사건(nk로 견줌)이 있으면 참
@@ -424,8 +447,8 @@ func (e *ev) loop(to int64) int {
 			}
 		}
 		e.pick()
-		// ponytail: 바퀴마다 기계마다 끝 500줄만 본다 — 한 바퀴 사이에 한 기계에 500건 넘게 쌓이면 앞의 것을 놓친다
-		out := e.evread(500)
+		// ponytail: 바퀴마다 기계마다 끝 evWin줄만 새 사건으로 본다 — 한 바퀴 사이에 한 기계에 evWin건 넘게 쌓이면 앞의 것을 놓친다
+		ctx, out := e.evreadCtx(evWin, evCtx)
 		var mu, evl []string
 		for _, l := range out {
 			if m, ok := strings.CutPrefix(l, "모름 "); ok {
@@ -459,7 +482,7 @@ func (e *ev) loop(to int64) int {
 			e.lsLanes()
 		}
 		if wantStop {
-			st = e.stopped(evl, mu)
+			st = e.stopped(append(append([]string(nil), ctx...), evl...), mu) // 마지막 report는 창 앞 문맥까지 보고
 			cand = append(cand, st...)
 		}
 		if e.ec == "watch" && (!e.lsok || e.myLaneLive()) || fillq() {
@@ -490,7 +513,7 @@ func (e *ev) loop(to int64) int {
 		if e.myp != "" && strings.Contains(strings.Join(cand, "\n"), "@") {
 			born, _ = terminalCreatedMs(e.myp)
 		}
-		nw := e.newEvents(cand, born)
+		nw := e.newEvents(ctx, cand, born)
 		if len(nw) > 0 && e.emit(nw) == 0 {
 			if e.ec != "watch" {
 				return 0

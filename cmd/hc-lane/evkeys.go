@@ -79,8 +79,9 @@ func turnOf(f []string) string {
 	return "-"
 }
 
-// newEvents: 커서·sent에 없는 새 사건(셸 판 ev_cmd의 큰 awk) — 정리됨 판정, 지휘 거름, --state·--since 거름
-func (e *ev) newEvents(cand []string, born string) []string {
+// newEvents: 커서·sent에 없는 새 사건(셸 판 ev_cmd의 큰 awk) — 정리됨 판정, 지휘 거름, --state·--since 거름.
+// ctx는 창 앞의 사건 — 판정 문맥(마지막 report)으로만 쓰고 내보내지 않는다
+func (e *ev) newEvents(ctx, cand []string, born string) []string {
 	seen := map[string]bool{}
 	fl := ""
 	cl, _ := readLines(e.cur)
@@ -104,6 +105,11 @@ func (e *ev) newEvents(cand []string, born string) []string {
 	}
 	W := "," + e.sts + ","
 	lr := newLastRep()
+	for _, l := range ctx { // 아래 cand 고리와 같은 열쇠·같은 규칙(정리됨·멈춤은 report가 아니다)
+		if f := strings.Split(l, tab); len(f) >= 7 && f[4] != "멈춤" && f[4] != "정리됨" {
+			lr.rep(f[4], f[5], turnOf(f), fld(f, 3)+"\x1c"+fld(f, 4))
+		}
+	}
 	done := map[string]bool{}
 	var out []string
 	for _, l := range cand {

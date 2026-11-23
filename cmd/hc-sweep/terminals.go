@@ -44,16 +44,19 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 				f.worktree, f.unlanded = no, no
 			}
 		}
-		var dtRepo string
+		var dtRepo, dtTop string
 		if f.worktree == yes && now-orNow(t, now) >= 30*minute {
-			// 분리·깨끗한 읽기 전용 작업 트리(감사 스크립트의 worktree add --detach): 닫는다. 지우기는 HC_SWEEP_DETACHED_REMOVE=1일 때만(detachedAfterClose)
+			// 분리·깨끗한 읽기 전용 작업 트리(감사 스크립트의 worktree add --detach): 닫고 지운다(detachedAfterClose — =0이면 닫기만).
 			// 다른 live 터미널이 그 폴더를 쓰거나 모르면 닫지도 지우지도 않는다(worktreeRemove가 지우기 직전 한 번 더 본다)
-			if dtRepo = detachedClean(str(t, "cwd"), run); dtRepo != "" {
-				if f.wtwhy = dirInUse(str(t, "cwd"), str(t, "address"), run); f.wtwhy != "" {
+			var why string
+			if dtRepo, dtTop, why = detachedClean(str(t, "cwd"), run); dtRepo != "" {
+				if f.wtwhy = dirInUse(dtTop, str(t, "address"), run); f.wtwhy != "" {
 					dtRepo = ""
 				} else {
 					f.worktree, f.unlanded, f.detached = no, no, true
 				}
+			} else if why != "" {
+				f.wtwhy = why
 			}
 		}
 		if (isWorker(t) || f.detached) && f.worktree == no { // R2 보호에만 쓴다
@@ -107,9 +110,12 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			fmt.Printf("작업 트리 정리%s: %s %s — %s\n", fail, wtRepo, wtBranch, msg)
 		}
 		if dtRepo != "" && strings.HasPrefix(res, "닫힘") {
-			line, why, msg := detachedAfterClose(dtRepo, str(t, "cwd"), str(t, "address"), run)
+			line, why, msg, bad := detachedAfterClose(dtRepo, dtTop, run)
 			if why != "" {
 				record(str(t, "address"), str(t, "name"), why, dtRepo, "-", msg)
+			}
+			if bad {
+				failed++
 			}
 			fmt.Println(line)
 		}

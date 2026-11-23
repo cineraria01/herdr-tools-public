@@ -40,8 +40,11 @@ func secGofix4(k *K) {
 	k.check("fill/R-202 이름 없는 전체 목록 항목: 착수 1·wait",
 		k.kStarts("sample3") == 1 && k.state("sample3") == "wait" && k.kUnsure("sample3", "box-1"), k.where("sample3"), k.out)
 
-	// 대조: 연결된 box-1에 그 터미널이 정말 없으면(두 목록 다 없음) 안 떴다고 확정하고 다시 띄운다
+	// 대조: 연결된 box-1에 그 터미널이 정말 없으면(두 목록 다 없고, 받은 주소도 hc get이 없음 — fill/R-4M01) 안 떴다고 확정하고 다시 띄운다
 	unsure("sample4")
+	k.set("HC_FAKE_GONE=box-1/sample4")
 	k.run("run")
-	k.check("fill/R-202 대조: 두 목록 다 없으면 다시 띄운다", k.kStarts("sample4") == 2 && k.state("sample4") == "up", k.where("sample4"), k.out)
+	k.unset("HC_FAKE_GONE")
+	// 가짜 hc는 같은 주소에 다시 띄우니 그 바퀴 시작 확인도 GONE으로 모름 — 다시 띄움(착수 2)만 본다
+	k.check("fill/R-202 대조: 두 목록 다 없으면 다시 띄운다", k.kStarts("sample4") == 2, k.where("sample4"), k.out)
 }

@@ -13,7 +13,7 @@ func TestJudgeLandedKeepShell(t *testing.T) {
 	shell := func(extra ...any) map[string]any {
 		m := map[string]any{"address": "t7", "name": "land-claim-net", "state": "live", "keep": true, "status": nil,
 			"labels": map[string]any{"hc-lane": "1", "where": "app / 1"}, "created_ms": now - 14*60*minute,
-			"foreground": map[string]any{"name": "zsh"}, "cwd": "/r.wt/land-claim-net"}
+			"foreground": map[string]any{"name": "zsh", "self": true}, "cwd": "/r.wt/land-claim-net", "shell": true}
 		for i := 0; i+1 < len(extra); i += 2 {
 			m[extra[i].(string)] = extra[i+1]
 		}
@@ -44,6 +44,10 @@ func TestJudgeLandedKeepShell(t *testing.T) {
 	if r, _ := judge(shell("labels", map[string]any{"where": "app / 1"}), ended, now, none); r != "" {
 		t.Fatal("레인이 아닌 사람 셸 칸을 닫음")
 	}
+	// R-4A09: 전경이 셸 이름이어도 터미널 자신이 아니면(그 셸에서 스크립트가 돎) 남김 — 셸 칸 보호도 그대로
+	if r, why := judge(shell("foreground", map[string]any{"name": "zsh", "self": false}), ended, now, none); r != "" || why != "에이전트 상태 없음" {
+		t.Fatalf("keep 셸에서 스크립트가 도는데 닫음: %q %q", r, why)
+	}
 	if r, _ := judge(shell("keep", false), ended, now, none); r != "" {
 		t.Fatal("keep이 아닌 status 없는 터미널을 닫음(셸로 바뀐 레인이 아니다)")
 	}
@@ -64,7 +68,7 @@ func TestSameRunKeepShellShape(t *testing.T) {
 	now := float64(time.Now().UnixMilli())
 	term := func(extra ...any) map[string]any {
 		m := map[string]any{"address": "t7", "name": "k", "state": "live", "keep": true, "status": nil,
-			"created_ms": now, "status_ms": now, "foreground": map[string]any{"name": "zsh"}}
+			"created_ms": now, "status_ms": now, "foreground": map[string]any{"name": "zsh", "self": true}}
 		for i := 0; i+1 < len(extra); i += 2 {
 			m[extra[i].(string)] = extra[i+1]
 		}
@@ -80,6 +84,7 @@ func TestSameRunKeepShellShape(t *testing.T) {
 		{term("status", idle), false, "그사이 에이전트가 붙음"},
 		{term("foreground", map[string]any{"name": "vim"}), false, "전경이 셸 아님"},
 		{term("foreground", nil), false, "전경 모름"},
+		{term("foreground", map[string]any{"name": "zsh", "self": false}), false, "전경 셸이 터미널 자신 아님(R-4A09)"},
 		{term("keep", false), false, "keep 꺼짐"},
 	}
 	for _, c := range cases {

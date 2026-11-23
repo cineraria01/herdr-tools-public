@@ -39,4 +39,7 @@
     화면으로 잡은 창(status `null` — hc가 막지 않아 창에 답으로 들어간다)은 상한이 지나도 보내지 않고 stderr·`…/hc-lane/watch.log`에 「<지휘> 질문 창 n분째 — 보류 중」 한 줄만 남긴다.
     미룬 사건은 커서에 안 적혀 지휘의 `hc-lane wait`로도 받는다.
     hc에는 대화 입력을 거치지 않는 알림 길이 없다(hc 0.1.21 `hc send --help`).
+  - **바퀴 창**: 바퀴마다 기계마다 `events.tsv` 끝 2000줄을 읽어, 끝 500줄만 새 사건 후보로 보고 그 앞 1500줄은 판정 문맥(레인의 마지막 report)으로만 쓴다(wait도 같다).
+    그래서 착지·판정 줄이 500줄 창 밖으로 빠져도 창 안에 남은 그 레인의 「정리됨」이 「멈춤 뜻밖의 종료(정리됨)」로 되살아나지 않는다(watch-window-stale-stop, 2026-11-23: mini-m4에서 4일 전 끝난 yt-cal-chip이 줄 하나 붙을 때 다시 알려짐).
+    앞 report가 없거나 작업 중이던 레인의 정리됨은 그대로 알린다. 앞 report와 정리됨 사이가 1500줄을 넘으면 다시 거짓 멈춤이 날 수 있다.
   - 손으로 띄우려면(레인 없이 감시만): `hc run --bg --no-notify --rm --name lane-watch-$HC_TERMINAL_ID --label hc-lane-watch=1 -- hc-lane watch --all --to $HC_TERMINAL_ID`

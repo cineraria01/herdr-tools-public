@@ -171,8 +171,10 @@ func hc(args ...string) (map[string]any, error) {
 	m["shell"] = isShellPane(sv)
 	delete(m, "argv")
 	delete(m, "env")
-	if fg := obj(m, "foreground"); fg != nil { // 전경은 이름만(착지한 keep 셸 판정 R-3M02 — argv·pid는 버린다)
-		m["foreground"] = map[string]any{"name": str(fg, "name")}
+	if fg := obj(m, "foreground"); fg != nil { // 전경은 이름과 「터미널 자신인가」만(착지한 keep 셸 판정 R-3M02·R-4A09 — argv·pid 값은 버린다)
+		fp, ok1 := num(fg, "pid")
+		tp, ok2 := num(m, "pid")
+		m["foreground"] = map[string]any{"name": str(fg, "name"), "self": ok1 && ok2 && fp != 0 && fp == tp}
 	} else {
 		delete(m, "foreground")
 	}

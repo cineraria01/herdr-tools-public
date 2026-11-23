@@ -10,19 +10,25 @@ import (
 	"time"
 )
 
-// kpTerm: keep 셸 레인 t7의 hc get 답. fg는 전경 프로그램 이름(argv·pid는 hc-sweep이 버려야 할 칸)
-func kpTerm(created int64, fg string) string {
+// kpTerm: keep 셸 레인 t7의 hc get 답 — 실제 hc 0.1.21 꼴(gofix5 R-4C01): 잃은 프로그램을 셸로 바꾸면 위 argv·pid도 그 셸
+// (["/bin/zsh","-l"]·터미널 pid 4242)이 된다. fg는 전경 프로그램 이름, fgPid는 전경 pid(4242면 쉬는 셸 자신, 다르면 그 셸에서 도는 것 —
+// R-4A09). argv·pid는 hc-sweep이 버려야 할 칸
+func kpTerm(created int64, fg string, fgPid int) string {
 	return fmt.Sprintf(`{"address":"t7","name":"land-keep","state":"live","keep":true,"status":null,"labels":{"hc-lane":"1","where":"app / 1"},`+
-		`"created_ms":%d,"status_ms":%d,"turn":5,"cwd":"/nonexistent-kp/land-keep","argv":["claude","--model","x"],`+
-		`"foreground":{"name":"%s","pid":42,"argv":["%s","-l"]}}`+"\n", created, created, fg, fg)
+		`"created_ms":%d,"status_ms":%d,"turn":5,"cwd":"/nonexistent-kp/land-keep","argv":["/bin/zsh","-l"],"pid":4242,`+
+		`"foreground":{"name":"%s","pid":%d,"argv":["%s","-l"]}}`+"\n", created, created, fg, fgPid, fg)
 }
 
-// kpSweep: 가짜 hc(get은 get-t7.json, kill 뒤엔 finished)와 이 실행 키의 착지 사건을 두고 쓸기를 돌린다
+// kpSweep: 가짜 hc(get은 get-t7.json, kill 뒤엔 finished)와 이 실행 키의 착지 사건을 두고 쓸기를 돌린다(전경은 터미널 자신)
 func kpSweep(t *testing.T, fg string, args ...string) (T, out string, rc int) {
+	return kpSweepPid(t, fg, 4242, args...)
+}
+
+func kpSweepPid(t *testing.T, fg string, fgPid int, args ...string) (T, out string, rc int) {
 	T, e, _ := j2Sweep(t)
 	created := (time.Now().Unix() - 14*3600) * 1000
 	write(t, T+"/ls.json", `{"terminals":[{"address":"t7","state":"live","agent":"zsh","status":null}]}`+"\n")
-	write(t, T+"/get-t7.json", kpTerm(created, fg))
+	write(t, T+"/get-t7.json", kpTerm(created, fg, fgPid))
 	write(t, T+"/home/.local/state/hc-lane/events.tsv",
 		fmt.Sprintf("2026-11-21T10:00:00Z\tm\tt7\tland-keep\t착지\tabc1234\t-\t5\t-\tt7@%d\n", created))
 	script(t, T+"/bin/hc", T, `#!/bin/bash
@@ -69,4 +75,11 @@ func TestKeepShellForegroundBusyKept(t *testing.T) {
 	T, out, rc := kpSweep(t, "vim")
 	c := checker{t: t, out: &out, rc: &rc}
 	c.ok("전경 vim: hc kill 없음", kpKills(T) == 0)
+}
+
+// [R-4A09] 전경이 셸 이름이어도 터미널 자신이 아니면(그 셸에서 스크립트·bash -c가 돎 — pid 다름) 닫지 않는다
+func TestKeepShellForegroundScriptKept(t *testing.T) {
+	T, out, rc := kpSweepPid(t, "zsh", 70614)
+	c := checker{t: t, out: &out, rc: &rc}
+	c.ok("전경 zsh · pid 다름: hc kill 없음", kpKills(T) == 0)
 }
