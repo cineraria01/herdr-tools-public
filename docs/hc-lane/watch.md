@@ -16,7 +16,7 @@
     pid·이름이 맞아도 같은 `hc get`으로 그 터미널에 에이전트가 있는지 가른다(`coordCheck` 한 곳 — watch·`hc-lane coord`·띄우기·hc-fill 주인 확인이 함께 쓴다).
     **없음**: 전경(`foreground.pid`)이 맨 위 `pid`와 같고, 전경 `argv`가 대화형 셸(셸 이름, `-c`·스크립트 인자 없음)이고, `status`가 `null` — 보내지 않고 `지휘 없음 … 에이전트가 끝나 셸만 남음` 한 줄을 watch.log에 남기고 끝낸다(종료 0, 사건은 events에). 다른 지휘가 그 레인 사건을 넘겨받는다.
     **있음**: 전경 pid가 셸과 다름(job control로 에이전트가 전경), 또는 전경이 셸이 아닌 프로그램, 또는 `-c` 셸(터미널을 읽지 않는다).
-    전경 pid가 맨 위와 달라도 전경 argv가 대화형 셸이면(셸 안에서 연 `bash`·`nix-shell` 같은 중첩 셸) 맨 위 셸과 같은 판정이다 — `status` null이면 없음, 남아 있으면 모름(hc는 중첩 셸로 돌아온 것을 알아채지 못해 status가 남을 수 있다, small-usage-fixes 2026-11-23).
+    전경 pid가 맨 위와 달라도 전경 argv가 인자 없는 대화형 셸이면(셸 안에서 연 `bash`·`zsh -i` 같은 중첩 셸) 맨 위 셸과 같은 판정이다(`nix-shell`처럼 `bash --rcfile <경로>` 꼴로 뜬 셸은 알아보지 못해 있음으로 읽는다 — 안전한 쪽) — `status` null이면 없음, 남아 있으면 모름(hc는 중첩 셸로 돌아온 것을 알아채지 못해 status가 남을 수 있다, small-usage-fixes 2026-11-23).
     **모름**: `hc get` 실패, 전경 칸을 못 읽음, 전경이 대화형 셸인데 `status`가 남아 있거나 칸이 없음, 전경 칸이 없는 판에서 맨 위가 대화형 셸 — 보내지도 끝내지도 않고 다음 바퀴에 다시, `lane.watch_hold_max`분 넘게 이어지면 watch.log에 「확인 못 함 n분째 — 보내지 않고 계속 본다」 한 번.
     잰 경우(워커 기계 hc 0.1.21, 견본 `cmd/hc-lane/testdata/agent`, 지휘 맥 0.1.22 견본 둘):
 

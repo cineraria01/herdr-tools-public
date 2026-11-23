@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -217,14 +218,30 @@ func TestPlan(t *testing.T) {
 	shardsWant := []string{ // 조각은 함께 돌아 차례가 없다
 		"test -race -count=1 -timeout 40m -p " + p + " -skip ^TestCotenantGuard$ herdr-tools/a herdr-tools/b",
 	}
-	var prev, runs []string // tests/merger의 part(표 splits 차례): 앞 part는 -skip
-	for _, sp := range splits {
-		if sp.pkg == mod+"tests/merger" {
-			for _, pt := range sp.parts {
-				runs = append(runs, pt.run)
+	partRuns := func(pkg string) (runs []string) { // 그 꾸러미의 part(표 splits 차례)
+		for _, sp := range splits {
+			if sp.pkg == mod+pkg {
+				for _, pt := range sp.parts {
+					runs = append(runs, pt.run)
+				}
+			}
+		}
+		return runs
+	}
+	// 계약 시험 묶음은 표에 글자로 있어야 한다 — 묶음이 빠지거나 이름이 바뀌어 통째 한 조각으로 되돌면 실패(lows-polish 2026-11-24)
+	for pkg, want := range map[string][]string{
+		"tests/merger":   {"^TestMergerContractA$", "^TestMergerContractB$", "^TestMergerContractC$", "^TestMergerContractD$", "^TestMergerContractE$"},
+		"cmd/herdr-sync": {"^TestContractA$", "^TestContractB$", "^TestContractC$", "^TestContractD$", "^TestContractE$"},
+	} {
+		got := partRuns(pkg)
+		for _, w := range want {
+			if !slices.Contains(got, w) {
+				t.Errorf("splits의 %s에 part %s가 없다: %q", pkg, w, got)
 			}
 		}
 	}
+	var prev []string // tests/merger의 part: 앞 part는 -skip
+	runs := partRuns("tests/merger")
 	if len(runs) == 0 {
 		t.Fatal("splits에 tests/merger가 없다")
 	}

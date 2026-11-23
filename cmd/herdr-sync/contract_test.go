@@ -2,7 +2,7 @@ package main
 
 // herdr-sync 계약 시험(옛 tests/herdr-sync.test.sh, 2026-11-21 go-tests-ops): 임시 HOME 셋(맥, 워커 맥 w1, 리눅스 lx — lx는 uname이
 // Linux이고 원격 조각을 dash로 돌린다), 가짜 hc(PATH 앞, machine ls·exec [-i] --on만), 임시 저장소 둘(범용 repo·개인 conf)과 그 bare
-// origin을 두고 herdr-sync 바이너리(clitest.Bin)를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 묶음(TestContractA~C) 안에서는 단계
+// origin을 두고 herdr-sync 바이너리(clitest.Bin)를 밖에서 부른다. 실제 기계·네트워크는 쓰지 않는다. 묶음(TestContractA~E) 안에서는 단계
 // 순서대로 상태를 이어 쓰고, 묶음마다 newSX로 새로 준비한다(2026-11-23 contract-split — 한 시험이던 때 검증의 긴 조각이었다). 뒤 묶음(B~E)이
 // 기대는 상태(처음 맞춘 뒤의 base·레인 클론·나무 줄)는 준비에서 제품 명령을 실제로 돌려 만든다(synced·treePrep). 새 단계는 기대는 상태가
 // 있는 묶음에 넣는다.

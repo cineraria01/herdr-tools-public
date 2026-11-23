@@ -400,7 +400,6 @@ func TestMergerContractB(t *testing.T) {
 
 	// 17. 재제출 경합: Go 병합기는 착지 직전 원격 refs/herdr/landing/<큐>를 올려 착지 중 재제출을 hc-lane land가 종료 2로 거절한다 —
 	//     옛 제출이 막힘 없이 들어가고 큐는 빈다
-	m.merge() // 앞 시험(15)이 남긴 l-cl 제출을 먼저 넣는다
 	m.lane("a", "l-rs", "rs.txt", "rs1")
 	m.land("a", "l-rs")
 	k.stub(filepath.Join(T, "vhook.l-rs"), "#!/bin/sh\nrm -f \"$T/vhook.l-rs\"\ncd \"$W/a/proj\" && git checkout -q -B l-rs origin/main && printf \"rs2\\n\" >rs2.txt && git add rs2.txt && git commit -qm l-rs2 rs2.txt && env -u HERDR_MERGER HC_LANE=l-rs \"$LANE\" land >/dev/null 2>\"$T/rs.err\"\necho $? >\"$T/rs.rc\"\nexit 0\n")

@@ -87,7 +87,8 @@ func agentState(t hcjson.Terminal) (int, string) {
 		if json.Unmarshal(r, &fg) != nil || fg.PID == nil || *fg.PID <= 0 {
 			return 2, "hc get의 전경 프로세스(foreground pid)를 못 읽음"
 		}
-		// 전경이 다른 프로그램(에이전트·그 배경 명령·하단 줄 실행기)이면 있음. 중첩 대화형 셸(bash·nix-shell 안)이면 아래 같은 판정
+		// 전경이 다른 프로그램(에이전트·그 배경 명령·하단 줄 실행기)이면 있음. 인자 없는 중첩 대화형 셸(bash·zsh -i 등)이면 아래 같은
+		// 판정. nix-shell의 `bash --rcfile <경로>` 꼴은 스크립트 인자로 보아 있음으로 읽는다(안전한 쪽)
 		if *fg.PID != t.PID && (len(fg.Argv) == 0 || !interactiveShell(fg.Argv)) {
 			return 0, ""
 		}
