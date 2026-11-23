@@ -149,6 +149,7 @@ func lsCmd(args []string) {
 	}
 	fmt.Println(lsLine("레인", "프로젝트", "상태", "주소", "주인", "우선", "선행·비고"))
 	if !isFile(Q) {
+		maPrint() // 병합기 한 줄(mergeralive.go)은 표 끝에
 		exit(0)
 	}
 	for _, l := range readLines(Q) {
@@ -269,5 +270,6 @@ func lsCmd(args []string) {
 		}
 		fmt.Println(lsLine(name, proj, s, a, dash(owner), plabel(prio), note))
 	}
+	maPrint()
 	exit(0)
 }

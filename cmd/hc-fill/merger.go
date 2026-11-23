@@ -202,5 +202,7 @@ func mergerTick() {
 			}
 		}
 	}
+	// 큐는 그대로 — 병합기 살아 있음(mergeralive.go)이 다시 읽지 않고 쓴다
+	maSnap = mqSnap{MQP, MQS, MQBAD}
 	MQP, MQS, MQBAD = "", nil, "" // 켬 표식을 고쳤을 수 있으니 이 바퀴의 나머지는 다시 읽는다
 }

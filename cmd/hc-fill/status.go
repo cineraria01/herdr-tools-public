@@ -220,7 +220,8 @@ func statusCmd(args []string) {
 		rows = append(rows, Row(f))
 	}
 	fmt.Println(stLine("레인", "기계", "넣은 뒤", "단계", "예상·근거"))
-	if len(rows) == 0 {
+	if len(rows) == 0 { // 병합기 한 줄(maPrint, mergeralive.go)은 표 끝에 — 줄이 없어도
+		maPrint()
 		exit(0)
 	}
 	// 터미널·연결은 한 번씩. 못 읽으면 살아 있음을 모르는 채로(끝남이 아니라 모름)
@@ -279,5 +280,6 @@ func statusCmd(args []string) {
 		}
 		fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stStage(in), ""))
 	}
+	maPrint()
 	exit(0)
 }

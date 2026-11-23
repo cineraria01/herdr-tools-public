@@ -55,6 +55,11 @@ type ev struct {
 	lsok         bool
 	pmap         [][]string
 	lk           string
+	lrepo        map[string]string // 이 바퀴 사건의 레인 이름 → 13칸 저장소(laneRepos)
+	occ          map[string]int    // 이 바퀴 wfilter의 지휘 확인(coordCheck) 결과
+	seenc        map[string]seenCache
+	rgrace       time.Duration        // 남의 저장소 주인 없는 사건을 미루는 유예(repoSend)
+	rdefer       map[string]time.Time // 미룬 열쇠 → 이 watch가 처음 미룬 때(바퀴를 넘어 남음)
 }
 
 // orHyph: 빈 칸은 「-」(옛 jlist 칸 꼴)
@@ -427,6 +432,9 @@ func (e *ev) loop(to int64) int {
 		die("바퀴 간격(lane.watch_tick·HC_LANE_WAIT_TICK)은 0 이상 정수(초): %s", tick)
 	}
 	tk := time.Duration(atoi(tick)) * time.Second
+	if e.ec == "watch" {
+		e.rgrace = repoGrace(atoi(tick))
+	}
 	now := func() int64 { return time.Now().Unix() }
 	end := now() + to*60
 	idle0 := now()
@@ -484,6 +492,9 @@ func (e *ev) loop(to int64) int {
 				continue
 			}
 			told = append(told, m)
+		}
+		if e.ec == "watch" {
+			e.lrepo = laneRepos(append(append([]string(nil), ctx...), evl...))
 		}
 		cand := append([]string(nil), evl...)
 		var st []string

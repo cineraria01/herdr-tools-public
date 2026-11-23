@@ -81,6 +81,8 @@ func (e *ev) wfilter(lines []string) []string {
 	w0 := lastSeg(e.wto)
 	recipientRun := ""
 	occ := map[string]int{}
+	e.occ, e.seenc = occ, map[string]seenCache{}
+	e.pruneDefer()
 	orc := map[string]string{}
 	var out []string
 	for _, l := range lines {
@@ -114,7 +116,9 @@ func (e *ev) wfilter(lines []string) []string {
 		}
 		o := e.evowner(l)
 		if o == "-" {
-			out = append(out, l)
+			if e.repoSend(l) {
+				out = append(out, l)
+			}
 			continue
 		}
 		om := fld(f, 11)
@@ -142,7 +146,7 @@ func (e *ev) wfilter(lines []string) []string {
 				continue
 			}
 			if oc != om {
-				if !e.prevseen(a, l, o) {
+				if !e.prevseen(a, l, o) && e.repoSend(l) {
 					out = append(out, l)
 				}
 				continue
@@ -162,7 +166,7 @@ func (e *ev) wfilter(lines []string) []string {
 		if r != 1 {
 			continue
 		}
-		if !e.prevseen(a, l, o) {
+		if !e.prevseen(a, l, o) && e.repoSend(l) {
 			out = append(out, l)
 		}
 	}

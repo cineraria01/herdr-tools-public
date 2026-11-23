@@ -230,7 +230,7 @@ func reportMain(a []string) int {
 		fmt.Fprintf(os.Stderr, "hc-lane report: %v\n", err)
 		return 2
 	}
-	line := e.Line()
+	line := withRepo(e, reportRepo(rn != ""))
 	ed := evdir()
 	if err := os.MkdirAll(ed, 0o777); err != nil {
 		die("report: 폴더를 만들지 못했다: %s", ed)
@@ -255,6 +255,24 @@ func reportMain(a []string) int {
 		prePost(lane, sha)
 	}
 	return 0
+}
+
+// withRepo: 사건 줄에 13칸 저장소(watch-project-route)를 — 모르면 지금 꼴 12칸 그대로. 1000바이트 안에 들게 한 줄 칸을 줄이고,
+// 그래도 안 들면 13칸을 뺀다(모름 — 모든 지휘에게 가는 쪽)
+func withRepo(e events.Event, rid string) string {
+	line := e.Line()
+	if rid == "" {
+		return line
+	}
+	if over := len(line) + 1 + len(rid) - events.MaxLine; over > 0 {
+		shown := fld(strings.Split(line, tab), 7)
+		e.Msg = bcut(len(shown)-over, shown)
+		line = e.Line()
+	}
+	if len(line)+1+len(rid) > events.MaxLine {
+		return line
+	}
+	return line + tab + rid
 }
 
 // keyedAppend: 잠금(셸 판 lockf -k -t 30과 같은 flock) 안에서 12칸이 key인 줄이 없으면 더한다. have = 이미 있음

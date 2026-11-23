@@ -526,6 +526,12 @@ func launchMain(args []string) int {
 			if err := appendLine(evdir()+"/lanes.tsv", addr+"\t"+name+"\t"+loOwner+lk+"\n"); err != nil {
 				errf("hc-lane: 레인 기록을 쓰지 못했다: %s/lanes.tsv\n", evdir())
 			}
+			// 그 지휘가 이 저장소를 다룬다(watch-project-route — 주인 없는 레인 사건을 그 저장소 지휘에게만). 지휘 정보가 이 기계에 있을 때만
+			if _, ok := readCoord(coordFile(loOwner)); ok && loOwner != "-" && loOwner != "*" {
+				if u, rc := xoutQ("git", "-C", repo, "config", "--get", "remote.origin.url"); rc == 0 {
+					coordRepoAdd(loOwner, repoID(u))
+				}
+			}
 		}
 		autoWatch()
 		showRemote()

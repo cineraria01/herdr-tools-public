@@ -189,6 +189,45 @@ func coordSet(addr string, launch bool) bool {
 	return atomic.WriteFileMode(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o600) == nil
 }
 
+// coordRepoFile: 지휘가 다루는 저장소 기록 <evdir>/coordrepo.<주소> 「pid<탭>저장소」(watch-project-route) — coord.<주소> 꼴은 그대로 두려고
+// 옆 파일(옛 판 readCoord는 다섯째 칸을 시각에 붙여 읽는다). pid가 지금 지휘 정보와 같은 줄만 지금 지휘의 것
+func coordRepoFile(addr string) string { return evdir() + "/coordrepo." + ckey(addr) }
+
+// coordRepoAdd: 그 지휘(지휘 정보가 이 기계에 있을 때만)가 그 저장소를 다룬다고 적는다. 이미 있으면 그대로
+func coordRepoAdd(addr, rid string) {
+	c, ok := readCoord(coordFile(addr))
+	if !ok || !repoIDok(rid) || !digits(c[1]) {
+		return
+	}
+	l := c[1] + tab + rid
+	f := coordRepoFile(addr)
+	if ls, _ := readLines(f); has(ls, l) {
+		return
+	}
+	if err := appendLines(f, l); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane: 경고 — 지휘 저장소 기록을 쓰지 못했다(그 지휘는 모든 저장소 사건을 받는다): %s\n", f)
+	}
+}
+
+// coordRepos: 그 지휘가 다루는 저장소(지금 지휘 정보의 pid 줄만). known 거짓 = 모름(정보 없음·옛 판·읽기 실패) — 모든 저장소를 다룬다로 본다
+func coordRepos(addr string) (map[string]bool, bool) {
+	c, ok := readCoord(coordFile(addr))
+	if !ok {
+		return nil, false
+	}
+	ls, err := readLines(coordRepoFile(addr))
+	if err != nil {
+		return nil, false
+	}
+	rs := map[string]bool{}
+	for _, l := range ls {
+		if p, r, _ := strings.Cut(l, tab); p == c[1] && repoIDok(r) {
+			rs[r] = true
+		}
+	}
+	return rs, len(rs) > 0
+}
+
 // seedSeen: 새로 적은 지휘(hc-fill add → coord --set)의 커서 seen.<지휘>가 없을 때만 「#since 지금」으로 만든다 — 뒤에 뜨는 그 지휘
 // watch가 등록 전 남의 사건(새 커서 기본 2시간 치)을 보내지 않게. 이미 있는 커서는 그대로(O_EXCL)
 func seedSeen(addr string) error {

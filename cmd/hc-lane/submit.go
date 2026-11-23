@@ -137,7 +137,8 @@ func srecord(qn, mc, sha string) {
 			die("land(제출): hc-submitted 쓰기 실패 — 같은 줄을 다시")
 		}
 	}
-	if reportCmd(nil, os.Stderr, "제출", sha, mid+" → refs/merge-queue/"+qn+" (병합기 "+mg+" 가 "+mbs+" 에 넣는다)", "--name", sln, "--key", "submit:"+mid) != 0 {
+	// 제출은 남의 이름(--name)으로 적지만 이 저장소 안에서 부르니 13칸 저장소를 넘긴다(watch-project-route)
+	if runCmd(cmdOpt{stderr: os.Stderr, env: []string{"HC_LANE_REPO_ID=" + repoHere()}}, selfExe(), "report", "제출", sha, mid+" → refs/merge-queue/"+qn+" (병합기 "+mg+" 가 "+mbs+" 에 넣는다)", "--name", sln, "--key", "submit:"+mid) != 0 {
 		die("land(제출): 제출 사건 쓰기 실패 — 같은 줄을 다시")
 	}
 	if err := os.Remove(spending); err != nil && !os.IsNotExist(err) {

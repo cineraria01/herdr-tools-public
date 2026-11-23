@@ -141,6 +141,8 @@ func uniqOK(a []string) []string {
 // 그 차수의 마지막 수거 확인·깨운 시각(13·14칸)부터 센다(감사가 오래 걸려 수거 직후 착지 중인 레인을 멈춤으로 보지 않게).
 // dry-run·사건 못 읽음·끊긴 기계는 건너뜀. run 바퀴가 audit_tick 다음에 부른다
 func stallTick() {
+	// 병합기 살아 있음(mergeralive.go)을 먼저 — stallMerger가 「큐에 있음 = 병합기가 맡음」으로 보는 것은 병합기가 살아 있을 때만 맞다
+	mergerAliveTick()
 	lim := auMinutes("done_stall", 60)
 	if lim == 0 || dry || EVBAD || !nonEmpty(Q) {
 		return

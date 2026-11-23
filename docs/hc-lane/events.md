@@ -12,6 +12,10 @@
   읽는 쪽(hc-fill 회신·마지막 보고·겹침, `hc-lane stats`)도 제출 ID는 `events.SubmitID` 하나로 읽는다: 12칸 `submit:<ID>`를 먼저, 키 없는 옛 줄은 한 줄 칸 첫 낱말이 ID 꼴일 때만. ID 없는 `제출`은 제출로 치지 않고 그 앞의 진짜 제출을 본다(없으면 병합기 결과를 기다리지 않는다).
   그 기계 `${XDG_STATE_HOME:-~/.local/state}/hc-lane/events.tsv`에 한 줄을 더한다(지우지 않음).
   칸: 시각(UTC `2026-11-16T02:00:00Z`)·기계(`HC_LANE_MACHINE`, 없으면 hostname)·터미널(`$HC_TERMINAL_ID`)·레인·상태·sha·한 줄(탭·줄바꿈은 빈칸)·그때의 hc turn(`hc get`, 터미널 밖이면 `-`. 옛 7칸 줄도 읽는다).
+  13칸 저장소(2026-11-24 watch-project-route): `--name` 없이 부르면 지금 폴더 저장소의 origin 원문(`git config remote.origin.url` — insteadOf를 풀지 않음)을 정규화한 「호스트/경로」(소문자, 사용자·포트·끝 `.git` 뗌 — scp 꼴·ssh·https가 같은 값)를 더 싣는다.
+  클론 경로는 기계마다 달라 쓰지 않는다. 로컬 경로·`file:` 원격·원격 없음은 모름이라 지금 꼴 12칸 그대로, 1000바이트에 모자라면 한 줄 칸을 줄여 싣는다.
+  `--name`(hc-fill·hc-sweep·병합기처럼 다른 폴더에서 남의 레인을 적는 길)은 싣지 않고, `hc-lane land`의 제출만 그 저장소 안에서 적으니 싣는다(`HC_LANE_REPO_ID`).
+  옛 판 판독기는 13칸을 안 읽고(앞 12칸 그대로), 새 판은 12칸 줄을 「저장소 모름」으로 읽는다 — 받는 지휘는 [watch](watch.md) 「사건은 그 레인을 띄운 지휘에게만」.
   레인 이름은 `--name` → `$HC_LANE` → hc 터미널 이름(`hc get`) → 작업 트리 가지(기본 가지면 `-` — 작업 트리를 지운 뒤 메인 폴더에서 report해도 `main`이 레인이 되지 않게).
   화면에도 `<레인> <상태>: <sha> <한 줄>`을 찍는다.
   `--print-steps`가 쓰기 레인에는 중간·완료·착지·막힘 때, `--read` 레인에는 판정 때(`hc-lane report 판정 - "<판정 한 줄>"`) 부르라는 줄을 넣는다.

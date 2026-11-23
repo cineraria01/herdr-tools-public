@@ -1,0 +1,4 @@
+  merger restart <프로젝트>
+         설정 「merger <프로젝트> <기계> [<클론>]」의 병합기를 지금 띄우는 길 그대로 한 번 다시 띄운다(hc run --bg [--on <기계>]
+         --name merger-<프로젝트> --cwd <클론> --no-parent -- zsh -lc 'export HC_LANE_MACHINE=<기계>; exec hc-lane merger --repo <클론>').
+         클론은 설정 넷째 칸, 없으면 그 기계의 끝난 병합기 터미널 폴더. 살아 있거나 hc ls --all을 못 읽으면 안 띄운다(종료 1)
