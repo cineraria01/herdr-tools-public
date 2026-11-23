@@ -9,10 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/proc"
 )
 
 func TestMain(m *testing.M) { Main(m) }
@@ -23,8 +26,8 @@ func TestContractInner(t *testing.T) {
 	switch os.Getenv("CLITEST_CASE") {
 	case "":
 		t.Skip("바깥 계약 시험이 띄울 때만")
-	case "term-ignored": // TERM을 무시하는 자식(2초) — 마감 전에 KILL·회수하고 124
-		r := Cmd{}.Run("sh", "-c", `trap '' TERM; : >"$1"; sleep 2; : >"$2"`, "sh", S, M)
+	case "term-ignored": // TERM을 무시하는 자식 무리(손자 sleep 30) — 마감 전에 무리째 KILL·회수하고 124
+		r := Cmd{}.Run("sh", "-c", stubborn, "sh", S)
 		if !r.Timeout || r.RC != 124 {
 			t.Fatalf("마감 전에 시간 넘김(124)이어야: %+v", r)
 		}
@@ -33,7 +36,9 @@ func TestContractInner(t *testing.T) {
 		if !ok {
 			t.Fatal("마감 없음")
 		}
-		time.Sleep(time.Until(dl) - 150*time.Millisecond) // minRemain(200ms)보다 덜 남게
+		// minRemain(200ms)보다 덜 남게. Run이 보는 바깥 마감(binStart 기준)은 t.Deadline보다 이르니 190ms면 늘 덜 남고,
+		// 부하로 잠이 늦게 깨도 마감 panic까지 190ms 여유
+		time.Sleep(time.Until(dl) - 190*time.Millisecond)
 		r := Cmd{}.Run("sh", "-c", `: >"$1"`, "sh", S)
 		if r.RC == 0 || r.Timeout || !strings.Contains(r.Err, "띄우지 않음") {
 			t.Fatalf("띄우지 않고 실패여야: %+v", r)
@@ -58,6 +63,10 @@ func TestContractInner(t *testing.T) {
 		t.Fatal("모르는 경우")
 	}
 }
+
+// stubborn: TERM을 무시하는 무리 — 손자 sleep 30(무시를 물려받음)의 pid를 $1에 쓰고 기다린다. 손자가 마감보다 훨씬 오래 살아
+// 마감을 넉넉히 잡아도(부하에서 늦게 떠도) 「거두지 않았으면 아직 살아 있다」가 성립하고, 우두머리만 죽이면 손자가 남아 무리 회수까지 본다
+const stubborn = `trap '' TERM; sleep 30 & echo $! >"$1.tmp"; mv "$1.tmp" "$1"; wait`
 
 // inner: 안쪽 경우 하나를 timeout 마감으로 돌려 (종료 코드, 출력, 걸린 시간)
 func inner(t *testing.T, c string, timeout string, env ...string) (int, string, time.Duration) {
@@ -85,26 +94,32 @@ func TestContract(t *testing.T) {
 	S := func(d string) string { return filepath.Join(d, "start") }
 	Mk := func(d string) string { return filepath.Join(d, "mark") }
 	SM := func(_ *testing.T, d string) []string { return []string{"CLITEST_S=" + S(d), "CLITEST_M=" + Mk(d)} }
-	// noLater: 시작 표식을 먼저 본 뒤(원인이 일어남), 자식이 살아 있었다면 쓸 늦은 표식이 끝까지 안 생기는지
+	// noLater: 시작 표식(손자 pid)을 먼저 본 뒤(원인이 일어남), 안쪽 시험이 끝난 뒤 그 손자가 사라졌는지. 죽은 손자는 고아라 init이
+	// 거둘 때까지 잠깐 좀비로 보일 수 있어 5초까지 기다린다 — 거두지 않은 손자는 30초 사니 기다림이 판별력을 잃지 않는다
 	noLater := func(t *testing.T, d string) {
 		t.Helper()
-		if !Exists(S(d)) {
-			t.Fatalf("시작 표식 없음 — 자식이 돌지 않아 시험이 되지 않는다")
+		pid, err := strconv.Atoi(strings.TrimSpace(Read(S(d))))
+		if err != nil || pid <= 1 {
+			t.Fatalf("시작 표식 없음 — 자식이 돌지 않아 시험이 되지 않는다 (%q)", Read(S(d)))
 		}
-		time.Sleep(2500 * time.Millisecond)
-		if !Absent(t, Mk(d)) {
-			t.Errorf("시험이 끝난 뒤 자식(무리)이 살아남아 늦은 표식을 썼다")
+		for end := time.Now().Add(5 * time.Second); proc.Alive(pid) && time.Now().Before(end); {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if proc.Alive(pid) {
+			syscall.Kill(pid, syscall.SIGKILL) //nolint:errcheck // 살아남은 손자 정리
+			t.Errorf("시험이 끝난 뒤 자식 무리(손자 %d)가 살아남았다", pid)
 		}
 	}
 	for _, c := range []tc{
-		{"R-223 TERM 무시 자식 — 마감 전 KILL·회수", "term-ignored", "1s", SM, // 지적은 700ms — 부하에서 시험 바이너리 시작이 늦어도 띄울 여유를 남겨 1s
+		// 마감 4s: 회수 여유(유예 rem/5 + KILL 기다림 rem/10×2)를 빼고도 자식이 뜰 창이 약 2.4s. 손자가 30초 살아 마감을 키워도 판별력은 그대로
+		{"R-223 TERM 무시 자식 — 마감 전 KILL·회수", "term-ignored", "4s", SM,
 			func(t *testing.T, d string, rc int, out string, took time.Duration) {
 				if rc != 0 {
 					t.Errorf("안쪽 시험이 마감 전에 124로 끝나야(종료 0): rc %d (%v)\n%s", rc, took, out)
 				}
 				noLater(t, d)
 			}},
-		{"R-223 남은 마감 < 회수 여유 — 띄우지 않음", "refuse", "700ms", SM,
+		{"R-223 남은 마감 < 회수 여유 — 띄우지 않음", "refuse", "2s", SM,
 			func(t *testing.T, d string, rc int, out string, took time.Duration) {
 				if rc != 0 {
 					t.Errorf("안쪽 시험이 띄우지 않고 끝나야(종료 0): rc %d\n%s", rc, out)
@@ -114,9 +129,9 @@ func TestContract(t *testing.T) {
 					t.Errorf("남은 시간이 여유보다 짧은데 자식을 띄웠다")
 				}
 			}},
-		{"R-224 Bin go build 2s · 마감 700ms — 빌드 무리 회수", "bin", "1s",
+		{"R-224 Bin go build 30s · 마감 4s — 빌드 무리 회수", "bin", "4s",
 			func(t *testing.T, d string) []string {
-				return append(SM(t, d), "PATH="+fakeGo(t, `trap '' TERM; : >"$CLITEST_S"; sleep 2; : >"$CLITEST_M"`+"\n")+":"+os.Getenv("PATH"))
+				return append(SM(t, d), "PATH="+fakeGo(t, `set -- "$CLITEST_S"; `+stubborn+"\n")+":"+os.Getenv("PATH"))
 			},
 			func(t *testing.T, d string, rc int, out string, took time.Duration) {
 				if rc != 1 || strings.Contains(out, "panic: test timed out") {
