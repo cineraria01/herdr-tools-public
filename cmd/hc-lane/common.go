@@ -11,11 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/shx"
@@ -258,27 +258,11 @@ func zxArgs(dir string, args ...string) []string {
 	return xArgs(append([]string{"sh", "-c", shx.ZX, "hc-lane", dir, on + core}, args...)...)
 }
 
-var lockContention = regexp.MustCompile(`cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다|\.lock'을 만들 수 없습니다`)
-
-// fetchrCmd: 명령(git fetch를 그대로 또는 x·zx로)을 돌리고, 같은 클론의 다른 fetch·착지와 참조 잠금이 겹친 실패면
-// HC_LANE_FETCH_WAITS(기본 1 2 4초) 쉬고 다시(셸 fetchr). 오류 출력은 시도마다 모았다가 그대로 내보낸다
+// fetchrCmd: 명령(git fetch를 그대로 또는 x·zx로)을 gitx.Fetchr로 — 참조 잠금 경합이면 쉬고 다시, 시간 넘김(모름)이면 그대로 멈춤
 func fetchrCmd(stdout, stderr io.Writer, argv ...string) int {
-	rc := 0
-	for _, w := range waitsEnv("HC_LANE_FETCH_WAITS") {
-		var e bytes.Buffer
-		rc = runCmd(cmdOpt{stdout: stdout, stderr: &e}, argv[0], argv[1:]...)
-		if stderr != nil {
-			stderr.Write(e.Bytes())
-		}
-		if rc == 0 || w == "-" || !lockContention.Match(e.Bytes()) {
-			break
-		}
-		if stderr != nil {
-			fmt.Fprintf(stderr, "hc-lane: git fetch 참조 잠금 경합(같은 클론의 다른 fetch·착지) — %s초 뒤 다시\n", w)
-		}
-		sleepS(w)
-	}
-	return rc
+	return gitx.Fetchr(stderr, func(e io.Writer) int {
+		return runCmd(cmdOpt{stdout: stdout, stderr: e}, argv[0], argv[1:]...)
+	})
 }
 
 // fetchr: fetchr git <args…>
@@ -288,33 +272,14 @@ func fetchr(stdout, stderr io.Writer, args ...string) int {
 
 // repoDefaults: 원격과 기본 가지를 같은 조회 결과로 정한다. 조회 오류(ok=false)는 기본값 선택과 구분한다
 func repoDefaults(dir string) (remote bool, base string, ok bool) {
-	switch xRun(cmdOpt{}, "git", "-C", dir, "remote", "get-url", "origin") {
-	case 0:
-		refs, rc := xOut("git", "-C", dir, "for-each-ref", "--format=%(symref)", "refs/remotes/origin/HEAD")
-		if rc != 0 {
-			return false, "", false
+	remote, base, rc := gitx.DefaultBase(func(quiet bool, args ...string) (string, int) {
+		a := append([]string{"git", "-C", dir}, args...)
+		if quiet {
+			return "", xRun(cmdOpt{}, a...)
 		}
-		base = strings.TrimPrefix(refs, "refs/remotes/origin/")
-		if base == "" {
-			base = "main"
-		}
-		return true, base, true
-	case 2:
-		refs, rc := xOut("git", "-C", dir, "for-each-ref", "--format=%(refname)", "refs/heads/main", "refs/heads/master")
-		if rc != 0 {
-			return false, "", false
-		}
-		base = "main"
-		has := map[string]bool{}
-		for _, l := range lines(refs) {
-			has[l] = true
-		}
-		if !has["refs/heads/main"] && has["refs/heads/master"] {
-			base = "master"
-		}
-		return false, base, true
-	}
-	return false, "", false
+		return xOut(a...)
+	})
+	return remote, base, rc == 0
 }
 
 func originBase(dir string) (string, bool) {

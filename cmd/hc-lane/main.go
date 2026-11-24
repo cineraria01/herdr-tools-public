@@ -55,7 +55,7 @@ func pick(args []string) (s sub, rest []string, ok bool) {
 func main() {
 	proc.Who = "hc-lane"
 	// 물려받은 fd(바깥 병합기 잠금 fd 18·19 등)를 자식에게 넘기지 않는다. Go가 여는 fd는 기본 O_CLOEXEC
-	closeInherited()
+	proc.CloseInherited()
 	a := os.Args[1:]
 	if len(a) > 0 && a[0] == "--version" {
 		fmt.Println(version.String("hc-lane")) // 다른 도구처럼 릴리스 커밋이 보이게(cli-usage-version)

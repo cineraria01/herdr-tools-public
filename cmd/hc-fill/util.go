@@ -123,15 +123,17 @@ func writeAtomic(path, data string) error {
 
 // appendLine: 한 번의 O_APPEND 쓰기로 한 줄(줄바꿈은 붙인다)
 func appendLine(path, line string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("열기 %s: %w", path, err)
+	err := atomic.Append(path, 0o644, line+"\n")
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		switch pe.Op {
+		case "open":
+			return fmt.Errorf("열기 %s: %w", path, err)
+		case "write":
+			return fmt.Errorf("쓰기 %s: %w", path, err)
+		}
 	}
-	if _, err := f.WriteString(line + "\n"); err != nil {
-		f.Close()
-		return fmt.Errorf("쓰기 %s: %w", path, err)
-	}
-	return f.Close()
+	return err // 닫기 오류는 그대로(옛 판과 같게)
 }
 
 // ---- 외부 명령 ----

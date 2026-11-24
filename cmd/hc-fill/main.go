@@ -21,7 +21,7 @@ var cmds = map[string]func(args []string){}
 func register(name string, run func([]string)) { cmds[name] = run }
 
 func main() {
-	closeInherited()
+	proc.CloseInherited()
 	proc.Who = "hc-fill"
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println(version.String("hc-fill")) // 릴리스 바이너리는 커밋 12자(gofix-fill F19)

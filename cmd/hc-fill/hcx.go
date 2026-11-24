@@ -126,11 +126,7 @@ func hcGet(addr string) (hcjson.Terminal, bool, error) {
 	var o, e bytes.Buffer
 	x.Stdout, x.Stderr = &o, &e
 	rc := proc.Code(proc.RunMax(x, proc.Limit(x.Args)))
-	b := o.Bytes()
-	if rc != 0 && len(bytes.TrimSpace(e.Bytes())) > 0 { // 오류 객체는 표준 오류에(비었으면 표준 출력을 그대로 판정)
-		b = e.Bytes()
-	}
-	return hcjson.ParseGet(b, rc, addr)
+	return hcjson.ParseGet([]byte(hcjson.GetOut(o.String(), e.String(), rc)), rc, addr)
 }
 
 // jsonList: raw의 .<key> 배열에서 sel을 통과한 것의 field를 줄로(jq -er 'map(select(…) | .<field>) | join("\n")'). ok=false면 배열 아님

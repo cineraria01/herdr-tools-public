@@ -54,12 +54,5 @@ func umask() int {
 	return um
 }
 
-// closeInherited: 물려받은 fd(바깥 병합기 잠금 fd 18·19 등)를 자식에게 넘기지 않는다
-func closeInherited() {
-	for fd := 3; fd < 1024; fd++ {
-		syscall.CloseOnExec(fd)
-	}
-}
-
 // execve: 이 프로세스를 그 바이너리로 바꾼다(돌아오면 실패)
 func execve(bin string, argv, env []string) error { return syscall.Exec(bin, argv, env) }

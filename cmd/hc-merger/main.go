@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
@@ -40,7 +41,7 @@ var (
 )
 
 func main() {
-	closeInherited()
+	proc.CloseInherited()
 	gSelf, gEvdir = selfPath(), evdir()
 	proc.Who = "hc-lane merger"
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
@@ -187,29 +188,14 @@ func machine() string {
 
 // originBase: 원격 기본 가지(bash repo_defaults와 같은 조회)와 git 종료 코드(0이 아니면 빈 값 — gitUnknown이면 모름)
 func originBase() (string, int) {
-	switch rc := runQ("-C", ".", "remote", "get-url", "origin"); rc {
-	case 0:
-		refs, rc := out("-C", ".", "for-each-ref", "--format=%(symref)", "refs/remotes/origin/HEAD")
-		if rc != 0 {
-			return "", rc
+	_, b, rc := gitx.DefaultBase(func(quiet bool, args ...string) (string, int) {
+		a := append([]string{"-C", "."}, args...)
+		if quiet {
+			return "", runQ(a...)
 		}
-		if b := strings.TrimPrefix(refs, "refs/remotes/origin/"); b != "" {
-			return b, 0
-		}
-		return "main", 0
-	case 2:
-		refs, rc := out("-C", ".", "for-each-ref", "--format=%(refname)", "refs/heads/main", "refs/heads/master")
-		if rc != 0 {
-			return "", rc
-		}
-		l := "\n" + refs + "\n"
-		if !strings.Contains(l, "\nrefs/heads/main\n") && strings.Contains(l, "\nrefs/heads/master\n") {
-			return "master", 0
-		}
-		return "main", 0
-	default:
-		return "", rc
-	}
+		return out(a...)
+	})
+	return b, rc
 }
 
 // gitUnknown: 시작 단계 git 종료 코드가 「모름」인가 — 시간 넘김(proc.TimeoutCode)·신호로 끝남(128 넘음). 확인된 부재·오류가 아니다(R-H08)

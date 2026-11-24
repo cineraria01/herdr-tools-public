@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/proc"
 )
 
@@ -543,13 +544,5 @@ func appendLine(path, line string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
-	if err != nil {
-		return err
-	}
-	if _, err = f.WriteString(line); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	return atomic.Append(path, 0o666, line)
 }

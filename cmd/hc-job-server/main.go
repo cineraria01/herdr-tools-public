@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/selfexec"
 	"herdr-tools/internal/version"
@@ -127,11 +129,19 @@ func (j *job) stuck(g got) string {
 }
 
 func (j *job) step() {
-	out, err := proc.Output(exec.Command(j.hc, "get", j.name, "--json"))
+	gc := exec.Command(j.hc, "get", j.name, "--json")
+	var e bytes.Buffer
+	gc.Stderr = &e // 종료 3의 not_found 오류 객체는 표준 오류에 온다(hcjson.GetOut)
+	out, err := proc.Output(gc)
 	st, g := "", got{}
 	switch rc := proc.Code(err); {
 	case rc == 3:
-		st = "absent"
+		// 없음은 완전한 not_found 오류 객체 하나일 때만(hcjson.ParseGet — 종료 3에 다른 출력은 모름)
+		if _, found, perr := hcjson.ParseGet([]byte(hcjson.GetOut(string(out), e.String(), rc)), rc, j.name); perr == nil && !found {
+			st = "absent"
+		} else {
+			st = "error"
+		}
 	case rc != 0 || json.Unmarshal(out, &g) != nil:
 		st = "error"
 	default:

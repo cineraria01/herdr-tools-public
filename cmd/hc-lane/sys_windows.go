@@ -8,8 +8,6 @@ import "errors"
 
 func umask() int { return 0 }
 
-func closeInherited() {}
-
 func execve(bin string, argv, env []string) error { return errors.New("Windows는 exec을 못 한다") }
 
 func killTree(root int) {}

@@ -35,6 +35,9 @@ func groupGone(pg int) bool { return !Alive(pg) }
 
 func isNoProcess(err error) bool { return errors.Is(err, os.ErrProcessDone) }
 
+// CloseInherited: Windows는 핸들을 기본으로 물려주지 않는다 — 할 일 없음(빌드만 깨지지 않게)
+func CloseInherited() {}
+
 // Alive: 그 pid가 있는가
 func Alive(pid int) bool {
 	_, err := os.FindProcess(pid)

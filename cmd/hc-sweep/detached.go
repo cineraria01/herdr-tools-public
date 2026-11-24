@@ -90,11 +90,7 @@ func dirInUse(dir, self string, r runner) string {
 		if res.err != nil {
 			return "hc get " + a + " 실패 — 그 터미널의 지금 폴더 모름"
 		}
-		b := res.out
-		if res.rc != 0 && strings.TrimSpace(res.errs) != "" { // 종료 3의 not_found 오류 객체는 표준 오류에 온다
-			b = res.errs
-		}
-		t, found, err := hcjson.ParseGet([]byte(b), res.rc, a)
+		t, found, err := hcjson.ParseGet([]byte(hcjson.GetOut(res.out, res.errs, res.rc)), res.rc, a)
 		switch {
 		case err != nil:
 			return "hc get " + a + " 실패 — 그 터미널의 지금 폴더 모름"

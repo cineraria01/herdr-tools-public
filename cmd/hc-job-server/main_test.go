@@ -17,11 +17,11 @@ import (
 // TestMain: 끝나면 clitest.Bin 폴더를 지운다
 func TestMain(m *testing.M) { clitest.Main(m) }
 
-// fakeHC: 부른 인자를 T_LOG에. get은 T_GET을 찍고 T_GET_RC로 끝난다
+// fakeHC: 부른 인자를 T_LOG에. get은 T_GET을(T_GET_ERR가 있으면 그것을 표준 오류에도) 찍고 T_GET_RC로 끝난다
 const fakeHC = `#!/bin/sh
 echo "$*" >>"$T_LOG"
 case $1 in
-  get) printf '%s\n' "$T_GET"; exit "${T_GET_RC:-0}" ;;
+  get) printf '%s\n' "$T_GET"; [ -z "$T_GET_ERR" ] || printf '%s\n' "$T_GET_ERR" >&2; exit "${T_GET_RC:-0}" ;;
 esac
 exit 0
 `

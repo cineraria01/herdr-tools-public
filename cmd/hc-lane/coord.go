@@ -31,10 +31,7 @@ func hcGet(sec int, addr string) (hcjson.Terminal, bool, error) {
 func hcGetRaw(sec int, addr string) (string, int) {
 	var eb strings.Builder
 	out, rc := captErr(sec, &eb, "hc", "get", addr, "--json")
-	if rc != 0 && strings.TrimSpace(eb.String()) != "" {
-		out = eb.String()
-	}
-	return out, rc
+	return hcjson.GetOut(out, eb.String(), rc), rc
 }
 
 // getState: hc get 판정. 0 살아 있음(state live), 1 없음(완전한 not_found)·끝남(확인된 finished), 2 모름(hcGet 오류 — gofix L04, 재감사 R-13)

@@ -302,10 +302,7 @@ func (g *cg) hcWho() {
 			return
 		}
 		gout, gerr, grc := hookRun([]string{"hc", "get"}, time.Until(end), nil, "", hc, "get", t.Address, "--json")
-		if grc != 0 && strings.TrimSpace(gerr) != "" {
-			gout = gerr // 종료 3의 not_found 오류 객체는 표준 오류에 온다
-		}
-		gt, found, err := hcjson.ParseGet([]byte(gout), grc, t.Address)
+		gt, found, err := hcjson.ParseGet([]byte(hcjson.GetOut(gout, gerr, grc)), grc, t.Address)
 		switch {
 		case err != nil || (found && gt.State == "live" && gt.NowCwd == ""):
 			g.who += ", " + whoName(t) + "[" + t.Address + "] 지금 폴더 모름"

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/version"
@@ -286,17 +287,7 @@ func record(address, name, why, cwd, sid, title string) error {
 	return appendLine(filepath.Join(tasksDir, "closed.log"), strings.Join(f, "\t"))
 }
 
-func appendLine(path, line string) error {
-	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err = fh.WriteString(line + "\n"); err != nil {
-		fh.Close()
-		return err
-	}
-	return fh.Close()
-}
+func appendLine(path, line string) error { return atomic.Append(path, 0o644, line+"\n") }
 
 // conf: 설정 값(herdr-tools-config get <키> <기본값>). 설정 도구가 곁에 없으면 기본값, 있는데 실패하면 ok=false(끄지 않음)
 func conf(key, def string) (string, bool) {

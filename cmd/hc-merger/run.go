@@ -5,16 +5,11 @@ package main
 // git 결과·자식 무리·잠금은 공통 꾸러미(internal/gitx·proc·lockx)가 한다.
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
 
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/oplog"
@@ -42,37 +37,16 @@ func inLog(dir, log string, args ...string) int {
 	return gitx.Run(dir, f, f, args...)
 }
 
-var lockContention = regexp.MustCompile(`cannot lock ref|unable to update local ref|is at [0-9a-f]+ but expected|로컬 레퍼런스를 업데이트할 수 없습니다|\.lock'을 만들 수 없습니다`)
-
-// fetchr: git fetch를 돌리고, 같은 클론의 다른 fetch·착지와 참조 잠금이 겹쳐 난 실패면 HC_LANE_FETCH_WAITS(기본 1 2 4초) 쉬고 다시
-// (bash fetchr와 같음). quiet = 2>/dev/null
+// fetchr: git fetch를 gitx.Fetchr로 — 참조 잠금 경합이면 HC_LANE_FETCH_WAITS(기본 1 2 4초) 쉬고 다시, 시간 넘김(모름)이면 그대로 멈춤.
+// quiet = 2>/dev/null
 func fetchr(quiet bool, args ...string) int {
 	var errw io.Writer = os.Stderr
 	if quiet {
-		errw = io.Discard
+		errw = nil
 	}
-	waits := strings.Fields(os.Getenv("HC_LANE_FETCH_WAITS"))
-	if os.Getenv("HC_LANE_FETCH_WAITS") == "" { // bash ${HC_LANE_FETCH_WAITS:-1 2 4} — 빈 값도 기본(F11)
-		waits = []string{"1", "2", "4"}
-	}
-	waits = append(waits, "-")
-	rc := 0
-	for _, w := range waits {
-		var e bytes.Buffer
-		rc = gitx.Run("", os.Stdout, &e, append([]string{"fetch"}, args...)...)
-		if rc == proc.TimeoutCode {
-			break // 모름 — 반쪽 오류 글로 잠금 경합을 판정하지 않는다(재감사 R-C01). 「시간 넘김」 줄은 proc이 적었다
-		}
-		errw.Write(e.Bytes())
-		if rc == 0 || w == "-" || !lockContention.Match(e.Bytes()) {
-			break
-		}
-		fmt.Fprintf(errw, "hc-lane: git fetch 참조 잠금 경합(같은 클론의 다른 fetch·착지) — %s초 뒤 다시\n", w)
-		if s, err := strconv.ParseFloat(w, 64); err == nil {
-			time.Sleep(time.Duration(s * float64(time.Second)))
-		}
-	}
-	return rc
+	return gitx.Fetchr(errw, func(e io.Writer) int {
+		return gitx.Run("", os.Stdout, e, append([]string{"fetch"}, args...)...)
+	})
 }
 
 // place: tmp를 dst로 바꿔 넣는다 — bash 판처럼 mv -f 명령으로(계약 시험이 PATH의 mv로 이 자리의 끊김을 흉내 낸다.

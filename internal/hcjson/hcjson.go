@@ -323,6 +323,15 @@ func ParseMachines(b []byte) ([]Machine, error) {
 	return machines(top["machines"])
 }
 
+// GetOut: hc get --json에서 ParseGet에 넘길 출력 — 표준 출력은 터미널 객체, 종료 0이 아닐 때의 오류 객체(종료 3의 not_found 등)는
+// 표준 오류에 온다(hc 0.1.22). 종료 0이 아니고 표준 오류가 비지 않았으면 표준 오류, 아니면 표준 출력
+func GetOut(stdout, stderr string, rc int) string {
+	if rc != 0 && strings.TrimSpace(stderr) != "" {
+		return stderr
+	}
+	return stdout
+}
+
 // ParseGet: hc get <want> --json 의 출력 b와 종료 코드 rc. rc 0(또는 11 끝남)이면 주소가 want와 같은 터미널 객체 하나,
 // rc 3이고 완전한 not_found 오류 객체 하나면 (_, false, nil) — 확인된 없음. 그 밖은 모두 오류(모름)
 func ParseGet(b []byte, rc int, want string) (Terminal, bool, error) {

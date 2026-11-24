@@ -35,6 +35,13 @@ func groupGone(pg int) bool { return syscall.Kill(-pg, 0) == syscall.ESRCH }
 
 func isNoProcess(err error) bool { return errors.Is(err, syscall.ESRCH) }
 
+// CloseInherited: 물려받은 fd 3~1023(바깥 병합기의 잠금 fd 18·19 등)을 자식에게 넘기지 않는다. Go가 여는 fd는 기본 O_CLOEXEC
+func CloseInherited() {
+	for fd := 3; fd < 1024; fd++ {
+		syscall.CloseOnExec(fd)
+	}
+}
+
 // Alive: 그 pid가 있는가(남의 것이라 신호를 못 보내도 있음)
 func Alive(pid int) bool {
 	err := syscall.Kill(pid, 0)

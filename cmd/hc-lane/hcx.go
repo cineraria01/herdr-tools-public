@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/proc"
 )
@@ -462,15 +463,7 @@ func appendLines(path string, lines ...string) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
-	if err != nil {
-		return err
-	}
-	_, err = io.WriteString(f, strings.Join(lines, "\n")+"\n")
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	return err
+	return atomic.Append(path, 0o666, strings.Join(lines, "\n")+"\n")
 }
 
 // at: 탭 칸 f[i](0부터, 없으면 빈 값) — 사건 줄이 아닌 표(lanes.tsv·after.tsv·판정 파일·대기열)만. 사건 줄은 events.Cols의
