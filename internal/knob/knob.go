@@ -61,7 +61,15 @@ var Defs = []Def{
 	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	// 지금 손댈 것(2026-11-24 ops-advise, docs/ops/advise.md). 풀 수 있는 대기·사슬의 문턱은 놀고 있음 알림과 같은 idle
 	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 바퀴 없음이 이만큼 넘으면 손댈 것(0이면 끔)"},
-	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 끔)"},
+	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
+	{Name: "deploy_grace", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "마지막 착지 뒤 이만큼은 배포 밀림을 손댈 것으로 안 침(배포 도는 중·착지 뒤 명령 차례 남음도 안 침, 0이면 착지 시각은 안 봄)"},
+	// 운영 에이전트(2026-11-24 ops-agent, docs/ops/agent.md). 이름이 agent가 아닌 까닭: hc-fill 설정 agent(에이전트 CLI 종류)를 덮는다.
+	// 운영 에이전트 실행 안에서는 ops_agent* 손잡이를 바꾸지 못한다(자기 권한 넓히기 막기 — hc-fill opsagent.go)
+	{Name: "ops_agent", Tool: "hc-fill", Default: "끔", Enum: []string{"끔", "판단만", "조치"}, Desc: "운영 에이전트 — 끔 · 판단만(hc-fill 조치 명령을 일지에 「하려던 것」으로만) · 조치"},
+	{Name: "ops_agent_max_hour", Tool: "hc-fill", Default: "2", Min: 1, Max: 60, Unit: "번", Desc: "운영 에이전트를 시간당 띄우는 상한(띄우기 실패도 셈)"},
+	{Name: "ops_agent_timeout", Tool: "hc-fill", Default: "20", Min: 1, Max: 240, Unit: "분", Desc: "운영 에이전트 한 바퀴 상한(넘으면 끝난 것으로 보고 조치 명령을 거절)"},
+	{Name: "ops_agent_tries", Tool: "hc-fill", Default: "2", Min: 1, Max: 20, Unit: "번", Desc: "같은 손댈 것으로 띄우는 상한(못 띄움·시간 넘김) — 넘으면 「사람이 정한다」 사건 한 번"},
+	{Name: "ops_agent_scope", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "운영 에이전트가 볼 프로젝트(쉼표, - = 전부 — 프로젝트를 모르는 항목은 늘 본다)"},
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
 	// knobs-migrate(2026-11-24): 고정으로 박혔던 hc-fill 설정 키(설정 줄보다 앞선다 — conf가 먼저 본다). 기본은 지금 코드의 값 그대로
@@ -93,6 +101,7 @@ var Defs = []Def{
 	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음(HC_LANE_SPEC_BUSY_MAX)"},
 	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
 	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
+	{Name: "merger_resolve_stuck", Tool: "hc-merger", Default: "3", Min: 0, Max: 1440, Unit: "분", Remote: true, Desc: "풀이·풀이 감사 에이전트가 blocked·error로 이만큼 머물면 운영 사건 한 번(0이면 끔, HC_LANE_MERGER_RESOLVE_STUCK)"},
 	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},

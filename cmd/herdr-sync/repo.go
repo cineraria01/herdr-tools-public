@@ -55,7 +55,7 @@ func strList(v any) []string {
 func repoSync() {
 	q, ok := query("")
 	if !ok {
-		die("맥 값을 읽지 못했다")
+		die("%s 값을 읽지 못했다", LOCAL)
 	}
 	RS := repoSigs() // 저장소 쪽 서명
 	LK := tleaks(q, RS)
@@ -66,9 +66,9 @@ func repoSync() {
 		return
 	}
 	if rconf > 0 {
-		row("맥", rdiff, rconf)
+		row(LOCAL, rdiff, rconf)
 		fmt.Print(rows)
-		fmt.Fprintln(os.Stderr, "herdr-sync: 저장소와 충돌이 있어 멈춘다. --take repo:<경로>(맥 값) 또는 --pull repo:<경로>(저장소 값)로 푼다. 개인 값이면 맥 파일에서 빼거나 그 줄을 개인 저장소로 옮긴다")
+		fmt.Fprintln(os.Stderr, "herdr-sync: 저장소와 충돌이 있어 멈춘다. --take repo:<경로>("+LOCAL+" 값) 또는 --pull repo:<경로>(저장소 값)로 푼다. 개인 값이면 "+LOCAL+" 파일에서 빼거나 그 줄을 개인 저장소로 옮긴다")
 		exit(1)
 	}
 	// 모음을 먼저 커밋·push하고 base를 쓴 뒤에 깐다. 깔다 멈춰도 모은 것이 스테이징에만 남지 않는다.
@@ -180,7 +180,7 @@ func macrow() {
 	} else {
 		s = "저장소와 같음"
 	}
-	rows = "맥: " + s + "\n"
+	rows = LOCAL + ": " + s + "\n"
 }
 
 // ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only. git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다

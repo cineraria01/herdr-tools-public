@@ -14,6 +14,7 @@
 3. 막힘 풀기: 띄우기 거절은 까닭을 고친 뒤 `hc-fill retry <레인>`, 선행·기계·지시문 바꾸기는 `hc-fill edit <레인> --after <선행>|--only <기계>|--brief <지시문>`.
    - 아직 안 뜬 줄의 겹침 검사·먼저 띄움: `hc-fill edit <레인> --overlap-ok|--overlap-check` · `--early|--no-early` (rm 뒤 add로 다시 넣지 않는다).
    - 레인 터미널이 일시 오류로 멈춤(hc 상태 error, 보고 없음): `hc-fill nudge <레인> --why <까닭>` — 이어 가라는 글 한 줄(한 레인에 손잡이 `nudge_every`분 안에 한 번).
+   - 병합기가 제출 탓이 아닌 검증 실패로 돌려보냄(시험 환경·흔들림): `hc-fill requeue <레인> --why <까닭> [--dry-run]` — 같은 커밋·같은 감사 판정으로 줄 끝에(충돌 반송은 거절).
 4. 착지: 레인이 스스로 한다(`hc-lane land`). 자동 감사가 붙은 레인은 감사 통과 뒤에.
 5. 레인에 말 더하기: `hc-fill note <레인> <글|파일>`(다음 감사 지시문에도 붙는다).
 
@@ -48,6 +49,7 @@
 - `hc-fill-unreach`(기계 끊김): `hc machine ls`로 보고, 오래면 그 레인을 다른 기계로 다시 띄울지 정한다.
 - `hc-fill-advise`(손댈 것이 생김): `hc-fill advise`로 보고 확신 `확실`은 다음 명령을 그대로, `판단 필요`는 근거를 읽고 정한다.
 - `hc-fill-pr`(PR 거울이 못 씀): `gh auth status`를 보고, 못 고치면 `hc-fill knob set pr - --why <까닭>`. 대기열·병합은 그대로 돈다.
+- `hc-fill-agent`(운영 에이전트 끝·사람이 정한다): `hc-fill agent status`와 `hc-fill journal --since 2h`로 한 조치·되돌리기를 본다. 운영 에이전트는 손잡이 `ops_agent`(끔|판단만|조치)로 켜고, `hc-fill agent run`이 지금 한 바퀴(docs/ops/agent.md).
 - 레인 `막힘`: 글의 까닭대로 — 띄우기 거절이면 고치고 `hc-fill retry <레인>`.
 - 사건마다 뜻·흔한 까닭·다음 명령: docs/ops/events.md
 

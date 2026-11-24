@@ -11,6 +11,7 @@ herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합
 
 - `--check` 표의 첫 줄은 맥 ↔ 두 저장소다: `맥: 저장소가 새로움 n개 (<저장소 경로> …) — herdr-sync로 깐다`(레인이 착지했는데 맥에 아직 안 깔림), `맥: 저장소보다 새로움 n개 (…) — 커밋 안 됨?`(맥에서 고쳤는데 아직 안 모음), 다 맞으면 `맥: 저장소와 같음`. 기계 줄은 **맥 실제 파일**과 견준 것이라, 맥이 저장소보다 뒤면 기계 줄 끝에 `(맥 판 기준 — 저장소 새 판은 아직)`이 붙는다 — 그때 `같음`은 「맥 옛 판과 같음」이지 「저장소 새 판이 퍼졌음」이 아니다.
   착지 뒤 퍼졌는지 볼 때는 맥 줄부터 본다(2026-11-19 착지 직후 `--check`의 기계 줄 `같음`만 보고 「이미 퍼졌다」고 오판했다).
+- 출력·기록의 `맥`은 이 기계 이름이다 — 개인 설정 `hc-fill.tsv`의 `local` 줄이 있으면 그 이름으로 적는다([이 기계 이름](local-name.md)).
 - 경로는 `sync.list`의 맥 경로(`~` 아래)다.
   예: `.claude/docs/notes.md`, 지침 본문은 `.claude/CLAUDE.md#body`, Codex 공통 구역은 `.codex/AGENTS.md#codex-shared`, 링크는 `.claude/skills/my-skill@`, 설정 키는 `.model`, 설정 훅은 `hook:PreToolUse:cotenant-guard`(herdr-settings-merge의 판정 이름), 나무 안 파일은 `.agents/skills/my-skill/scripts/run.sh`.
 - `<기계>:*`는 그 기계의 충돌 전부, `<기계>:<폴더>/**`는 그 나무 줄의 그 기계 충돌 전부다(`repo:<폴더>/**`도 된다).

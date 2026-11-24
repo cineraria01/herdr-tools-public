@@ -135,6 +135,7 @@ func main() {
 	if len(all) == 0 {
 		notMac()
 	}
+	LOCAL = mustLocal(all) // 이 기계를 적는 이름(localname.go) — 읽기 모드도 같은 이름으로
 	if err := os.MkdirAll(STATE, 0o755); err != nil {
 		os.Exit(1)
 	}
@@ -164,7 +165,7 @@ func main() {
 				os.Exit(2)
 			}
 			if a[i] == "--take" {
-				takes = append(takes, a[i+1])
+				takes = append(takes, localSpec(a[i+1])) // --take 맥:… 도 이 기계
 			} else {
 				pulls = append(pulls, a[i+1])
 			}
@@ -185,7 +186,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "herdr-sync: --check는 --take·--pull과 함께 쓰지 않는다")
 		os.Exit(2)
 	}
-	if deployPicked = machines; len(machines) == 0 {
+	if deployPicked, machines = machines, notLocal(machines); len(deployPicked) == 0 { // 이 기계 이름만 골랐으면 다른 기계는 없음
 		machines = all
 	}
 
@@ -233,12 +234,12 @@ func main() {
 		repoSync()
 	}
 	if len(RBH) > 0 {
-		RSUF = " (맥 판 기준 — 저장소 새 판은 아직)"
+		RSUF = " (" + LOCAL + " 판 기준 — 저장소 새 판은 아직)"
 	}
 	pinCommit() // 공개 내보내기와 이번 배포의 커밋 하나(pin.go) — 맥 값을 읽기 전에
 	mq, ok := query("")
 	if !ok {
-		die("맥 값을 읽지 못했다")
+		die("%s 값을 읽지 못했다", LOCAL)
 	}
 	syncMachines(machines, mq)
 	movedNote()
@@ -588,10 +589,10 @@ func targets(t, m, osname string) bool {
 	case "macos":
 		return osname == "Darwin"
 	case "local":
-		return m == "맥"
+		return m == LOCAL
 	}
 	for _, x := range strings.Split(t, ",") {
-		if x == m {
+		if localOf(x) == m { // 이 기계는 옛 이름 「맥」으로 적혀도
 			return true
 		}
 	}

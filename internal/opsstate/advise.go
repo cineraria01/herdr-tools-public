@@ -58,6 +58,12 @@ type Facts struct {
 	Addr     map[string]string // 떠 있는 레인 → 터미널 주소
 	Paused   map[string]bool   // 새 레인을 안 띄우는 기계(pause@)
 	Resident []string          // 이 기계 상주 판 점검 결과 줄(resident.Show)
+	// DeployHold: 배포 밀림을 아직 따지지 않을 까닭(배포 도는 중·착지 뒤 명령 차례 남음·마지막 착지 뒤 deploy_grace분 안), 없으면 빈 값.
+	// 착지 직후 착지 뒤 배포가 도는 1~2분에 밀림 사건이 거짓으로 나갔다(2026-11-24 지휘)
+	DeployHold string
+	// Known: 이미 알린 항목 열쇠(advise 사건 기록·운영 에이전트 기록). 보류는 새 열쇠의 첫 알림만 미룬다 — 이미 알린 밀림을 보류 동안
+	// 빼면 열쇠를 잊어 보류가 풀릴 때마다 같은 사건이 다시 나갔다(감사 atozuyd 중간)
+	Known map[string]bool
 }
 
 // Wait: 대기 줄 하나와 기다리는 까닭
@@ -304,7 +310,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 					continue
 				}
 			}
-			if th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
+			if l.Open && th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
 				look("lane-long", fmt.Sprintf("레인 %s 같은 단계에 %d분", l.Name, *l.StageAgeS/60), "멈췄으면 자리를 잡은 채 시간이 간다")
 				o[len(o)-1].What = fmt.Sprintf("레인 %s: 같은 단계에 %d분 — %s", l.Name, *l.StageAgeS/60, l.Stage)
 			}
@@ -346,7 +352,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		case d.Why == DeployNotTarget:
 		case d.Version == "" || d.Behind == nil:
 			add(unknown("deploy:"+d.Machine, "배포 "+d.Machine, or(d.Why, "까닭 모름")))
-		case *d.Behind > 0:
+		case *d.Behind > 0 && (f.DeployHold == "" || f.Known["deploy:"+d.Machine]): // 보류는 기계 구분 없이 새 밀림의 첫 알림만
 			it := Item{Key: "deploy:" + d.Machine, Kind: "deploy", What: fmt.Sprintf("배포 %s: %d커밋 밀림(%s)", d.Machine, *d.Behind, d.Version),
 				Evidence: fmt.Sprintf("기록상 판이 origin/main에서 %d커밋 뒤 · 마지막 배포 기록 %s 전 — 그 뒤 착지한 고침이 이 기계에 없다", *d.Behind, age(depAge)),
 				Cost:     "고친 도구가 안 깔려 같은 문제가 이어진다",

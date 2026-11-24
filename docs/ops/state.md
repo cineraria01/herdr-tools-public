@@ -39,6 +39,7 @@
   - 레인 마지막 사건·최근 사건: `<DATA>/last.tsv`([마지막 보고](../hc-fill/last-report.md)). 그 사건 시각부터 지금까지가 `stage_age_s`다.
   - 대기 까닭: 띄우기 거절 기록 · `overlap.tsv` 겹침 · `need.tsv` 능력 · 대기열의 선행 칸 · 그 밖은 「자리·차례」(기계별 까닭은 `machines[].skip_why`).
 - 이번에 부르는 것(`sources[]`의 `hc` 줄 — 호출 수·초): `hc ls --json`(레인 살아 있음·감시 터미널) · `hc machine ls --json`(기계 연결). 둘 다 이 기계 코어에 묻는 것이다.
+- 배포 기록의 옛 이 기계 이름 `맥`은 설정 `local` 기계로 읽는다(herdr-sync가 그 이름으로 적기 전 기록 — [이 기계 이름](../herdr-sync/local-name.md)).
 - 배포(`deploy` 줄): herdr-sync 배포 기록 `~/.local/state/herdr-sync/deploy.tsv`에서 기계마다 결과가 같음·씀인 마지막 줄의 커밋(「기록상 판」)과, 범용 저장소(`HERDR_TOOLS_REPO`, 없으면 herdr-sync와 같은 기본 자리)의 `git rev-list --count <판>..origin/main`(fetch 없이 — 판마다 한 번).
   기계의 실제 바이너리를 보려면 `herdr-sync --status`(기계마다 원격 호출)를 쓴다.
 - 손잡이: 공통 손잡이 저장의 살아 있는 줄. 최근 조치: 운영 일지 24시간 안 마지막 5줄([일지](journal.md)).

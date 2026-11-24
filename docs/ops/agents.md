@@ -70,6 +70,7 @@ herdr-tools로 <할 일>을 해라. 먼저 쓸 도구의 `<도구> --skill`을 �
 | `hc-fill knob set <이름> <값> --why <까닭> --dry-run` · `knob unset <이름> --dry-run` | 바뀔 값과 지금 값(이름·범위·고정 검사는 실제와 같다) |
 | `hc-fill machine <기계> --seats <n>\|--pause\|--resume --dry-run` | 바뀔 손잡이(조정 기록도 안 남김) |
 | `hc-fill run --dry-run` | 한 바퀴에 띄울 것(전부터 있음) |
+| `hc-fill requeue <레인> --why <까닭> --dry-run` | 검증 실패 반송을 옮길 새 큐 이름·제출·감사 판정(검사는 실제와 같다, [다시 넣기](../hc-fill/requeue.md)) |
 | `hc-lane --dry-run …` · `hc-lane clean --dry-run` · `hc-lane gc --dry-run` | 띄우기·정리 미리 보기(전부터 있음) |
 | `herdr-sync --check` · `herdr-sync --at <커밋> --check` | 맞출 것·되돌릴 것(전부터 있음) |
 | `hc-sweep --dry-run` | 닫을 것·지울 것(전부터 있음) |

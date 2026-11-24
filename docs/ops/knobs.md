@@ -35,7 +35,8 @@
   기계 닿지 않음([끊김](../hc-fill/unreach.md)): `unreach`(분).
   멈춘 레인 다시 굴리기([nudge](../hc-fill/edit.md)): `nudge_every`(분, 한 레인에 다시 보내기까지, 0 막지 않음).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%). 기본 출력이 끝난 레인을 남기는 시간: `state_done`(분).
-  지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다.
+  지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다. 밀린 배포의 착지 뒤 유예 `deploy_grace`(분, 기본 5).
+  운영 에이전트([agent](agent.md)): `ops_agent`(끔|판단만|조치, 기본 끔)·`ops_agent_max_hour`(번)·`ops_agent_timeout`(분)·`ops_agent_tries`(번)·`ops_agent_scope`(프로젝트) — 운영 에이전트 실행 안에서는 이 다섯을 바꾸지 못한다.
 - 옮긴 hc-fill 설정 키(knobs-migrate, 2026-11-24 — 기본은 지금 코드 값 그대로): `gc`·`idle_empty`·`reland_wait`(분), `reland_max`·`audit_max`(번),
   `audit_close`·`audit_seat_rounds`(바퀴), `lows_hour`·`lows_min`(개).
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).
@@ -70,7 +71,7 @@
   - 옛 파일을 손잡이 아래에 둔 까닭: 병합기 기계에서 손으로 둔 값은 그 기계 사람의 뜻이지만, 지휘가 공통 손잡이로 바꾼 값이 먹지 않으면 「한 화면에서 조정」이 깨진다. 옛 파일은 손잡이가 없을 때만 먹는다.
   - 환경 변수와 `--tick`은 병합기를 띄울 때의 값이라 손잡이 아래다.
 - 손잡이: `merger_batch`(개 — 묶음 크기), `merger_tick`(초 — 빈 바퀴 쉼), `merger_spec_start`·`merger_spec_timeout`·`merger_front_wait`·`merger_pre_max`(초), `merger_pre_rebuild`(번),
-  `merger_front_dispatch`·`merger_front_local`(`0`|`1`), `merger_idle_load`(%), `merger_busy_wait`(초), `merger_busy_max`(번), `merger_conflict`(`agent`|`event`|`reject`), `merger_resolve_max`(초).
+  `merger_front_dispatch`·`merger_front_local`(`0`|`1`), `merger_idle_load`(%), `merger_busy_wait`(초), `merger_busy_max`(번), `merger_conflict`(`agent`|`event`|`reject`), `merger_resolve_max`(초), `merger_resolve_stuck`(분 — 풀이 터미널 멈춤 사건 문턱, 0 끔).
   각 손잡이가 덮는 환경 변수는 `knob ls`의 설명 끝 괄호.
 - 빈 바퀴 쉼은 상주 부모가 정하므로, 일꾼이 읽은 참조를 `<일지 폴더>/knobs.remote`(SHA 한 줄 + 메시지)에 두고 부모가 쉬기 전마다 읽는다(기한은 그때 다시 본다).
 - 참조가 없거나 못 읽은 바퀴는 손잡이 없이(옛 파일·환경 변수·기본) 돈다.

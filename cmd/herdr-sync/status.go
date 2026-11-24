@@ -24,7 +24,7 @@ import (
 func statusResident(dir string, now time.Time) []string {
 	var o []string
 	for _, l := range resident.Show(dir, now) {
-		o = append(o, "맥 "+l)
+		o = append(o, LOCAL+" "+l)
 	}
 	return o
 }
@@ -46,10 +46,10 @@ fi
 echo END
 `
 
-// machineBins: 기계(맥은 "맥")의 bin.tsv 상태. ok 거짓 = 모름(닿지 못함·출력이 온전하지 않음)
+// machineBins: 기계(이 기계는 LOCAL)의 bin.tsv 상태. ok 거짓 = 모름(닿지 못함·출력이 온전하지 않음)
 func machineBins(m string) (rows [][3]string, ok bool) {
 	var c *exec.Cmd
-	if m == "맥" {
+	if m == LOCAL {
 		c = exec.Command("sh", "-c", binStateSh)
 	} else {
 		c = exec.Command("hc", "exec", "--on", m, "--", "sh", "-c", binStateSh)
@@ -147,7 +147,7 @@ func halfLine(mac string, old []string) string {
 	if mac == "" || len(old) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("맥만 새 판 %s — 워커 %d대 옛 판 (%s) · herdr-sync로 맞춘다", mac, len(old), strings.Join(old, " "))
+	return fmt.Sprintf("%s만 새 판 %s — 워커 %d대 옛 판 (%s) · herdr-sync로 맞춘다", LOCAL, mac, len(old), strings.Join(old, " "))
 }
 
 // behind: from..origin/main 커밋 수와 제목 머리(오래된 것부터, 겹침 없이). from을 모르면 n=-1
@@ -207,7 +207,7 @@ func countText(n int, unit string) string {
 func pendingLine(from string) (string, int) {
 	q := "병합 줄 " + countText(queueLeft(), "건") + " 남음"
 	if from == "" {
-		return "배포할 것 모름 (깔린 판을 모른다 — 맥 bin.tsv·배포 기록) · " + q, -1
+		return "배포할 것 모름 (깔린 판을 모른다 — " + LOCAL + " bin.tsv·배포 기록) · " + q, -1
 	}
 	k, heads := behind(from)
 	switch {
@@ -229,7 +229,7 @@ func fetchMain() string {
 
 // macCommit: 맥에 깔린 판(맥이 먼저 깔고 기계는 그 판을 받는다) — 모르면 ""
 func macCommit(log []logRow) string {
-	rows, ok := machineBins("맥")
+	rows, ok := machineBins(LOCAL)
 	if !ok {
 		return ""
 	}
@@ -258,7 +258,7 @@ func showStatus(machines []string) int {
 	fmt.Printf("origin/main %s%s · 지금 도는 배포 %s\n", om, note, run)
 	var lines, old []string
 	from, macK := "", -1
-	for _, m := range append([]string{"맥"}, machines...) {
+	for _, m := range append([]string{LOCAL}, machines...) {
 		rows, ok := machineBins(m)
 		if !ok {
 			lines = append(lines, m+": 모름 (닿지 않음·읽지 못함)")
@@ -271,7 +271,7 @@ func showStatus(machines []string) int {
 				d += " · 뒤 " + strconv.Itoa(k) + "커밋"
 			}
 		}
-		if m == "맥" {
+		if m == LOCAL {
 			from, macK = c, k
 		} else if macK >= 0 && k > macK {
 			old = append(old, m)
@@ -279,7 +279,7 @@ func showStatus(machines []string) int {
 		lines = append(lines, m+": "+d)
 	}
 	p, _ := pendingLine(from)
-	fmt.Println(p + " (맥 기준)")
+	fmt.Println(p + " (" + LOCAL + " 기준)")
 	fmt.Println(strings.Join(lines, "\n"))
 	if l := halfLine(from, old); l != "" {
 		fmt.Println(l)

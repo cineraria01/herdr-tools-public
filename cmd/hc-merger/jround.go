@@ -85,9 +85,20 @@ func scanFail(path string, off int64, test bool) string {
 	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	timedOut := false
+	var lines []string
 	for sc.Scan() {
-		l := sc.Text()
+		lines = append(lines, sc.Text())
+	}
+	return pickFail(lines, firstLine(lines, test, false), path, test)
+}
+
+// firstLine: 옛 규칙의 첫 실패 줄. noTop이면 「--- FAIL」 줄(시험 이름 줄)과 맨 「FAIL」(요약)은 건너뛴다(꾸러미 줄만)
+func firstLine(lines []string, test, noTop bool) string {
+	timedOut := false
+	for _, l := range lines {
+		if noTop && (strings.HasPrefix(strings.TrimSpace(l), "--- FAIL") || strings.TrimSpace(l) == "FAIL") {
+			continue
+		}
 		if test {
 			switch {
 			case strings.HasPrefix(l, "panic: test timed out"):

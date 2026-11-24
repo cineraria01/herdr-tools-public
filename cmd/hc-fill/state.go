@@ -82,7 +82,7 @@ func stateCollect(now time.Time) opsstate.State {
 
 // stateCollectF: stateCollect와 손댈 것 재료(대기 줄마다 까닭·레인 주소·멈춘 기계·상주 판 점검) — 같은 읽기에서
 func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
-	f := opsstate.Facts{Addr: map[string]string{}, Paused: map[string]bool{},
+	f := opsstate.Facts{Addr: map[string]string{}, Paused: map[string]bool{}, Known: adviseKnown(),
 		Resident: resident.Show(resident.DirFor(os.Getenv("XDG_STATE_HOME"), HOME), now)}
 	s := opsstate.State{Schema: opsstate.Schema, At: now, Queue: opsstate.Queue{Counts: map[string]int{}},
 		Machines: []opsstate.Machine{}, Lanes: []opsstate.Lane{}, Merge: []opsstate.MergeLine{}, Deploy: []opsstate.Deploy{},
@@ -283,8 +283,8 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		}
 	}
 	s.Events = stateEvents(last)
-
 	dep := stateDeploy(&s, now)
+	f.DeployHold = deployHoldIf(s.Deploy, now)
 	s.Sources = []opsstate.Source{tick, hc, dep, jr}
 	return s, f
 }

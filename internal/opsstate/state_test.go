@@ -39,7 +39,7 @@ func fake() State {
 		Queue: Queue{Counts: map[string]int{"wait": 4, "up": 2, "sent": 0},
 			Oldest: &Waiting{Lane: "lane-old", AgeS: 7200, Why: "선행 lane-x"}},
 		Lanes: []Lane{
-			{Name: "lane-stuck", Machine: "a", Stage: "작업 중(working)", StageAgeS: ip(95 * 60), LastEvent: "중간 시험 통과"},
+			{Name: "lane-stuck", Machine: "a", Stage: "작업 중(working)", StageAgeS: ip(95 * 60), LastEvent: "중간 시험 통과", Open: true},
 			{Name: "lane-ok", Machine: "b", Stage: "완료 abcd1234", StageAgeS: ip(5 * 60), LastEvent: "완료", PR: "PR #7 https://example.org/pull/7"},
 		},
 		Merge: []MergeLine{{Project: "p", Length: ip(2), Merger: "alive", LastRoundAgeS: ip(30), RecentVerifyS: fp(410), SkipRatio: fp(0.25)}},

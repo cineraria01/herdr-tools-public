@@ -137,7 +137,7 @@ func rollback(machines []string) {
 	}
 	deployC12, deploySrc, deployReached = c12, rel.src, true
 	say("되돌리기 bin-%s (바이너리만)", c12)
-	mbd, _ := installBins("맥", "Darwin", rel, &rconf)
+	mbd, _ := installBins(LOCAL, "Darwin", rel, &rconf)
 	rdiff = append(rdiff, mbd...)
 	for _, m := range machines {
 		q, ok := query(m)
@@ -161,6 +161,6 @@ func rollback(machines []string) {
 	}
 	saved := rows
 	rows = ""
-	row("맥", rdiff, rconf)
+	row(LOCAL, rdiff, rconf)
 	fmt.Print(rows + saved)
 }

@@ -5,7 +5,8 @@
 #   load_band load_busy load_starve skew_min skew_every pr pr_max pr_fail pr_timeout
 # (기계별 자리·멈춤은 hc-fill machine <기계> --seats|--pause — 손잡이 seats@<기계>·pause@<기계>)
 #
-# local    이 기계(hc --on 없이 띄우는 기계)의 이름. machine·repo 줄에서 이 이름을 쓴다
+# local    이 기계(hc --on 없이 띄우는 기계)의 이름. machine·repo 줄에서 이 이름을 쓴다. herdr-sync도 이 기계를 이 이름으로 적는다
+#          (없으면 「맥」 — 망·hc 이름과 같게 두면 기계마다 한 이름, docs/herdr-sync/local-name.md)
 # agent    셀 에이전트 종류(hc ls --json 의 agent 값)
 # coord    지휘 터미널 주소. 주인 없는 대기열 줄을 이 기계에 띄울 때 herdr-balance --main <주소> --add 로 붙인다(주인 지휘가
 #          있으면 그 옆). 빼면 붙이지 않는다. 감시(hc-lane watch)·알림 대상은 이 값이 아니라 대기열 줄의 주인 지휘(hc-fill add를
@@ -97,6 +98,11 @@ idle_empty 60
 hold     60
 #audit   ~/.config/herdr-tools/hc-fill-audit.md
 audit_max 2
+# 운영 에이전트(docs/ops/agent.md): 손댈 것(hc-fill advise)에 새 항목이 생기면 바퀴가 에이전트를 한 번 띄운다. 켜려면 이 줄과
+#   틀(설정 폴더 ops-agent.md — 본보기 config.example/ops-agent.md)이 있고 손잡이 ops_agent가 판단만|조치여야 한다(기본 끔).
+#   sh -c 로 부르고 환경 HC_FILL_AGENT_RUN(실행 표식 — 에이전트 환경까지 넘겨야 관문이 먹는다)·HC_FILL_AGENT_NAME·HC_FILL_AGENT_DIR
+#   (작업 폴더)·HC_FILL_AGENT_BRIEF(지시문)를 준다. 60초 안에 돌아와야 하고 표준 출력 첫 줄이 터미널 주소다
+#ops_agent_launch hc run --bg --name "$HC_FILL_AGENT_NAME" --cwd "$HC_FILL_AGENT_DIR" -- env HC_FILL_AGENT_RUN="$HC_FILL_AGENT_RUN" my-agent-cli "$(cat "$HC_FILL_AGENT_BRIEF")"
 #auto_submit app
 overlap  block
 #overlap_ignore app docs/fragments/*

@@ -41,7 +41,7 @@ func collectTree(repo, dst, tkey string, rels []string, want map[string]string, 
 	}
 	for _, r := range rels { // 다 확인한 뒤에야 하나라도 바꿔 넣는다
 		if w, s := want[r], rsig(st+"/"+r, tkey+"/"+r); w == "" || s != w {
-			return fmt.Errorf("%s 서명이 맥 값과 다르다 (%s ≠ %s)", r, s, w)
+			return fmt.Errorf("%s 서명이 %s 값과 다르다 (%s ≠ %s)", r, LOCAL, s, w)
 		}
 	}
 	for _, r := range rels {

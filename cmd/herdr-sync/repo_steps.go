@@ -101,12 +101,12 @@ func repoPlan(q *qres, RS, RP []string, LK map[int]string) (rbp []string, acts m
 		}
 		switch m {
 		case "!":
-			die("맥 ~/%s에 '<!-- User customizations -->' 줄이 없다", strings.SplitN(k, "#", 2)[0])
+			die("%s ~/%s에 '<!-- User customizations -->' 줄이 없다", LOCAL, strings.SplitN(k, "#", 2)[0])
 		case "~", "?": // 맥에 Codex 지침이나 그 표식이 없다
 			continue
 		case "L":
 			if !shown[q.L[i]] {
-				say("건너뜀 맥 %s (링크 — 따라가지 않음)", q.L[i])
+				say("건너뜀 %s %s (링크 — 따라가지 않음)", LOCAL, q.L[i])
 				shown[q.L[i]] = true
 			}
 			continue
@@ -249,7 +249,7 @@ func (g *gather) unit(u unit, m string) {
 		}
 	}
 	g.rbp = append(g.rbp, k+"\t"+m+"\t"+u.url)
-	g.mm[grp] = append(g.mm[grp], "맥 모음 "+k)
+	g.mm[grp] = append(g.mm[grp], LOCAL+" 모음 "+k)
 }
 
 // collectFile: 맥 값 m을 저장소 파일로(m이 "-"면 git rm) 쓰고 스테이징. 실패하면 멈출 까닭, 되면 ""
@@ -400,10 +400,10 @@ func repoInstall(idx []int, acts map[int]string, RS []string) (rbp2 []string, ba
 		switch {
 		case r == "-":
 			if run(mac("d", k, STAMP)) != 0 {
-				die("맥에서 지우지 못했다: %s", k)
+				die("%s에서 지우지 못했다: %s", LOCAL, k)
 			}
 			rbp2 = append(rbp2, k+"\t-\t"+u.url)
-			say("맥 지움 %s (저장소에서 지워짐)", k)
+			say("%s 지움 %s (저장소에서 지워짐)", LOCAL, k)
 			continue
 		case u.tree:
 			g := u.d == REPO
@@ -413,11 +413,11 @@ func repoInstall(idx []int, acts map[int]string, RS []string) (rbp2 []string, ba
 		}
 		in, err := os.Open(u.d + "/" + u.r)
 		if err != nil || runIn(mac("w", k, sigx(r), r, STAMP), in, nil) != 0 {
-			die("맥에 깔지 못했다: %s", k)
+			die("%s에 깔지 못했다: %s", LOCAL, k)
 		}
 		in.Close()
 		rbp2 = append(rbp2, k+"\t"+r+"\t"+u.url)
-		say("맥 깖 %s", k)
+		say("%s 깖 %s", LOCAL, k)
 		if k == ".claude/CLAUDE.md#body" {
 			body = true
 		}
@@ -442,16 +442,16 @@ func installTrees(d string, kc, kp []string) (rbp []string, bad bool) {
 	var wo bytes.Buffer
 	pre, tar := wpack(d, kc, "kc.src")
 	if p, c := pipeline(pre, tar, mac("W", STAMP), &wo); p != 0 || c != 0 {
-		warn("맥 나무 깔기 묶음이 실패로 끝났다 (보냄 %d · 받음 %d)", p, c)
+		warn("%s 나무 깔기 묶음이 실패로 끝났다 (보냄 %d · 받음 %d)", LOCAL, p, c)
 		bad = true
 	}
 	okk := map[string]bool{}
 	for _, r := range wres(kc, wo.String()) {
 		if r[0] == "ok" {
-			say("맥 깖 %s", r[1])
+			say("%s 깖 %s", LOCAL, r[1])
 			okk[r[1]] = true
 		} else {
-			warn("맥에 깔지 못했다: %s (%s)", r[1], r[2])
+			warn("%s에 깔지 못했다: %s (%s)", LOCAL, r[1], r[2])
 			bad = true
 		}
 	}

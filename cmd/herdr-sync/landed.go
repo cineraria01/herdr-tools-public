@@ -205,6 +205,8 @@ func modes(a, all []string) (int, bool) {
 		ms := a[1:]
 		if len(ms) == 0 {
 			ms = all
+		} else {
+			ms = notLocal(ms) // 이 기계 줄은 늘 먼저 나온다
 		}
 		return showStatus(ms), true
 	case "--landed":

@@ -189,7 +189,9 @@ type Knob struct {
 
 // Thresholds: 손댈 것의 문턱(손잡이 state_stage·state_hot·state_cool·idle·advise_wait). 0이면 그 본보기는 끈다
 type Thresholds struct {
-	StageMin       int     // 같은 단계에 이만큼(분) 머문 레인
+	// StageMin: 같은 단계에 이만큼(분) 머문 레인. 터미널이 살아 있는(또는 모르는, Lane.Open) 줄만 — 끝난 줄은 자리를 잡지 않고 hc read할
+	// 터미널도 없다(2026-11-24 지휘: 스스로 착지·정리하고 완료로 보고한 레인·착지 없는 검토 레인이 거짓 양성이었다. 완료 뒤 멈춤은 done_stall 사건이 따로 본다)
+	StageMin       int
 	SkewHi, SkewLo float64 // 코어당 부하가 SkewHi 이상인 기계와 SkewLo 이하인 기계가 함께 있으면
 	IdleMin        int     // 빈 자리가 있는데 대기 줄이 이만큼(분) 넘게 기다리면(손잡이 idle)
 	WaitMin        int     // 감사 자리 없음·병합 줄 바퀴 없음이 이만큼(분) 넘으면(손잡이 advise_wait)

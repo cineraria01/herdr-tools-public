@@ -13,13 +13,11 @@ import (
 	"strings"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/trustq"
 )
 
+// 신뢰 질문 판정은 internal/trustq 한 곳(병합기의 풀이 터미널 감시와 함께 쓴다)
 var (
-	trustQ     = regexp.MustCompile(`(?m)^ *(❯ | +)No, exit *$`)
-	trustY     = regexp.MustCompile(`(?m)^ *(❯ | +)Yes, I trust this folder *$`)
-	trustCurN  = regexp.MustCompile(`(?m)^ *❯ No, exit *$`)
-	trustCurY  = regexp.MustCompile(`(?m)^ *❯ Yes, I trust this folder *$`)
 	impCurY    = regexp.MustCompile(`^ *❯ ([0-9]+\. )?Yes, allow external imports *$`)
 	impCurN    = regexp.MustCompile(`^ *❯ ([0-9]+\. )?No, disable external imports *$`)
 	impY       = regexp.MustCompile(`^ *( +)([0-9]+\. )?Yes, allow external imports *$`)
@@ -137,17 +135,10 @@ func startCheck(a string) int {
 			why = "외부 가져오기 질문에 작업 폴더 저장소 밖 경로가 있다"
 			break
 		}
-		if tr == "" && (strings.Contains(scr, "Accessing workspace") || strings.Contains(scr, "trust this folder") ||
-			strings.Contains(scr, "Do you trust") || strings.Contains(scr, "one you trust?")) {
-			if strust == "off" {
+		if tr == "" && trustq.Seen(scr) {
+			if v, keys := trustq.Look(scr); strust == "off" {
 				tr = "off"
-			} else if strings.Contains(scr, "Is this a project you created or one you trust?") && trustQ.MatchString(scr) && trustY.MatchString(scr) {
-				var keys []string
-				if trustCurN.MatchString(scr) {
-					keys = []string{"down", "enter"}
-				} else if trustCurY.MatchString(scr) {
-					keys = []string{"enter"}
-				}
+			} else if v != trustq.Odd {
 				if keys == nil {
 					tr = "unknown"
 					errf("hc-lane: 모름 — 시작 화면 확인(%s): 신뢰 질문에 커서(❯)가 안 보여 건드리지 않았다\n", a)

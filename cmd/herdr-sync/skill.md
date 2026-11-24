@@ -19,6 +19,7 @@
 - `herdr-sync --status [<기계>…]` — 고치지 않는다. 닿지 못한 기계는 「모름」(같음으로 읽지 않는다).
 - `herdr-sync --log --json` — 배포 기록 마지막 줄들(칸: docs/ops/agents.md). 사람용은 `herdr-sync --log 20`.
 - `herdr-sync --check` — 맞출 것·충돌 목록(첫 줄 「맥:」은 맥 ↔ 저장소 방향).
+- 출력·배포 기록의 「맥」 자리는 이 기계 이름이다 — 개인 설정 `hc-fill.tsv`의 `local` 줄이 있으면 그 이름, 옛 기록의 「맥」도 같은 기계로 읽는다(docs/herdr-sync/local-name.md).
 - `herdr-sync --auto` — 스스로 배포 켬·끔(인자 없이 보기만).
 - 대기열 쪽에서 한 장으로: `hc-fill state --json`의 배포 칸.
 

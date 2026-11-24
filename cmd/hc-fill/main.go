@@ -101,6 +101,7 @@ func main() {
 	if !ok {
 		usage()
 	}
+	agentGate(cmd, args) // 운영 에이전트 실행이 부른 것만 거른다(opsagent_gate.go) — 사람이 부른 것은 그대로
 	run(args)
 	exit(0)
 }

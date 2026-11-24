@@ -85,6 +85,17 @@ func adviseWait(r Row, now time.Time) opsstate.Wait {
 	return w
 }
 
+// adviseKnown: 이미 사건으로 알린 열쇠(<DATA>/advise.tsv 둘째 줄부터) — opsstate.Facts.Known
+func adviseKnown() map[string]bool {
+	k := map[string]bool{}
+	if ls := readLines(DATA + "/advise.tsv"); len(ls) > 1 {
+		for _, x := range ls[1:] {
+			k[x] = true
+		}
+	}
+	return k
+}
+
 // adviseTick <지금>: advise_every분(손잡이, 0이면 끔)마다 손댈 것을 다시 보고, 지난번 목록(<DATA>/advise.tsv — 첫 줄 본 초, 그다음
 // 줄마다 열쇠)에 없던 항목이 생기면 운영 사건 한 번. 판정 못 함은 사건으로 내지 않는다. 보내기를 실패하면 그 열쇠를 안 적어 다음에 다시
 func adviseTick(now time.Time) {

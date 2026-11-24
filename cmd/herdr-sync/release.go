@@ -204,7 +204,7 @@ func unknownTargets(bins []binUnit, osOf map[string]string) []string {
 	return r
 }
 
-// installBins: 그 기계(맥은 "맥")에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다).
+// installBins: 그 기계(이 기계는 LOCAL)에 바이너리를 깐다(--check면 견주기만). 다름 묶음과 「다 깔렸나」(거짓이면 설정·지움을 미룬다).
 // 충돌(따로 바뀐 바이너리)은 conf에 더한다 — 그 바이너리만 그대로 두고 설정·지움은 계속한다
 func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 	tools := binTools(m, osname)
@@ -237,7 +237,7 @@ func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 	var out string
 	var rc int
 	var errb bytes.Buffer
-	if m == "맥" {
+	if m == LOCAL {
 		// 맥 대체 빌드도 상한·무리 소유(ops/R-205): 조각 전체가 HERDR_TIMEOUT_BUILD 안에(남은 도구는 그 시각부터 E 「시간 상한」), 넘기면
 		// proc가 무리째(짓던 go·컴파일러 자손까지) 거둔 뒤 돌아오고 결과는 모름 — 돌아온 뒤 본체·bin.tsv를 쓰는 자손이 남지 않는다.
 		// herdr-sync가 신호를 받으면 onSignals의 StopCurrent가 이 무리를 다 거둔 뒤에 끝낸다(잠금은 그 뒤에 놓인다)
@@ -396,7 +396,7 @@ func release(rel *relInfo, pub, checked string, pubwarn func(string)) {
 	}
 	gob := goBin()
 	if gob == "" {
-		pubwarn("릴리스 건너뜀 — 맥에 go가 없다(brew install go). 기계는 각자 짓는다")
+		pubwarn("릴리스 건너뜀 — " + LOCAL + "에 go가 없다(brew install go). 기계는 각자 짓는다")
 		return
 	}
 	if !hex40.MatchString(checked) {
@@ -515,9 +515,10 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 		// 연결·인증·이름 풀기 오류는 조회 실패(모름)다(R-12)
 		if rc != proc.TimeoutCode && strings.TrimSpace(errs) == "release not found" {
 			args := append([]string{"release", "create", tag, "--repo", slug, "--title", tag,
+				// 공개 릴리스 글 — 이 기계 이름(개인 값)을 넣지 않는다
 				"--notes", "herdr-tools " + c12 + " Go 도구 바이너리(<도구> darwin/arm64, <도구>-linux-amd64) — herdr-sync가 맥에서 지어 올림, 기계는 SHA256SUMS로 확인해 받는다"}, files(all)...)
 			if _, rc, _ := gh(args...); rc != 0 {
-				pubwarn("릴리스 만들기 실패 " + tag + " (gh release create — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
+				pubwarn("릴리스 만들기 실패 " + tag + " (gh release create — " + LOCAL + " gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
 				return false
 			}
 			say("릴리스 올림 %s", tag)
@@ -584,7 +585,7 @@ func upload(slug, tag, c12, out string, tools []string, sums string, pubwarn fun
 		return true
 	}
 	if _, rc, _ := gh(append([]string{"release", "upload", tag, "--repo", slug}, files(miss)...)...); rc != 0 {
-		pubwarn("릴리스 올리기 실패 " + tag + " (gh release upload — 맥 gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
+		pubwarn("릴리스 올리기 실패 " + tag + " (gh release upload — " + LOCAL + " gh 인증·공개 미러 쓰기 권한) — 기계는 각자 짓는다")
 		return false
 	}
 	say("릴리스 채움 %s (%s)", tag, strings.Join(miss, " "))

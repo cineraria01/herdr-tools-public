@@ -46,7 +46,7 @@ func logJSON(rs []logRow) int {
 		}
 		for _, w := range strings.Fields(r.res) {
 			if m, s, ok := strings.Cut(w, "="); ok {
-				d.Machines[m] = s
+				d.Machines[localOf(m)] = s // 옛 기록의 「맥」도 이 기계 이름으로(raw는 그대로)
 			}
 		}
 		out = append(out, d)

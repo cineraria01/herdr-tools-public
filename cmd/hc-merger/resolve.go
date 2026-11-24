@@ -299,6 +299,7 @@ func (m *M) resolveTick() bool {
 			m.rdrop(r)
 			continue
 		}
+		m.rwatch(r) // 푸는 터미널의 신뢰 질문·멈춤(resolvewatch.go)
 		if m.rstep(r) {
 			changed = true
 			continue

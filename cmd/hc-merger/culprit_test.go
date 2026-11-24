@@ -185,12 +185,13 @@ func TestFirstFailEnvLines(t *testing.T) {
 	for _, c := range []struct{ name, out, want string }{
 		{"setup 뿐", setup + "FAIL\n", ""},
 		{"go.sum 없음", "# m/d\nd/d.go:2:8: missing go.sum entry\nFAIL\tm/d [setup failed]\nFAIL\n", ""},
-		{"시험 실패", "=== RUN   TestX\n--- FAIL: TestX (0.00s)\nFAIL\nFAIL\tm/c\t0.1s\nFAIL\n", "--- FAIL: TestX (0.00s)"},
+		// 시험 실패의 이름표는 「<꾸러미>: <시험>」(knob-test-leak — 실패한 꾸러미의 최상위 「--- FAIL」만, failpick.go)
+		{"시험 실패", "=== RUN   TestX\n--- FAIL: TestX (0.00s)\nFAIL\nFAIL\tm/c\t0.1s\nFAIL\n", "m/c: TestX"},
 		{"빌드 실패", "# m/b [m/b.test]\nb/b.go:2:23: cannot use\nFAIL\tm/b [build failed]\nFAIL\n", "FAIL\tm/b [build failed]"},
-		{"setup + 시험 실패", setup + "--- FAIL: TestX (0.00s)\nFAIL\nFAIL\tm/c\t0.2s\nFAIL\n", "--- FAIL: TestX (0.00s)"},
+		{"setup + 시험 실패", setup + "--- FAIL: TestX (0.00s)\nFAIL\nFAIL\tm/c\t0.2s\nFAIL\n", "m/c: TestX"},
 		{"setup + 빌드 실패", setup + "# m/b [m/b.test]\nFAIL\tm/b [build failed]\nFAIL\n", "FAIL\tm/b [build failed]"},
 		{"시간 넘김 뿐", timeout + "FAIL\n", ""},
-		{"시간 넘김 + 다른 꾸러미 시험 실패", timeout + "--- FAIL: TestY (0.00s)\nFAIL\nFAIL\tm/f\t0.1s\nFAIL\n", "--- FAIL: TestY (0.00s)"},
+		{"시간 넘김 + 다른 꾸러미 시험 실패", timeout + "--- FAIL: TestY (0.00s)\nFAIL\nFAIL\tm/f\t0.1s\nFAIL\n", "m/f: TestY"},
 		{"꾸러미 실패만(TestMain os.Exit 등)", "FAIL\tm/g\t0.1s\nFAIL\n", "FAIL\tm/g\t0.1s"},
 		{"bun", "(fail) x > y [1.00ms]\n", "(fail) x > y [1.00ms]"},
 		{"맨 FAIL 뿐", "FAIL\n", ""},

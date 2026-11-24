@@ -56,6 +56,11 @@ func resolveFx0(t *testing.T, resolve, audit string) (*rfx, string) {
 	os.WriteFile(conf+"/merger-resolve.md", []byte("# 풀이 {lane}\nRESULT={result}\nDIR={worktree}\n"), 0o666)
 	os.WriteFile(conf+"/merger-resolve-audit.md", []byte("# 풀이 감사 {lane}\nVERDICT={verdict}\nAID={audit_id}\nDIFF={auto_tree} {resolved}\n"), 0o666)
 	os.WriteFile(f.dir+"/agent.sh", []byte(fakeAgent), 0o777)
+	// 가짜 hc(풀이 터미널 감시 resolvewatch.go가 부른다 — 진짜 hc에 닿지 않게): get·read는 $HCFAKE/get·screen, 없으면 실패. 부른 인자는 hc.log
+	os.MkdirAll(f.dir+"/hcfake/bin", 0o777)
+	os.WriteFile(f.dir+"/hcfake/bin/hc", []byte(fakeHcWatch), 0o777)
+	t.Setenv("PATH", f.dir+"/hcfake/bin:"+os.Getenv("PATH"))
+	t.Setenv("HCFAKE", f.dir+"/hcfake")
 	for k, v := range map[string]string{"HERDR_TOOLS_CONFIG": conf, "LAUNCHLOG": r.launchlog, "FAKE_RESOLVE": resolve, "FAKE_AUDIT": audit,
 		"HC_LANE_MERGER_RESOLVE_LAUNCH": f.dir + "/agent.sh", "HC_LANE_MERGER_CONFLICT": "", "HC_LANE_MERGER_RESOLVE_MAX": ""} {
 		t.Setenv(k, v)

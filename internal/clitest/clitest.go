@@ -208,7 +208,10 @@ func BinDir(t *testing.T, names ...string) string {
 var EnvAllow = []string{"PATH", "TMPDIR", "HERDR_VERIFY_BOOT_TMPDIR", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
 	// 시험 바이너리가 스스로 넣는 값: internal/journal·internal/oplog의 init이 지정이 없으면 /dev/null로 넣어, 시험이 띄운 도구가 실제
 	// 일지·운영 기록에 쌓지 않게 자식에 물려준다(이름은 journal.Env·oplog.Env — 그 꾸러미를 가져오면 모든 시험 바이너리에서 init이 돈다)
-	"HERDR_TOOLS_JOURNAL", "HERDR_TOOLS_OPLOG"}
+	"HERDR_TOOLS_JOURNAL", "HERDR_TOOLS_OPLOG",
+	// 격리한 시험 프로세스의 표식(internal/clitest/sandbox Marker — 가져오면 그 init이 돌아 tests/repo까지 격리되니 이름만): 틀이 다시 부른
+	// 시험 바이너리가 부모가 넣은 HOME 그대로 돈다
+	"HERDR_SANDBOX_HOME"}
 
 // Env: 시험 자식 환경의 바탕 — 허용 목록과 keep의 바깥 값, 임시 HOME(T), GIT_CEILING_DIRECTORIES(git이 T 위로 저장소를 찾아
 // 올라가지 못하게). 시험 틀이 이 위에 자기 값(가짜 명령 PATH·git 이름 등)을 덧씌운다

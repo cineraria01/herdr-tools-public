@@ -27,6 +27,18 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - 시험이 바깥 값을 꼭 읽어야 하면(시험 전용 덮어쓰기 `HC_FILL_EXAMPLE`·`HERDR_BUILD_OVERLAY` 같은 것) 시험 프로세스에서 `os.Getenv`로 읽어 자식에 값을 넘기고(`Isolate`보다 먼저), 자식이 바깥 이름 그대로 받아야 하면 `Env`·`Isolate`의 keep에 이름을 적는다 — 허용 목록 자체는 늘리지 않는다.
 - `clitest.Poison`·`Leaked`: 레인 터미널·병합기 값(`clitest.LaneEnv`, 아직 없는 손잡이 자리 하나 포함)을 넣고 틀의 자식 환경에 남은 것을 본다. 틀마다 `TestKitEnvNoLeak`(`tests/{util,hclane,merger,hcfill}/envleak_test.go`)가 지킨다 — 새 시험 틀은 `clitest.Env`에서 시작하고 같은 시험을 하나 둔다.
 
+## 시험의 집 — 시험 바이너리는 실제 상태를 읽지도 쓰지도 않는다
+
+2026-11-24 knob-test-leak: 지휘가 `hc-fill knob set merger_idle_load 100`을 걸자 병합기가 일꾼에 넘긴 `HC_LANE_SPEC_IDLE_LOAD=100`이 그 기계의 저장소 검증(`go test`)까지 이어져, 「한가함 문턱」을 기본값으로 보는 병합기 시험 넷이 깨지고 무관한 제출이 반송됐다(손잡이 파일이 아니라 환경 변수 길이었다 — 가짜 HOME의 손잡이 파일로는 안 깨지고 환경 변수로 깨짐을 재현).
+- 시험이 있는 꾸러미는 모두 `internal/clitest/sandbox`를 가져온다(폴더마다 `sandbox_test.go`의 `TestSandboxed` 한 줄). 그 init이 시험 바이너리 시작에 한 번(시험하는 꾸러미의 꾸러미 변수보다 먼저):
+  - 도구가 설정·운영 값으로 읽는 이름 공간 `HC_*`·`HERDR_*`·`LANE_*`·`XDG_*`·`CLAUDE_*`·`GIT_*`을 지운다 — 검증 실행기 값 `HERDR_VERIFY_*`와 시험 전용 이름(`…_TEST…`·`…_EXAMPLE`·`…_CRASH_AT`, 도구 덮어쓰기 `HERDR_SYNC` 등 `sandbox.Keep`)은 남긴다.
+  - HOME을 새 임시 폴더(`herdr-test-home.<pid>.*`, git 이름만 둔 `.gitconfig`)로 돌린다 — 실제 손잡이·대기열·일지·기계 쉬게 하기·부하·배포 기록이 모두 HOME 아래라 닿지 않는다. go 캐시·모듈·설정 자리는 그 전 값으로 못박는다.
+  - 일지·운영 기록은 `/dev/null`(`HERDR_TOOLS_JOURNAL`·`HERDR_TOOLS_OPLOG`).
+  - 다시 부른 자식 시험 바이너리는 표식 `HERDR_SANDBOX_HOME`(`clitest.EnvAllow`에 있어 틀의 자식에도 감)가 있으면 아무것도 하지 않는다 — 부모 시험이 넣은 HOME·값 그대로.
+- `TestSandboxed`(`sandbox.Check`)는 격리됐는지 보고, 독(실제 꼴의 손잡이·대기열·설정 파일을 둔 HOME, 운영 손잡이 환경 변수)을 넣고 표식 없이 자기 바이너리를 다시 불러 자식이 그것을 안 보는지 본다.
+- 싼 검사 `tests/repo` `TestTestsSandboxed`가 시험 폴더마다 가져오기를 본다(구문만). 빠지는 것은 `sandboxExempt`(까닭과 함께) — `tests/repo` 자신은 이 기계의 개인 값 패턴과 레인 표식을 일부러 읽는다.
+- 새 시험 폴더는 다른 폴더의 `sandbox_test.go`를 본떠 하나 둔다. 시험이 실제 상태를 읽어야 하면 격리를 빼지 말고 그 값을 시험이 만든다.
+
 ## 시험의 기다림 — 새 장면을 쓸 때의 규칙
 
 검증 바닥은 조각 초의 합 ÷ 자리라, 일 없이 기다리는 초가 검증 시간이 된다(2026-11-24 tests-wait-trim: 병합기 상주 시험 122초·hc-fill gc 배경 32초를 걷었다).

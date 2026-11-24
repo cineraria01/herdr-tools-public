@@ -1,0 +1,160 @@
+$  → 1
+맥 모음 .local/bin/herdr-balance
+맥 모음 .claude/CLAUDE.md#body
+맥 모음 .claude/docs/a.md
+맥 모음 .claude/docs/b.md
+맥 모음 .codex/AGENTS.md#codex-shared
+맥 모음 .agents/skills/herdr-desktop/SKILL.md
+맥 모음 .local/share/claude-md/build_codex.py
+맥 깖 .local/bin/hc-lane
+맥 깖 .local/bin/herdr-settings-merge
+맥 깖 .local/share/herdr-sync/keys.json
+충돌 w1 .claude/docs/b.md (2줄 다름)
+w1 씀 .agents/skills/herdr-desktop/SKILL.md
+w1 씀 .local/bin/hc-lane
+w1 씀 .local/bin/herdr-settings-merge
+w1 씀 .local/share/herdr-sync/keys.json
+w1 씀 .claude/skills/herdr-desktop@
+w1 씀 hook:PreToolUse:cotenant-guard.sh
+w1 참고 .permissions
+w1 지움 .agents/skills/herdr-ovis
+충돌 lx .claude/CLAUDE.md#body (2줄 다름)
+lx 씀 .claude/docs/a.md
+lx 씀 .claude/docs/b.md
+충돌 lx .codex/AGENTS.md#codex-shared (1줄 다름)
+lx 씀 .local/bin/herdr-settings-merge
+lx 씀 .local/share/herdr-sync/keys.json
+lx 예외 .effortLevel
+lx 씀 hook:PreToolUse:cotenant-guard.sh
+lx 참고 .permissions
+맥 지움 .local/bin/claude-md-sync
+맥: 같음
+w1: 충돌 1건
+lx: 충돌 2건
+$ --take w1:.claude/docs/b.md → 1
+w1 씀 .claude/docs/b.md
+w1 참고 .permissions
+충돌 lx .claude/CLAUDE.md#body (2줄 다름)
+충돌 lx .codex/AGENTS.md#codex-shared (1줄 다름)
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 충돌 2건
+$ --take lx:.claude/CLAUDE.md#body → 1
+w1 참고 .permissions
+lx 씀 .claude/CLAUDE.md#body
+충돌 lx .codex/AGENTS.md#codex-shared (1줄 다름)
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 충돌 1건
+$ --take lx:.codex/AGENTS.md#codex-shared → 0
+w1 참고 .permissions
+lx 씀 .codex/AGENTS.md#codex-shared
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 같음
+$ --check → 0
+w1 참고 .permissions
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 저장소와 같음
+w1: 같음
+lx: 같음
+$  → 0
+맥 깖 .local/lib/herdr-go/go.mod
+맥 깖 .local/lib/herdr-go/cmd/hello/main.go
+맥 깖 .local/lib/herdr-go/internal/version/version.go
+release not found
+릴리스 올림 bin-<H>
+맥 받음 hello
+w1 씀 .local/lib/herdr-go/go.mod
+w1 씀 .local/lib/herdr-go/cmd/hello/main.go
+w1 씀 .local/lib/herdr-go/internal/version/version.go
+w1 받음 hello
+w1 참고 .permissions
+lx 씀 .local/lib/herdr-go/go.mod
+lx 씀 .local/lib/herdr-go/cmd/hello/main.go
+lx 씀 .local/lib/herdr-go/internal/version/version.go
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 같음
+$  → 0
+릴리스 같음 bin-<H>
+w1 참고 .permissions
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 같음
+$ --status → 0
+origin/main <H> · 지금 도는 배포 없음
+배포할 것 1커밋: lane-two · 병합 줄 0건 남음 (맥 기준)
+맥: <H> · 뒤 1커밋
+w1: <H> · 뒤 1커밋
+lx: 모름 (깐 기록 없음)
+마지막 배포 <시각> 배포 종료 0 · <H> · 부른 곳 -
+스스로 배포 끔
+$ --landed → 0
+배포할 것 1커밋: lane-two · 병합 줄 0건 남음
+$  → 0
+맥 깖 .local/lib/herdr-go/cmd/hello/main.go
+release not found
+릴리스 올림 bin-<H>
+맥 받음 hello
+w1 씀 .local/lib/herdr-go/cmd/hello/main.go
+w1 받음 hello
+w1 참고 .permissions
+lx 씀 .local/lib/herdr-go/cmd/hello/main.go
+lx 예외 .effortLevel
+lx 참고 .permissions
+맥: 같음
+w1: 같음
+lx: 같음
+$ --at <H> --check w1 → 1
+되돌리기 bin-<H> (바이너리만)
+맥 다름:바이너리 hello (판이 다르거나 모름)
+w1 다름:바이너리 hello (판이 다르거나 모름)
+맥: 다름 (바이너리)
+w1: 다름 (바이너리)
+$ --at <H> → 0
+되돌리기 bin-<H> (바이너리만)
+맥 받음 hello
+w1 받음 hello
+맥: 같음
+w1: 같음
+lx: 같음
+$ --status → 0
+origin/main <H> · 지금 도는 배포 없음
+배포할 것 1커밋: lane-two · 병합 줄 0건 남음 (맥 기준)
+맥: <H> · 뒤 1커밋
+w1: <H> · 뒤 1커밋
+lx: 모름 (깐 기록 없음)
+마지막 배포 <시각> 되돌림 종료 0 · <H> · 부른 곳 -
+스스로 배포 끔
+$ --log → 0
+<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=충돌 lx=충돌
+<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=씀 lx=충돌
+<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=충돌
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=씀
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=씀 lx=씀
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=같음
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=씀 lx=씀
+<시각> 되돌림 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=씀 lx=같음
+$ --log 2 --json → 0
+[{"when":"<시각>","kind":"배포","exit":0,"tools_commit":"<H>","source":"3832504415.94","config_commit":"<H>","by":"-","machines":{"lx":"씀","w1":"씀","맥":"씀"},"raw":"맥=씀 w1=씀 lx=씀"},{"when":"<시각>","kind":"되돌림","exit":0,"tools_commit":"<H>","source":"at:<H>","config_commit":"<H>","by":"-","machines":{"lx":"같음","w1":"씀","맥":"씀"},"raw":"맥=씀 w1=씀 lx=같음"}]
+# deploy.tsv
+<시각>	배포	1	<H>	-	<H>	-	맥=씀 w1=충돌 lx=충돌
+<시각>	배포	1	<H>	-	<H>	-	맥=같음 w1=씀 lx=충돌
+<시각>	배포	1	<H>	-	<H>	-	맥=같음 w1=같음 lx=충돌
+<시각>	배포	0	<H>	-	<H>	-	맥=같음 w1=같음 lx=씀
+<시각>	배포	0	<H>	3901473422.92	<H>	-	맥=씀 w1=씀 lx=씀
+<시각>	배포	0	<H>	3901473422.92	<H>	-	맥=같음 w1=같음 lx=같음
+<시각>	배포	0	<H>	3832504415.94	<H>	-	맥=씀 w1=씀 lx=씀
+<시각>	되돌림	0	<H>	at:<H>	<H>	-	맥=씀 w1=씀 lx=같음

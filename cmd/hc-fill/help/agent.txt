@@ -1,0 +1,4 @@
+        hc-fill agent status [--json] | agent run [--why <까닭>]   (운영 에이전트 — docs/ops/agent.md)
+  agent  손댈 것(advise)에 새 항목이 생기면 바퀴가 설정 ops_agent_launch 명령으로 에이전트를 한 번 띄운다(손잡이 ops_agent
+         끔|판단만|조치, 기본 끔 · ops_agent_max_hour · ops_agent_timeout · ops_agent_tries · ops_agent_scope). status는 도는 실행·
+         최근 바퀴·항목마다 시도, run은 지금 한 바퀴(손으로 — 시도 기록·시간당 상한과 상관없이, 한 번에 하나)

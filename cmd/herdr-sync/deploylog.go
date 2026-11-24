@@ -129,11 +129,11 @@ func deployEndOnce(code int, sig bool) {
 	rs := []string{"신호로 멈춤"}
 	if !sig {
 		rs = nil
-		if r, ok := results["맥"]; ok { // 표처럼 맥 먼저
-			rs = append(rs, "맥="+r)
+		if r, ok := results[LOCAL]; ok { // 표처럼 이 기계 먼저
+			rs = append(rs, LOCAL+"="+r)
 		}
 		for _, m := range resultOrder {
-			if m != "맥" {
+			if m != LOCAL {
 				rs = append(rs, m+"="+results[m])
 			}
 		}
@@ -208,7 +208,7 @@ func showLog(args []string) int {
 		return 0
 	}
 	for _, r := range rs {
-		fmt.Printf("%s %s 종료 %s · 범용 %s · 개인 %s · 부른 곳 %s · %s\n", r.when, r.kind, r.rc, r.c12, r.conf, r.by, r.res)
+		fmt.Printf("%s %s 종료 %s · 범용 %s · 개인 %s · 부른 곳 %s · %s\n", r.when, r.kind, r.rc, r.c12, r.conf, r.by, localRes(r.res))
 	}
 	return 0
 }

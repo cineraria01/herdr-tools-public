@@ -19,20 +19,20 @@ func doPulls() {
 	for _, s := range pulls {
 		m, k := before(s), after(s)
 		if strings.HasSuffix(k, "#codex-shared") {
-			die("Codex 구역은 맥 지침에서 다시 만드므로 --pull을 받지 않는다. --take를 쓴다: %s", s)
+			die("Codex 구역은 %s 지침에서 다시 만드므로 --pull을 받지 않는다. --take를 쓴다: %s", LOCAL, s)
 		}
 		if m == "repo" {
 			continue
 		}
 		if binKey(k) {
-			die("바이너리는 --pull을 받지 않는다. 그 기계 판을 남기려면 그대로 둔다(충돌로 보인다), 맥 판으로 덮으려면 --take: %s", s)
+			die("바이너리는 --pull을 받지 않는다. 그 기계 판을 남기려면 그대로 둔다(충돌로 보인다), %s 판으로 덮으려면 --take: %s", LOCAL, s)
 		}
 		if k != "*" && !unitKey(k) && !treespec(k) {
-			die("설정 키는 --pull을 받지 않는다. 맥 settings.json을 고친 뒤 --take를 쓴다: %s", s)
+			die("설정 키는 --pull을 받지 않는다. %s settings.json을 고친 뒤 --take를 쓴다: %s", LOCAL, s)
 		}
 		mq, ok := query("")
 		if !ok {
-			die("맥 값을 읽지 못했다")
+			die("%s 값을 읽지 못했다", LOCAL)
 		}
 		q, ok := query(m)
 		if !ok {
@@ -89,13 +89,13 @@ func doPulls() {
 			if r2 != 0 {
 				die("%s에서 %s를 가져오지 못했다", m, u.k)
 			}
-			say("맥 가져옴 %s (%s)", u.k, m)
+			say("%s 가져옴 %s (%s)", LOCAL, u.k, m)
 			got++
 		}
 		if len(pl) > 0 {
 			ok, bad := pullTree(m, pl)
 			for _, k := range ok {
-				say("맥 가져옴 %s (%s)", k, m)
+				say("%s 가져옴 %s (%s)", LOCAL, k, m)
 				got++
 			}
 			for _, r := range bad {
@@ -149,7 +149,7 @@ func pullTree(m string, pl []string) (ok []string, bad [][2]string) {
 			}
 		}
 		if p != 0 || c != 0 { // 다 넣었다고 알렸어도 묶음이 실패로 끝났으면 성공으로 치지 않는다(base를 못 적었을 수 있다)
-			bad = append(bad, [2]string{field(ch[0], 1), fmt.Sprintf("맥 넣기 묶음이 실패로 끝났다 — 보냄 %d · 받음 %d", p, c)})
+			bad = append(bad, [2]string{field(ch[0], 1), fmt.Sprintf("%s 넣기 묶음이 실패로 끝났다 — 보냄 %d · 받음 %d", LOCAL, p, c)})
 		}
 	}
 	return ok, bad

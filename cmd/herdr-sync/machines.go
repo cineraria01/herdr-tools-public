@@ -228,7 +228,7 @@ func syncMachines(machines []string, mq *qres) {
 	qs, live := queryLive(machines)
 	// 2. 릴리스(맥에서 짓고 올림 — 공개 내보내기는 pinCommit이 앞서 했다), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
 	rel := binsPrepare(func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) })
-	mbd, macBins := installBins("맥", "Darwin", rel, &rconf)
+	mbd, macBins := installBins(LOCAL, "Darwin", rel, &rconf)
 	rdiff = append(rdiff, mbd...)
 	for _, m := range live {
 		q := qs[m]
@@ -434,12 +434,12 @@ func syncMachines(machines []string, mq *qres) {
 		}
 		switch {
 		case check:
-			say("맥 다름:지움 %s", k)
+			say("%s 다름:지움 %s", LOCAL, k)
 			rdiff = append(rdiff, "지움")
 		case run(mac("d", k, STAMP)) == 0:
-			say("맥 지움 %s", k)
+			say("%s 지움 %s", LOCAL, k)
 		default:
-			warn("맥 %s 지우기 실패", k)
+			warn("%s %s 지우기 실패", LOCAL, k)
 			rdiff = append(rdiff, "지움")
 		}
 	}
@@ -448,7 +448,7 @@ func syncMachines(machines []string, mq *qres) {
 	if check {
 		macrow()
 	} else {
-		row("맥", rdiff, rconf)
+		row(LOCAL, rdiff, rconf)
 	}
 	fmt.Print(rows + saved)
 	if rel != nil && macBins && !check { // 맥은 새 판을 깔았는데 바이너리를 못 깐 워커
