@@ -175,6 +175,8 @@ type oaStatusOut struct {
 	Scope     string            `json:"scope"`
 	Keys      map[string]*oaKey `json:"keys"`
 	Recent    []oaDone          `json:"recent"`
+	Fails     int               `json:"launch_fails"` // 못 띄움이 이어진 수(뜨면 0)
+	Left      string            `json:"left"`         // 끝난 실행의 터미널 가운데 아직 못 닫은 주소(없으면 "")
 }
 
 func agentStatus(args []string) {
@@ -192,7 +194,7 @@ func agentStatus(args []string) {
 	now := time.Now().Unix()
 	o := oaStatusOut{Mode: oaMode(), Launch: confRaw(oaLaunchK) != "", Template: isFile(oaTmplPath()), Run: st.Run,
 		HourMax: knobInt("ops_agent_max_hour"), Timeout: knobInt("ops_agent_timeout"), Tries: knobInt("ops_agent_tries"),
-		Scope: dash(conf("ops_agent_scope")), Keys: st.Keys, Recent: st.Recent}
+		Scope: dash(conf("ops_agent_scope")), Keys: st.Keys, Recent: st.Recent, Fails: st.LaunchFails, Left: st.Left}
 	for _, t := range st.Launches {
 		if now-t < 3600 {
 			o.HourCount++
@@ -220,6 +222,12 @@ func agentStatus(args []string) {
 			time.Unix(r.Deadline, 0).Format("15:04"), strings.Join(r.Keys, ", "))
 	} else {
 		say("  도는 것 없음")
+	}
+	if o.Fails > 0 {
+		say("  못 띄움 %d번 이어짐 — 까닭은 hc-fill journal의 「agent 띄우기」 실패 줄과 실행 폴더의 launch.err", o.Fails)
+	}
+	if o.Left != "" {
+		say("  못 닫은 앞 실행 터미널 %s — 다음 띄우기 직전에 다시 닫아 본다", o.Left)
 	}
 	for k, x := range st.Keys {
 		say("  항목 %s: %d번 띄움%s%s", k, x.Tries, map[bool]string{true: " · 끝까지 봄", false: ""}[x.Done], map[bool]string{true: " · 사람에게 넘김", false: ""}[x.Asked])

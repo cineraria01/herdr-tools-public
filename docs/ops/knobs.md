@@ -36,7 +36,7 @@
   멈춘 레인 다시 굴리기([nudge](../hc-fill/edit.md)): `nudge_every`(분, 한 레인에 다시 보내기까지, 0 막지 않음).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%). 기본 출력이 끝난 레인을 남기는 시간: `state_done`(분).
   지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_merge_slow`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다. 밀린 배포의 착지 뒤 유예 `deploy_grace`(분, 기본 5).
-  운영 에이전트([agent](agent.md)): `ops_agent`(끔|판단만|조치, 기본 끔)·`ops_agent_max_hour`(번)·`ops_agent_timeout`(분)·`ops_agent_tries`(번)·`ops_agent_scope`(프로젝트) — 운영 에이전트 실행 안에서는 이 다섯을 바꾸지 못한다.
+  운영 에이전트([agent](agent.md)): `ops_agent`(끔|판단만|조치, 기본 끔)·`ops_agent_max_hour`(번)·`ops_agent_timeout`(분)·`ops_agent_tries`(번)·`ops_agent_scope`(프로젝트)·`ops_agent_close`(0·1, 기본 1) — 운영 에이전트 실행 안에서는 이 여섯을 바꾸지 못한다.
 - 옮긴 hc-fill 설정 키(knobs-migrate, 2026-11-24 — 기본은 지금 코드 값 그대로): `gc`·`idle_empty`·`reland_wait`(분), `reland_max`·`audit_max`(번),
   `audit_close`·`audit_seat_rounds`(바퀴), `lows_hour`·`lows_min`(개).
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).

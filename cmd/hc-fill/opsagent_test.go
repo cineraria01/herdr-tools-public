@@ -140,13 +140,13 @@ func TestOpsAgentFinishSummary(t *testing.T) {
 	}
 }
 
-// ② ⑧ 띄우기 실패는 바퀴를 막지 않고 다음 바퀴에 다시 — ops_agent_tries(2)번 뒤에는 안 띄우고 항목마다 「사람이 정한다」 한 번
+// ② 떠서 못 푼 것(시간 넘김)은 다음 바퀴에 다시 — ops_agent_tries(2)번 뒤에는 안 띄우고 항목마다 「사람이 정한다」 한 번.
+// 못 띄움(띄울 명령 실패)은 시도로 세지 않는다(ops-agent-relaunch — opsagent_relaunch_test.go)
 func TestOpsAgentTriesThenHuman(t *testing.T) {
 	oaFx(t, "ops_agent 조치")
-	confLines = append([]string{`ops_agent_launch printf 'x\n' >>'` + DATA + `/launched'; exit 1`}, confLines...)
 	now := time.Now()
-	for i := 0; i < 5; i++ {
-		opsAgentTick(now.Add(time.Duration(i) * time.Minute))
+	for _, m := range []int{0, 21, 22, 43, 44, 45} { // 띄움 · 시간 넘김(기본 20분) · 띄움 · 시간 넘김 · 안 띄움
+		opsAgentTick(now.Add(time.Duration(m) * time.Minute))
 	}
 	if l := oaLaunched(t); len(l) != 2 {
 		t.Fatalf("두 번까지 띄워 봐야: %q", l)
@@ -158,10 +158,6 @@ func TestOpsAgentTriesThenHuman(t *testing.T) {
 	asks := grepN(reports(t), "번 띄웠는데 못 풀림")
 	if asks != len(st.Keys) {
 		t.Fatalf("항목마다 한 번(%d개)이어야: %d — %q", len(st.Keys), asks, reports(t))
-	}
-	jb, _ := os.ReadFile(DATA + "/journal.jsonl")
-	if strings.Count(string(jb), `"result":"실패: 종료 1"`) != 2 {
-		t.Errorf("일지에 실패 두 줄: %s", jb)
 	}
 }
 
