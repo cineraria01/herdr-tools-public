@@ -41,7 +41,7 @@ func TestEditDuringRunRefused(t *testing.T) {
 	if rc := withQ(func() { editCmd([]string{"e1", "--brief", nb}) }); rc != 0 {
 		t.Fatalf("run이 끝난 뒤 edit 종료 %d", rc)
 	}
-	if r := qrow("e1"); r == nil || r.F(3) != DATA+"/briefs/added/e1.md" {
+	if r := qrow("e1"); r == nil || r.F(qBrief) != DATA+"/briefs/added/e1.md" {
 		t.Fatalf("run이 끝난 뒤 edit가 안 먹었다: %v", qRows())
 	}
 }

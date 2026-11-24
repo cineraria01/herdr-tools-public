@@ -73,10 +73,10 @@ func TestAuditQueuedRejectsForeignVerdict(t *testing.T) {
 	}
 	EV = []string{auTEv("2026-11-21T01:00:00Z", "m/audit-a1", "audit-a1", "판정", strings.Repeat("f", 40), "감사 완료 a1 높음 0·중간 0·낮음 0", "-")}
 	r := arow("a1")
-	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6), r.F(7), r.F(8)
-	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(9), r.F(10), r.F(11), r.F(12), r.F(13), r.F(14), r.F(15), r.F(16)
+	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(atID), r.F(atLane), r.F(atRound), r.F(atRun), r.F(atSHA), r.F(atMach), r.F(atAddr), r.F(atState)
+	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(atFixes), r.F(atVerdict), r.F(atWakes), r.F(atWaited), r.F(atChecked), r.F(atWoke), r.F(atNoVerdict), r.F(atFlags)
 	aRound()
-	if got := arow("a1"); got.F(8) != "queued" || got.F(15) != "1" {
+	if got := arow("a1"); got.F(atState) != "queued" || got.F(atNoVerdict) != "1" {
 		t.Fatalf("다른 sha 판정을 받았거나 판정 없음 바퀴를 안 셌다: %v", got)
 	}
 }

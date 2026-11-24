@@ -424,8 +424,8 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			say("모름 %s @%s %s: 시작 확인(hc get)을 못 함 — 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, m, ADDR)
 			// 받은 주소를 시도 기록 8칸에 — 다음 바퀴가 hc get으로 확정한다(fill/R-4M01). 못 적으면 주소 모름 미확정 그대로
 			if !dry && tryEdit(lane, func(r Row) Row {
-				if r.F(2) == RID && r.F(3) == m && r.F(6) == "?" {
-					return r.Set(8, ADDR)
+				if r.F(trRID) == RID && r.F(trMach) == m && r.F(trAddr) == "?" {
+					return r.Set(trGot, ADDR)
 				}
 				return r
 			}) != 0 {

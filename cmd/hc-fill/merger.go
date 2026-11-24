@@ -29,7 +29,7 @@ func mqload(p string) {
 		}
 		if !bad {
 			for _, x := range readRows(DATA + "/merger.tsv") {
-				if x.F(1) == p {
+				if x.F(mgProj) == p {
 					bad = true
 					break
 				}
@@ -68,8 +68,8 @@ func mqlanding(p, lane string) int {
 	}
 	var refs []landing.Ref
 	for _, r := range MQS {
-		if r.F(1) == p {
-			refs = append(refs, landing.Ref{Name: r.F(2), SHA: r.F(3)})
+		if r.F(mqProj) == p {
+			refs = append(refs, landing.Ref{Name: r.F(mqRef), SHA: r.F(mqSHA)})
 		}
 	}
 	if landing.Of(refs, lane) != "" {
@@ -87,10 +87,10 @@ func mqueued(p, lane string) int {
 		return 2
 	}
 	for _, r := range MQS {
-		if r.F(1) != p {
+		if r.F(mqProj) != p {
 			continue
 		}
-		if loc := mgQueueRe.FindStringIndex(r.F(2)); loc != nil && r.F(2)[loc[1]:] == lane {
+		if loc := mgQueueRe.FindStringIndex(r.F(mqRef)); loc != nil && r.F(mqRef)[loc[1]:] == lane {
 			return 0
 		}
 	}
@@ -102,7 +102,7 @@ func mgmach(p string) []string {
 	mqload(p)
 	var o []string
 	for _, r := range MQS {
-		if m, ok := strings.CutPrefix(r.F(2), "refs/herdr/merger/"); r.F(1) == p && ok {
+		if m, ok := strings.CutPrefix(r.F(mqRef), "refs/herdr/merger/"); r.F(mqProj) == p && ok {
 			o = append(o, m)
 		}
 	}
@@ -117,7 +117,7 @@ func mgDrop(path, p string) (string, bool) {
 	}
 	var b strings.Builder
 	for _, l := range lines(text) {
-		if splitRow(l).F(1) != p {
+		if splitRow(l).F(mgProj) != p {
 			b.WriteString(l + "\n")
 		}
 	}
@@ -136,13 +136,13 @@ func mergerTick() {
 		}
 	}
 	for _, x := range readRows(mgf) {
-		ps = append(ps, x.F(1))
+		ps = append(ps, x.F(mgProj))
 	}
 	for _, p := range strings.Fields(strings.Join(uniq(ps), "\n")) {
 		w := ""
 		for _, x := range want {
-			if x.F(1) == p {
-				w = x.F(2)
+			if x.F(mgProj) == p {
+				w = x.F(mgMach)
 				break
 			}
 		}

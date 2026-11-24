@@ -86,8 +86,8 @@ func (k *clsT) setAudit(status, name string) {
 // round: 이 차수를 한 바퀴(auditTick 안의 a_round 한 번과 같다)
 func (k *clsT) round() {
 	r := arow("a1")
-	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6), r.F(7), r.F(8)
-	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(9), r.F(10), r.F(11), r.F(12), r.F(13), r.F(14), r.F(15), r.F(16)
+	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(atID), r.F(atLane), r.F(atRound), r.F(atRun), r.F(atSHA), r.F(atMach), r.F(atAddr), r.F(atState)
+	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(atFixes), r.F(atVerdict), r.F(atWakes), r.F(atWaited), r.F(atChecked), r.F(atWoke), r.F(atNoVerdict), r.F(atFlags)
 	aRound()
 }
 
@@ -114,7 +114,7 @@ func TestAuditCloseAfterDeliver(t *testing.T) {
 			if k.kills() != 1 {
 				t.Fatalf("판정을 넘긴 뒤 끝난 감사 터미널 닫기 %d번, 바람 1\n%s", k.kills(), k.read("hc.log"))
 			}
-			if got := arow("a1").F(8); got != "deliver" {
+			if got := arow("a1").F(atState); got != "deliver" {
 				t.Fatalf("닫기가 차수 상태를 바꿨다: %s", got)
 			}
 			k.setAudit("", "")
@@ -192,7 +192,7 @@ func TestAuditCloseOnConsumeRound(t *testing.T) {
 	k := clsSetup(t, "done")
 	k.setRound("queued", "-")
 	k.round()
-	if got := arow("a1").F(8); got != "deliver" {
+	if got := arow("a1").F(atState); got != "deliver" {
 		t.Fatalf("판정을 받지 못했다: %s\n%s", got, k.read("hc.log"))
 	}
 	if k.kills() != 1 {
@@ -205,8 +205,8 @@ func TestAuditCloseKillFails(t *testing.T) {
 	k := clsSetup(t, "done")
 	k.wr("killfail", "")
 	k.round()
-	if !k.verdictFile() || !k.sent() || arow("a1").F(8) != "deliver" {
-		t.Fatalf("닫기 실패가 판정 전달을 막았다: 파일 %v 깨움 %v 상태 %s", k.verdictFile(), k.sent(), arow("a1").F(8))
+	if !k.verdictFile() || !k.sent() || arow("a1").F(atState) != "deliver" {
+		t.Fatalf("닫기 실패가 판정 전달을 막았다: 파일 %v 깨움 %v 상태 %s", k.verdictFile(), k.sent(), arow("a1").F(atState))
 	}
 	if k.kills() != 1 {
 		t.Fatalf("닫기를 시도하지 않았다\n%s", k.read("hc.log"))

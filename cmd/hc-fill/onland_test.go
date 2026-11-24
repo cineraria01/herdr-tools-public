@@ -70,7 +70,7 @@ func TestOnlandTickFiresOnceOnLanding(t *testing.T) {
 	FETCHED = ""
 	onlandTick() // 두 번째 바퀴는 더 넣지 않는다
 	rs := readRows(onlandDir() + "/dev.pending")
-	if len(rs) != 1 || rs[0].F(1) != "fix-a" || rs[0].F(2) != "t9" || rs[0].F(3) != sha {
+	if len(rs) != 1 || rs[0].F(opLane) != "fix-a" || rs[0].F(opOwner) != "t9" || rs[0].F(opSHA) != sha {
 		t.Fatalf("pending = %v, 바람 fix-a t9 %s 한 줄", rs, sha)
 	}
 	if nonEmpty(DATA + "/onland.tsv") {

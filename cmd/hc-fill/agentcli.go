@@ -141,17 +141,17 @@ func rmPreview(name string, force bool) {
 	if r == nil {
 		noLane(name) // 실제 rm과 같은 글·종료 1(감사 atozkxr 낮음 1)
 	}
-	if r.F(14) == "parked" && !force {
+	if r.F(qEarly) == "parked" && !force {
 		refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
 	}
-	preview("뺌 %s (상태 %s, 떠 있는 터미널은 그대로) · 되돌리기 %s", name, r.F(6), rmUndo(r))
+	preview("뺌 %s (상태 %s, 떠 있는 터미널은 그대로) · 되돌리기 %s", name, r.F(qState), rmUndo(r))
 }
 
 // qrowW: 그 이름 줄(없으면 nil). 대기열 파일이 있는데 못 읽으면 「없다」가 아니라 실제 명령과 같은 글·종료 1(qRowsW — R-29,
 // 감사 atozkxr 중간 1: 미리 보기가 못 읽음을 「대기열에 없다」로 읽었다). 잠금 없이 읽기만
 func qrowW(n string) Row {
 	for _, r := range qRowsW() {
-		if r.F(1) == n {
+		if r.F(qName) == n {
 			return r
 		}
 	}
@@ -164,8 +164,8 @@ func prioPreview(name, p string) {
 	if r == nil {
 		noLane(name)
 	}
-	s := fmt.Sprintf("우선 %s: %s → %s · 되돌리기 hc-fill prio %s %s", name, plabel(r.F(13)), plabel(p), name, plabel(r.F(13)))
-	if r.F(6) != "wait" {
+	s := fmt.Sprintf("우선 %s: %s → %s · 되돌리기 hc-fill prio %s %s", name, plabel(r.F(qPrio)), plabel(p), name, plabel(r.F(qPrio)))
+	if r.F(qState) != "wait" {
 		s += " · 이미 병합기 큐에 냈으면 큐 메타 priority=도"
 	}
 	preview("%s", s)

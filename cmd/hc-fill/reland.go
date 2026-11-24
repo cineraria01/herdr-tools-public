@@ -152,36 +152,36 @@ func relandTick() {
 	for _, l := range lines(text) {
 		r := splitRow(l)
 		switch {
-		case r.F(1) == "#since":
-			since = r.F(2)
-		case r.F(4) == "알림":
-			told[r.F(1)+"\t"+r.F(5)] = true
-		case r.F(4) == "보냄": // 원래 레인에 보내고 다시 냄을 기다리는 반송 — 뒤 줄(넣음·다시 냄 등)이 있으면 끝난 것
-			if !seen[r.F(1)] {
-				pend[r.F(1)] = r
+		case r.F(rlFailed) == "#since":
+			since = r.F(rlSinceAt)
+		case r.F(rlWhat) == "알림":
+			told[r.F(rlFailed)+"\t"+r.F(rlArg)] = true
+		case r.F(rlWhat) == "보냄": // 원래 레인에 보내고 다시 냄을 기다리는 반송 — 뒤 줄(넣음·다시 냄 등)이 있으면 끝난 것
+			if !seen[r.F(rlFailed)] {
+				pend[r.F(rlFailed)] = r
 			}
-			if r.F(8) != "" {
+			if r.F(rlMsg) != "" {
 				tell = append(tell, r)
 			}
-		case r.F(1) != "":
-			seen[r.F(1)] = true
-			delete(pend, r.F(1))
-			if r.F(4) == "넣음" {
-				cnt[r.F(3)]++
-				bases[r.F(5)] = r.F(3)
-				if r.F(8) != "" {
+		case r.F(rlFailed) != "":
+			seen[r.F(rlFailed)] = true
+			delete(pend, r.F(rlFailed))
+			if r.F(rlWhat) == "넣음" {
+				cnt[r.F(rlBase)]++
+				bases[r.F(rlArg)] = r.F(rlBase)
+				if r.F(rlMsg) != "" {
 					tell = append(tell, r)
 				}
 			}
 		}
 	}
 	for _, r := range tell { // 등록·보냄은 됐는데 주인 알림이 안 간 것 — 같은 키로 다시
-		if !told[r.F(1)+"\t"+r.F(4)] {
-			ow := r.F(7)
+		if !told[r.F(rlFailed)+"\t"+r.F(rlWhat)] {
+			ow := r.F(rlOwner)
 			if ow == "-" {
 				ow = ""
 			}
-			relandTell(rf, r.F(1), r.F(2), r.F(3), r.F(4), ow, r.F(8))
+			relandTell(rf, r.F(rlFailed), r.F(rlLane), r.F(rlBase), r.F(rlWhat), ow, r.F(rlMsg))
 		}
 	}
 	mg := map[string]bool{}
@@ -190,17 +190,17 @@ func relandTick() {
 	}
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(5) != "막힘" || !mg[r.F(2)] || r.F(1) < since {
+		if r.F(evState) != "막힘" || !mg[r.F(evMach)] || r.F(evTime) < since {
 			continue
 		}
-		mm, qm := relandRe.FindStringSubmatch(r.F(7)), relandQRe.FindStringSubmatch(r.F(7))
+		mm, qm := relandRe.FindStringSubmatch(r.F(evMsg)), relandQRe.FindStringSubmatch(r.F(evMsg))
 		if mm == nil || qm == nil || seen[qm[1]] {
 			continue
 		}
 		seen[qm[1]] = true
-		base := bases[r.F(4)]
+		base := bases[r.F(evLane)]
 		if base == "" {
-			base = relandSuf.ReplaceAllString(r.F(4), "")
+			base = relandSuf.ReplaceAllString(r.F(evLane), "")
 		}
 		if pr, ok := pend[qm[1]]; ok {
 			relandPend(rf, qm[1], mm[1], base, r, mx, cnt, pr, mg)
@@ -212,19 +212,19 @@ func relandTick() {
 
 // relandPend: 원래 레인에 보낸 반송 — 보낸 뒤 그 레인이 다시 냈으면 「다시 냄」, reland_wait분이 지나도 안 냈으면 다시 맞춤
 func relandPend(rf, n, files, base string, r Row, mx int, cnt map[string]int, pr Row, mg map[string]bool) {
-	lane, at := r.F(4), pr.F(6)
+	lane, at := r.F(evLane), pr.F(rlAt)
 	re := func() {
-		if err := appendLine(rf, strings.Join([]string{n, lane, base, "다시 냄", pr.F(5), utcnow()}, "\t")); err != nil {
+		if err := appendLine(rf, strings.Join([]string{n, lane, base, "다시 냄", pr.F(rlArg), utcnow()}, "\t")); err != nil {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
 		say("다시 맞춤 안 함 %s: 원래 레인이 다시 냈다(refs/merge-failed/%s)", lane, n)
 	}
 	for _, e := range EV {
 		x := splitRow(e)
-		if strings.Contains(x.F(7), "refs/merge-failed/"+n+" ") {
+		if strings.Contains(x.F(evMsg), "refs/merge-failed/"+n+" ") {
 			continue // 이 반송 사건 자체
 		}
-		if x.F(4) == lane && x.F(1) > at && (x.F(5) == "제출" || x.F(5) == "착지" || (mg[x.F(2)] && x.F(5) == "막힘")) {
+		if x.F(evLane) == lane && x.F(evTime) > at && (x.F(evState) == "제출" || x.F(evState) == "착지" || (mg[x.F(evMach)] && x.F(evState) == "막힘")) {
 			re()
 			return
 		}
@@ -234,7 +234,7 @@ func relandPend(rf, n, files, base string, r Row, mx int, cnt map[string]int, pr
 		return
 	}
 	// 시간이 지났다 — 큐에 같은 레인(다시 냄)·착지 중이면 relandOne이 아무것도 하지 않는다
-	say("다시 맞춤 %s: 원래 레인(%s)에 보낸 뒤 %d분 — 병합기 큐를 보고 다시 맞춤", lane, pr.F(5), relandWait())
+	say("다시 맞춤 %s: 원래 레인(%s)에 보낸 뒤 %d분 — 병합기 큐를 보고 다시 맞춤", lane, pr.F(rlArg), relandWait())
 	relandOne(rf, n, files, base, r, mx, cnt, false)
 }
 
@@ -291,8 +291,8 @@ func relandLive(lane, p, n string) (string, string) {
 	}
 	sn := len(cs)
 	for _, o := range OREC {
-		if o.F(1) == lane && !strings.HasPrefix(o.F(4), "pending:") {
-			cs = append(cs, [3]string{o.F(3), o.F(4), lane})
+		if o.F(owLane) == lane && !strings.HasPrefix(o.F(owAddr), "pending:") {
+			cs = append(cs, [3]string{o.F(owMach), o.F(owAddr), lane})
 		}
 	}
 	if len(cs) == sn {
@@ -342,7 +342,7 @@ func relandLive(lane, p, n string) (string, string) {
 // 원격을 못 읽거나 이름이 아직 대기열에 있으면 적지 않고 다음 바퀴에
 // live면 먼저 원래 레인을 본다(relandLive) — 살아 있으면 그 터미널에 보내고 끝(보냄, 횟수에 안 셈)
 func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, live bool) {
-	lane, mach, owner := r.F(4), r.F(2), r.F(9)
+	lane, mach, owner := r.F(evLane), r.F(evMach), r.F(evTo)
 	if owner == "-" {
 		owner = ""
 	}
@@ -424,7 +424,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 	msg := fmt.Sprintf("자동 다시 맞춤 넣음 %s — %s 병합기 rebase 충돌 반송(refs/merge-failed/%s, 충돌 %s)", name, lane, n, files)
 	if qHasName(name) {
 		// 넣은 뒤 기록 전에 끊긴 바퀴면 그 줄의 지시문이 이 반송을 가리킨다 — 기록을 잇고 알림도 보낸다
-		if b, _ := readFile(qrow(name).F(3)); strings.Contains(b, "refs/merge-failed/"+n+" ") {
+		if b, _ := readFile(qrow(name).F(qBrief)); strings.Contains(b, "refs/merge-failed/"+n+" ") {
 			cnt[base]++
 			recTell("넣음", name, msg)
 		} else {
@@ -433,7 +433,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		return
 	}
 	lg := "모름(사건 글이 잘림)"
-	if m := relandLog.FindStringSubmatch(r.F(7)); m != nil {
+	if m := relandLog.FindStringSubmatch(r.F(evMsg)); m != nil {
 		lg = m[1]
 	}
 	bf := DATA + "/briefs/added/" + name + ".md"
@@ -442,7 +442,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		say("다시 맞춤 보류 %s: %v", lane, err)
 		return
 	}
-	if err := os.WriteFile(tmp, []byte(relandBrief(name, lane, n, mach, files, lg, r.F(7), rule)), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(relandBrief(name, lane, n, mach, files, lg, r.F(evMsg), rule)), 0o644); err != nil {
 		say("다시 맞춤 보류 %s: 지시문을 못 씀: %v", lane, err)
 		return
 	}

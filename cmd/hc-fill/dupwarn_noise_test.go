@@ -75,13 +75,13 @@ func TestDupWarnBoilerplate(t *testing.T) {
 	// 상용구는 키에서 빠진다: 프로젝트 이름(app/)·자리표시. 흔한 경로(.claude/herdr-verify.sh·lib/common.go)는 동적으로
 	ks := dupKeys("app", mine)
 	for _, k := range ks {
-		if p := k.F(2); p == "app/" || strings.Contains(p, "<") {
+		if p := k.F(kyKey); p == "app/" || strings.Contains(p, "<") {
 			t.Fatalf("상용구 키가 남음: %q (%v)", p, ks)
 		}
 	}
 	var all [][]Row
 	for _, r := range qRows() {
-		all = append(all, dupKeys("app", r.F(3)))
+		all = append(all, dupKeys("app", r.F(qBrief)))
 	}
 	all = append(all, ks)
 	c := dupCommon(all, 0.3)
@@ -141,7 +141,7 @@ func TestDupWarnSkipsFinished(t *testing.T) {
 	if err := os.WriteFile(Q, []byte(q), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rid := func(l string) string { return splitRow(strings.TrimSuffix(l, "\n")).F(17) }
+	rid := func(l string) string { return splitRow(strings.TrimSuffix(l, "\n")).F(qRID) }
 	last := strings.Join([]string{"done-lane", "완료", "abc12345", "14:00", "끝", "14:01", "fresh", rid(rDone)}, "\t") + "\n" +
 		strings.Join([]string{"sent-lane", "제출", "abc12346", "14:00", "제출", "14:01", "fresh", rid(rSent)}, "\t") + "\n" +
 		strings.Join([]string{"live", "중간", "-", "14:00", "하는 중", "14:01", "fresh", rid(rLive)}, "\t") + "\n"

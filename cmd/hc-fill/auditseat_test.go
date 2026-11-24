@@ -98,8 +98,8 @@ func TestAuditSeatHandover(t *testing.T) {
 	// 다음 바퀴: 감사 줄이 up·working
 	rows := qRows()
 	for i, r := range rows {
-		if r.F(1) == "audit-a1" {
-			rows[i] = r.Set(6, "up").Set(7, "here").Set(8, "h/au")
+		if r.F(qName) == "audit-a1" {
+			rows[i] = r.Set(qState, "up").Set(qMach, "here").Set(qAddr, "h/au")
 		}
 	}
 	rejW(t, Q, rowsText(rows))
@@ -152,7 +152,7 @@ func TestAuditSeatReleases(t *testing.T) {
 			x := asSetup(t, "2", c.auto)
 			if c.auto {
 				rows := readRows(AT)
-				rows[0] = rows[0].Set(8, c.st)
+				rows[0] = rows[0].Set(atState, c.st)
 				rejW(t, AT, rowsText(rows))
 			}
 			rejW(t, DATA+"/held.tsv", "h/a\t"+old+"\n")
@@ -179,8 +179,8 @@ func TestAuditSeatNote(t *testing.T) {
 	}
 	rows := qRows()
 	for i, r := range rows {
-		if r.F(1) == "audit-a1" {
-			rows[i] = r.Set(6, "up").Set(7, "here").Set(8, "h/au")
+		if r.F(qName) == "audit-a1" {
+			rows[i] = r.Set(qState, "up").Set(qMach, "here").Set(qAddr, "h/au")
 		}
 	}
 	rejW(t, Q, rowsText(rows))

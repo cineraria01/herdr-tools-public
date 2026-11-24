@@ -41,20 +41,20 @@ func TestCksumMatchesSystem(t *testing.T) {
 func TestQsetRowID(t *testing.T) {
 	setData(t)
 	old := "a\tapp\tb\t-\t-\twait\t-\t-\t-\t2026-11-21T10:00\t-\t-"
-	cur := pad16("n", "app", "b", "-", "-", "wait", "-", "-", "-", "t", "-", "-", "normal", "-", "-", "-").Set(17, "r1-1-1")
+	cur := pad16("n", "app", "b", "-", "-", "wait", "-", "-", "-", "t", "-", "-", "normal", "-", "-", "-").Set(qRID, "r1-1-1")
 	if err := os.WriteFile(Q, []byte(old+"\n"+cur.Line()+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if rc := qset(true, "r9-9-9", "n", "up", "m", "m/n", "-", "", ""); rc != 1 {
 		t.Fatalf("다른 줄 ID: rc %d, 바람 1", rc)
 	}
-	if rc := qset(true, "r1-1-1", "n", "up", "m", "m/n", "-", "", ""); rc != 0 || qrow("n").F(6) != "up" {
+	if rc := qset(true, "r1-1-1", "n", "up", "m", "m/n", "-", "", ""); rc != 0 || qrow("n").F(qState) != "up" {
 		t.Fatalf("같은 줄 ID: rc %d, 줄 %v", rc, qrow("n"))
 	}
 	if rc := qset(false, "", "a", "up", "m", "m/a", "-", "early", ""); rc != 0 {
 		t.Fatal(rc)
 	}
-	if r := qrow("a"); r.F(13) != "normal" || r.F(14) != "early" || r.NF() != 14 {
+	if r := qrow("a"); r.F(qPrio) != "normal" || r.F(qEarly) != "early" || r.NF() != qEarly {
 		t.Fatalf("옛 줄 채움: %v", r)
 	}
 }

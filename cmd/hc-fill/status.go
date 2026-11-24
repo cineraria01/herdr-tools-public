@@ -34,7 +34,7 @@ func stStage0(in stIn) string {
 	case "sent":
 		return "되돌려줌"
 	}
-	ls, sha, msg := in.Last.F(2), in.Last.F(3), in.Last.F(5)
+	ls, sha, msg := in.Last.F(lsState), in.Last.F(lsSHA), in.Last.F(lsMsg)
 	switch {
 	case in.Pos == 1: // 우선·병합기 쉼은 안 보니 「지금 넣는 중」이라 하지 않는다(감사 낮음 1)
 		return "제출됨(병합기 줄 맨 앞)"
@@ -213,11 +213,11 @@ func statusCmd(args []string) {
 	}
 	var rows []Row
 	for _, l := range readLines(Q) {
-		f := lsSplit(l, 17)
-		if strings.HasPrefix(f[14], "audit=") || (owner != "" && f[11] != owner) {
+		f := Row(lsSplit(l, qNF))
+		if strings.HasPrefix(f.F(qAudit), "audit=") || (owner != "" && f.F(qOwner) != owner) {
 			continue // 감사 줄은 그 레인 줄의 단계로 보인다
 		}
-		rows = append(rows, Row(f))
+		rows = append(rows, f)
 	}
 	fmt.Println(stLine("레인", "기계", "넣은 뒤", "단계", "예상·근거"))
 	if len(rows) == 0 { // 병합기 한 줄(maPrint, mergeralive.go)·바퀴 계측 줄(statusTick)은 표 끝에 — 줄이 없어도
@@ -244,8 +244,8 @@ func statusCmd(args []string) {
 	}
 	rems := map[string]*rem{}
 	for _, r := range rows {
-		p := r.F(2)
-		if r.F(6) != "up" || rems[p] != nil {
+		p := r.F(qProj)
+		if r.F(qState) != "up" || rems[p] != nil {
 			continue
 		}
 		x := &rem{}
@@ -259,14 +259,14 @@ func statusCmd(args []string) {
 	}
 	now := time.Now()
 	for _, r := range rows {
-		name, m, addr := r.F(1), r.F(7), r.F(8)
-		in := stIn{State: r.F(6), Early: r.F(14), Last: lsFirst(DATA+"/last.tsv", name)}
+		name, m, addr := r.F(qName), r.F(qMach), r.F(qAddr)
+		in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: lsFirst(DATA+"/last.tsv", name)}
 		if in.State == "up" {
 			in.Live = stLive(terms, termsOK, conn, connKnown, addr, name)
-			if r.F(15) == "auto" {
+			if r.F(qAudit) == "auto" {
 				in.Aud = anote(name)
 			}
-			x := rems[r.F(2)]
+			x := rems[r.F(qProj)]
 			if !x.ok {
 				in.Pos = -1
 			}
@@ -276,14 +276,14 @@ func statusCmd(args []string) {
 					break
 				}
 			}
-			fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stStage(in), stEstimate(in.Pos, x.landed)))
+			fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stStage(in), stEstimate(in.Pos, x.landed)))
 			continue
 		}
 		stage := stStage(in)
-		if w := rejWhy(name, r.F(17)); in.State == "wait" && w != "" {
+		if w := rejWhy(name, r.F(qRID)); in.State == "wait" && w != "" {
 			stage = "띄우기 거절 — " + w
 		}
-		fmt.Println(stLine(name, dash(m), stAge(r.F(10), now), stage, ""))
+		fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, ""))
 	}
 	maPrint()
 	statusTick()

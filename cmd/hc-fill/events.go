@@ -35,10 +35,10 @@ func mgres(lane, sid string) string {
 	l := ""
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(4) != lane || (r.F(5) != "착지" && r.F(5) != "막힘") || !mg[r.F(2)] {
+		if r.F(evLane) != lane || (r.F(evState) != "착지" && r.F(evState) != "막힘") || !mg[r.F(evMach)] {
 			continue
 		}
-		if strings.Contains(" "+strings.ReplaceAll(r.F(7), ",", " ")+" ", " 제출 ID "+sid+" ") {
+		if strings.Contains(" "+strings.ReplaceAll(r.F(evMsg), ",", " ")+" ", " 제출 ID "+sid+" ") {
 			l = e
 		}
 	}
@@ -60,7 +60,7 @@ func sublast(n, a string) string {
 	defer func() { EV = saved }()
 	var f []string
 	for _, e := range EV {
-		if evF(e, 5) != "제출" || evSid(e) != "" {
+		if evF(e, evState) != "제출" || evSid(e) != "" {
 			f = append(f, e)
 		}
 	}
@@ -89,15 +89,15 @@ func evTick() {
 	var eups []Row
 	var projs []string
 	for _, r := range qRows() {
-		if r.F(6) == "up" {
-			eups = append(eups, Row{r.F(1), r.F(7), r.F(8), r.F(17)})
-			projs = append(projs, r.F(2))
+		if r.F(qState) == "up" {
+			eups = append(eups, Row{r.F(qName), r.F(qMach), r.F(qAddr), r.F(qRID)})
+			projs = append(projs, r.F(qProj))
 		}
 	}
 	var eoms []string
 	for _, r := range OREC {
-		eoms = append(eoms, r.F(3))
-		projs = append(projs, r.F(2))
+		eoms = append(eoms, r.F(owMach))
+		projs = append(projs, r.F(owProj))
 	}
 	// 병합기를 켠 프로젝트는 떠 있는 줄이 없어도 병합기 사건을 읽는다(반송 → 자동 다시 맞춤, reland.go)
 	mgp := relandOn()
@@ -115,7 +115,7 @@ func evTick() {
 	}
 	ms := strings.Fields(MGM)
 	for _, r := range eups {
-		ms = append(ms, r.F(2))
+		ms = append(ms, r.F(upMach))
 	}
 	ms = append(ms, eoms...)
 	args := []string{"events"}
@@ -138,15 +138,15 @@ func evTick() {
 	old := readRows(lrt)
 	var b strings.Builder
 	for _, u := range eups {
-		n, m, a, rid := u.F(1), u.F(2), u.F(3), u.F(4)
+		n, m, a, rid := u.F(upName), u.F(upMach), u.F(upAddr), u.F(upRID)
 		if n == "" {
 			continue
 		}
 		// 끊긴 기계의 지난 값은 줄 ID가 같을 때만 남긴다
 		if m != LOCAL && (!connHas(m) || has(eunk, m)) {
 			for _, o := range old {
-				if o.F(1) == n && o.F(8) == rid {
-					b.WriteString(o.Set(7, "old").Line() + "\n")
+				if o.F(lsName) == n && o.F(lsRID) == rid {
+					b.WriteString(o.Set(lsFresh, "old").Line() + "\n")
 					break
 				}
 			}
@@ -159,7 +159,7 @@ func evTick() {
 		}
 		// 제출 뒤 정리 중간 보고가 끼어도 같은 실행의 병합 결과를 보인다
 		subm := ""
-		switch evF(l, 5) {
+		switch evF(l, evState) {
 		case "제출", "중간":
 			subm = sublast(n, a)
 		}
@@ -169,10 +169,10 @@ func evTick() {
 			}
 		}
 		eh := "?"
-		if t, err := time.Parse("2006-01-02T15:04:05Z", evF(l, 1)); err == nil {
+		if t, err := time.Parse("2006-01-02T15:04:05Z", evF(l, evTime)); err == nil {
 			eh = t.Local().Format("15:04")
 		}
-		b.WriteString(strings.Join([]string{n, dash(evF(l, 5)), dash(head(evF(l, 6), 8)), eh, dash(runeCut(evF(l, 7), 40)), enow, "fresh", rid}, "\t") + "\n")
+		b.WriteString(strings.Join([]string{n, dash(evF(l, evState)), dash(head(evF(l, evSHA), 8)), eh, dash(runeCut(evF(l, evMsg), 40)), enow, "fresh", rid}, "\t") + "\n")
 	}
 	if err := writeAtomic(lrt, b.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
@@ -185,8 +185,8 @@ func parkTick() {
 		return
 	}
 	for _, q := range qRows() {
-		n, m, a, st, rid, ef := q.F(1), q.F(7), q.F(8), q.F(9), q.F(17), q.F(14)
-		if q.F(6) != "up" || (ef != "early" && ef != "parked") || n == "" {
+		n, m, a, st, rid, ef := q.F(qName), q.F(qMach), q.F(qAddr), q.F(qStuck), q.F(qRID), q.F(qEarly)
+		if q.F(qState) != "up" || (ef != "early" && ef != "parked") || n == "" {
 			continue
 		}
 		if parkev(n, a, m) != 0 {
@@ -201,7 +201,7 @@ func parkTick() {
 			continue
 		}
 		if qset(true, rid, n, "wait", "-", "-", st, "parked", "") == 0 {
-			fmt.Println("주차 " + n + ": " + a + " 가 lane/" + n + " (" + head(evF(PKL, 6), 8) + ")에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움" + w)
+			fmt.Println("주차 " + n + ": " + a + " 가 lane/" + n + " (" + head(evF(PKL, evSHA), 8) + ")에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움" + w)
 		}
 	}
 }

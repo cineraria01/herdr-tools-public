@@ -147,7 +147,7 @@ func idleTick() {
 			ik = "cap"
 		} else {
 			for _, o := range OVWAIT {
-				oo, op := o.F(4), o.F(5)
+				oo, op := o.F(wtOnly), o.F(wtProj)
 				if op == "" || (oo != "-" && !inlist(m, oo)) {
 					continue
 				}
@@ -179,13 +179,13 @@ func idleTick() {
 		}
 		var x Row
 		for _, r := range old {
-			if r.F(1) == m {
+			if r.F(idMach) == m {
 				x = r
 				break
 			}
 		}
 		// 셸 판은 「print $2, $3, $4, $5, $6」을 read로 나눴다 — 빈 칸은 뒤로 밀린다
-		vals := strings.Fields(strings.Join([]string{x.F(2), x.F(3), x.F(4), x.F(5), x.F(6)}, " "))
+		vals := strings.Fields(strings.Join([]string{x.F(idSince), x.F(idSent), x.F(idCount), x.F(idFree), x.F(idWhy)}, " "))
 		get := func(i int) string {
 			if i < len(vals) {
 				return vals[i]
@@ -238,8 +238,8 @@ func idleTick() {
 		iall := false
 		var owners []string
 		for _, r := range qRows() {
-			if r.F(6) == "wait" {
-				owners = append(owners, dash(r.F(12)))
+			if r.F(qState) == "wait" {
+				owners = append(owners, dash(r.F(qOwner)))
 			}
 		}
 		sort.Strings(owners)
@@ -279,8 +279,8 @@ func idleTick() {
 			ie := int64(atoi10(conf("idle_empty")))
 			last := int64(0)
 			for _, r := range inew {
-				if r.F(6) == "none" && int64(num(r.F(3))) > last {
-					last = int64(num(r.F(3)))
+				if r.F(idWhy) == "none" && int64(num(r.F(idSent))) > last {
+					last = int64(num(r.F(idSent)))
 				}
 			}
 			if ie == 0 || inow-last < ie*60 {
@@ -304,14 +304,14 @@ func idleTick() {
 			}
 			say("놀고 있음 알림 → %s: %s — %s", to, imsg, iwhy)
 			for i, r := range inew {
-				if !has(dm, r.F(1)) {
+				if !has(dm, r.F(idMach)) {
 					continue
 				}
 				c := "1"
-				if r.F(6) == ik {
-					c = strconv.Itoa(int(num(r.F(4))) + 1)
+				if r.F(idWhy) == ik {
+					c = strconv.Itoa(int(num(r.F(idCount))) + 1)
 				}
-				inew[i] = r.Set(3, strconv.FormatInt(inow, 10)).Set(4, c).Set(6, ik)
+				inew[i] = r.Set(idSent, strconv.FormatInt(inow, 10)).Set(idCount, c).Set(idWhy, ik)
 			}
 		} else {
 			say("놀고 있음 알림 실패(hc-lane report) — 다음 바퀴에 다시")

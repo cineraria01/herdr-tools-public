@@ -53,7 +53,7 @@ func TestRelandDocsRule(t *testing.T) {
 			if r == nil {
 				t.Fatalf("다시 맞춤 줄 없음: %v\n%s", qRows(), out)
 			}
-			b, _ := readFile(r.F(3))
+			b, _ := readFile(r.F(qBrief))
 			sends, _ := readFile(DATA + "/sends")
 			if !strings.Contains(sends, "send|here/t1|병합기 반송(rebase 충돌 README.md, refs/merge-failed/100-l-live)") {
 				t.Fatalf("원래 레인에 보냄: %q", sends)

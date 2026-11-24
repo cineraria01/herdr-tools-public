@@ -148,8 +148,8 @@ func TestJournalRepeatNotice(t *testing.T) {
 	if errs[0] != "" || !strings.Contains(errs[2], "hc-fill: 최근 2시간에 같은 조치(prio l1) 3번째") {
 		t.Fatalf("알림 %q", errs)
 	}
-	if r := qrow("l1"); r.F(13) != "urgent" {
-		t.Fatalf("알림이 조치를 막음: 우선 %q", r.F(13))
+	if r := qrow("l1"); r.F(qPrio) != "urgent" {
+		t.Fatalf("알림이 조치를 막음: 우선 %q", r.F(qPrio))
 	}
 }
 
@@ -166,7 +166,7 @@ func TestJournalWriteFailKeepsAction(t *testing.T) {
 			t.Fatalf("prio 종료 %d", rc)
 		}
 	})
-	if !strings.Contains(msg, "hc-fill: 일지를 남기지 못했다(조치는 그대로)") || qrow("l1").F(13) != "high" {
-		t.Fatalf("알림 %q, 우선 %q", msg, qrow("l1").F(13))
+	if !strings.Contains(msg, "hc-fill: 일지를 남기지 못했다(조치는 그대로)") || qrow("l1").F(qPrio) != "high" {
+		t.Fatalf("알림 %q, 우선 %q", msg, qrow("l1").F(qPrio))
 	}
 }

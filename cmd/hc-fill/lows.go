@@ -57,7 +57,7 @@ func lowsName(lane string) string {
 func lowsRecent() int {
 	k, now := 0, nowUnix()
 	for _, r := range readRows(DATA + "/lows.tsv") {
-		if t, err := strconv.ParseInt(r.F(1), 10, 64); err == nil && now-t < 3600 {
+		if t, err := strconv.ParseInt(r.F(lwAt), 10, 64); err == nil && now-t < 3600 {
 			k++
 		}
 	}
@@ -92,19 +92,19 @@ func lowsTick() {
 	}
 	hour, lmin := lowsConf("lows_hour", 3), lowsConf("lows_min", 1)
 	for _, r := range readRows(AT) {
-		if r.NF() < 17 || r.F(10) != "pass" {
+		if r.NF() < atNF || r.F(atVerdict) != "pass" {
 			continue
 		}
-		n, done := lowsN(r.F(16))
+		n, done := lowsN(r.F(atFlags))
 		if n == 0 || done {
 			continue
 		}
-		aid, lane, m, rep := r.F(1), r.F(2), r.F(6), r.F(17)
+		aid, lane, m, rep := r.F(atID), r.F(atLane), r.F(atMach), r.F(atNote)
 		name := lowsName(lane)
 		skip := func(why string) { // 안 넣음 — 표시를 남겨 다시 보지 않는다
 			fmt.Println("후속 안 넣음 " + lane + ": " + why)
 			if !dry {
-				aupd(aid, "16", addFlag(r.F(16), "lowsx"))
+				aupd(aid, cv{atFlags, addFlag(r.F(atFlags), "lowsx")})
 			}
 		}
 		q := qrow(lane)
@@ -118,15 +118,15 @@ func lowsTick() {
 		case q == nil:
 			skip("대기열에 그 레인 줄이 없다(주인·프로젝트 모름)")
 			continue
-		case q.F(15) == "no-audit" || strings.HasPrefix(q.F(15), "audit="):
+		case q.F(qAudit) == "no-audit" || strings.HasPrefix(q.F(qAudit), "audit="):
 			skip("자동 감사 끈 줄")
 			continue
 		}
-		if _, _, inbox := replyOf(q.F(11)); inbox {
+		if _, _, inbox := replyOf(q.F(qReply)); inbox {
 			skip("받은편지 레인")
 			continue
 		}
-		p, own := q.F(2), qown(lane)
+		p, own := q.F(qProj), qown(lane)
 		switch {
 		case !lowsOn(p):
 			skip("프로젝트 " + p + " 꺼짐(설정 lows)")
@@ -137,8 +137,8 @@ func lowsTick() {
 		}
 		bf := DATA + "/briefs/lows/" + name + ".md"
 		if x := qrow(name); x != nil || thenof(name) != "" {
-			if x != nil && x.F(3) == bf { // 넣은 뒤 표시 전에 끊겼다 — 표시·알림만 잇는다
-				lowsDone(aid, r.F(16), lane, name, own, n)
+			if x != nil && x.F(qBrief) == bf { // 넣은 뒤 표시 전에 끊겼다 — 표시·알림만 잇는다
+				lowsDone(aid, r.F(atFlags), lane, name, own, n)
 			} else {
 				skip("같은 이름 " + name + " 이 이미 대기열에 있다")
 			}
@@ -189,7 +189,7 @@ func lowsTick() {
 			fmt.Println("후속 미룸 " + lane + ": 대기열에 넣지 못함")
 			continue
 		}
-		lowsDone(aid, r.F(16), lane, name, own, n)
+		lowsDone(aid, r.F(atFlags), lane, name, own, n)
 	}
 }
 
@@ -198,7 +198,7 @@ func lowsDone(aid, afl, lane, name, own string, n int) {
 	if err := appendLine(DATA+"/lows.tsv", strings.Join([]string{strconv.FormatInt(nowUnix(), 10), aid, lane, name, strconv.Itoa(n)}, "\t")); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 	}
-	aupd(aid, "16", addFlag(afl, "lowsq"))
+	aupd(aid, cv{atFlags, addFlag(afl, "lowsq")})
 	msg := fmt.Sprintf("후속 넣음 %s: 낮음 %d개 (빼려면 hc-fill rm %s)", name, n, name)
 	fmt.Println(msg)
 	if hcLaneReport("중간", msg, lane, dash0(own), "hf:"+aid+":lows") != 0 {

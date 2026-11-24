@@ -33,7 +33,7 @@ func ownStore() {
 func ownRel(n, a string) {
 	var o []Row
 	for _, r := range OREC {
-		if r.NF() > 0 && !(r.F(1) == n && r.F(4) == a) {
+		if r.NF() > 0 && !(r.F(owLane) == n && r.F(owAddr) == a) {
 			o = append(o, r)
 		}
 	}
@@ -44,11 +44,11 @@ func ownRel(n, a string) {
 func ownBind(n, a, b string) {
 	var o []Row
 	for _, r := range OREC {
-		if r.F(1) == n && r.F(4) == b {
+		if r.F(owLane) == n && r.F(owAddr) == b {
 			continue
 		}
-		if r.F(1) == n && r.F(4) == a {
-			r = r.Set(4, b)
+		if r.F(owLane) == n && r.F(owAddr) == a {
+			r = r.Set(owAddr, b)
 		}
 		if r.NF() > 0 {
 			o = append(o, r)
@@ -76,7 +76,7 @@ func ownFinish() {
 	}
 	ref := map[string]bool{}
 	for _, l := range lines(text) {
-		ref[splitRow(l).F(6)] = true
+		ref[splitRow(l).F(owBrief)] = true
 	}
 	for _, e := range ents {
 		f := OWND + "/" + e.Name()
@@ -185,34 +185,34 @@ func ownDone(n, a, start string) bool {
 		return false
 	}
 	lx := joblast(n, a, "")
-	if lcCut(lx, 5) == "착지" && !(lcCut(lx, 1) < start) {
+	if lcCut(lx, evState) == "착지" && !(lcCut(lx, evTime) < start) {
 		return true
 	}
 	// 그 터미널이 아직 사건을 하나도 안 적었으면 같은 이름의 옛 착지로 풀지 않는다. 마지막 사건이 「제출」이면 그 제출 ID가 든 병합기
 	// 착지로도 푼다 — 시각과 상관없이
 	if sm := sublast(n, a); sm != "" {
-		return lcCut(mgres(n, evSid(sm)), 5) == "착지"
+		return lcCut(mgres(n, evSid(sm)), evState) == "착지"
 	}
 	// 제출 ID가 없던 옛 형식은 레인의 완료·제출 보고와 ID 없는 병합기 착지만 잇는다
 	f57 := lx
 	if strings.Contains(lx, "\t") {
 		r := splitRow(lx)
-		f57 = r.F(5)
-		if r.NF() >= 7 {
-			f57 += "\t" + r.F(7)
+		f57 = r.F(evState)
+		if r.NF() >= evMsg {
+			f57 += "\t" + r.F(evMsg)
 		}
 	}
 	if !strings.HasPrefix(f57, "완료\t제출") {
 		return false
 	}
-	t := lcCut(lx, 1)
+	t := lcCut(lx, evTime)
 	mg := map[string]bool{}
 	for _, x := range fields(MGM) {
 		mg[x] = true
 	}
 	for _, l := range EV {
 		e := splitRow(l)
-		if t != "" && e.F(4) == n && e.F(5) == "착지" && mg[e.F(2)] && !strings.Contains(e.F(7), "제출 ID ") && e.F(1) > t {
+		if t != "" && e.F(evLane) == n && e.F(evState) == "착지" && mg[e.F(evMach)] && !strings.Contains(e.F(evMsg), "제출 ID ") && e.F(evTime) > t {
 			return true
 		}
 	}
@@ -222,8 +222,8 @@ func ownDone(n, a, start string) bool {
 // tmap <이름>: 이어 붙인 이름이면 받은 줄
 func tmap(n string) string {
 	for _, r := range THENMAP {
-		if r.F(1) == n {
-			return r.F(2)
+		if r.F(tmName) == n {
+			return r.F(tmInto)
 		}
 	}
 	return n
@@ -235,20 +235,20 @@ func owners(c, p string) []Row {
 	A, T := qGraph()
 	var R []Row
 	for _, r := range OREC {
-		if r.NF() >= 7 {
-			R = append(R, Row{r.F(1), r.F(2), r.F(8)})
+		if r.NF() >= owAfter {
+			R = append(R, r)
 		}
 	}
 	waits := func(o string) bool { return reach(A, T, o)[c] }
 	S := map[string]bool{}
 	var out []Row
 	for _, f := range R {
-		if f.F(2) != p || f.F(1) == c || S[f.F(1)] {
+		if f.F(owProj) != p || f.F(owLane) == c || S[f.F(owLane)] {
 			continue
 		}
-		S[f.F(1)] = true
-		if !waits(f.F(1)) {
-			out = append(out, Row{f.F(1), f.F(3)})
+		S[f.F(owLane)] = true
+		if !waits(f.F(owLane)) {
+			out = append(out, Row{f.F(owLane), f.F(owOverlap)})
 		}
 	}
 	return out
@@ -263,8 +263,8 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 	ovo := owners(name, p)
 	so := ""
 	for _, r := range ovo {
-		if dash(ovk) == "solo" && r.NF() > 0 || r.F(2) == "solo" {
-			so = r.F(1)
+		if dash(ovk) == "solo" && r.NF() > 0 || r.F(orOverlap) == "solo" {
+			so = r.F(orLane)
 			break
 		}
 	}
@@ -278,14 +278,14 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 	}
 	ok := map[string]bool{}
 	for _, r := range ovo {
-		if r.F(1) != "" {
-			ok[r.F(1)] = true
+		if r.F(orLane) != "" {
+			ok[r.F(orLane)] = true
 		}
 	}
 	var ow []Row
 	for _, r := range OWN {
-		if r.F(1) == p && ok[r.F(2)] {
-			ow = append(ow, Row{r.F(2), r.F(3), r.F(4)})
+		if r.F(onProj) == p && ok[r.F(onLane)] {
+			ow = append(ow, Row{r.F(onLane), r.F(onKind), r.F(onKey)})
 		}
 	}
 	if len(ow) == 0 {
@@ -298,17 +298,17 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 	}
 	if OVM == "block" {
 		for _, r := range ov {
-			if r.F(2) == "예약" || r.F(2) == "실제" {
-				why := r.F(3) // 예약은 예전 꼴 그대로(시험·지휘가 읽는 줄), 실제 변경만 「실제 」를 붙인다
-				if r.F(2) == "실제" {
+			if r.F(ovGrade) == "예약" || r.F(ovGrade) == "실제" {
+				why := r.F(ovKeys) // 예약은 예전 꼴 그대로(시험·지휘가 읽는 줄), 실제 변경만 「실제 」를 붙인다
+				if r.F(ovGrade) == "실제" {
 					why = "실제 " + why
 				}
 				if ACTPARK[p+"\t"+name] { // 주차해 둔 가지: 앞 레인을 먼저 착지시키고 그 위로 이어 띄운다
-					say("재개 미룸 %s: %s (%s) — 앞 레인이 착지한 뒤 주차한 가지에서 이어 띄운다", name, r.F(1), why)
+					say("재개 미룸 %s: %s (%s) — 앞 레인이 착지한 뒤 주차한 가지에서 이어 띄운다", name, r.F(ovLane), why)
 				} else {
-					say("겹침 대기 %s: %s (%s) — 앞 레인이 착지하면 뜬다", name, r.F(1), why)
+					say("겹침 대기 %s: %s (%s) — 앞 레인이 착지하면 뜬다", name, r.F(ovLane), why)
 				}
-				OVWAIT = append(OVWAIT, Row{name, r.F(1), r.F(3), dash(only), p})
+				OVWAIT = append(OVWAIT, Row{name, r.F(ovLane), r.F(ovKeys), dash(only), p})
 				return false
 			}
 		}
@@ -329,9 +329,9 @@ func ovlPlaced(name, p, brief, after, ak string) {
 		OWN = append(OWN, append(Row{p, name}, k...))
 	}
 	for _, w := range OVWARN {
-		say("겹침 경고 %s: %s %s (%s)", name, w.F(1), w.F(2), w.F(3))
+		say("겹침 경고 %s: %s %s (%s)", name, w.F(ovLane), w.F(ovGrade), w.F(ovKeys))
 		if !dry {
-			if err := appendLine(DATA+"/overlap-warn.log", strings.Join([]string{nowMin(), name, w.F(1), w.F(2), w.F(3)}, "\t")); err != nil {
+			if err := appendLine(DATA+"/overlap-warn.log", strings.Join([]string{nowMin(), name, w.F(ovLane), w.F(ovGrade), w.F(ovKeys)}, "\t")); err != nil {
 				fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 			}
 		}
@@ -375,12 +375,12 @@ func ovCut15(r Row) string {
 	if r == nil {
 		return ""
 	}
-	if r.NF() <= 1 {
+	if r.NF() <= qName {
 		return r.Line()
 	}
-	o := append(Row(nil), r[:min(5, r.NF())]...)
-	if r.NF() > 9 {
-		o = append(o, r[9:]...)
+	o := append(Row(nil), r[:min(qOnly, r.NF())]...)
+	if r.NF() > qStuck {
+		o = append(o, r[qAdded-1:]...)
 	}
 	return o.Line()
 }
@@ -389,13 +389,13 @@ func ovCut15(r Row) string {
 func snap(lane, brief string) bool {
 	var o, c Row
 	for _, r := range ROWS {
-		if r.F(1) == lane {
+		if r.F(qName) == lane {
 			o = r
 			break
 		}
 	}
 	for _, r := range qRows() {
-		if r.F(1) == lane {
+		if r.F(qName) == lane {
 			c = r
 			break
 		}
@@ -444,7 +444,7 @@ func predState(pred, p string) {
 		PSV = "stop\t대기열에 없음(착지 안 하고 끝남)"
 		return
 	}
-	pn, pq, pm, pa := r.F(1), r.F(6), r.F(7), r.F(8)
+	pn, pq, pm, pa := r.F(qName), r.F(qState), r.F(qMach), r.F(qAddr)
 	switch pq {
 	case "wait":
 		PSV = "go\t대기열에서 기다림(아직 안 뜸)"
@@ -469,8 +469,8 @@ func predState(pred, p string) {
 	// 그 레인의 마지막 감사 차수(audit.tsv 17칸 줄): 상태·판정
 	s := ""
 	for _, a := range readRows(AT) {
-		if a.NF() >= 17 && a.F(2) == pn {
-			s = a.F(8) + " " + a.F(10)
+		if a.NF() >= atNF && a.F(atLane) == pn {
+			s = a.F(atState) + " " + a.F(atVerdict)
 		}
 	}
 	switch {
@@ -486,7 +486,7 @@ func predState(pred, p string) {
 	}
 	if !EVBAD {
 		l := lastev(pn, pa, "")
-		switch e := lcCut(l, 5); e {
+		switch e := lcCut(l, evState); e {
 		case "완료":
 			PSV = "go\t완료 보고(감사·착지 기다림)"
 			return
@@ -494,14 +494,14 @@ func predState(pred, p string) {
 			PSV = "go\t" + e + " 보고"
 			return
 		case "막힘":
-			PSV = "stop\t막힘: " + lcCut(l, 7)
+			PSV = "stop\t막힘: " + lcCut(l, evMsg)
 			return
 		}
 	}
 	hs := HNOW
 	for _, h := range HNEW {
-		if r := splitRow(h); r.F(1) == pa {
-			if v := r.F(2); isDigits(v) {
+		if r := splitRow(h); r.F(hdAddr) == pa {
+			if v := r.F(hdSince); isDigits(v) {
 				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 					hs = n
 				}

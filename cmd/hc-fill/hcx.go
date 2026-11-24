@@ -276,7 +276,7 @@ func lalive(addr, name string) bool {
 // qrow <이름>: 대기열 그 줄(없으면 nil)
 func qrow(n string) Row {
 	for _, r := range qRows() {
-		if r.F(1) == n {
+		if r.F(qName) == n {
 			return r
 		}
 	}
@@ -286,7 +286,7 @@ func qrow(n string) Row {
 // qown <이름>: 그 줄 주인(없으면 -)
 func qown(n string) string {
 	if r := qrow(n); r != nil {
-		return dash(r.F(12))
+		return dash(r.F(qOwner))
 	}
 	return "-"
 }

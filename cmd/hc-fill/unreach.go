@@ -28,14 +28,14 @@ func reachFile() string { return DATA + "/reach.tsv" }
 func reachLoad() map[string]reachRow {
 	o := map[string]reachRow{}
 	for _, r := range readRows(reachFile()) {
-		if r.F(1) == "" {
+		if r.F(rcMach) == "" {
 			continue
 		}
 		var ls []string
-		if r.F(5) != "-" {
-			ls = words(r.F(5))
+		if r.F(rcLanes) != "-" {
+			ls = words(r.F(rcLanes))
 		}
-		o[r.F(1)] = reachRow{r.F(1), r.F(2), int64(atoi10(r.F(3))), r.F(4) == "1", ls}
+		o[r.F(rcMach)] = reachRow{r.F(rcMach), r.F(rcState), int64(atoi10(r.F(rcSince))), r.F(rcAlerted) == "1", ls}
 	}
 	return o
 }
@@ -60,7 +60,7 @@ func reachLanes(m string, q []Row) []string {
 			continue
 		}
 		for _, r := range q {
-			if r.F(6) == "up" && r.F(8) == t.Addr && r.F(1) == t.Name {
+			if r.F(qState) == "up" && r.F(qAddr) == t.Addr && r.F(qName) == t.Name {
 				o = append(o, t.Name)
 			}
 		}
@@ -74,8 +74,8 @@ func reachLanes(m string, q []Row) []string {
 func reachQueued(m string, q []Row) []string {
 	var o []string
 	for _, r := range q {
-		if r.F(6) == "up" && r.F(7) == m && r.F(1) != "" {
-			o = append(o, r.F(1))
+		if r.F(qState) == "up" && r.F(qMach) == m && r.F(qName) != "" {
+			o = append(o, r.F(qName))
 		}
 	}
 	o = uniq(o)
@@ -111,8 +111,8 @@ func unreachTick() {
 		ms[t.M] = true
 	}
 	for _, r := range q {
-		if r.F(6) == "up" && r.F(7) != "" {
-			ms[r.F(7)] = true
+		if r.F(qState) == "up" && r.F(qMach) != "" {
+			ms[r.F(qMach)] = true
 		}
 	}
 	var names []string

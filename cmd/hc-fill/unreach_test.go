@@ -27,7 +27,7 @@ func urFx(t *testing.T) (events func() string) {
 func urTick(back int64) {
 	var rs []Row
 	for _, r := range readRows(reachFile()) {
-		rs = append(rs, r.Set(3, fmt.Sprint(int64(atoi10(r.F(3)))-back)))
+		rs = append(rs, r.Set(rcSince, fmt.Sprint(int64(atoi10(r.F(rcSince)))-back)))
 	}
 	if len(rs) > 0 {
 		writeAtomic(reachFile(), rowsText(rs))

@@ -84,7 +84,7 @@ func loadPut(m string, l mLoad) {
 func loadTick() {
 	wait := false
 	for _, r := range ROWS {
-		if r.F(6) == "wait" && !strings.HasPrefix(r.F(15), "audit=") {
+		if r.F(qState) == "wait" && !strings.HasPrefix(r.F(qAudit), "audit=") {
 			wait = true
 		}
 	}
@@ -376,16 +376,16 @@ type loadRec struct {
 func loadRecs() map[string]loadRec {
 	o := map[string]loadRec{}
 	for _, r := range readRows(DATA + "/load.tsv") {
-		if r.NF() < 9 {
+		if r.NF() < loNF {
 			continue
 		}
-		x := loadRec{m: r.F(1), why: strings.TrimPrefix(r.F(7), "-")}
-		x.l = loadParse("load " + r.F(2) + " " + r.F(3))
-		x.l.At, _ = strconv.ParseInt(r.F(4), 10, 64)
-		x.used, _ = strconv.Atoi(r.F(5))
-		x.cp, _ = strconv.Atoi(r.F(6))
-		x.hotSince, _ = strconv.ParseInt(r.F(8), 10, 64)
-		x.sent, _ = strconv.ParseInt(r.F(9), 10, 64)
+		x := loadRec{m: r.F(loMach), why: strings.TrimPrefix(r.F(loWhy), "-")}
+		x.l = loadParse("load " + r.F(loL1) + " " + r.F(loCores))
+		x.l.At, _ = strconv.ParseInt(r.F(loAt), 10, 64)
+		x.used, _ = strconv.Atoi(r.F(loUsed))
+		x.cp, _ = strconv.Atoi(r.F(loCap))
+		x.hotSince, _ = strconv.ParseInt(r.F(loHot), 10, 64)
+		x.sent, _ = strconv.ParseInt(r.F(loSent), 10, 64)
 		o[x.m] = x
 	}
 	return o
@@ -400,7 +400,7 @@ func loadEnd(now time.Time) {
 	smin := int64(knobInt("skew_min")) * 60
 	k := 0
 	for _, r := range ROWS {
-		if r.F(6) == "wait" && !strings.HasPrefix(r.F(15), "audit=") && !inlist(r.F(1), UPNOW) {
+		if r.F(qState) == "wait" && !strings.HasPrefix(r.F(qAudit), "audit=") && !inlist(r.F(qName), UPNOW) {
 			k++
 		}
 	}

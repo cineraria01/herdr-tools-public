@@ -35,7 +35,7 @@ func aseatPrune(wait map[string]bool) {
 	var keep []Row
 	rows := readRows(aseatPath())
 	for _, r := range rows {
-		if wait[r.F(1)] {
+		if wait[r.F(asName)] {
 			keep = append(keep, r)
 		}
 	}
@@ -64,7 +64,7 @@ func aseatWait(an, m string) {
 	rows := readRows(aseatPath())
 	i := -1
 	for j, r := range rows {
-		if r.F(1) == an {
+		if r.F(asName) == an {
 			i = j
 		}
 	}
@@ -73,18 +73,18 @@ func aseatWait(an, m string) {
 		i = len(rows) - 1
 	}
 	r := rows[i]
-	c := atoi10(r.F(2)) + 1
-	r = r.Set(2, strconv.Itoa(c))
-	if c > lim && r.F(4) != "1" {
+	c := atoi10(r.F(asTurns)) + 1
+	r = r.Set(asTurns, strconv.Itoa(c))
+	if c > lim && r.F(asTold) != "1" {
 		lane := ""
 		if q := qrow(an); q != nil {
-			lane = strings.TrimPrefix(q.F(15), "audit=")
+			lane = strings.TrimPrefix(q.F(qAudit), "audit=")
 		}
-		first, _ := strconv.ParseInt(r.F(3), 10, 64)
+		first, _ := strconv.ParseInt(r.F(asFirst), 10, 64)
 		msg := fmt.Sprintf("감사 %s(%s)가 %s 자리 없어 %d분 대기 — 자리를 올리거나 레인을 옮긴다(hc-fill은 상한을 넘겨 띄우지 않음)",
 			strings.TrimPrefix(an, "audit-"), lane, m, (now-first)/60)
 		if lane != "" && aesc(lane, qown(lane), msg, "hf:"+strings.TrimPrefix(an, "audit-")+":seat") == 0 {
-			r = r.Set(4, "1")
+			r = r.Set(asTold, "1")
 		}
 	}
 	rows[i] = r
@@ -96,8 +96,8 @@ func aseatWait(an, m string) {
 // aseatMin <감사 줄>: 자리 없어 기다린 분(기록 없으면 -1)
 func aseatMin(an string) int64 {
 	for _, r := range readRows(aseatPath()) {
-		if r.F(1) == an {
-			first, err := strconv.ParseInt(r.F(3), 10, 64)
+		if r.F(asName) == an {
+			first, err := strconv.ParseInt(r.F(asFirst), 10, 64)
 			if err != nil {
 				return -1
 			}

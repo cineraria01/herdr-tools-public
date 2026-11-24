@@ -23,10 +23,10 @@ func aCloseDelivered() {
 		return
 	}
 	qr := qrow(auAn)
-	if qr == nil || qr.F(6) != "up" || qr.F(15) != "audit="+auLn {
+	if qr == nil || qr.F(qState) != "up" || qr.F(qAudit) != "audit="+auLn {
 		return // 안 뜬 줄·빠진 줄은 닫을 터미널이 없다(대기열 줄 정리는 aCleanup)
 	}
-	qm, qa := qr.F(7), qr.F(8)
+	qm, qa := qr.F(qMach), qr.F(qAddr)
 	n := 0
 	var rest []string
 	for _, f := range strings.Split(dash(auAfl), ",") {
@@ -49,5 +49,5 @@ func aCloseDelivered() {
 		rest = append(rest, "aclose="+strconv.Itoa(n))
 	}
 	auAfl = strings.Join(rest, ",")
-	aupd(auAid, "16", auAfl)
+	aupd(auAid, cv{atFlags, auAfl})
 }

@@ -65,13 +65,13 @@ func lcFetch(p string, quiet bool) int {
 func since(lane string) (string, bool) {
 	sa := ""
 	for _, r := range qRows() {
-		if r.F(1) != lane {
+		if r.F(qName) != lane {
 			continue
 		}
-		if x := r.F(17); sinceIDRe.MatchString(x) {
+		if x := r.F(qRID); sinceIDRe.MatchString(x) {
 			sa = strings.SplitN(x[1:], "-", 2)[0]
 		} else {
-			sa = r.F(10)
+			sa = r.F(qAdded)
 		}
 		break
 	}
@@ -134,8 +134,8 @@ func cachedMark(p, lane string) bool {
 	}
 	sha := ""
 	for _, r := range readRows(f) {
-		if r.F(1) == p && r.F(2) == lane && r.F(3) == stamp {
-			sha = r.F(4)
+		if r.F(alProj) == p && r.F(alLane) == lane && r.F(alFrom) == stamp {
+			sha = r.F(alMark)
 			break
 		}
 	}
@@ -252,7 +252,7 @@ func laneLanded(name, cwd string) bool {
 // submitted <레인 이름> <주소>: 그 터미널이 이번 실행에 그 이름으로 적은 마지막 사건이 「제출」이면 참.
 // 사건을 못 읽었거나(EVBAD) 그 기계 사건이 없으면 거짓(지금처럼 판정)
 func submitted(name, addr string) bool {
-	return !EVBAD && lcCut(joblast(name, addr, ""), 5) == "제출"
+	return !EVBAD && lcCut(joblast(name, addr, ""), evState) == "제출"
 }
 
 // wt_there <기계> <폴더> → yes|no|? (확인 못 하면 ?)
@@ -293,11 +293,11 @@ func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) + rsvOn(m, "") 
 func lanesOn(m string) int {
 	k := 0
 	for _, r := range ROWS {
-		if r.F(6) != "up" || r.F(7) != m || strings.HasPrefix(r.F(15), "audit=") || r.F(8) == "" {
+		if r.F(qState) != "up" || r.F(qMach) != m || strings.HasPrefix(r.F(qAudit), "audit=") || r.F(qAddr) == "" {
 			continue
 		}
 		for _, t := range TERMS { // 주소+이름(주소 재사용), 끝난 keep 셸 레인은 빼고
-			if t.Addr == r.F(8) && t.Name == r.F(1) {
+			if t.Addr == r.F(qAddr) && t.Name == r.F(qName) {
 				if !laneEnded(t) {
 					k++
 				}
@@ -329,8 +329,8 @@ func laneEnded(t Term) bool {
 	last := ""
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(3) == t.Addr && r.F(4) == t.Name && r.F(5) != "정리됨" && r.NF() >= 10 && r.F(10) == key {
-			last = r.F(5)
+		if r.F(evTerm) == t.Addr && r.F(evLane) == t.Name && r.F(evState) != "정리됨" && r.NF() >= evRun && r.F(evRun) == key {
+			last = r.F(evState)
 		}
 	}
 	return last == "제출" || last == "착지"
@@ -349,7 +349,7 @@ func tryput(name, rid, m, e, u, addr, r string) int {
 			return 1
 		}
 		for _, l := range lines(text) {
-			if splitRow(l).F(1) != name {
+			if splitRow(l).F(trName) != name {
 				b.WriteString(l + "\n")
 			}
 		}
@@ -367,8 +367,8 @@ func tryput(name, rid, m, e, u, addr, r string) int {
 func tryOldBusy(name, rid string) bool {
 	machine, addr := "", ""
 	for _, r := range readRows(DATA + "/try.tsv") {
-		if r.F(1) == name && r.F(2) != rid {
-			machine, addr = r.F(3), r.F(6)
+		if r.F(trName) == name && r.F(trRID) != rid {
+			machine, addr = r.F(trMach), r.F(trAddr)
 			break
 		}
 	}
@@ -397,7 +397,7 @@ const unsureWarn = 5
 func tryUnsure(name, rid string) bool {
 	var r Row
 	for _, x := range readRows(DATA + "/try.tsv") {
-		if x.F(1) == name && x.F(2) == rid && x.F(6) == "?" {
+		if x.F(trName) == name && x.F(trRID) == rid && x.F(trAddr) == "?" {
 			r = x
 			break
 		}
@@ -405,14 +405,14 @@ func tryUnsure(name, rid string) bool {
 	if r == nil {
 		return false
 	}
-	m, a := r.F(3), dash(r.F(8))
+	m, a := r.F(trMach), dash(r.F(trGot))
 	wait := func(f string, v ...any) bool {
 		say(f, v...)
-		n, _ := strconv.Atoi(r.F(9))
+		n, _ := strconv.Atoi(r.F(trWaits))
 		n++
 		if !dry && tryEdit(name, func(x Row) Row {
-			if x.F(2) == rid && x.F(6) == "?" {
-				return x.Set(8, a).Set(9, strconv.Itoa(n))
+			if x.F(trRID) == rid && x.F(trAddr) == "?" {
+				return x.Set(trGot, a).Set(trWaits, strconv.Itoa(n))
 			}
 			return x
 		}) == 0 && n >= unsureWarn { // 키가 같으면 hc-lane이 한 번만 남긴다
@@ -437,7 +437,7 @@ func tryUnsure(name, rid string) bool {
 			return wait("미확정 시도 기다림 %s @%s: 받은 주소 %s 가 살아 있다(목록엔 아직 없음)", name, m, a)
 		}
 	}
-	if !dry && tryput(name, rid, m, r.F(4), r.F(5), "", "") != 0 {
+	if !dry && tryput(name, rid, m, r.F(trEarly), r.F(trAudit), "", "") != 0 {
 		return true
 	}
 	return false
@@ -452,7 +452,7 @@ func tryEdit(name string, f func(Row) Row) int {
 	}
 	var b strings.Builder
 	for _, l := range lines(text) {
-		if r := splitRow(l); r.F(1) == name {
+		if r := splitRow(l); r.F(trName) == name {
 			l = f(r).Line()
 		}
 		b.WriteString(l + "\n")
@@ -491,12 +491,12 @@ func tryPrune() {
 	}
 	q := map[string]bool{}
 	for _, l := range lines(qtext) {
-		q[splitRow(l).F(1)] = true
+		q[splitRow(l).F(qName)] = true
 	}
 	var b strings.Builder
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if q[r.F(1)] || !mset[r.F(3)] || seen[[2]string{r.F(3), r.F(1)}] {
+		if q[r.F(trName)] || !mset[r.F(trMach)] || seen[[2]string{r.F(trMach), r.F(trName)}] {
 			b.WriteString(l + "\n")
 		}
 	}
@@ -508,8 +508,8 @@ func tryPrune() {
 // tryget: 그 이름·줄 ID·기계의 시도 기록 「먼저<TAB>감사」
 func tryget(name, rid, m string) (string, bool) {
 	for _, r := range readRows(DATA + "/try.tsv") {
-		if r.F(1) == name && r.F(2) == rid && r.F(3) == m {
-			return r.F(4) + "\t" + r.F(5), true
+		if r.F(trName) == name && r.F(trRID) == rid && r.F(trMach) == m {
+			return r.F(trEarly) + "\t" + r.F(trAudit), true
 		}
 	}
 	return "", false

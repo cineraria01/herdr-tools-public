@@ -88,8 +88,8 @@ func TestEarlyChainPredWaiting(t *testing.T) {
 	ob, oe2, orows := ELIST, ECAP, ROWS
 	t.Cleanup(func() { ELIST, ECAP, ROWS = ob, oe2, orows })
 	b := bf("B", "파일: cmd/x.go\n")
-	a := pad16("A", "app", b, "-", "-", "wait").Set(17, "r1-1-1")
-	bb := pad16("B", "app", b, "A", "-", "wait").Set(17, "r2-1-1")
+	a := pad16("A", "app", b, "-", "-", "wait").Set(qRID, "r1-1-1")
+	bb := pad16("B", "app", b, "A", "-", "wait").Set(qRID, "r2-1-1")
 	if err := os.WriteFile(Q, []byte(a.Line()+"\n"+bb.Line()+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

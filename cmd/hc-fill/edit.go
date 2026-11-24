@@ -86,7 +86,7 @@ func editCmd(args []string) {
 			noLane(name)
 		}
 		undo = editUndo(r, after != "", only != "", brief != "", prio != "")
-		st, prj = r.F(6), r.F(2)
+		st, prj = r.F(qState), r.F(qProj)
 		if after != "" {
 			after = afterFix(name, prj, after, anyp)
 		}
@@ -95,7 +95,7 @@ func editCmd(args []string) {
 			if st != "wait" {
 				die("%s: 이미 떴다(%s) — 떠 있는 레인의 지시문은 바꾸지 않는다(그 레인에 hc send)", name, st)
 			}
-			if len(thenNames(r.F(3))) > 0 {
+			if len(thenNames(r.F(qBrief))) > 0 {
 				die("%s: 지시문에 「## 이어서:」(--then으로 붙인 일)가 있다 — 바꾸면 그 일을 잃는다. 새 지시문에 그 절까지 넣어 rm --force 뒤 다시 add", name)
 			}
 			bf = DATA + "/briefs/added/" + name + ".md"
@@ -106,24 +106,24 @@ func editCmd(args []string) {
 		}
 		var out []Row
 		for _, x := range qRowsW() {
-			if x.F(1) == name {
+			if x.F(qName) == name {
 				for i := x.NF() + 1; i < 13; i++ {
 					x = x.Set(i, "-")
 				}
 				if after != "" {
-					x = x.Set(4, after)
+					x = x.Set(qAfter, after)
 					note += ", 선행 " + after
 				}
 				if only != "" {
-					x = x.Set(5, only)
+					x = x.Set(qOnly, only)
 					note += ", 기계 " + only
 				}
 				if bf != "" {
-					x = x.Set(3, bf)
+					x = x.Set(qBrief, bf)
 					note += ", 지시문 " + bf
 				}
 				if prio != "" {
-					x = x.Set(13, prio)
+					x = x.Set(qPrio, prio)
 					note += ", 우선 " + plabel(prio)
 				}
 			}
@@ -196,11 +196,11 @@ func rmCmd(args []string) {
 	}
 	rc := withQ(func() {
 		r := qrow(name)
-		if r != nil && r.F(14) == "parked" && !force {
+		if r != nil && r.F(qEarly) == "parked" && !force {
 			refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
 		}
 		if r != nil {
-			st, undo = r.F(6), rmUndo(r)
+			st, undo = r.F(qState), rmUndo(r)
 		}
 		qRm(name)
 	})
@@ -213,20 +213,20 @@ func rmCmd(args []string) {
 
 // editUndo: 바꾸기 전 줄 r에서, 바꾼 칸만 옛 값으로 되돌리는 edit 한 줄(지시문은 옛 사본 경로 — 같은 경로면 덮였으니 뺀다)
 func editUndo(r Row, a, o, b, p bool) string {
-	s := "hc-fill edit " + r.F(1)
+	s := "hc-fill edit " + r.F(qName)
 	if a {
-		s += " --after " + shq(dash(r.F(4)))
+		s += " --after " + shq(dash(r.F(qAfter)))
 	}
 	if o {
-		s += " --only " + shq(dash(r.F(5)))
+		s += " --only " + shq(dash(r.F(qOnly)))
 	}
-	if b && r.F(3) != DATA+"/briefs/added/"+r.F(1)+".md" {
-		s += " --brief " + shq(r.F(3))
+	if b && r.F(qBrief) != DATA+"/briefs/added/"+r.F(qName)+".md" {
+		s += " --brief " + shq(r.F(qBrief))
 	}
 	if p {
-		s += " --priority " + plabel(r.F(13))
+		s += " --priority " + plabel(r.F(qPrio))
 	}
-	if s == "hc-fill edit "+r.F(1) {
+	if s == "hc-fill edit "+r.F(qName) {
 		return "-"
 	}
 	return s
@@ -234,14 +234,14 @@ func editUndo(r Row, a, o, b, p bool) string {
 
 // rmUndo: 뺀 줄을 다시 넣는 add 한 줄(새 줄 ID — 주차한 준비 커밋·시도 기록은 돌아오지 않는다)
 func rmUndo(r Row) string {
-	s := "hc-fill add --name " + r.F(1) + " --project " + shq(r.F(2)) + " --brief " + shq(r.F(3)) + " --priority " + plabel(r.F(13))
-	if a := dash(r.F(4)); a != "-" {
+	s := "hc-fill add --name " + r.F(qName) + " --project " + shq(r.F(qProj)) + " --brief " + shq(r.F(qBrief)) + " --priority " + plabel(r.F(qPrio))
+	if a := dash(r.F(qAfter)); a != "-" {
 		s += " --after " + shq(a)
 	}
-	if o := dash(r.F(5)); o != "-" {
+	if o := dash(r.F(qOnly)); o != "-" {
 		s += " --only " + shq(o)
 	}
-	if c := dash(r.F(12)); c != "-" {
+	if c := dash(r.F(qOwner)); c != "-" {
 		s += " --coord " + shq(c)
 	}
 	return s
@@ -284,11 +284,11 @@ func afterFix(lane, prj, list string, anyp bool) string {
 func afterProj(n, prj string) string {
 	other := ""
 	for _, r := range qRows() {
-		if r.F(1) == n {
-			if r.F(2) == prj {
+		if r.F(qName) == n {
+			if r.F(qProj) == prj {
 				return prj
 			}
-			other = r.F(2)
+			other = r.F(qProj)
 		}
 	}
 	if other != "" {

@@ -23,7 +23,7 @@ func aRound() {
 		if !abrief(auAid, auLn, auAm, auSha, pj) || !aPut(auAid, auLn, auAm, pj) {
 			return
 		}
-		aupd(auAid, "8", "queued")
+		aupd(auAid, cv{atState, "queued"})
 		fmt.Println("감사 넣음 " + auAn + " ← " + auLn + " " + head(auSha, 8) + " (" + auRnd + "번째, " + auAm + ")")
 	case auAst == "queued":
 		aQueued()
@@ -41,7 +41,7 @@ func auVerdict(an, aid, sha string) string {
 	l := ""
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(4) == an && r.F(5) == "판정" && r.F(6) == sha && strings.Contains(r.F(7)+" ", "감사 완료 "+aid+" ") {
+		if r.F(evLane) == an && r.F(evState) == "판정" && r.F(evSHA) == sha && strings.Contains(r.F(evMsg)+" ", "감사 완료 "+aid+" ") {
 			l = e
 		}
 	}
@@ -57,7 +57,7 @@ func aQueued() {
 		aEsc(auAid, "cancelled", auLn+" 감사 "+auRnd+"번째("+auAid+", "+head(auSha, 8)+") 감사 줄이 대기열에서 빠졌다(hc-fill rm) — 지휘 판단")
 		return
 	}
-	qs, qm, qa := qr.F(6), qr.F(7), qr.F(8)
+	qs, qm, qa := qr.F(qState), qr.F(qMach), qr.F(qAddr)
 	if !auOK(qm) {
 		return
 	}
@@ -72,12 +72,12 @@ func aQueued() {
 		case "gone", "done", "idle":
 			n := atoi10(auAnv) + 1
 			auAnv = strconv.Itoa(n)
-			aupd(auAid, "15", auAnv)
+			aupd(auAid, cv{atNoVerdict, auAnv})
 			if n >= 3 {
 				lx := ""
 				for _, e := range EV {
-					if r := splitRow(e); r.F(4) == auAn {
-						lx = r.F(5) + " " + r.F(7)
+					if r := splitRow(e); r.F(evLane) == auAn {
+						lx = r.F(evState) + " " + r.F(evMsg)
 					}
 				}
 				if lx == "" {
@@ -90,7 +90,7 @@ func aQueued() {
 			}
 		default:
 			if auAnv != "" && auAnv != "0" {
-				aupd(auAid, "15", "0")
+				aupd(auAid, cv{atNoVerdict, "0"})
 			}
 		}
 		return
@@ -110,12 +110,12 @@ func aQueued() {
 		fmt.Println("감사 판정 미룸 " + auAn + ": 부모 실행의 완료 사건을 못 찾았다")
 		return
 	}
-	if !auSameSha(auSha, evF(le, 6)) {
-		aupd(auAid, "8", "superseded")
-		fmt.Println("판정 버림 " + auAn + ": " + auLn + " 이 새 완료(" + evF(le, 6) + ")를 적었다 — 새 차수로")
+	if !auSameSha(auSha, evF(le, evSHA)) {
+		aupd(auAid, cv{atState, "superseded"})
+		fmt.Println("판정 버림 " + auAn + ": " + auLn + " 이 새 완료(" + evF(le, evSHA) + ")를 적었다 — 새 차수로")
 		return
 	}
-	msg := evF(v, 7)
+	msg := evF(v, evMsg)
 	mm := regexp.MustCompile(`^감사 완료 ` + regexp.QuoteMeta(auAid) + ` 높음 ([0-9]+)·중간 ([0-9]+)·낮음 ([0-9]+)$`).FindStringSubmatch(msg)
 	if mm == nil {
 		aEsc(auAid, "unreadable", auLn+" 감사 "+auRnd+"번째 판정 줄을 못 읽음(「"+msg+"」) — 지휘 판단 ("+auAn+" @"+qm+" "+rep+")")
@@ -129,7 +129,7 @@ func aQueued() {
 	case atoi10(auAfx) < AMAX:
 		auAv, auAfx = "fix", strconv.Itoa(atoi10(auAfx)+1)
 	default:
-		aupd(auAid, "16", addFlag(auAfl, hml))
+		aupd(auAid, cv{atFlags, addFlag(auAfl, hml)})
 		aEsc(auAid, "limit", fmt.Sprintf("%s 감사 %s번째 높음 %s·중간 %s — 지휘 판단 (지적 %s번, 상한 audit_max %d, %s @%s %s)", auLn, auRnd, h, md, auAfx, AMAX, auAn, qm, rep))
 		return
 	}
@@ -141,7 +141,7 @@ func aQueued() {
 	if auAv == "pass" && atoi10(lw) > 0 { // 낮음 후속(lows.go lowsTick)
 		auAfl = addFlag(auAfl, "lows="+strconv.Itoa(atoi10(lw)))
 	}
-	aupd(auAid, "8", "deliver", "9", auAfx, "10", auAv, "16", auAfl, "17", rep)
+	aupd(auAid, cv{atState, "deliver"}, cv{atFixes, auAfx}, cv{atVerdict, auAv}, cv{atFlags, auAfl}, cv{atNote, rep})
 	crash("after-consume")
 	fmt.Println("판정 받음 " + auAn + " → " + auLn + " (" + auAv + ", 높음 " + h + "·중간 " + md + "·낮음 " + lw + ")")
 	auAst, auAlc, auAlw = "deliver", "", ""
@@ -162,7 +162,7 @@ func auLowAF(s string) string {
 // ponytail: 사건만 본다 — report 없이 손으로 push한 착지는 못 본다(그때는 noack가 지휘에)
 func aLanded() bool {
 	for _, s := range []string{"제출", "착지"} {
-		h := evF(runlast(auLn, auPa, auPrun, s), 6)
+		h := evF(runlast(auLn, auPa, auPrun, s), evSHA)
 		if len(h) < 7 {
 			continue
 		}
@@ -176,7 +176,7 @@ func aLanded() bool {
 func aDeliver() {
 	if !auOK(auAm) { // 끊긴 동안은 기다린 시간을 세지 않는다
 		if auAlc != "" && auAlc != "-" {
-			aupd(auAid, "13", "-")
+			aupd(auAid, cv{atChecked, "-"})
 		}
 		return
 	}
@@ -185,7 +185,7 @@ func aDeliver() {
 			fmt.Println(P + "수거된 것으로 닫을 " + auAid + " (" + auLn + " 이 수거 없이 제출·착지 " + head(auSha, 8) + ")")
 			return
 		}
-		aupd(auAid, "8", "taken")
+		aupd(auAid, cv{atState, "taken"})
 		fmt.Println("판정 수거됨 " + auAn + " → " + auLn + " (수거 없이 제출·착지 " + head(auSha, 8) + ")")
 		aCleanupNow()
 		return
@@ -194,7 +194,7 @@ func aDeliver() {
 		fmt.Println(P + "둘 판정 " + auAid + " → " + auAm + ":verdicts/" + auLn + "/")
 		return
 	}
-	auRep = auRest(arow(auAid), 17)
+	auRep = auRest(arow(auAid), atNote)
 	// 파일 공개 전에 부모 실행·최신 완료를 재확인한다. 이미 수거했으면 a_void가 그 표시를 보존한다
 	pr := pget(auPa)
 	if pr == 1 {
@@ -211,9 +211,9 @@ func aDeliver() {
 		fmt.Println("판정 두기 미룸 " + auAid + ": 부모 완료 사건을 확인하지 못했다")
 		return
 	}
-	if !auSameSha(auSha, evF(le, 6)) {
+	if !auSameSha(auSha, evF(le, evSHA)) {
 		if aVoid(auAid, auLn, auAm) == 0 {
-			aupd(auAid, "8", "superseded")
+			aupd(auAid, cv{atState, "superseded"})
 			fmt.Println("판정 취소 " + auAn + ": " + auLn + " 이 수거 전에 새 완료를 적었다 — 새 차수로")
 		}
 		return
@@ -248,12 +248,12 @@ func aDeliver() {
 	asNote = ""
 	switch mark {
 	case "taken", "landing":
-		aupd(auAid, "8", "taken")
+		aupd(auAid, cv{atState, "taken"})
 		fmt.Println("판정 수거됨 " + auAn + " → " + auLn + " (" + mark + ")")
 		aCleanupNow()
 		return
 	case "void":
-		aupd(auAid, "8", "superseded")
+		aupd(auAid, cv{atState, "superseded"})
 		return
 	case "landing+fill": // 대기열이 시작한 제출이 끝나지 않았다(앞 바퀴가 도중에 죽음) — 에이전트에 넘기고 바로 깨운다(autosubmit.go)
 		if F1(strings.Fields(vo), 2) == "yes" { // 끝 표시(.done)가 있다 — 그 land는 끝났다(report 착지는 했는지 모름)
@@ -279,7 +279,7 @@ func aDeliver() {
 		awt += d
 	}
 	auAwt = strconv.FormatInt(awt, 10)
-	aupd(auAid, "12", auAwt, "13", strconv.FormatInt(now, 10))
+	aupd(auAid, cv{atWaited, auAwt}, cv{atChecked, strconv.FormatInt(now, 10)})
 	alw := int64(0)
 	if isDigits(auAlw) {
 		alw = int64(atoi10(auAlw))
@@ -293,7 +293,7 @@ func aDeliver() {
 			fmt.Println("깨우기 미룸 " + auAn + ": 레인 터미널 " + auPa + " 이 이 바퀴 목록에 없다")
 		} else if auSend(auPa, "hc-fill: 감사 판정이 왔다 — 이 작업 트리에서 hc-lane verdict "+auAid+" 를 돌리고 그 출력대로 한다 (판정 "+auAid+")"+wn) {
 			k := strconv.Itoa(atoi10(auAwk) + 1)
-			aupd(auAid, "11", k, "14", strconv.FormatInt(now, 10))
+			aupd(auAid, cv{atWakes, k}, cv{atWoke, strconv.FormatInt(now, 10)})
 			fmt.Println("깨움 " + auLn + " " + auPa + " — 판정 " + auAid + " (" + auAv + ", " + k + "번째)")
 		} else {
 			fmt.Println("깨우기 실패 " + auLn + " " + auPa + " — 다음 바퀴에(판정은 파일에 있다)")
@@ -305,7 +305,7 @@ func aDeliver() {
 			if auAfl != "" {
 				f = auAfl + ",noack"
 			}
-			aupd(auAid, "16", f)
+			aupd(auAid, cv{atFlags, f})
 			auAfl = f
 		}
 	}
@@ -324,8 +324,8 @@ func aCleanup() {
 	if qr == nil {
 		return
 	}
-	qs, qm, qa := qr.F(6), qr.F(7), qr.F(8)
-	if qr.F(15) != "audit="+auLn {
+	qs, qm, qa := qr.F(qState), qr.F(qMach), qr.F(qAddr)
+	if qr.F(qAudit) != "audit="+auLn {
 		return
 	}
 	if dry {
@@ -374,9 +374,9 @@ func aCloseTerm(cn, qa string) bool {
 // auSameRound: 차수 줄의 sha가 완료 sha s로 시작하나(s가 -이면 차수 sha도 -)
 func auSameRound(r Row, s string) bool {
 	if s == "-" {
-		return r.F(5) == "-"
+		return r.F(atSHA) == "-"
 	}
-	return strings.HasPrefix(r.F(5), s)
+	return strings.HasPrefix(r.F(atSHA), s)
 }
 
 // a_open: 쓰기 레인(up·auto)이 그 실행으로 적은 최신 「완료 <sha>」가 아직 감사되지 않았으면 새 차수(완료 뒤 중간 보고가 끼어도)
@@ -388,33 +388,33 @@ func aOpen(n, p, m, la string) {
 	if lc == "" {
 		return
 	}
-	s := evF(lc, 6)
+	s := evF(lc, evSHA)
 	var mine []Row
 	for _, r := range readRows(AT) {
-		if r.NF() >= 17 && r.F(2) == n {
+		if r.NF() >= atNF && r.F(atLane) == n {
 			mine = append(mine, r)
 		}
 	}
 	for _, r := range mine {
-		if r.F(4) == PRUN && r.F(7) == la && auSameRound(r, s) {
+		if r.F(atRun) == PRUN && r.F(atAddr) == la && auSameRound(r, s) {
 			return
 		}
 		// 옮긴 옛 기록이 같은 sha를 이미 다뤘으면 다시 열지 않는다(이미 보낸 판정)
-		if s != "-" && r.F(4) == "-" && (strings.HasPrefix(r.F(5), s) || strings.HasPrefix(s, r.F(5))) {
+		if s != "-" && r.F(atRun) == "-" && (strings.HasPrefix(r.F(atSHA), s) || strings.HasPrefix(s, r.F(atSHA))) {
 			return
 		}
 	}
 	// 이 레인의 끝나지 않은 차수: 감사가 아직 돌면 미룸, 아니면 그 차수를 끝낸다(deliver는 void를 먼저)
 	for _, r := range mine {
-		oa, osh, om, ost := r.F(1), r.F(5), r.F(6), r.F(8)
+		oa, osh, om, ost := r.F(atID), r.F(atSHA), r.F(atMach), r.F(atState)
 		if oa == "" {
 			continue
 		}
 		switch {
 		case ost == "opening" || ost == "queued":
 			q := qrow("audit-" + oa)
-			if q.F(6) == "up" {
-				switch alive(q.F(8)) {
+			if q.F(qState) == "up" {
+				switch alive(q.F(qAddr)) {
 				case "gone", "done", "idle":
 				default:
 					fmt.Println("자동 감사 미룸 " + n + ": 새 완료 " + s + " — 지난 감사(" + oa + " " + head(osh, 8) + ")가 아직 돈다")
@@ -422,7 +422,7 @@ func aOpen(n, p, m, la string) {
 				}
 			}
 			if !dry {
-				aupd(oa, "8", "superseded")
+				aupd(oa, cv{atState, "superseded"})
 			}
 		case ost == "deliver":
 			if dry {
@@ -430,7 +430,7 @@ func aOpen(n, p, m, la string) {
 			}
 			switch aVoid(oa, n, om) {
 			case 0:
-				aupd(oa, "8", "superseded")
+				aupd(oa, cv{atState, "superseded"})
 			case 2:
 			default:
 				fmt.Println("자동 감사 미룸 " + n + ": 지난 판정 " + oa + " 취소를 확인하지 못했다")
@@ -447,8 +447,8 @@ func aOpen(n, p, m, la string) {
 	}
 	k, f := 0, ""
 	for _, r := range readRows(AT) {
-		if r.NF() >= 17 && r.F(2) == n && r.F(4) == PRUN {
-			k, f = k+1, r.F(9)
+		if r.NF() >= atNF && r.F(atLane) == n && r.F(atRun) == PRUN {
+			k, f = k+1, r.F(atFixes)
 		}
 	}
 	rnd, afx := strconv.Itoa(k+1), strconv.Itoa(int(num(f))) // 기록이 아직 없으면 0
@@ -536,7 +536,7 @@ func aOpen(n, p, m, la string) {
 		return
 	}
 	crash("after-put")
-	aupd(aid, "8", "queued")
+	aupd(aid, cv{atState, "queued"})
 	fmt.Println("감사 넣음 audit-" + aid + " ← " + n + " " + s40[:8] + " (" + rnd + "번째, " + m + ")")
 }
 
@@ -552,21 +552,21 @@ func auditTick() {
 	}
 	AUNK = evUnk()
 	for _, r := range readRows(AT) {
-		if r.NF() < 17 || r.F(1) == "" {
+		if r.NF() < atNF || r.F(atID) == "" {
 			continue
 		}
-		auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6), r.F(7), r.F(8)
-		auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(9), r.F(10), r.F(11), r.F(12), r.F(13), r.F(14), r.F(15), r.F(16)
+		auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(atID), r.F(atLane), r.F(atRound), r.F(atRun), r.F(atSHA), r.F(atMach), r.F(atAddr), r.F(atState)
+		auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(atFixes), r.F(atVerdict), r.F(atWakes), r.F(atWaited), r.F(atChecked), r.F(atWoke), r.F(atNoVerdict), r.F(atFlags)
 		aRound()
 	}
 	for _, r := range qRows() {
-		if r.F(6) != "up" || r.F(15) != "auto" || alive(r.F(8)) == "gone" {
+		if r.F(qState) != "up" || r.F(qAudit) != "auto" || alive(r.F(qAddr)) == "gone" {
 			continue
 		}
-		if !auOK(r.F(7)) {
-			fmt.Println("자동 감사 미룸 @" + r.F(7) + ": 연결 안 됨")
+		if !auOK(r.F(qMach)) {
+			fmt.Println("자동 감사 미룸 @" + r.F(qMach) + ": 연결 안 됨")
 			continue
 		}
-		aOpen(r.F(1), r.F(2), r.F(7), r.F(8))
+		aOpen(r.F(qName), r.F(qProj), r.F(qMach), r.F(qAddr))
 	}
 }

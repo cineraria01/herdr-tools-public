@@ -20,18 +20,18 @@ var (
 func qGraph() (A, T map[string]string) {
 	A, T = map[string]string{}, map[string]string{}
 	for _, r := range QEDGES {
-		if r.NF() >= 2 {
-			A[r.F(1)] += r.F(2)
+		if r.NF() >= qeAfter {
+			A[r.F(qeLane)] += r.F(qeAfter)
 		}
 	}
 	for _, r := range THENMAP {
-		if r.NF() >= 2 {
-			T[r.F(1)] = r.F(2)
+		if r.NF() >= tmInto {
+			T[r.F(tmName)] = r.F(tmInto)
 		}
 	}
 	for _, r := range OREC {
-		if r.NF() >= 7 {
-			A[r.F(1)] += r.F(7)
+		if r.NF() >= owAfter {
+			A[r.F(owLane)] += r.F(owAfter)
 		}
 	}
 	return A, T
@@ -66,8 +66,8 @@ func chainCut(c string, ov []Row) []Row {
 	up := reach(A, T, c)
 	var rest []Row
 	for _, r := range ov {
-		if up[r.F(1)] && r.F(1) != c && (r.F(2) == "예약" || r.F(2) == "실제") {
-			say("먼저 띄움 선행 겹침 %s: %s (%s) — 선행 사슬이라 막지 않음, 선행 착지 뒤 rebase", c, r.F(1), r.F(3))
+		if up[r.F(ovLane)] && r.F(ovLane) != c && (r.F(ovGrade) == "예약" || r.F(ovGrade) == "실제") {
+			say("먼저 띄움 선행 겹침 %s: %s (%s) — 선행 사슬이라 막지 않음, 선행 착지 뒤 rebase", c, r.F(ovLane), r.F(ovKeys))
 			OVCHAIN = append(OVCHAIN, r)
 			continue
 		}
@@ -82,14 +82,14 @@ func earlyChainSave(rows []Row, add []Row) {
 	f := DATA + "/early-chain.tsv"
 	live := map[string]bool{}
 	for _, r := range rows {
-		if r.F(6) == "up" && r.F(14) == "early" {
-			live[r.F(1)+"\t"+r.F(17)] = true
+		if r.F(qState) == "up" && r.F(qEarly) == "early" {
+			live[r.F(qName)+"\t"+r.F(qRID)] = true
 		}
 	}
 	old := readRows(f)
 	var keep []Row
 	for _, r := range old {
-		if live[r.F(1)+"\t"+r.F(2)] {
+		if live[r.F(ecLane)+"\t"+r.F(ecRID)] {
 			keep = append(keep, r)
 		}
 	}
@@ -105,8 +105,8 @@ func earlyChainSave(rows []Row, add []Row) {
 func earlyChainNote(n, rid string) string {
 	var s []string
 	for _, r := range readRows(DATA + "/early-chain.tsv") {
-		if r.F(1) == n && r.F(2) == rid {
-			s = append(s, r.F(3)+": "+r.F(4))
+		if r.F(ecLane) == n && r.F(ecRID) == rid {
+			s = append(s, r.F(ecFront)+": "+r.F(ecKeys))
 		}
 	}
 	if len(s) == 0 {

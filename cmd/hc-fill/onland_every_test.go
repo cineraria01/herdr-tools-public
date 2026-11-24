@@ -35,7 +35,7 @@ func TestOnlandEveryCoalescesLandings(t *testing.T) {
 	FETCHED = ""
 	onlandTick() // 같은 머리 — 더 넣지 않는다
 	rs := readRows(onlandDir() + "/dev.pending")
-	if len(rs) != 2 || rs[0].F(1) != "lane-a" || rs[1].F(1) != "lane-b" || rs[1].F(2) != "-" || rs[1].F(3) != sha {
+	if len(rs) != 2 || rs[0].F(opLane) != "lane-a" || rs[1].F(opLane) != "lane-b" || rs[1].F(opOwner) != "-" || rs[1].F(opSHA) != sha {
 		t.Fatalf("pending = %v, 바람 lane-a·lane-b(주인 -, %s)", rs, sha)
 	}
 	if rc := onlandRun("dev"); rc != 0 {

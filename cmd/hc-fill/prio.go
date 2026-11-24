@@ -28,8 +28,8 @@ func prioCmd(args []string) {
 	rc := withQ(func() {
 		rows := qRowsW() // 못 읽으면 「없다」가 아니라 종료 1(R-29)
 		for _, x := range rows {
-			if x.F(1) == args[0] {
-				st, prj, op = x.F(6), x.F(2), x.F(13)
+			if x.F(qName) == args[0] {
+				st, prj, op = x.F(qState), x.F(qProj), x.F(qPrio)
 				break
 			}
 		}
@@ -38,11 +38,11 @@ func prioCmd(args []string) {
 		}
 		var out []Row
 		for _, x := range rows {
-			if x.F(1) == args[0] {
+			if x.F(qName) == args[0] {
 				for i := x.NF() + 1; i < 13; i++ {
 					x = x.Set(i, "-")
 				}
-				x = x.Set(13, p)
+				x = x.Set(qPrio, p)
 			}
 			out = append(out, x)
 		}

@@ -62,10 +62,10 @@ func TestLowsAdds(t *testing.T) {
 	if r == nil {
 		t.Fatalf("후속을 안 넣었다: %q", readLines(Q))
 	}
-	if r.F(2) != "app" || r.F(4) != "w1" || r.F(6) != "wait" || r.F(12) != "t1" || r.F(13) != "low" || r.F(14) != "no-early" || r.F(15) != "-" {
+	if r.F(qProj) != "app" || r.F(qAfter) != "w1" || r.F(qState) != "wait" || r.F(qOwner) != "t1" || r.F(qPrio) != "low" || r.F(qEarly) != "no-early" || r.F(qAudit) != "-" {
 		t.Fatalf("후속 줄 칸: %q", r)
 	}
-	b, err := os.ReadFile(r.F(3))
+	b, err := os.ReadFile(r.F(qBrief))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestLowsAdds(t *testing.T) {
 	if got := x.logText(); !strings.Contains(got, "report 중간 - 후속 넣음 w1-lows: 낮음 2개") || !strings.Contains(got, "--name w1 --to t1 --key hf:a1:lows") {
 		t.Fatalf("주인 알림 꼴: %q", got)
 	}
-	if f := arow("a1").F(16); f != "lows=2,lowsq" {
+	if f := arow("a1").F(atFlags); f != "lows=2,lowsq" {
 		t.Fatalf("표시: %q", f)
 	}
 	lowsTick()
@@ -107,11 +107,11 @@ func TestLowsVerdictFlag(t *testing.T) {
 			auTEv("2026-11-21T01:10:00Z", "m/audit-a1", "audit-a1", "판정", auTSha, "감사 완료 a1 "+c.msg, "-"),
 		}
 		r := arow("a1")
-		auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6), r.F(7), r.F(8)
-		auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(9), r.F(10), r.F(11), r.F(12), r.F(13), r.F(14), r.F(15), r.F(16)
+		auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(atID), r.F(atLane), r.F(atRound), r.F(atRun), r.F(atSHA), r.F(atMach), r.F(atAddr), r.F(atState)
+		auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(atFixes), r.F(atVerdict), r.F(atWakes), r.F(atWaited), r.F(atChecked), r.F(atWoke), r.F(atNoVerdict), r.F(atFlags)
 		aRound()
-		if got := arow("a1"); got.F(8) == "queued" || got.F(16) != c.want {
-			t.Errorf("%s: 상태 %s 표시 %q, 바람 %q", c.msg, got.F(8), got.F(16), c.want)
+		if got := arow("a1"); got.F(atState) == "queued" || got.F(atFlags) != c.want {
+			t.Errorf("%s: 상태 %s 표시 %q, 바람 %q", c.msg, got.F(atState), got.F(atFlags), c.want)
 		}
 	}
 }
@@ -151,7 +151,7 @@ func TestLowsSkips(t *testing.T) {
 		if got := x.logText(); got != "" {
 			t.Errorf("%s: 알렸다 %q", c.name, got)
 		}
-		if f := arow("a1").F(16); strings.Contains(f, "lowsx") != c.mark {
+		if f := arow("a1").F(atFlags); strings.Contains(f, "lowsx") != c.mark {
 			t.Errorf("%s: 표시 %q", c.name, f)
 		}
 	}
@@ -163,8 +163,8 @@ func TestLowsHourCap(t *testing.T) {
 	confLines = []string{"lows app", "lows_hour 1"}
 	lowsW(t, DATA+"/lows.tsv", itoa64(nowUnix()-60)+"\tax\tz\tz-lows\t1\n")
 	lowsTick()
-	if qrow("w1-lows") != nil || arow("a1").F(16) != "lows=2" {
-		t.Fatalf("상한인데 넣었거나 표시했다: %q %q", readLines(Q), arow("a1").F(16))
+	if qrow("w1-lows") != nil || arow("a1").F(atFlags) != "lows=2" {
+		t.Fatalf("상한인데 넣었거나 표시했다: %q %q", readLines(Q), arow("a1").F(atFlags))
 	}
 	lowsW(t, DATA+"/lows.tsv", itoa64(nowUnix()-3700)+"\tax\tz\tz-lows\t1\n")
 	lowsTick()
@@ -194,7 +194,7 @@ func TestLowsUnreadable(t *testing.T) {
 		if got := x.logText(); !strings.Contains(got, "report 중간 - 후속 못 넣음 w1-lows: "+c.want) || !strings.Contains(got, "--to t1 --key hf:a1:lows") {
 			t.Errorf("%s: 알림 꼴 %q", c.name, got)
 		}
-		if f := arow("a1").F(16); f != "lows=2,lowsx" {
+		if f := arow("a1").F(atFlags); f != "lows=2,lowsx" {
 			t.Errorf("%s: 표시 %q", c.name, f)
 		}
 	}

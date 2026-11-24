@@ -161,7 +161,7 @@ func asHand() bool {
 // report 종료가 빈 값이 아니면 레인에 report 착지를 다시 부르게 한다(앞 바퀴가 도중에 죽었으면 「?」 — 불렀는지 모름)
 func asDone(line, rr string) {
 	f := strings.TrimPrefix(strings.TrimPrefix(auAfl+",asubok", "-,"), ",")
-	aupd(auAid, "8", "taken", "16", f)
+	aupd(auAid, cv{atState, "taken"}, cv{atFlags, f})
 	auAfl = f
 	fmt.Println("대기열이 제출 " + auLn + " ← 판정 " + auAid + " (" + head(auSha, 8) + "): " + line)
 	msg := "hc-fill: 대기열이 판정 " + auAid + " 를 레인 대신 제출했다 — hc-lane verdict·land 는 하지 않는다. 지시문 정리 절차의 hc-lane clean 줄만 돌리고 끝낸다"
@@ -198,7 +198,7 @@ func aAutoSubmit(base string) bool {
 	}
 	// 시도 표시를 먼저: 도중에 죽어도 다시 돌리지 않는다(다음 바퀴는 표시 landing+fill을 보고 넘긴다)
 	auAfl = strings.TrimPrefix(strings.TrimPrefix(auAfl+",asub", "-,"), ",")
-	aupd(auAid, "16", auAfl)
+	aupd(auAid, cv{atFlags, auAfl})
 	out, rc := asubRun(strings.TrimSuffix(repo, "/")+".wt/"+auLn, base, env)
 	st, last := asParse(out)
 	ld, landed := st["land"]

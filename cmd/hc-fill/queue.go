@@ -113,25 +113,25 @@ func qset(useID bool, qrid, n, s, m, a, k, e, u string) int {
 	found := false
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if r.F(1) == n && (!useID || r.F(17) == qrid) {
-			r = r.Set(6, s).Set(7, m).Set(8, a).Set(9, k)
+		if r.F(qName) == n && (!useID || r.F(qRID) == qrid) {
+			r = r.Set(qState, s).Set(qMach, m).Set(qAddr, a).Set(qStuck, k)
 			found = true
 			pad := func(upto int) {
 				for i := r.NF() + 1; i < upto; i++ {
 					v := "-"
-					if i == 13 {
+					if i == qPrio {
 						v = "normal"
 					}
 					r = r.Set(i, v)
 				}
 			}
 			if e != "" {
-				pad(14)
-				r = r.Set(14, e)
+				pad(qEarly)
+				r = r.Set(qEarly, e)
 			}
 			if u != "" {
-				pad(15)
-				r = r.Set(15, u)
+				pad(qAudit)
+				r = r.Set(qAudit, u)
 			}
 		}
 		out = append(out, r)
@@ -149,7 +149,7 @@ func qset(useID bool, qrid, n, s, m, a, k, e, u string) int {
 // pad16: 16칸까지 -로 채우고 17칸 줄 ID
 func pad16(f ...string) Row {
 	r := Row(append([]string(nil), f...))
-	for len(r) < 16 {
+	for len(r) < qRID-1 {
 		r = append(r, "-")
 	}
 	return append(r, rowid())
@@ -157,7 +157,7 @@ func pad16(f ...string) Row {
 
 func qHasName(n string) bool {
 	for _, r := range qRows() {
-		if r.F(1) == n {
+		if r.F(qName) == n {
 			return true
 		}
 	}
@@ -167,7 +167,7 @@ func qHasName(n string) bool {
 // qHasNameW: 쓰기 전 같은 이름 확인 — 대기열이 있는데 못 읽으면 종료 1(모름을 「없음」으로 읽어 같은 이름을 더하지 않게, R-21)
 func qHasNameW(n string) bool {
 	for _, r := range qRowsW() {
-		if r.F(1) == n {
+		if r.F(qName) == n {
 			return true
 		}
 	}
@@ -178,14 +178,14 @@ func qHasNameW(n string) bool {
 func thenofW(name string) string {
 	pre := "## 이어서: " + name + " "
 	for _, r := range qRowsW() {
-		b, err := os.ReadFile(r.F(3))
+		b, err := os.ReadFile(r.F(qBrief))
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "hc-fill: 대기열 줄 %s의 지시문을 읽지 못해 더하지 않는다: %s\n", r.F(1), r.F(3))
+			fmt.Fprintf(os.Stderr, "hc-fill: 대기열 줄 %s의 지시문을 읽지 못해 더하지 않는다: %s\n", r.F(qName), r.F(qBrief))
 			exit(1)
 		}
 		for _, l := range lines(string(b)) {
 			if strings.HasPrefix(l, pre) {
-				return r.F(1)
+				return r.F(qName)
 			}
 		}
 	}
@@ -218,9 +218,9 @@ func qAdd(tmp string, f ...string) int {
 func thenof(name string) string {
 	pre := "## 이어서: " + name + " "
 	for _, r := range qRows() {
-		for _, l := range readLines(r.F(3)) {
+		for _, l := range readLines(r.F(qBrief)) {
 			if strings.HasPrefix(l, pre) {
-				return r.F(1)
+				return r.F(qName)
 			}
 		}
 	}
@@ -233,15 +233,15 @@ func thenof(name string) string {
 func lget(rid string) Row {
 	var last Row
 	for _, r := range readRows(LED) {
-		if r.F(1) == rid {
+		if r.F(ldRID) == rid {
 			last = r
 		}
 	}
 	return last
 }
 
-// lset <요청ID> <칸> <값> …: 그 줄의 칸을 바꾸고 9칸에 시각. 0 됨
-func lset(rid string, kv ...string) int {
+// lset <요청ID> <칸 값> …: 그 줄의 칸을 바꾸고 시각 칸(9칸)에 시각. 0 됨
+func lset(rid string, kv ...cv) int {
 	if !qHeld {
 		rc := 0
 		if w := withQ(func() { rc = lset(rid, kv...) }); w != 0 {
@@ -257,12 +257,11 @@ func lset(rid string, kv ...string) int {
 	var out []Row
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if r.F(1) == rid {
-			for i := 0; i+1 < len(kv); i += 2 {
-				c, _ := strconv.Atoi(kv[i])
-				r = r.Set(c, flat1(dash(kv[i+1])))
+		if r.F(ldRID) == rid {
+			for _, x := range kv {
+				r = r.Set(x.c, flat1(dash(x.v)))
 			}
-			r = r.Set(9, t)
+			r = r.Set(ldTime, t)
 		}
 		out = append(out, r)
 	}
@@ -286,10 +285,10 @@ func replyOf(f11 string) (dest, rid string, ok bool) {
 func rmigrate() int {
 	if nonEmpty(LED) {
 		for _, r := range readRows(LED) {
-			if r.F(4) != "open" || !isFile(DATA+"/replies/"+r.F(1)+".md") {
+			if r.F(ldState) != "open" || !isFile(DATA+"/replies/"+r.F(ldRID)+".md") {
 				continue
 			}
-			if rfix(r.F(1), "-", "", false) != 0 {
+			if rfix(r.F(ldRID), "-", "", false) != 0 {
 				return 1
 			}
 		}
@@ -299,12 +298,12 @@ func rmigrate() int {
 	}
 	var old []Row
 	for _, r := range qRows() {
-		if r.F(11) != "" && r.F(11) != "-" && !strings.Contains(r.F(11), "#") {
+		if r.F(qReply) != "" && r.F(qReply) != "-" && !strings.Contains(r.F(qReply), "#") {
 			old = append(old, r)
 		}
 	}
 	for _, o := range old {
-		n, st, d := o.F(1), o.F(6), o.F(11)
+		n, st, d := o.F(qName), o.F(qState), o.F(qReply)
 		rr := fmt.Sprintf("rl%08x", cksum([]byte(n+" "+d)))
 		if lget(rr) == nil {
 			s, lg := "open", "-"
@@ -320,8 +319,8 @@ func rmigrate() int {
 		}
 		var out []Row
 		for _, r := range qRowsW() {
-			if r.F(1) == n && !strings.Contains(r.F(11), "#") {
-				r = r.Set(11, r.F(11)+"#"+rr)
+			if r.F(qName) == n && !strings.Contains(r.F(qReply), "#") {
+				r = r.Set(qReply, r.F(qReply)+"#"+rr)
 			}
 			out = append(out, r)
 		}
@@ -332,18 +331,18 @@ func rmigrate() int {
 	// _inadd가 대기열만 쓴 뒤 끊겼으면 rm도 그 요청을 취소할 수 있게 장부를 복원한다
 	seen := map[string]bool{}
 	for _, r := range readRows(LED) {
-		seen[r.F(1)] = true
+		seen[r.F(qName)] = true
 	}
 	for _, r := range qRows() {
-		d, rid, ok := replyOf(r.F(11))
+		d, rid, ok := replyOf(r.F(qReply))
 		if !ok || seen[rid] {
 			continue
 		}
 		s := "open"
-		if r.F(6) == "sent" {
+		if r.F(qState) == "sent" {
 			s = "sent"
 		}
-		if appendLine(LED, strings.Join([]string{rid, r.F(1), d, s, "-", "-", "-", "-", r.F(10)}, "\t")) != nil {
+		if appendLine(LED, strings.Join([]string{rid, r.F(qName), d, s, "-", "-", "-", "-", r.F(qAdded)}, "\t")) != nil {
 			return 1
 		}
 	}
@@ -352,16 +351,16 @@ func rmigrate() int {
 	}
 	x := map[string]string{}
 	for _, r := range readRows(LED) {
-		if r.F(4) != "open" {
-			x[r.F(1)] = r.F(5)
+		if r.F(ldState) != "open" {
+			x[r.F(ldRID)] = r.F(ldKind)
 		}
 	}
 	text, _ := readFile(Q)
 	var out []Row
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if _, rid, ok := replyOf(r.F(11)); ok {
-			if k, in := x[rid]; in && (r.F(6) == "wait" || k == "cancel") {
+		if _, rid, ok := replyOf(r.F(qReply)); ok {
+			if k, in := x[rid]; in && (r.F(qState) == "wait" || k == "cancel") {
 				continue
 			}
 		}
@@ -388,7 +387,7 @@ func rfix(rid, kind, body string, hasBody bool) int {
 		return rc
 	}
 	row := lget(rid)
-	if row.F(4) != "open" {
+	if row.F(ldState) != "open" {
 		return 0
 	}
 	if os.MkdirAll(DATA+"/replies", 0o755) != nil {
@@ -411,12 +410,12 @@ func rfix(rid, kind, body string, hasBody bool) int {
 		if cerr := t.Close(); werr == nil {
 			werr = cerr
 		}
-		if werr != nil || lset(rid, "5", kind) != 0 || os.Rename(t.Name(), rf) != nil {
+		if werr != nil || lset(rid, cv{ldKind, kind}) != 0 || os.Rename(t.Name(), rf) != nil {
 			os.Remove(t.Name())
 			return 1
 		}
 	} else {
-		kind = row.F(5)
+		kind = row.F(ldKind)
 		if kind == "-" {
 			last := lastLine(func() string { s, _ := readFile(rf); return s }())
 			switch {
@@ -434,7 +433,7 @@ func rfix(rid, kind, body string, hasBody bool) int {
 	if err != nil {
 		return 1
 	}
-	return lset(rid, "4", "deliver", "5", kind, "6", sha256hex(b), "7", strconv.Itoa(len(b)))
+	return lset(rid, cv{ldState, "deliver"}, cv{ldKind, kind}, cv{ldHash, sha256hex(b)}, cv{ldSize, strconv.Itoa(len(b))})
 }
 
 // q_rmx <이름> <상태>: 그 줄이 그 상태일 때만 뺀다(잠금 안). 없으면 1
@@ -447,7 +446,7 @@ func qRmx(n, s string) int {
 	found := false
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if r.F(1) == n && r.F(6) == s {
+		if r.F(qName) == n && r.F(qState) == s {
 			found = true
 			continue
 		}
@@ -466,7 +465,7 @@ func qRmx(n, s string) int {
 func qInadd(n, p, brief, after, only, prio, dest, rid string) (string, int) {
 	ia := ""
 	rc := withQ(func() {
-		switch lget(rid).F(4) {
+		switch lget(rid).F(ldState) {
 		case "", "open":
 		default:
 			ia = "HAD"
@@ -474,8 +473,8 @@ func qInadd(n, p, brief, after, only, prio, dest, rid string) (string, int) {
 		}
 		ex, found := "", false
 		for _, r := range qRows() {
-			if r.F(1) == n {
-				ex, found = dash(r.F(11)), true
+			if r.F(qName) == n {
+				ex, found = dash(r.F(qReply)), true
 				break
 			}
 		}
@@ -509,20 +508,20 @@ func qRm(n string) {
 	}
 	var rc11 string
 	for _, r := range qRows() {
-		if r.F(1) == n {
-			rc11 = r.F(11)
+		if r.F(qName) == n {
+			rc11 = r.F(qReply)
 			break
 		}
 	}
 	if _, rrid, ok := replyOf(rc11); ok {
-		if lget(rrid).F(4) == "open" && rfix(rrid, "cancel", "결과: 실패 취소 — hc-fill rm "+nowMin(), true) != 0 {
+		if lget(rrid).F(ldState) == "open" && rfix(rrid, "cancel", "결과: 실패 취소 — hc-fill rm "+nowMin(), true) != 0 {
 			die("취소 결과를 두지 못했다: %s", n)
 		}
 		crash("rm-after-cancel")
 	}
 	var out []Row
 	for _, r := range qRowsW() {
-		if r.F(1) != n {
+		if r.F(qName) != n {
 			out = append(out, r)
 		}
 	}
@@ -540,17 +539,17 @@ func anote(n string) string {
 	var id, r, s, f, v, fl string
 	g := false
 	for _, x := range readRows(DATA + "/audit.tsv") {
-		if x.NF() >= 17 && x.F(2) == n {
-			id, r, s, f, v, fl, g = x.F(1), x.F(3), x.F(8), x.F(9), x.F(10), x.F(16), true
-		} else if x.NF() >= 5 && x.NF() < 17 && x.F(1) == n {
-			r, f, s, g = x.F(3), x.F(4), "old", true
+		if x.NF() >= atNF && x.F(atLane) == n {
+			id, r, s, f, v, fl, g = x.F(atID), x.F(atRound), x.F(atState), x.F(atFixes), x.F(atVerdict), x.F(atFlags), true
+		} else if x.NF() >= atoState && x.NF() < atNF && x.F(atoLane) == n {
+			r, f, s, g = x.F(atoRound), x.F(atoFixes), "old", true
 		}
 	}
 	switch {
 	case !g:
 		return "자동 감사(완료 기다림)"
 	case s == "opening" || s == "queued":
-		if q := qrow("audit-" + id); q != nil && q.F(6) == "wait" { // 감사 줄이 아직 안 떴다
+		if q := qrow("audit-" + id); q != nil && q.F(qState) == "wait" { // 감사 줄이 아직 안 떴다
 			if m := aseatMin("audit-" + id); m >= 0 {
 				return "감사 대기(자리 없음 " + strconv.FormatInt(m, 10) + "분)"
 			}

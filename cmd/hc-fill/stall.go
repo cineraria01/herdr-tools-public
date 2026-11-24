@@ -16,10 +16,10 @@ import (
 // ④ 병합기가 맡음(stallMerger). ③을 모르면(fetch·merge-base 실패) 지금처럼 알리지 않는다. ④를 모르면(병합기 참조를 못 읽음) 알리되
 // 글에 「(착지 판정 못 함)」(2026-11-22 stall-false-alarm). 그 sha가 이 클론에 없으면(남의 기계에만 있는 커밋) 기본 브랜치에도 없다
 func stallDone(q Row, ev, sha string) (bool, bool) {
-	if !lalive(q.F(8), q.F(1)) || strings.Contains(evF(ev, 7), "커밋 0") {
+	if !lalive(q.F(qAddr), q.F(qName)) || strings.Contains(evF(ev, evMsg), "커밋 0") {
 		return true, false
 	}
-	if lcFetch(q.F(2), true) != 0 {
+	if lcFetch(q.F(qProj), true) != 0 {
 		return true, false // 기본 브랜치를 모름
 	}
 	// 「이 클론에 없음」은 rev-parse 종료 1에 출력이 없을 때만 — 그 밖의 실패·시간 넘김은 모름(알리지 않는다, gofix-fill F12·L5)
@@ -48,10 +48,10 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 	if !strings.HasPrefix(FB, "origin/") {
 		return false, false
 	}
-	p, n := q.F(2), q.F(1)
+	p, n := q.F(qProj), q.F(qName)
 	st, ok := since(n)
 	if !ok {
-		t, err := time.Parse("2006-01-02T15:04:05Z", evF(ev, 1))
+		t, err := time.Parse("2006-01-02T15:04:05Z", evF(ev, evTime))
 		if err != nil {
 			return false, true
 		}
@@ -77,7 +77,7 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 		unk = true
 	default:
 		for _, r := range MQS {
-			if r.F(1) == p && strings.HasPrefix(r.F(2), "refs/merge-queue/") && same(r.F(3)) {
+			if r.F(mqProj) == p && strings.HasPrefix(r.F(mqRef), "refs/merge-queue/") && same(r.F(mqSHA)) {
 				return true, false
 			}
 		}
@@ -94,7 +94,7 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 	}
 	if len(names) > 0 {
 		for _, r := range readRows(DATA + "/reland.tsv") {
-			if has(names, r.F(1)) && (r.F(4) == "넣음" || r.F(4) == "보냄") {
+			if has(names, r.F(rlFailed)) && (r.F(rlWhat) == "넣음" || r.F(rlWhat) == "보냄") {
 				return true, false
 			}
 		}
@@ -106,12 +106,12 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 // 낸다), 이 클론의 가지 설정 branch.<레인>.hcLane(hc-lane이 이름 바꿔 낸 제출에 남김 — 이 기계 레인만 보인다). 설정 조회가 「없음」(종료 1)
 // 말고 실패하면 모름
 func stallNames(q Row) ([]string, bool) {
-	n := q.F(1)
+	n := q.F(qName)
 	names := []string{n}
 	b, _, err := atomic.Read(DATA + "/reland.tsv")
 	for _, l := range lines(string(b)) {
-		if r := splitRow(l); r.F(5) == n && r.F(4) == "넣음" {
-			names = append(names, r.F(2), r.F(3))
+		if r := splitRow(l); r.F(rlArg) == n && r.F(rlWhat) == "넣음" {
+			names = append(names, r.F(rlLane), r.F(rlBase))
 		}
 	}
 	o, rc := run("git", "-C", FR, "config", "--get", "branch."+n+".hcLane")
@@ -152,34 +152,34 @@ func stallTick() {
 	at := readRows(AT)
 	now := time.Now()
 	for _, q := range qRows() {
-		n, m, a := q.F(1), q.F(7), q.F(8)
-		if q.F(6) != "up" || strings.HasPrefix(q.F(15), "audit=") || n == "" {
+		n, m, a := q.F(qName), q.F(qMach), q.F(qAddr)
+		if q.F(qState) != "up" || strings.HasPrefix(q.F(qAudit), "audit=") || n == "" {
 			continue
 		}
 		if m != LOCAL && (!connHas(m) || has(unk, m)) {
 			continue
 		}
 		l := joblast(n, a, "")
-		if evF(l, 5) != "완료" {
+		if evF(l, evState) != "완료" {
 			continue
 		}
-		t0, err := time.Parse("2006-01-02T15:04:05Z", evF(l, 1))
+		t0, err := time.Parse("2006-01-02T15:04:05Z", evF(l, evTime))
 		if err != nil {
 			continue
 		}
-		s, open := evF(l, 6), false
+		s, open := evF(l, evSHA), false
 		if s == "" || s == "-" { // 커밋 없는 완료(감사·조사 레인의 「완료 -」) — 감사할 것도 착지할 것도 없다(2026-11-23 stall-no-sha)
 			continue
 		}
 		for _, r := range at {
-			if r.NF() < 17 || r.F(2) != n || !auSameRound(r, s) {
+			if r.NF() < atNF || r.F(atLane) != n || !auSameRound(r, s) {
 				continue
 			}
-			if !aterm(r.F(8)) {
+			if !aterm(r.F(atState)) {
 				open = true
 				break
 			}
-			for _, c := range []string{r.F(13), r.F(14)} {
+			for _, c := range []string{r.F(atChecked), r.F(atWoke)} {
 				if isDigits(c) {
 					if ts := time.Unix(int64(atoi10(c)), 0); ts.After(t0) {
 						t0 = ts
@@ -199,12 +199,12 @@ func stallTick() {
 		if unk {
 			tail = " (착지 판정 못 함)"
 		}
-		own := dash(q.F(12))
-		if _, _, inbox := replyOf(q.F(11)); inbox {
+		own := dash(q.F(qOwner))
+		if _, _, inbox := replyOf(q.F(qReply)); inbox {
 			own = "-"
 		}
 		what := "감사·착지" // 자동 감사 줄(감사 칸 auto)만 감사를 기다린다 — 그 밖(no-audit·감사 꺼짐·받은편지)은 착지만
-		if q.F(15) != "auto" {
+		if q.F(qAudit) != "auto" {
 			what = "착지"
 		}
 		aesc(n, own, fmt.Sprintf("%s 완료 뒤 멈춤 — %d분째 %s 없음 (%s, 완료 %s)%s", n, mins, what, a, head(s, 8), tail), "hf:"+n+":stall:"+s)

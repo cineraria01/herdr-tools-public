@@ -84,7 +84,7 @@ func onlandPut(lane, name, prj, owner string) {
 	f := DATA + "/onland.tsv"
 	var out []Row
 	for _, r := range readRows(f) {
-		if r.F(1) != lane {
+		if r.F(olLane) != lane {
 			out = append(out, r)
 		}
 	}
@@ -161,10 +161,10 @@ func onlandTick() {
 	now := nowUnix()
 	drop := map[string]bool{} // 「레인 접수초」
 	for _, r := range rows {
-		lane, name, p, own, ts := r.F(1), r.F(2), r.F(3), r.F(4), int64(num(r.F(5)))
+		lane, name, p, own, ts := r.F(olLane), r.F(olName), r.F(olProj), r.F(olOwner), int64(num(r.F(olAt)))
 		if now-ts > onlandKeep {
 			say("착지 뒤 %s: %s 가 %d일 넘게 착지하지 않아 버림", name, lane, onlandKeep/86400)
-			drop[lane+" "+r.F(5)] = true
+			drop[lane+" "+r.F(olAt)] = true
 			continue
 		}
 		if fetchProj(p) != 0 {
@@ -187,13 +187,13 @@ func onlandTick() {
 			continue
 		}
 		say("착지 뒤 %s ← %s 착지 %s — 명령 차례에 넣음", name, lane, head(sha, 8))
-		drop[lane+" "+r.F(5)], fire[name] = true, true
+		drop[lane+" "+r.F(olAt)], fire[name] = true, true
 	}
 	if len(drop) > 0 && !dry {
 		if withQ(func() {
 			var keep []Row
 			for _, r := range readRows(f) {
-				if !drop[r.F(1)+" "+r.F(5)] {
+				if !drop[r.F(olLane)+" "+r.F(olAt)] {
 					keep = append(keep, r)
 				}
 			}
@@ -347,7 +347,7 @@ func onlandOnce(name string, rs []Row) {
 	var lanes, owners []string
 	sha := ""
 	for _, r := range rs {
-		lanes, owners, sha = append(lanes, r.F(1)), append(owners, r.F(2)), r.F(3)
+		lanes, owners, sha = append(lanes, r.F(opLane)), append(owners, r.F(opOwner)), r.F(opSHA)
 	}
 	lanes, owners = uniq(lanes), uniq(owners)
 	p, cmdline := onlandConf(name)

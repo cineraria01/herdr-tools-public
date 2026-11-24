@@ -208,7 +208,7 @@ func addCmd(args []string) {
 		rows := qRows()
 		for _, a := range words(after) {
 			for _, r := range rows {
-				if r.F(1) == a && r.F(6) == "wait" && r.F(2) == prj && (r.F(11) == "" || r.F(11) == "-") && !strings.HasPrefix(r.F(15), "audit=") {
+				if r.F(qName) == a && r.F(qState) == "wait" && r.F(qProj) == prj && (r.F(qReply) == "" || r.F(qReply) == "-") && !strings.HasPrefix(r.F(qAudit), "audit=") {
 					say("알림: %s가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then %s로 한 레인에 이어 붙인다", a, a)
 					break
 				}
@@ -248,7 +248,7 @@ func thenLocked(tl, pre, prj, brief string) {
 		}
 		refuse("선행이 대기열에 없다: %s", pre)
 	}
-	pp, pb, ps, pst, pr, pk := row.F(2), row.F(3), row.F(6), dash(row.F(9)), dash(row.F(11)), dash(row.F(15))
+	pp, pb, ps, pst, pr, pk := row.F(qProj), row.F(qBrief), row.F(qState), dash(row.F(qStuck)), dash(row.F(qReply)), dash(row.F(qAudit))
 	if ps != "wait" {
 		refuse("%s: 이미 떴다(%s) — --after %s으로 넣거나 그 레인에 hc send", pre, ps, pre)
 	}

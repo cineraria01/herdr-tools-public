@@ -21,7 +21,7 @@ func TestEarlyWaitRealGit(t *testing.T) {
 	setData(t)
 	EWAIT = 5
 	st := time.Now().Unix() - 60
-	row := pad16("pre", "app", "b", "-", "-", "up", "-", "-", "-", "t", "-", "-", "normal", "-", "-", "-").Set(17, fmt.Sprintf("r%d-1-1", st))
+	row := pad16("pre", "app", "b", "-", "-", "up", "-", "-", "-", "t", "-", "-", "normal", "-", "-", "-").Set(qRID, fmt.Sprintf("r%d-1-1", st))
 	if err := os.WriteFile(Q, []byte(row.Line()+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

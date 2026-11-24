@@ -46,7 +46,7 @@ func TestActTrackedOnly(t *testing.T) {
 func actKeysOwn(n, p string) []Row {
 	var o []Row
 	for _, k := range actKeys(p, n) {
-		o = append(o, Row{n, k.F(1), k.F(2)})
+		o = append(o, Row{n, k.F(kyKind), k.F(kyKey)})
 	}
 	return o
 }

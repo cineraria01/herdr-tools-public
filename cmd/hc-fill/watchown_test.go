@@ -33,8 +33,8 @@ func TestWatchOwners(t *testing.T) {
 	st := map[string]string{"f": "착지", "g": "판정", "a": "완료"}
 	last := ""
 	for _, r := range qRows() { // 줄 ID는 읽을 때 붙는다 — last.tsv는 레인·줄 ID로 맞춘다(evTick)
-		if s := st[r.F(1)]; s != "" {
-			last += strings.Join([]string{r.F(1), s, "-", "10:00", "-", "10:01", "fresh", r.F(17)}, "\t") + "\n"
+		if s := st[r.F(qName)]; s != "" {
+			last += strings.Join([]string{r.F(qName), s, "-", "10:00", "-", "10:01", "fresh", r.F(qRID)}, "\t") + "\n"
 		}
 	}
 	if err := os.WriteFile(DATA+"/last.tsv", []byte(last), 0o644); err != nil {

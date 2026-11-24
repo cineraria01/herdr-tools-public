@@ -79,13 +79,13 @@ func TestRelandTick(t *testing.T) {
 	)
 	relandTick()
 	r := qrow("l-a-reland")
-	if r == nil || r.F(2) != "app" || r.F(6) != "wait" || r.F(12) != "t9" || r.F(13) != "high" || r.F(15) != "no-audit" {
+	if r == nil || r.F(qProj) != "app" || r.F(qState) != "wait" || r.F(qOwner) != "t9" || r.F(qPrio) != "high" || r.F(qAudit) != "no-audit" {
 		t.Fatalf("다시 맞춤 줄: %v", r)
 	}
 	if len(qRows()) != 1 {
 		t.Fatalf("다른 반송은 넣지 않는다: %v", qRows())
 	}
-	b, _ := readFile(r.F(3))
+	b, _ := readFile(r.F(qBrief))
 	for _, s := range []string{"git fetch origin refs/merge-failed/100-l-a ", "충돌 파일(병합기가 3자 합침으로 본 것): a.go b.go", "/s/merger-logs/l-a.log", "머리 l-a:", "rebase --abort 금지"} {
 		if !strings.Contains(b, s) {
 			t.Errorf("지시문에 %q 없음:\n%s", s, b)
@@ -235,7 +235,7 @@ func TestRelandLongChain(t *testing.T) {
 		MQP, MQS, MQBAD = "", nil, ""
 		relandTick()
 		if q := qRows(); len(q) == 1 {
-			lane = q[0].F(1)
+			lane = q[0].F(qName)
 		}
 	}
 	rl, _ := readFile(DATA + "/reland.tsv")

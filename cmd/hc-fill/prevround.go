@@ -33,21 +33,21 @@ func aprev(aid string) (rnd, sha, rep, hml string) {
 	rows := readRows(AT)
 	var cur Row
 	for _, r := range rows {
-		if r.NF() >= 17 && r.F(1) == aid {
+		if r.NF() >= atNF && r.F(atID) == aid {
 			cur = r
 		}
 	}
 	if cur == nil {
 		return
 	}
-	rnd = cur.F(3)
+	rnd = cur.F(atRound)
 	for _, r := range rows {
-		if r.F(1) == aid {
+		if r.F(atID) == aid {
 			break
 		}
-		if r.NF() >= 17 && r.F(2) == cur.F(2) && r.F(4) == cur.F(4) {
-			if h := hmlText(r.F(16)); h != "" {
-				sha, rep, hml = r.F(5), "~/.local/share/hc-fill/reports/audit-"+r.F(1)+".md", h
+		if r.NF() >= atNF && r.F(atLane) == cur.F(atLane) && r.F(atRun) == cur.F(atRun) {
+			if h := hmlText(r.F(atFlags)); h != "" {
+				sha, rep, hml = r.F(atSHA), "~/.local/share/hc-fill/reports/audit-"+r.F(atID)+".md", h
 			}
 		}
 	}
@@ -96,9 +96,9 @@ func noteCmd(args []string) {
 	if r == nil {
 		noLane(lane)
 	}
-	m, addr := r.F(7), r.F(8)
-	if r.F(6) != "up" || m == "" || m == "-" || addr == "" || addr == "-" {
-		die("떠 있지 않은 레인이다(상태 %s): %s", r.F(6), lane)
+	m, addr := r.F(qMach), r.F(qAddr)
+	if r.F(qState) != "up" || m == "" || m == "-" || addr == "" || addr == "-" {
+		die("떠 있지 않은 레인이다(상태 %s): %s", r.F(qState), lane)
 	}
 	nf := coordNotes(lane)
 	in := "## " + utcnow() + " 지휘\n" + text + "\n\n"

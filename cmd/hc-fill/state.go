@@ -115,21 +115,21 @@ func stateCollect(now time.Time) opsstate.State {
 	// 대기열·레인
 	var rows []Row
 	for _, l := range readLines(Q) {
-		if f := lsSplit(l, 17); !strings.HasPrefix(f[14], "audit=") {
-			rows = append(rows, Row(f))
+		if f := Row(lsSplit(l, qNF)); !strings.HasPrefix(f.F(qAudit), "audit=") {
+			rows = append(rows, f)
 		}
 	}
 	last := map[string]Row{}
 	for _, r := range readRows(DATA + "/last.tsv") {
-		last[r.F(1)] = r
+		last[r.F(lsName)] = r
 	}
 	laneOn := map[string]int{}
 	var oldest *opsstate.Waiting
 	for _, r := range rows {
-		name, st := r.F(1), r.F(6)
+		name, st := r.F(qName), r.F(qState)
 		s.Queue.Counts[st]++
 		if st == "wait" {
-			if a, ok := stateAddedAge(r.F(10), now); ok && (oldest == nil || a > oldest.AgeS) {
+			if a, ok := stateAddedAge(r.F(qAdded), now); ok && (oldest == nil || a > oldest.AgeS) {
 				oldest = &opsstate.Waiting{Lane: name, AgeS: a, Why: stateWaitWhy(r)}
 			}
 			continue
@@ -137,22 +137,22 @@ func stateCollect(now time.Time) opsstate.State {
 		if st != "up" {
 			continue
 		}
-		in := stIn{State: st, Early: r.F(14), Last: last[name], Pos: -1}
-		in.Live = stLive(terms, termsOK, conn, connKnown, r.F(8), name)
-		if r.F(15) == "auto" {
+		in := stIn{State: st, Early: r.F(qEarly), Last: last[name], Pos: -1}
+		in.Live = stLive(terms, termsOK, conn, connKnown, r.F(qAddr), name)
+		if r.F(qAudit) == "auto" {
 			in.Aud = anote(name)
 		}
 		if in.Live != "" && !strings.HasPrefix(in.Live, "?") {
-			laneOn[r.F(7)]++
+			laneOn[r.F(qMach)]++
 		}
-		ln := opsstate.Lane{Name: name, Machine: r.F(7), Stage: stStage(in), Open: in.Live != ""}
-		if x := last[name]; x != nil && x.F(2) != "-" {
-			ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(2)+" "+x.F(3)+" "+x.F(5), " -", "")), " ")
-			if a, ok := stateClockAge(x.F(4), now); ok {
+		ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: in.Live != ""}
+		if x := last[name]; x != nil && x.F(lsState) != "-" {
+			ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(lsState)+" "+x.F(lsSHA)+" "+x.F(lsMsg), " -", "")), " ")
+			if a, ok := stateClockAge(x.F(lsWhen), now); ok {
 				ln.StageAgeS = ptrI(a)
 			}
 			// 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(「?」 모름은 살아 있을 수 있어 끝남이 아니다)
-			ln.Done = (x.F(2) == "정리됨" || x.F(2) == "착지") && in.Live == ""
+			ln.Done = (x.F(lsState) == "정리됨" || x.F(lsState) == "착지") && in.Live == ""
 		}
 		s.Lanes = append(s.Lanes, ln)
 	}
@@ -221,8 +221,8 @@ func stateCollect(now time.Time) opsstate.State {
 	// 감시: 열린 줄이 있는 주인 지휘마다 그 감시 터미널(hc-lane이 띄우는 이름 lane-watch-<주인>)이 hc ls에 있나
 	seen := map[string]bool{}
 	for _, r := range rows {
-		o := r.F(12)
-		if o == "" || o == "-" || seen[o] || !(r.F(6) == "up" || r.F(6) == "wait" && r.F(14) == "parked") {
+		o := r.F(qOwner)
+		if o == "" || o == "-" || seen[o] || !(r.F(qState) == "up" || r.F(qState) == "wait" && r.F(qEarly) == "parked") {
 			continue
 		}
 		seen[o] = true
@@ -326,17 +326,17 @@ func stateClockAge(hm string, now time.Time) (int, bool) {
 
 // stateWaitWhy: 기다리는 까닭 — 거절 · 겹침 · 필요 능력 · 선행 · 그 밖은 자리·차례(기계별 안 띄운 까닭은 machines[].skip_why)
 func stateWaitWhy(r Row) string {
-	name := r.F(1)
-	if w := rejWhy(name, r.F(17)); w != "" {
+	name := r.F(qName)
+	if w := rejWhy(name, r.F(qRID)); w != "" {
 		return "거절 " + w
 	}
 	if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
-		return "겹침 " + x.F(2)
+		return "겹침 " + x.F(wtFront)
 	}
 	if x := lsFirst(DATA+"/need.tsv", name); x != nil {
-		return "필요 " + x.F(2)
+		return "필요 " + x.F(ndNeed)
 	}
-	if a := r.F(4); a != "" && a != "-" {
+	if a := r.F(qAfter); a != "" && a != "-" {
 		return "선행 " + a
 	}
 	return "자리·차례"
@@ -347,10 +347,10 @@ func stateWaitWhy(r Row) string {
 func stateEvents(last map[string]Row) []string {
 	var o []string
 	for n, x := range last {
-		if x.F(2) == "-" || x.F(4) == "?" {
+		if x.F(lsState) == "-" || x.F(lsWhen) == "?" {
 			continue
 		}
-		o = append(o, strings.Join(strings.Fields(strings.ReplaceAll(x.F(4)+" "+n+" "+x.F(2)+" "+x.F(3)+" "+x.F(5), " -", "")), " "))
+		o = append(o, strings.Join(strings.Fields(strings.ReplaceAll(x.F(lsWhen)+" "+n+" "+x.F(lsState)+" "+x.F(lsSHA)+" "+x.F(lsMsg), " -", "")), " "))
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(o)))
 	if len(o) > 10 {

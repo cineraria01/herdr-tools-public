@@ -76,11 +76,12 @@ func maLegacy(k string) string {
 func maLoad() map[string]maRow {
 	o := map[string]maRow{}
 	for _, r := range readRows(maFile()) {
-		al := r.F(9)
+		al := r.F(maAlerted)
 		if al == "-" {
 			al = ""
 		}
-		o[r.F(1)] = maRow{r.F(1), r.F(2), r.F(3), int64(atoi10(r.F(4))), r.F(5), r.F(6), int64(atoi10(r.F(7))), int64(atoi10(r.F(8))), al, r.F(10)}
+		o[r.F(maProj)] = maRow{r.F(maProj), r.F(maMach), r.F(maState), int64(atoi10(r.F(maSince))), r.F(maAddr), r.F(maQueued),
+			int64(atoi10(r.F(maOldest))), int64(atoi10(r.F(maChecked))), al, r.F(maWhy)}
 	}
 	return o
 }
@@ -111,7 +112,7 @@ func maQueue(p string) (lanes []string, oldest int64, ok bool) {
 		mqload(p)
 		maSnap.p += "," + p
 		for _, r := range MQS {
-			if r.F(1) == p {
+			if r.F(mqProj) == p {
 				maSnap.s = append(maSnap.s, r)
 			}
 		}
@@ -124,12 +125,12 @@ func maQueue(p string) (lanes []string, oldest int64, ok bool) {
 		return nil, 0, false
 	}
 	for _, r := range rows {
-		if r.F(1) != p {
+		if r.F(mqProj) != p {
 			continue
 		}
-		if loc := mgQueueRe.FindStringIndex(r.F(2)); loc != nil {
-			lanes = append(lanes, r.F(2)[loc[1]:])
-			s := int64(atoi10(strings.TrimPrefix(r.F(2)[:loc[1]-1], "refs/merge-queue/")))
+		if loc := mgQueueRe.FindStringIndex(r.F(mqRef)); loc != nil {
+			lanes = append(lanes, r.F(mqRef)[loc[1]:])
+			s := int64(atoi10(strings.TrimPrefix(r.F(mqRef)[:loc[1]-1], "refs/merge-queue/")))
 			if oldest == 0 || s < oldest {
 				oldest = s
 			}
@@ -144,8 +145,8 @@ func maOwners(lanes []string) []string {
 	for _, n := range lanes {
 		own := "-"
 		if q := qrow(n); q != nil {
-			own = dash(q.F(12))
-			if _, _, inbox := replyOf(q.F(11)); inbox {
+			own = dash(q.F(qOwner))
+			if _, _, inbox := replyOf(q.F(qReply)); inbox {
 				own = "-"
 			}
 		}

@@ -26,7 +26,7 @@ func stateMergeJournal(mr map[string]maRow, rows []Row) func(g *opsstate.MergeLi
 	}
 	proj := map[string]string{}
 	for _, r := range rows {
-		proj[r.F(1)] = r.F(2)
+		proj[r.F(qName)] = r.F(qProj)
 	}
 	var ls []string
 	bad := ""

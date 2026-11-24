@@ -81,7 +81,7 @@ func lsSplit(line string, n int) []string {
 // lsFirst: awk -F'\t' -v n=… '($1 "")==n { …; exit }' — 그 이름 첫 줄(없으면 nil)
 func lsFirst(path, n string) Row {
 	for _, r := range readRows(path) {
-		if r.F(1) == n {
+		if r.F(kvKey) == n {
 			return r
 		}
 	}
@@ -161,14 +161,14 @@ func lsCmd(args []string) {
 		exit(0)
 	}
 	for _, l := range readLines(Q) {
-		f := lsSplit(l, 17)
-		name, proj, brief, after, only, state, addr, stuck := f[0], f[1], f[2], f[3], f[4], f[5], f[7], f[8]
-		reply, owner, prio, early, ak, ovk := f[10], f[11], f[12], f[13], f[14], f[15]
+		f := Row(lsSplit(l, qNF))
+		name, proj, brief, after, only, state, addr, stuck := f.F(qName), f.F(qProj), f.F(qBrief), f.F(qAfter), f.F(qOnly), f.F(qState), f.F(qAddr), f.F(qStuck)
+		reply, owner, prio, early, ak, ovk := f.F(qReply), f.F(qOwner), f.F(qPrio), f.F(qEarly), f.F(qAudit), f.F(qOverlap)
 		live, lr, s, a := "", "", "", ""
 		switch state {
 		case "wait":
 			s, a = "대기", "-"
-			if w := rejWhy(name, f[16]); w != "" {
+			if w := rejWhy(name, f.F(qRID)); w != "" {
 				s = "띄우기 거절 — " + w
 			}
 		case "sent":
@@ -199,20 +199,20 @@ func lsCmd(args []string) {
 			a = addr
 			// 마지막 보고: run이 바퀴마다 적은 last.tsv(레인 상태 sha8 사건시각 한줄 읽은시각 fresh|old)
 			if x := lsFirst(DATA+"/last.tsv", name); x != nil {
-				if x.F(2) == "-" {
+				if x.F(lsState) == "-" {
 					lr = "보고 없음"
 				} else {
-					lr = x.F(2)
-					if x.F(3) != "-" {
-						lr += " " + x.F(3)
+					lr = x.F(lsState)
+					if x.F(lsSHA) != "-" {
+						lr += " " + x.F(lsSHA)
 					}
-					lr += " " + x.F(4)
-					if x.F(5) != "-" {
-						lr += " " + x.F(5)
+					lr += " " + x.F(lsWhen)
+					if x.F(lsMsg) != "-" {
+						lr += " " + x.F(lsMsg)
 					}
 				}
-				if x.F(7) == "old" {
-					lr += " (옛 값 " + x.F(6) + ")"
+				if x.F(lsFresh) == "old" {
+					lr += " (옛 값 " + x.F(lsSeen) + ")"
 				}
 			}
 		}
@@ -231,7 +231,7 @@ func lsCmd(args []string) {
 		}
 		switch early {
 		case "early":
-			note = "먼저 띄움(" + ew + ")" + earlyChainNote(name, f[16]) + strings.TrimPrefix(note, "선행 "+after)
+			note = "먼저 띄움(" + ew + ")" + earlyChainNote(name, f.F(qRID)) + strings.TrimPrefix(note, "선행 "+after)
 		case "no-early":
 			note += " 먼저 띄움 끔"
 		case "parked":
@@ -265,10 +265,10 @@ func lsCmd(args []string) {
 		if state == "wait" {
 			// 겹침 대기: run이 바퀴마다 적은 overlap.tsv(레인 앞레인 파일), 능력 막힘: need.tsv(레인 능력 보냄)
 			if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
-				note += " 겹침 대기(" + x.F(2) + ": " + x.F(3) + ")"
+				note += " 겹침 대기(" + x.F(wtFront) + ": " + x.F(wtKey) + ")"
 			}
 			if x := lsFirst(DATA+"/need.tsv", name); x != nil {
-				note += " 필요 " + x.F(2) + " — 가진 기계 없음"
+				note += " 필요 " + x.F(ndNeed) + " — 가진 기계 없음"
 			}
 		}
 		note = strings.TrimPrefix(note, " ")

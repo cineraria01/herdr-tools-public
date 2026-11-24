@@ -4,6 +4,7 @@
   하위 명령은 그 명령 파일의 `init()`이 `register`로 넣고 `main.go`는 등록표를 돌기만 한다(2026-11-22 go-cmd-registry, 속 명령 `_gc`·`_onland`도 같다).
   도움말은 `usage.go`의 머리(명령 줄 요약)·꼬리(설정·대기열·종료) 사이에 명령마다의 조각 `cmd/hc-fill/help/<명령>.txt`를 이름순으로 잇는다(시험 `cmd/hc-fill/registry_test.go`).
   새 하위 명령은 그 명령 파일과 `help/<명령>.txt`(첫 줄에 「        hc-fill <명령> …」 요약 줄)에서만 더하고, `main.go`·`usage.go`는 고치지 않는다.
+  탭 구분 파일·줄의 칸은 `cmd/hc-fill/cols.go`의 이름(대기열 `q…`, 감사 기록 `at…`, 사건 줄 `ev…` 등 파일 종류마다 한 묶음)으로만 읽고 쓴다 — 칸을 더하면 그 묶음에 한 줄을 더하고, 숫자 칸 접근은 `cols_guard_test.go`가 막는다(2026-11-24 fill-named-cols).
   상태 파일 queue.tsv·inbox.tsv·audit.tsv·own.tsv 등. 잠금은 flock(run.lock·queue.lock·watch.lock·gc.lock — O_CLOEXEC), 상태 쓰기는 임시 → fsync → rename(10분 넘게 남은 임시 파일은 다음 바퀴가 거둠).
   ls 「떠 있음」은 주소+이름(끊긴 기계는 「모름」), 감사 틀 `-C {worktree}` 인용, 완료 뒤 멈춤 알림(설정 `done_stall` — 터미널이 닫힌 「끝남」 레인·「커밋 0」 완료·sha 없는 완료(「완료 -」, 감사·조사 레인)·완료 sha가 기본 브랜치에 든 레인·병합기가 맡은 레인(다음 줄)은 빼고, 기본 브랜치에 들었는지 모르면 알리지 않고 병합기 참조를 못 읽으면 「(착지 판정 못 함)」을 붙여 알림, 자동 감사(감사 칸 `auto`) 줄이 아니면 글은 「감사·착지 없음」 대신 「착지 없음」), 바퀴 상한(`watch`가 한 바퀴를 `HC_FILL_ROUND_TIMEOUT`초, 기본 1200 넘기면 끝내고 다음 바퀴로).
   병합기가 맡은 레인(2026-11-22 stall-false-alarm — 묶음 착지한 d1-inbox-claim·반송 뒤 다시 맞춤이 이어받은 sv-shell-remove-reland를 멈춤으로 알렸다)은 레인 표식 `refs/hc-landed/<레인>/<초>`가 그 줄 접수 뒤이고 기본 브랜치에 들었거나(묶음도 구성원마다 `refs/merge-done/<레인>`과 함께 남는다), 큐 `refs/merge-queue/*-<레인>`·그 sha의 큐 항목이 있거나, `refs/merge-failed/*`가 그 sha이고 reland.tsv에 그 반송의 「넣음」·「보냄」이 있는 것이다.

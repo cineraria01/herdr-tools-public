@@ -54,8 +54,8 @@ func maTick(n int) {
 		mergerAliveTick()
 		var rs []Row
 		for _, r := range readRows(DATA + "/merger-alive.tsv") {
-			if r.F(4) != "-" && isDigits(r.F(4)) {
-				r = r.Set(4, fmt.Sprint(atoi10(r.F(4))-360))
+			if r.F(maSince) != "-" && isDigits(r.F(maSince)) {
+				r = r.Set(maSince, fmt.Sprint(atoi10(r.F(maSince))-360))
 			}
 			rs = append(rs, r)
 		}

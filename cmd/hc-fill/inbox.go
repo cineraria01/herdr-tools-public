@@ -88,8 +88,8 @@ func inbIrej(im, idir, n, why string) {
 // inbReq: printf '%s\n' "$req" | awk -F'\t' '$1==k {print $2; exit}' — ok=false면 그 줄 없음
 func inbReq(req, k string) (string, bool) {
 	for _, l := range strings.Split(req, "\n") {
-		if r := splitRow(l); r.F(1) == k {
-			return r.F(2), true
+		if r := splitRow(l); r.F(kvKey) == k {
+			return r.F(kvVal), true
 		}
 	}
 	return "", false
@@ -224,7 +224,7 @@ func inbOne(im, idir, n string) {
 	if why == "" && rid == "" { // 새 접수: 같은 이름 줄이 있으면 거절, 지시문이 없거나 비었으면 거절
 		hst, hrp := "", ""
 		if r := lsFirst(Q, n); r != nil {
-			hst, hrp = r.F(6), r.F(11)
+			hst, hrp = r.F(qState), r.F(qReply)
 		}
 		// 옛 차례(접수 표시 없음)가 대기열에 넣고 taken/으로 못 옮긴 요청: 옮긴 옛 줄(요청 ID rl…)이 이 받은편지·이름이면 그 ID로 옮기기만
 		if strings.HasPrefix(hrp, im+":"+idir+"/done/"+n+".md#rl") && hst != "sent" {
@@ -326,19 +326,19 @@ func replyTick() {
 	ICON = CONN
 	// 1) 고정
 	for _, r := range qRows() {
-		if r.F(6) != "up" || r.F(11) == "" || r.F(11) == "-" {
+		if r.F(qState) != "up" || r.F(qReply) == "" || r.F(qReply) == "-" {
 			continue
 		}
-		f := lsSplit(r.Line(), 12)
-		if f[0] != "" {
-			inbFix(f[0], f[6], f[7], f[10])
+		f := Row(lsSplit(r.Line(), qOwner))
+		if f.F(qName) != "" {
+			inbFix(f.F(qName), f.F(qMach), f.F(qAddr), f.F(qReply))
 		}
 	}
 	// 2) 공개
 	for _, l := range readLines(LED) {
-		f := lsSplit(l, 8)
-		if f[3] == "deliver" {
-			inbPub(f[0], f[1], f[2], f[5], f[6])
+		f := Row(lsSplit(l, ldNote))
+		if f.F(ldState) == "deliver" {
+			inbPub(f.F(ldRID), f.F(ldLane), f.F(ldReply), f.F(ldHash), f.F(ldSize))
 		}
 	}
 	// 3) 장부 sent인데 대기열 줄이 아직 up이면 sent로(공개·장부 뒤 대기열 기록 전에 죽음)
@@ -347,16 +347,16 @@ func replyTick() {
 	}
 	sent := map[string]bool{}
 	for _, x := range readRows(LED) {
-		if x.F(4) == "sent" {
-			sent[x.F(1)] = true
+		if x.F(ldState) == "sent" {
+			sent[x.F(ldRID)] = true
 		}
 	}
 	for _, x := range qRows() {
-		if x.F(6) != "up" || !strings.Contains(x.F(11), "#") {
+		if x.F(qState) != "up" || !strings.Contains(x.F(qReply), "#") {
 			continue
 		}
-		if rid := x.F(11)[strings.LastIndexByte(x.F(11), '#')+1:]; sent[rid] {
-			qset(true, x.F(17), x.F(1), "sent", x.F(7), x.F(8), x.F(9), "", "")
+		if rid := x.F(qReply)[strings.LastIndexByte(x.F(qReply), '#')+1:]; sent[rid] {
+			qset(true, x.F(qRID), x.F(qName), "sent", x.F(qMach), x.F(qAddr), x.F(qStuck), "", "")
 		}
 	}
 }
@@ -375,10 +375,10 @@ func inbMerge(n, a string) (mline string, wait bool) {
 		return "", true
 	}
 	x := splitRow(mr)
-	if x.F(5) == "착지" {
-		return "착지 " + runeCut(x.F(6), 12) + " (병합기 " + x.F(2) + ", 제출 ID " + sid + ")", false
+	if x.F(evState) == "착지" {
+		return "착지 " + runeCut(x.F(evSHA), 12) + " (병합기 " + x.F(evMach) + ", 제출 ID " + sid + ")", false
 	}
-	return "결과: 실패 병합기 막힘 — " + x.F(7), false
+	return "결과: 실패 병합기 막힘 — " + x.F(evMsg), false
 }
 
 // inbFix: reply_tick 1) 한 줄 — 레인 기계 보고를 고정본 replies/<요청 ID>.md로
@@ -389,12 +389,12 @@ func inbFix(n, m, a, rp string) {
 	}
 	rid := rp[i+1:]
 	lr := lget(rid)
-	if lr.F(4) != "open" {
+	if lr.F(ldState) != "open" {
 		return
 	}
 	if exists(DATA + "/replies/" + rid + ".md") { // 고정 뒤 장부 전에 죽음
 		if !dry {
-			rfix(rid, lr.F(5), "", false)
+			rfix(rid, lr.F(ldKind), "", false)
 		}
 		return
 	}
@@ -411,7 +411,7 @@ func inbFix(n, m, a, rp string) {
 		return
 	}
 	rpth := "~/.local/share/hc-fill/reports/" + n + "." + rid + ".md"
-	if strings.Contains(lr.F(8), "legacy") {
+	if strings.Contains(lr.F(ldNote), "legacy") {
 		rpth = "~/.local/share/hc-fill/reports/" + n + ".md"
 	}
 	// 종료를 확인한 뒤 보고를 읽어, 마지막 mv와 종료가 같은 바퀴에 일어나도 본문을 놓치지 않는다.
@@ -509,14 +509,14 @@ func inbPub(rid, n, dest, h, z string) {
 	crash("after-publish")
 	switch po {
 	case "SENT", "ALREADY":
-		if lset(rid, "4", "sent") != 0 {
+		if lset(rid, cv{ldState, "sent"}) != 0 {
 			say("되돌려 줌 %s → %s — 장부 기록 실패, 다음 바퀴에 같은 내용으로 다시(요청자는 ALREADY)", n, dest)
 			return
 		}
 		say("되돌려 줌 %s → %s (%s)", n, dest, last())
 	case "CONFLICT", "EXISTS":
 		if aesc(n, "-", "받은편지 결과를 못 둠 "+n+" → "+dest+": 그 자리에 다른 결과가 있다("+po+" — 덮지 않음). 지휘 판단(고정본 "+rf+")", "hf:"+rid+":held") == 0 {
-			lset(rid, "4", "held")
+			lset(rid, cv{ldState, "held"})
 		}
 	default:
 		say("되돌려 주기 미룸 %s → %s: 「%s」, 다음 바퀴에", n, dest, po)

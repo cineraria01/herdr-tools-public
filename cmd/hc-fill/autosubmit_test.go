@@ -99,8 +99,8 @@ func asTSetup(t *testing.T, machine, status, on string) *subT {
 		t.Fatal(err)
 	}
 	r := arow("a1")
-	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6), r.F(7), r.F(8)
-	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(9), r.F(10), r.F(11), r.F(12), r.F(13), r.F(14), r.F(15), r.F(16)
+	auAid, auLn, auRnd, auPrun, auSha, auAm, auPa, auAst = r.F(atID), r.F(atLane), r.F(atRound), r.F(atRun), r.F(atSHA), r.F(atMach), r.F(atAddr), r.F(atState)
+	auAfx, auAv, auAwk, auAwt, auAlc, auAlw, auAnv, auAfl = r.F(atFixes), r.F(atVerdict), r.F(atWakes), r.F(atWaited), r.F(atChecked), r.F(atWoke), r.F(atNoVerdict), r.F(atFlags)
 	return k
 }
 
@@ -139,8 +139,8 @@ func TestAutoSubmitIdleLane(t *testing.T) {
 		t.Fatalf("판정 깨우기 없이 정리 알림 한 번이어야 한다:\n%s", l)
 	}
 	r := arow("a1")
-	if r.F(8) != "taken" || r.F(11) != "0" || r.F(16) != "asub,asubok" {
-		t.Fatalf("감사 기록: 상태 %s 깨움 %s 표시 %s", r.F(8), r.F(11), r.F(16))
+	if r.F(atState) != "taken" || r.F(atWakes) != "0" || r.F(atFlags) != "asub,asubok" {
+		t.Fatalf("감사 기록: 상태 %s 깨움 %s 표시 %s", r.F(atState), r.F(atWakes), r.F(atFlags))
 	}
 	if !strings.HasSuffix(strings.TrimSpace(k.ack()), "\tfill") {
 		t.Fatalf("시작 표시는 대기열 것: %q", k.ack())
@@ -157,8 +157,8 @@ func TestAutoSubmitIdleLane(t *testing.T) {
 func TestAutoSubmitBusyLane(t *testing.T) {
 	for _, st := range []string{"working", "blocked"} {
 		k := asTSetup(t, "m", st, "app")
-		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(16) != "-" {
-			t.Fatalf("%s: 손댔다 — 글 %q 기록 %q 표시 %s", st, asNote, k.logged(), arow("a1").F(16))
+		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(atFlags) != "-" {
+			t.Fatalf("%s: 손댔다 — 글 %q 기록 %q 표시 %s", st, asNote, k.logged(), arow("a1").F(atFlags))
 		}
 	}
 }
@@ -176,8 +176,8 @@ func TestAutoSubmitConflictHandsOff(t *testing.T) {
 	if a := k.ack(); strings.Contains(a, "fill") || !strings.HasPrefix(a, "landing\tT\tw1@1700000000000\tpid\n") {
 		t.Fatalf("표시를 에이전트 것으로 넘기지 않았다: %q", a)
 	}
-	if r := arow("a1"); r.F(8) != "deliver" || r.F(16) != "asub" {
-		t.Fatalf("넘긴 차수는 그대로 수거 기다림 + 다시 시도 안 함 표시: %s %s", r.F(8), r.F(16))
+	if r := arow("a1"); r.F(atState) != "deliver" || r.F(atFlags) != "asub" {
+		t.Fatalf("넘긴 차수는 그대로 수거 기다림 + 다시 시도 안 함 표시: %s %s", r.F(atState), r.F(atFlags))
 	}
 	if aAutoSubmit("main") || strings.Count(k.logged(), "land land") != 1 {
 		t.Fatalf("한 차수에 대기열 시도는 한 번: %s", k.logged())
@@ -197,8 +197,8 @@ func TestAutoSubmitAgentFirst(t *testing.T) {
 	if l := k.logged(); strings.Contains(l, "제출") || strings.Contains(l, "send ") || strings.Contains(l, "report ") {
 		t.Fatalf("이중 제출·알림: %s", l)
 	}
-	if r := arow("a1"); r.F(8) != "deliver" {
-		t.Fatalf("수거는 다음 바퀴 표시 읽기(landing → taken)가 닫는다: %s", r.F(8))
+	if r := arow("a1"); r.F(atState) != "deliver" {
+		t.Fatalf("수거는 다음 바퀴 표시 읽기(landing → taken)가 닫는다: %s", r.F(atState))
 	}
 }
 
@@ -210,7 +210,7 @@ func TestAutoSubmitRemoteUnknown(t *testing.T) {
 	if aAutoSubmit("main") {
 		t.Fatal("모름은 넘김(거짓)")
 	}
-	if !strings.Contains(asNote, "결과 모름") || arow("a1").F(8) != "deliver" || strings.Contains(arow("a1").F(16), "asubok") {
+	if !strings.Contains(asNote, "결과 모름") || arow("a1").F(atState) != "deliver" || strings.Contains(arow("a1").F(atFlags), "asubok") {
 		t.Fatalf("모름을 성공으로 쳤다: %q %v", asNote, arow("a1"))
 	}
 	if !strings.Contains(k.logged(), "exec-asub") {
@@ -222,7 +222,7 @@ func TestAutoSubmitRemoteUnknown(t *testing.T) {
 func TestAutoSubmitOff(t *testing.T) {
 	for _, on := range []string{"", "-", "other"} {
 		k := asTSetup(t, "m", "idle", on)
-		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(16) != "-" {
+		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(atFlags) != "-" {
 			t.Fatalf("끔(%q)인데 손댔다: %q %q", on, asNote, k.logged())
 		}
 	}
@@ -311,8 +311,8 @@ func TestAutoSubmitEnvUnknown(t *testing.T) {
 	} {
 		k := asTSetup(t, "m", "idle", "app")
 		t.Setenv(c.key, c.val)
-		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(16) != "-" {
-			t.Fatalf("%s: 돌렸다 — %q %q %s", c.name, asNote, k.logged(), arow("a1").F(16))
+		if aAutoSubmit("main") || asNote != "" || k.logged() != "" || arow("a1").F(atFlags) != "-" {
+			t.Fatalf("%s: 돌렸다 — %q %q %s", c.name, asNote, k.logged(), arow("a1").F(atFlags))
 		}
 	}
 }

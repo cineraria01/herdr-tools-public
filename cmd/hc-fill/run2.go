@@ -30,8 +30,8 @@ func launchRows() {
 	ELIST, UPNOW, ECAPHIT, ECAPM = "", "", false, ""
 	SEENOFF = nil
 	for _, r := range readRows(DATA + "/seen.tsv") {
-		if r.F(1) != "" && r.F(1) != LOCAL && !connHas(r.F(1)) {
-			SEENOFF = append(SEENOFF, Row{r.F(1), r.F(2), r.F(3)})
+		if r.F(snMach) != "" && r.F(snMach) != LOCAL && !connHas(r.F(snMach)) {
+			SEENOFF = append(SEENOFF, Row{r.F(snMach), r.F(snName), r.F(snAddr)})
 		}
 	}
 	if !dry {
@@ -81,13 +81,13 @@ func launchRows() {
 // syncOwners: 쓰기 소유 실행 기록(OREC) 채움·지움·입양, 기다림 사슬(QEDGES·THENMAP), 소유 키(OWN)
 func syncOwners() {
 	rows := qRows()
-	notAudit := func(r Row) bool { return !strings.HasPrefix(r.F(15), "audit=") }
+	notAudit := func(r Row) bool { return !strings.HasPrefix(r.F(qAudit), "audit=") }
 	if OSEED { // own.tsv가 없거나 옛 꼴이면 대기열 쓰기 up 줄 주소와 끊긴 기계에 남긴 주소
 		for _, r := range rows {
-			if (r.F(6) != "up" && r.F(6) != "wait") || !notAudit(r) || r.F(1) == "" {
+			if (r.F(qState) != "up" && r.F(qState) != "wait") || !notAudit(r) || r.F(qName) == "" {
 				continue
 			}
-			qn, qp, qb, qa, qst, qm, qad, qsk, qad0, qo := r.F(1), r.F(2), r.F(3), r.F(4), r.F(6), r.F(7), r.F(8), r.F(9), r.F(10), dash(r.F(16))
+			qn, qp, qb, qa, qst, qm, qad, qsk, qad0, qo := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qState), r.F(qMach), r.F(qAddr), r.F(qStuck), r.F(qAdded), dash(r.F(qOverlap))
 			if qst == "up" && qad != "-" {
 				ownAdd(qn, qp, qm, qad, utcOf(qad0), qb, qa, qo)
 			}
@@ -103,7 +103,7 @@ func syncOwners() {
 	}
 	// 지움
 	for _, o := range append([]Row(nil), OREC...) {
-		rn, rp, rm, ra, rs := o.F(1), o.F(2), o.F(3), o.F(4), o.F(5)
+		rn, rp, rm, ra, rs := o.F(owLane), o.F(owProj), o.F(owMach), o.F(owAddr), o.F(owStart)
 		if rn == "" {
 			continue
 		}
@@ -138,11 +138,11 @@ func syncOwners() {
 	}
 	// 입양: 대기열 쓰기 줄과 같은 이름의 살아 있는 터미널(기록이 없고 그 줄을 넣은 뒤 착지 전인 것)
 	for _, r := range rows {
-		st := r.F(6)
-		if (st != "up" && st != "wait" && st != "sent") || !notAudit(r) || r.F(1) == "" {
+		st := r.F(qState)
+		if (st != "up" && st != "wait" && st != "sent") || !notAudit(r) || r.F(qName) == "" {
 			continue
 		}
-		qn, qp, qb, qa, qad0, qo := r.F(1), r.F(2), r.F(3), r.F(4), r.F(10), dash(r.F(16))
+		qn, qp, qb, qa, qad0, qo := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qAdded), dash(r.F(qOverlap))
 		for _, t := range TERMS {
 			if t.Name != qn {
 				continue
@@ -152,7 +152,7 @@ func syncOwners() {
 			}
 			rec := false
 			for _, o := range OREC {
-				if o.F(1) == qn && o.F(4) == t.Addr {
+				if o.F(owLane) == qn && o.F(owAddr) == t.Addr {
 					rec = true
 				}
 			}
@@ -171,17 +171,17 @@ func syncOwners() {
 		if r.NF() == 0 || !notAudit(r) {
 			continue
 		}
-		QEDGES = append(QEDGES, Row{r.F(1), "," + r.F(4) + ","})
-		for _, n := range thenNames(r.F(3)) {
+		QEDGES = append(QEDGES, Row{r.F(qName), "," + r.F(qAfter) + ","})
+		for _, n := range thenNames(r.F(qBrief)) {
 			if strings.TrimSpace(n) != "" {
-				THENMAP = append(THENMAP, Row{n, r.F(1)})
+				THENMAP = append(THENMAP, Row{n, r.F(qName)})
 			}
 		}
 	}
 	okey := false
 	if OVM != "off" {
 		for _, r := range ROWS {
-			if r.F(6) == "wait" && notAudit(r) && r.F(16) != "overlap-ok" && r.F(16) != "solo" {
+			if r.F(qState) == "wait" && notAudit(r) && r.F(qOverlap) != "overlap-ok" && r.F(qOverlap) != "solo" {
 				okey = true
 			}
 		}
@@ -190,11 +190,11 @@ func syncOwners() {
 	if okey {
 		actTick(rows) // 실제 변경(키 A) — 못 읽은 레인은 지시문 키만
 		for _, o := range append([]Row(nil), OREC...) {
-			if o.F(1) == "" {
+			if o.F(owLane) == "" {
 				continue
 			}
-			for _, k := range append(lkeys(o.F(2), o.F(6)), actKeys(o.F(2), o.F(1))...) {
-				OWN = append(OWN, Row{o.F(2), o.F(1), k.F(1), k.F(2)})
+			for _, k := range append(lkeys(o.F(owProj), o.F(owBrief)), actKeys(o.F(owProj), o.F(owLane))...) {
+				OWN = append(OWN, Row{o.F(owProj), o.F(owLane), k.F(kyKind), k.F(kyKey)})
 			}
 		}
 	}
@@ -203,7 +203,7 @@ func syncOwners() {
 // curRid <이름>: 지금 대기열 그 줄의 줄 ID(17칸)
 func curRid(n string) string {
 	if r := qrow(n); r != nil {
-		return r.F(17)
+		return r.F(qRID)
 	}
 	return ""
 }
@@ -220,9 +220,9 @@ func stuckAlive(sa string) bool {
 
 // waitRow: 대기열 줄 하나(셸 판 run 고리 본문)
 func waitRow(r Row) {
-	name, prj, brief, after, only, state := r.F(1), r.F(2), r.F(3), r.F(4), r.F(5), r.F(6)
-	a0, reply, owner, ef, ak, ovk, rid := r.F(8), r.F(11), r.F(12), r.F(14), r.F(15), r.F(16), r.F(17)
-	RID, proj, stuck = rid, prj, r.F(9)
+	name, prj, brief, after, only, state := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qOnly), r.F(qState)
+	a0, reply, owner, ef, ak, ovk, rid := r.F(qAddr), r.F(qReply), r.F(qOwner), r.F(qEarly), r.F(qAudit), r.F(qOverlap), r.F(qRID)
+	RID, proj, stuck = rid, prj, r.F(qStuck)
 	// 상태가 안 잡혀 남긴 터미널이 살아났으면 같은 레인이 둘 돈다: 알리고 그 레인은 더 띄우지 않는다(지휘가 정리)
 	dupr := false
 	if stuck != "-" {
@@ -252,13 +252,13 @@ func waitRow(r Row) {
 		say("건너뜀 %s: 중복 위험이라 더 띄우지 않음", name)
 		return
 	}
-	if _, rr, ok := replyOf(dash(reply)); ok && lget(rr).F(4) != "open" {
+	if _, rr, ok := replyOf(dash(reply)); ok && lget(rr).F(ldState) != "open" {
 		say("건너뜀 %s: 받은편지 요청 %s 결과가 이미 고정됐다", name, rr)
 		return
 	}
 	for _, a := range readRows(AT) {
-		if a.NF() >= 17 && a.F(2) == name && !auditTerm[a.F(8)] {
-			say("건너뜀 %s: 감사 %s 넘기기 중 — 끝난 뒤에", name, a.F(1))
+		if a.NF() >= atNF && a.F(atLane) == name && !auditTerm[a.F(atState)] {
+			say("건너뜀 %s: 감사 %s 넘기기 중 — 끝난 뒤에", name, a.F(atID))
 			return
 		}
 	}
@@ -311,8 +311,8 @@ func waitRow(r Row) {
 		return
 	}
 	for _, s := range SEENOFF {
-		if s.F(2) == name {
-			say("건너뜀 %s: 끊긴 기계 %s에 지난 바퀴 같은 이름 터미널(%s)이 있었다 — 끝났는지 몰라 띄우지 않음(다시 붙으면 본다)", name, s.F(1), s.F(3))
+		if s.F(snName) == name {
+			say("건너뜀 %s: 끊긴 기계 %s에 지난 바퀴 같은 이름 터미널(%s)이 있었다 — 끝났는지 몰라 띄우지 않음(다시 붙으면 본다)", name, s.F(snMach), s.F(snAddr))
 			return
 		}
 	}
@@ -339,7 +339,7 @@ func waitRow(r Row) {
 	if dash(ef) == "parked" {
 		RESUME, RSEC = true, resumeSec(name, after, bBranch)
 	}
-	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(13), r.F(10)
+	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
 	RESUME, RSEC = false, ""
 	if placed || GOTADDR {
@@ -416,14 +416,14 @@ func earlyRows() {
 	}
 	elive := 0
 	for _, r := range ROWS {
-		if r.F(6) == "up" && r.F(14) == "early" && lalive(r.F(8), r.F(1)) {
+		if r.F(qState) == "up" && r.F(qEarly) == "early" && lalive(r.F(qAddr), r.F(qName)) {
 			elive++
 		}
 	}
 	for _, r := range ROWS {
-		name, prj, brief, after, only := r.F(1), r.F(2), r.F(3), r.F(4), r.F(5)
-		reply, owner, ak, ovk, rid := r.F(11), r.F(12), r.F(15), r.F(16), r.F(17)
-		RID, proj, stuck = rid, prj, r.F(9)
+		name, prj, brief, after, only := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qOnly)
+		reply, owner, ak, ovk, rid := r.F(qReply), r.F(qOwner), r.F(qAudit), r.F(qOverlap), r.F(qRID)
+		RID, proj, stuck = rid, prj, r.F(qStuck)
 		eb := ""
 		for _, e := range strings.Split(ELIST, ",") {
 			if v, ok := strings.CutPrefix(e, name+"="); ok {
@@ -442,7 +442,7 @@ func earlyRows() {
 			ra, st := a, ""
 			inRows := false
 			for _, x := range ROWS {
-				if x.F(1) == a {
+				if x.F(qName) == a {
 					inRows = true
 				}
 			}
@@ -453,8 +453,8 @@ func earlyRows() {
 				continue
 			}
 			for _, x := range ROWS {
-				if x.F(1) == ra {
-					st = x.F(6)
+				if x.F(qName) == ra {
+					st = x.F(qState)
 					break
 				}
 			}
@@ -491,7 +491,7 @@ func earlyRows() {
 		if !strings.HasPrefix(dash(ak), "audit=") {
 			NEED = needs(SB)
 		}
-		AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(13), r.F(10)
+		AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 		place(name, prj, SB, only, dash(reply), dash(owner), after)
 		ESEC = ""
 		if placed || GOTADDR {
@@ -500,7 +500,7 @@ func earlyRows() {
 		if placed {
 			elive++
 			for _, c := range OVCHAIN {
-				echain = append(echain, Row{name, rid, c.F(1), c.F(3)})
+				echain = append(echain, Row{name, rid, c.F(ovLane), c.F(ovKeys)})
 			}
 		}
 	}

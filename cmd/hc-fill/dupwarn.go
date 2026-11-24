@@ -100,7 +100,7 @@ func dupJaccard(a, b map[string]bool) (float64, int) {
 func dupKeys(prj, brief string) []Row {
 	var o []Row
 	for _, k := range lkeys(prj, brief) {
-		if p := k.F(2); strings.TrimSuffix(p, "/") != prj && !strings.ContainsAny(p, "<>") {
+		if p := k.F(kyKey); strings.TrimSuffix(p, "/") != prj && !strings.ContainsAny(p, "<>") {
 			o = append(o, k)
 		}
 	}
@@ -117,7 +117,7 @@ func dupCommon(keys [][]Row, share float64) map[string]bool {
 	for _, ks := range keys {
 		seen := map[string]bool{}
 		for _, k := range ks {
-			if p := k.F(2); !seen[p] {
+			if p := k.F(kyKey); !seen[p] {
 				seen[p] = true
 				n[p]++
 			}
@@ -137,13 +137,13 @@ func dupCommon(keys [][]Row, share float64) map[string]bool {
 func dupPaths(a, b []Row, common map[string]bool) (res, men []string) {
 	for _, x := range a {
 		for _, y := range b {
-			p, q := x.F(2), y.F(2)
+			p, q := x.F(kyKey), y.F(kyKey)
 			if p == "" || q == "" {
 				continue
 			}
 			if p == q || strings.HasSuffix(p, "/") && strings.HasPrefix(q, p) || strings.HasSuffix(q, "/") && strings.HasPrefix(p, q) {
 				switch {
-				case x.F(1) == "R" && y.F(1) == "R":
+				case x.F(kyKind) == "R" && y.F(kyKind) == "R":
 					if !has(res, q) {
 						res = append(res, q)
 					}
@@ -161,15 +161,15 @@ func dupPaths(a, b []Row, common map[string]bool) (res, men []string) {
 // last.tsv, 같은 줄 ID) 병합기 큐에 냈다
 func dupDone(r Row, prj string, merger bool) bool {
 	for _, x := range readRows(DATA + "/last.tsv") {
-		if x.F(1) == r.F(1) && (x.F(8) == "" || x.F(8) == r.F(17)) {
-			switch x.F(2) {
+		if x.F(lsName) == r.F(qName) && (x.F(lsRID) == "" || x.F(lsRID) == r.F(qRID)) {
+			switch x.F(lsState) {
 			case "완료", "제출", "착지":
 				return true
 			}
 			break
 		}
 	}
-	return merger && mqueued(prj, r.F(1)) == 0
+	return merger && mqueued(prj, r.F(qName)) == 0
 }
 
 // dupLandedSince <landed 줄> <줄 넣은 시각>: 그 커밋이 줄을 넣은 뒤의 것(이번 실행의 착지)인가 — 같은 이름 옛 커밋이면 거짓(R-26).
@@ -198,13 +198,13 @@ func dupWarn(name, prj, brief string) {
 	var rows []Row
 	all, kk := [][]Row{mk}, map[string][]Row{}
 	for _, r := range qRows() {
-		if r.F(1) == name || r.F(2) != prj || strings.HasPrefix(r.F(15), "audit=") || !isFile(r.F(3)) {
+		if r.F(qName) == name || r.F(qProj) != prj || strings.HasPrefix(r.F(qAudit), "audit=") || !isFile(r.F(qBrief)) {
 			continue
 		}
-		ks := dupKeys(prj, r.F(3)) // 흔한 경로는 끝난 줄까지 모든 지시문으로 센다
+		ks := dupKeys(prj, r.F(qBrief)) // 흔한 경로는 끝난 줄까지 모든 지시문으로 센다
 		all = append(all, ks)
-		if st := r.F(6); st == "wait" || st == "up" {
-			rows, kk[r.F(1)] = append(rows, r), ks
+		if st := r.F(qState); st == "wait" || st == "up" {
+			rows, kk[r.F(qName)] = append(rows, r), ks
 		}
 	}
 	common := dupCommon(all, share)
@@ -222,9 +222,9 @@ func dupWarn(name, prj, brief string) {
 	}
 	var hits []hit
 	for _, r := range rows {
-		n, st := r.F(1), r.F(6)
+		n, st := r.F(qName), r.F(qState)
 		res, men := dupPaths(mk, kk[n], common)
-		j, c := dupJaccard(mt, dupTitle(r.F(3)))
+		j, c := dupJaccard(mt, dupTitle(r.F(qBrief)))
 		var why []string
 		if len(res) > 0 {
 			why = append(why, "예약 "+strconv.Itoa(len(res))+"개 겹침("+strings.Join(res[:min(3, len(res))], ",")+")")
@@ -241,7 +241,7 @@ func dupWarn(name, prj, brief string) {
 		s := "대기"
 		if st == "up" {
 			if logKnown {
-				if l, ok := landed(n); ok && l != "" && dupLandedSince(l, r.F(10)) {
+				if l, ok := landed(n); ok && l != "" && dupLandedSince(l, r.F(qAdded)) {
 					continue
 				}
 			}
@@ -249,11 +249,11 @@ func dupWarn(name, prj, brief string) {
 				continue
 			}
 			s = "떠 있음"
-			if a := r.F(8); a != "" && a != "-" {
+			if a := r.F(qAddr); a != "" && a != "-" {
 				s += " " + a
 			}
 		}
-		own := dash(r.F(12))
+		own := dash(r.F(qOwner))
 		if own == "-" {
 			own = "없음"
 		}

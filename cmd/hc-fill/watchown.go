@@ -9,17 +9,17 @@ import "strings"
 func watchOwners() {
 	done := map[[2]string]bool{}
 	for _, l := range readRows(DATA + "/last.tsv") {
-		if s := l.F(2); s == "착지" || s == "판정" {
-			done[[2]string{l.F(1), l.F(8)}] = true
+		if s := l.F(lsState); s == "착지" || s == "판정" {
+			done[[2]string{l.F(lsName), l.F(lsRID)}] = true
 		}
 	}
 	seen := map[string]bool{}
 	for _, r := range qRows() {
-		o, st := r.F(12), r.F(6)
-		if o == "" || o == "-" || seen[o] || strings.HasPrefix(r.F(15), "audit=") {
+		o, st := r.F(qOwner), r.F(qState)
+		if o == "" || o == "-" || seen[o] || strings.HasPrefix(r.F(qAudit), "audit=") {
 			continue
 		}
-		if !(st == "up" && !done[[2]string{r.F(1), r.F(17)}] || st == "wait" && r.F(14) == "parked") {
+		if !(st == "up" && !done[[2]string{r.F(qName), r.F(qRID)}] || st == "wait" && r.F(qEarly) == "parked") {
 			continue
 		}
 		seen[o] = true

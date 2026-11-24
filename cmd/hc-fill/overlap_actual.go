@@ -45,11 +45,11 @@ func actParse(out string) map[string][]string {
 	o := map[string][]string{}
 	for _, l := range lines(out) {
 		r := splitRow(l)
-		if r.NF() != 3 {
+		if r.NF() != acVal {
 			continue
 		}
-		k := r.F(1) + "\t" + r.F(2)
-		switch v := r.F(3); {
+		k := r.F(acProj) + "\t" + r.F(acLane)
+		switch v := r.F(acVal); {
 		case v == "+":
 			if _, ok := o[k]; !ok {
 				o[k] = []string{}
@@ -81,7 +81,7 @@ func actTick(rows []Row) {
 	seen := map[string]bool{}
 	ps := map[string]bool{}
 	for _, o := range OREC {
-		n, p, m, a := o.F(1), o.F(2), o.F(3), o.F(4)
+		n, p, m, a := o.F(owLane), o.F(owProj), o.F(owMach), o.F(owAddr)
 		if n == "" || p == "" || seen[p+"\t"+n] {
 			continue
 		}
@@ -96,10 +96,10 @@ func actTick(rows []Row) {
 	var parked []ent
 	ACTPARK = map[string]bool{}
 	for _, r := range rows {
-		if r.F(6) == "wait" && dash(r.F(14)) == "parked" && !strings.HasPrefix(r.F(15), "audit=") && !seen[r.F(2)+"\t"+r.F(1)] {
-			parked = append(parked, ent{r.F(2), r.F(1), ""})
-			ACTPARK[r.F(2)+"\t"+r.F(1)] = true
-			ps[r.F(2)] = true
+		if r.F(qState) == "wait" && dash(r.F(qEarly)) == "parked" && !strings.HasPrefix(r.F(qAudit), "audit=") && !seen[r.F(qProj)+"\t"+r.F(qName)] {
+			parked = append(parked, ent{r.F(qProj), r.F(qName), ""})
+			ACTPARK[r.F(qProj)+"\t"+r.F(qName)] = true
+			ps[r.F(qProj)] = true
 		}
 	}
 	if len(own) == 0 && len(parked) == 0 {
@@ -180,8 +180,8 @@ func actTick(rows []Row) {
 				ACT[k] = v
 			}
 			for _, l := range lines(out) {
-				if r := splitRow(l); r.NF() == 3 && strings.HasPrefix(r.F(3), "!") {
-					why[r.F(1)+"\t"+r.F(2)] = r.F(3)[1:]
+				if r := splitRow(l); r.NF() == acVal && strings.HasPrefix(r.F(acVal), "!") {
+					why[r.F(acProj)+"\t"+r.F(acLane)] = r.F(acVal)[1:]
 				}
 			}
 		}(m, args)

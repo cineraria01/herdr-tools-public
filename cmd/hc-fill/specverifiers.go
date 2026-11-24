@@ -34,7 +34,7 @@ func specVerifiersTick() {
 		}
 	}
 	for _, x := range readRows(sf) {
-		ps = append(ps, x.F(1))
+		ps = append(ps, x.F(kvKey))
 	}
 	// 미리 줄(preverify) 끄기: 「merger_preverify <프로젝트> off」 — 목록 커밋에 verified.PreOffLine 한 줄(기본 켬)
 	off := map[string]bool{}

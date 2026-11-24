@@ -101,13 +101,13 @@ func TestRejectTellRetriesOnReportFail(t *testing.T) {
 	orig := x.read("hc-lane")
 	rejW(t, x.d+"/hc-lane", strings.Replace(orig, "report) printf '%s\\n' \"$*\" >>\"$HC_T/reports\"; exit 0", "report) printf '%s\\n' \"$*\" >>\"$HC_T/reports\"; exit 1", 1))
 	x.place()
-	if r := rejRow("l1", "r1", "reject"); r == nil || r.F(6) != "-" {
+	if r := rejRow("l1", "r1", "reject"); r == nil || r.F(rjTold) != "-" {
 		t.Fatalf("못 알린 기록 %q", r)
 	}
 	rejW(t, x.d+"/hc-lane", orig)
 	x.place()
 	r := rejRow("l1", "r1", "reject")
-	if r == nil || !strings.HasPrefix(r.F(6), "hf:l1:reject:r1:") {
+	if r == nil || !strings.HasPrefix(r.F(rjTold), "hf:l1:reject:r1:") {
 		t.Fatalf("다시 알린 키 %q", r)
 	}
 	if n := strings.Count(x.read("reports"), "report 막힘"); n != 2 {
@@ -188,7 +188,7 @@ func TestRejectTransientRetries(t *testing.T) {
 	if rejWhy("l1", "r1") != "" {
 		t.Fatal("일시 실패·모르는 종료로 멈춤")
 	}
-	if r := rejRow("l1", "r1", "fail"); r == nil || !strings.Contains(r.F(8), "종료 42") {
+	if r := rejRow("l1", "r1", "fail"); r == nil || !strings.Contains(r.F(rjWhy), "종료 42") {
 		t.Fatalf("일시 실패 기록 %q", r)
 	}
 	if strings.Contains(x.read("reports"), "report") {
@@ -232,7 +232,7 @@ func TestRejectTransientOffAndReset(t *testing.T) {
 	stale := strconv.FormatInt(time.Now().Add(-time.Hour).Unix(), 10)
 	rejW(t, x.d+"/reject.tsv", strings.Join([]string{"r1", "l1", "fail", stale, stale, "-", "-", "x"}, "\t")+"\n")
 	x.place()
-	if r := rejRow("l1", "r1", "fail"); r == nil || r.F(4) == stale || x.read("reports") != "" {
+	if r := rejRow("l1", "r1", "fail"); r == nil || r.F(rjFirst) == stale || x.read("reports") != "" {
 		t.Fatalf("오래 쉰 뒤 새로 세지 않음 %q · %q", r, x.read("reports"))
 	}
 }

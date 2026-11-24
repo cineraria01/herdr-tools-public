@@ -56,15 +56,15 @@ func auRest(r Row, i int) string {
 func arow(aid string) Row {
 	var l Row
 	for _, r := range readRows(AT) {
-		if r.NF() >= 17 && r.F(1) == aid {
+		if r.NF() >= atNF && r.F(atID) == aid {
 			l = r
 		}
 	}
 	return l
 }
 
-// aupd <aid> <칸> <값> …: 그 차수 줄의 칸을 바꾼다(dry-run은 안 씀). 값의 탭·줄바꿈은 빈칸, 빈 값은 -
-func aupd(aid string, kv ...string) {
+// aupd <aid> <칸 값> …: 그 차수 줄의 칸을 바꾼다(dry-run은 안 씀). 값의 탭·줄바꿈은 빈칸, 빈 값은 -
+func aupd(aid string, kv ...cv) {
 	if dry {
 		return
 	}
@@ -75,10 +75,9 @@ func aupd(aid string, kv ...string) {
 	var out []Row
 	for _, l := range lines(text) {
 		r := splitRow(l)
-		if r.NF() >= 17 && r.F(1) == aid {
-			for i := 0; i+1 < len(kv); i += 2 {
-				c, _ := strconv.Atoi(kv[i])
-				r = r.Set(c, flat1(dash(kv[i+1])))
+		if r.NF() >= atNF && r.F(atID) == aid {
+			for _, x := range kv {
+				r = r.Set(x.c, flat1(dash(x.v)))
 			}
 		}
 		out = append(out, r)
@@ -108,7 +107,7 @@ func amigrate() {
 	ls := readLines(AT)
 	old := false
 	for _, l := range ls {
-		if nf := splitRow(l).NF(); nf >= 5 && nf < 17 {
+		if nf := splitRow(l).NF(); nf >= atoState && nf < atNF {
 			old = true
 		}
 	}
@@ -118,20 +117,20 @@ func amigrate() {
 	var b strings.Builder
 	for _, l := range ls {
 		r := splitRow(l)
-		if r.NF() >= 17 || r.NF() < 5 {
+		if r.NF() >= atNF || r.NF() < atoState {
 			b.WriteString(l + "\n")
 			continue
 		}
 		st, nt := "legacy", "-"
-		if r.F(5) == "queued" {
+		if r.F(atoState) == "queued" {
 			st = "escalate:legacy"
-			nt = r.F(1) + " 옛 감사 기록(" + r.F(2) + " " + r.F(3) + "번째) — 판정을 차수에 묶지 못한 채 hc-fill이 바뀌었다. 지휘 판단(옛 감사 줄 정리 포함)"
+			nt = r.F(atoLane) + " 옛 감사 기록(" + r.F(atoSHA) + " " + r.F(atoRound) + "번째) — 판정을 차수에 묶지 못한 채 hc-fill이 바뀌었다. 지휘 판단(옛 감사 줄 정리 포함)"
 		}
-		fx := r.F(4)
+		fx := r.F(atoFixes)
 		if fx == "" {
 			fx = "0"
 		}
-		b.WriteString(strings.Join([]string{fmt.Sprintf("al%08x", cksum([]byte(l))), r.F(1), r.F(3), "-", r.F(2), "-", "-", st, fx, "-",
+		b.WriteString(strings.Join([]string{fmt.Sprintf("al%08x", cksum([]byte(l))), r.F(atoLane), r.F(atoRound), "-", r.F(atoSHA), "-", "-", st, fx, "-",
 			"0", "0", "-", "-", "0", "-", nt}, "\t") + "\n")
 	}
 	if writeAtomic(AT, b.String()) != nil {
@@ -154,7 +153,7 @@ func lastev(name, addr, state string) string {
 	l := ""
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(4) == name && r.F(3) == addr && (state == "" || r.F(5) == state) {
+		if r.F(evLane) == name && r.F(evTerm) == addr && (state == "" || r.F(evState) == state) {
 			l = e
 		}
 	}
@@ -166,8 +165,8 @@ var auRunKeyRe = regexp.MustCompile(`@[0-9]+$`)
 // attempt_run <이름> <주소>: try.tsv에 확정한 실행 키
 func attemptRun(name, addr string) string {
 	for _, r := range readRows(DATA + "/try.tsv") {
-		if r.F(1) == name && r.F(6) == addr && auRunKeyRe.MatchString(r.F(7)) {
-			return r.F(7)
+		if r.F(trName) == name && r.F(trAddr) == addr && auRunKeyRe.MatchString(r.F(trRun)) {
+			return r.F(trRun)
 		}
 	}
 	return ""
@@ -210,14 +209,14 @@ func runlast(name, addr, run, state string) string {
 	l := ""
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(4) != name || r.F(3) != addr || (state != "" && r.F(5) != state) {
+		if r.F(evLane) != name || r.F(evTerm) != addr || (state != "" && r.F(evState) != state) {
 			continue
 		}
-		if r.NF() >= 10 && r.F(10) != "-" {
-			if r.F(10) != run {
+		if r.NF() >= evRun && r.F(evRun) != "-" {
+			if r.F(evRun) != run {
 				continue
 			}
-		} else if r.F(1) < t {
+		} else if r.F(evTime) < t {
 			continue
 		}
 		l = e
@@ -237,14 +236,14 @@ func parkev(lane, addr, m string) int {
 	saved := EV
 	var f []string
 	for _, e := range EV {
-		if splitRow(e).F(5) != "정리됨" {
+		if splitRow(e).F(evState) != "정리됨" {
 			f = append(f, e)
 		}
 	}
 	EV = f
 	PKL = joblast(lane, addr, "")
 	EV = saved
-	if evF(PKL, 5) == "주차" {
+	if evF(PKL, evState) == "주차" {
 		return 0
 	}
 	return 1
@@ -283,14 +282,14 @@ func aterm(s string) bool {
 
 // a_esc <aid> <까닭> <글>: 기록을 먼저(escalate:<까닭> + 글), 사건은 a_send_esc가(키로 한 번)
 func aEsc(aid, why, text string) {
-	aupd(aid, "8", "escalate:"+why, "17", text)
+	aupd(aid, cv{atState, "escalate:" + why}, cv{atNote, text})
 	crash("after-escalate-record")
 	aSendEsc(aid)
 }
 
 func aSendEsc(aid string) {
 	r := arow(aid)
-	a, l, s, t := r.F(1), r.F(2), r.F(8), auRest(r, 17)
+	a, l, s, t := r.F(atID), r.F(atLane), r.F(atState), auRest(r, atNote)
 	if a == "" {
 		return
 	}
@@ -299,9 +298,9 @@ func aSendEsc(aid string) {
 	}
 	crash("after-escalate-event")
 	if s == "escalate:nosha" {
-		aupd(aid, "8", "nosha")
+		aupd(aid, cv{atState, "nosha"})
 	} else {
-		aupd(aid, "8", "coord")
+		aupd(aid, cv{atState, "coord"})
 	}
 }
 
@@ -337,7 +336,7 @@ func aVoid(aid, lane, m string) int {
 	case "void":
 		return 0
 	case "taken", "landing":
-		aupd(aid, "8", "taken")
+		aupd(aid, cv{atState, "taken"})
 		fmt.Println("감사 " + aid + ": 레인이 이미 판정을 받음(" + vo + ") — 끝")
 		return 2
 	}
@@ -445,8 +444,8 @@ func aPut(aid, lane, m, p string) bool {
 // aproj <aid>: 그 차수의 프로젝트(audit-proj.tsv)
 func aproj(aid string) string {
 	for _, r := range readRows(DATA + "/audit-proj.tsv") {
-		if r.F(1) == aid {
-			return r.F(2)
+		if r.F(apAid) == aid {
+			return r.F(apProj)
 		}
 	}
 	return ""

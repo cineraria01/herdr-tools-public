@@ -352,7 +352,7 @@ func knobsRemoteTick() {
 	rf := DATA + "/knobs-remote.tsv"
 	done := map[string]string{}
 	for _, r := range readRows(rf) {
-		done[r.F(1)] = r.F(2)
+		done[r.F(kvKey)] = r.F(kvVal)
 	}
 	var keep []string
 	for _, f := range confRows("repo") {

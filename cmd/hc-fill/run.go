@@ -65,12 +65,12 @@ func runRound() {
 	// 넘기기가 남았으면(장부 open·deliver, 끝나지 않은 감사 차수) 대기열이 비어도 바퀴를 돈다
 	hpend := false
 	for _, r := range readRows(LED) {
-		if r.F(4) == "deliver" || r.F(4) == "open" {
+		if r.F(ldState) == "deliver" || r.F(ldState) == "open" {
 			hpend = true
 		}
 	}
 	for _, r := range readRows(AT) {
-		if r.NF() >= 17 && !auditTerm[r.F(8)] {
+		if r.NF() >= atNF && !auditTerm[r.F(atState)] {
 			hpend = true
 		}
 	}
@@ -124,7 +124,7 @@ func runRound() {
 	OREC, OSEED = nil, false
 	if isFile(OWNF) {
 		for _, r := range readRows(OWNF) {
-			if r.NF() >= 7 {
+			if r.NF() >= owAfter {
 				OREC = append(OREC, r)
 			} else if r.NF() > 0 {
 				OSEED = true
@@ -273,36 +273,36 @@ func auditSeats() {
 	hold := ","
 	wl := map[string]string{} // 쓰기 레인 → 아직 안 뜬(wait) 감사 줄
 	for _, r := range rows {
-		if !strings.HasPrefix(r.F(15), "audit=") {
+		if !strings.HasPrefix(r.F(qAudit), "audit=") {
 			continue
 		}
-		AUDN = append(AUDN, r.F(1))
-		switch r.F(6) {
+		AUDN = append(AUDN, r.F(qName))
+		switch r.F(qState) {
 		case "wait":
-			if strings.Contains(","+r.F(9)+",", ","+r.F(5)+"=") {
+			if strings.Contains(","+r.F(qStuck)+",", ","+r.F(qOnly)+"=") {
 				continue
 			}
-			wl[strings.TrimPrefix(r.F(15), "audit=")] = r.F(1)
+			wl[strings.TrimPrefix(r.F(qAudit), "audit=")] = r.F(qName)
 		case "up":
-			if s := alive(r.F(8)); s == "gone" || s == "done" || s == "idle" {
+			if s := alive(r.F(qAddr)); s == "gone" || s == "done" || s == "idle" {
 				continue
 			}
 		default:
 			continue
 		}
-		hold += strings.TrimPrefix(r.F(15), "audit=") + ","
+		hold += strings.TrimPrefix(r.F(qAudit), "audit=") + ","
 	}
 	w := map[string]bool{}
 	for _, a := range readRows(AT) {
-		if a.NF() >= 17 && (a.F(8) == "queued" || a.F(8) == "opening") {
-			w[a.F(2)] = true
+		if a.NF() >= atNF && (a.F(atState) == "queued" || a.F(atState) == "opening") {
+			w[a.F(atLane)] = true
 		}
 	}
 	for _, r := range rows {
-		if r.F(6) == "up" && r.F(15) == "auto" && w[r.F(1)] && strings.Contains(hold, ","+r.F(1)+",") {
-			AWT = append(AWT, r.F(8))
-			if an, ok := wl[r.F(1)]; ok {
-				RSVW[r.F(8)] = an
+		if r.F(qState) == "up" && r.F(qAudit) == "auto" && w[r.F(qName)] && strings.Contains(hold, ","+r.F(qName)+",") {
+			AWT = append(AWT, r.F(qAddr))
+			if an, ok := wl[r.F(qName)]; ok {
+				RSVW[r.F(qAddr)] = an
 			}
 		}
 	}
@@ -326,18 +326,18 @@ func orderRows() {
 		if r.NF() == 0 {
 			continue
 		}
-		for _, l := range readLines(r.F(3)) {
+		for _, l := range readLines(r.F(qBrief)) {
 			if m := talRe.FindStringSubmatch(l); m != nil {
-				TAL[m[1]] = r.F(1)
+				TAL[m[1]] = r.F(qName)
 			}
 		}
 	}
 	for _, r := range rows {
-		if !(r.F(6) == "wait" || (r.F(6) == "up" && r.F(14) == "early")) || r.F(4) == "" || r.F(4) == "-" {
+		if !(r.F(qState) == "wait" || (r.F(qState) == "up" && r.F(qEarly) == "early")) || r.F(qAfter) == "" || r.F(qAfter) == "-" {
 			continue
 		}
 		seen := map[string]bool{}
-		for _, x := range strings.Split(r.F(4), ",") {
+		for _, x := range strings.Split(r.F(qAfter), ",") {
 			if t, ok := TAL[x]; ok {
 				x = t
 			}
@@ -357,7 +357,7 @@ func orderRows() {
 			continue
 		}
 		p := 2
-		switch r.F(13) {
+		switch r.F(qPrio) {
 		case "urgent":
 			p = 0
 		case "high":
@@ -365,9 +365,9 @@ func orderRows() {
 		case "low":
 			p = 3
 		}
-		k := r.F(1)
-		if strings.HasPrefix(r.F(15), "audit=") {
-			k = r.F(15)[6:]
+		k := r.F(qName)
+		if strings.HasPrefix(r.F(qAudit), "audit=") {
+			k = r.F(qAudit)[6:]
 		}
 		os_ = append(os_, ord{p, WC[k], i, r})
 	}
@@ -397,7 +397,7 @@ func countSeats() {
 	}
 	kind := map[string]string{}
 	for _, r := range readRows(lk + "/hc-lane/lanes.tsv") {
-		kind[r.F(1)+"\t"+r.F(2)] = r.F(4)
+		kind[r.F(lnAddr)+"\t"+r.F(lnName)] = r.F(lnKind)
 	}
 	LKIND = map[string]bool{}
 	for k, v := range kind {
@@ -407,8 +407,8 @@ func countSeats() {
 	}
 	HELD = map[string]string{}
 	for _, r := range readRows(DATA + "/held.tsv") {
-		if _, ok := HELD[r.F(1)]; !ok {
-			HELD[r.F(1)] = r.F(2)
+		if _, ok := HELD[r.F(hdAddr)]; !ok {
+			HELD[r.F(hdAddr)] = r.F(hdSince)
 		}
 	}
 	HNEW, HNOW, SEATS, AGUNK = nil, nowUnix(), nil, nil

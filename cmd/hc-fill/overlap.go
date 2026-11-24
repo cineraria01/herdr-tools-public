@@ -25,8 +25,8 @@ func afterTick() {
 	atn := strconv.FormatInt(nowUnix(), 10)
 	var ms []string
 	for _, r := range qs {
-		if r.F(6) == "up" && r.F(14) == "early" && r.F(7) != "" {
-			ms = append(ms, r.F(7))
+		if r.F(qState) == "up" && r.F(qEarly) == "early" && r.F(qMach) != "" {
+			ms = append(ms, r.F(qMach))
 		}
 	}
 	sort.Strings(ms)
@@ -41,11 +41,11 @@ func afterTick() {
 		var ab []string // 「선행<TAB>go|stop<TAB>까닭<TAB>쓴시각」
 		done := map[string]bool{}
 		for _, r := range qs {
-			if r.F(6) != "up" || r.F(14) != "early" || r.F(7) != am || r.F(4) == "-" {
+			if r.F(qState) != "up" || r.F(qEarly) != "early" || r.F(qMach) != am || r.F(qAfter) == "-" {
 				continue
 			}
-			ap := r.F(2)
-			for _, x := range words(r.F(4)) {
+			ap := r.F(qProj)
+			for _, x := range words(r.F(qAfter)) {
 				if done[x] {
 					continue
 				}
@@ -335,7 +335,7 @@ func lkeys(p, brief string) []Row {
 	seen := map[string]bool{}
 	var o []Row
 	for _, t := range append(ktok("R", ex, kp), ktok("M", bl, kp)...) {
-		k, y, v, w := t.F(1), t.F(2), t.F(3), t.F(4)
+		k, y, v, w := t.F(tkKind), t.F(tkType), t.F(tkVal), t.F(tkRaw)
 		var vs []string // 맨 이름이 확장자 붙은 맨 위 파일로 풀리면 그 이름들(README → README.md)
 		switch y {
 		case "p", "q":
@@ -429,29 +429,29 @@ func ovcmp(own, cand []Row) []Row {
 	seenO, res := map[string]bool{}, map[string]int{}
 	ks, kc := map[rk][]string{}, map[rk]int{}
 	for _, f := range own {
-		if f.NF() < 3 || f.F(3) == "" {
+		if f.NF() < okKey || f.F(okKey) == "" {
 			continue
 		}
 		for _, c := range cand {
-			if c.F(2) == "" || !hitf(f.F(3), c.F(2)) { // 빈 키는 겹침이 아니다
+			if c.F(kyKey) == "" || !hitf(f.F(okKey), c.F(kyKey)) { // 빈 키는 겹침이 아니다
 				continue
 			}
-			o := f.F(1)
+			o := f.F(okLane)
 			if !seenO[o] {
 				seenO[o] = true
 				ord = append(ord, o)
 			}
 			r := 0
 			switch {
-			case f.F(2) == "R" && c.F(1) == "R":
+			case f.F(okKind) == "R" && c.F(kyKind) == "R":
 				r = 1
-			case strong(f.F(2)) && strong(c.F(1)):
+			case strong(f.F(okKind)) && strong(c.F(kyKind)):
 				r = 2
 			}
 			res[o] = max(res[o], r)
 			k := rk{r, o}
-			if !has(ks[k], c.F(2)) && kc[k] < 2 {
-				ks[k] = append(ks[k], c.F(2))
+			if !has(ks[k], c.F(kyKey)) && kc[k] < 2 {
+				ks[k] = append(ks[k], c.F(kyKey))
 				kc[k]++
 			}
 		}
