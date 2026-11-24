@@ -130,6 +130,29 @@ func knobRows(now time.Time) []knobRow {
 			}
 		}
 		rs = append(rs, r)
+		rs = append(rs, knobProjectRows(d, es, now)...)
+	}
+	return rs
+}
+
+// knobProjectRows: 병합기 손잡이의 프로젝트별 값(이름@프로젝트 — merger-knob-per-project)을 공통 줄 바로 밑에 둔 것만 한 줄씩
+func knobProjectRows(d knob.Def, es map[string]knob.Entry, now time.Time) []knobRow {
+	var ns []string
+	for n, e := range es {
+		if fd, ok := knob.Find(n); ok && fd.Per == knob.PerProject && fd.Base() == d.Name && e.Live(now) {
+			ns = append(ns, n)
+		}
+	}
+	sort.Strings(ns)
+	var rs []knobRow
+	for _, n := range ns {
+		e := es[n]
+		r := knobRow{Name: n, Value: e.Value, Source: string(knob.FromKnob), Tool: d.Tool, Unit: d.Unit, Range: d.Range(), Remote: d.Remote,
+			Desc: d.Desc + " — 프로젝트 " + n[len(d.Name)+1:] + " 몫", By: e.By, Why: e.Why, Pin: e.Pin, At: stamp(e.At)}
+		if e.Until != 0 {
+			r.Until = stamp(e.Until)
+		}
+		rs = append(rs, r)
 	}
 	return rs
 }
@@ -216,6 +239,12 @@ func knobSet(args []string, now time.Time) error {
 	if d.Per == "기계" && !machineKnown(d.Of()) {
 		return fmt.Errorf("설정에 없는 기계: %s — machine 줄의 이름만", d.Of())
 	}
+	if d.Per == knob.PerProject && !projectKnown(d.Of()) {
+		return fmt.Errorf("설정에 없는 프로젝트: %s — repo 줄의 이름만", d.Of())
+	}
+	if d.Per == knob.PerProject && repoOf(d.Of(), LOCAL) == "" { // 원격에 올리는 knobsRemoteTick은 이 기계 repo 줄만 돈다 — 안 올라갈 값을 받지 않는다
+		return fmt.Errorf("이 기계(%s)에 repo 줄이 없는 프로젝트: %s — 원격에 올릴 클론이 없다", LOCAL, d.Of())
+	}
 	e := knob.Entry{Name: name, Value: val, By: knobBy(), Why: why, At: now.Unix(), Pin: pin}
 	switch {
 	case forM != "":
@@ -250,7 +279,7 @@ func knobSet(args []string, now time.Time) error {
 	}
 	say("손잡이 %s = %s (전: %s, %s) — 다음 바퀴부터, %s", name, val, old, src, u)
 	undo := "hc-fill knob unset " + name
-	if src == knob.FromKnob && oe != nil {
+	if src == knob.FromKnob && oe != nil && oe.Name == name { // 프로젝트별 첫 값의 oe는 공통 줄 — 되돌리기는 unset 이름@프로젝트
 		undo = knobSetLine(*oe)
 	}
 	if pin {
@@ -290,7 +319,13 @@ func knobUnset(args []string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	v, src, _ := knob.Effective(d, nil, confRaw(d.Name), now)
+	rest := map[string]knob.Entry{} // 지운 뒤 먹는 값 — 프로젝트별(이름@프로젝트)이면 공통 손잡이까지 본다
+	for k, e := range knobEntries() {
+		if k != d.Name {
+			rest[k] = e
+		}
+	}
+	v, src, _ := knob.Effective(d, rest, confRaw(d.Name), now)
 	if v == "" { // 묶음 손잡이(seats@<기계> 등) — 설정 줄 값으로
 		v, src = "설정 값", knob.FromConf
 	}
@@ -299,8 +334,9 @@ func knobUnset(args []string, now time.Time) error {
 		return nil
 	}
 	say("손잡이 %s를 지웠다 — 다음 바퀴부터 %s(%s)", d.Name, v, src)
-	undo := "-" // 기한이 지나 이미 안 먹던 값이면 되돌릴 것이 없다
-	if oe != nil {
+	// 기한이 지나 이미 안 먹던 값이면 되돌릴 것이 없다(프로젝트별 값이 안 먹던 때의 oe는 공통 줄이라 마찬가지)
+	undo := "-"
+	if oe != nil && oe.Name == d.Name {
 		undo = knobSetLine(*oe)
 	}
 	jot("knob unset", d.Name, why, "됨", undo, fmt.Sprintf("전 %s(%s) → %s(%s)", ov, osrc, v, src))
@@ -345,10 +381,10 @@ func parseUntil(s string) (time.Time, error) {
 }
 
 // knobsRemoteTick: Remote 손잡이를 이 기계 repo 줄의 프로젝트마다 원격 참조 knob.Ref로(날짜 0 빈 트리 커밋 — 같은 내용이면 같은 SHA).
-// 올린 내용의 지문을 <DATA>/knobs-remote.tsv에 두어 바뀌지 않은 바퀴는 git을 부르지 않는다. 못 올리면 다음 바퀴에 다시
+// 올린 내용의 지문을 <DATA>/knobs-remote.tsv에 두어 바뀌지 않은 바퀴는 git을 부르지 않는다. 못 올리면 다음 바퀴에 다시.
+// 내용은 프로젝트마다 그 몫으로 푼 값(knob.ForProject — 「이름@프로젝트」가 공통을 덮고 다른 프로젝트 값은 안 실림)
 func knobsRemoteTick() {
-	msg := knob.FormatRemote(knobEntries(), time.Now())
-	sum := sha256hex([]byte(msg))
+	es, now := knobEntries(), time.Now()
 	rf := DATA + "/knobs-remote.tsv"
 	done := map[string]string{}
 	for _, r := range readRows(rf) {
@@ -360,6 +396,8 @@ func knobsRemoteTick() {
 			continue
 		}
 		p := f[1]
+		msg := knob.FormatRemote(knob.ForProject(es, p, now), now)
+		sum := sha256hex([]byte(msg))
 		if done[p] == sum || (msg == "" && done[p] == "") {
 			if done[p] != "" {
 				keep = append(keep, p+"\t"+sum)

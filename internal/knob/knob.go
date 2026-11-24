@@ -32,6 +32,10 @@ type Def struct {
 	Per      string // 묶음 손잡이: Name이 「접두@」이고 저장 이름은 「접두@<Per 값>」(예: seats@<기계>). 빈 값이면 낱개
 }
 
+// PerProject: 병합기 손잡이(Tool hc-merger·Remote)의 프로젝트별 덮어쓰기 「<이름>@<프로젝트>」가 Find에서 받는 Per(merger-knob-per-project).
+// 표에 따로 줄이 없다 — 낱개 병합기 손잡이마다 저절로 되고, 범위·기본은 그 낱개 줄 그대로
+const PerProject = "프로젝트"
+
 // Defs: 등록 표. 새 손잡이는 여기에 한 줄 더하고, 도구는 한 함수(hc-fill은 conf, 다른 기계는 ReadRemote → Remote.Get)로 읽는다
 var Defs = []Def{
 	{Name: "idle", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "놀고 있음 알림(자리가 남은 채 이만큼 이어지면, 0이면 끔)"},
@@ -129,8 +133,22 @@ func Find(name string) (Def, bool) {
 				return d, true
 			}
 		}
+		for _, d := range Defs {
+			if d.Per == "" && d.Remote && d.Tool == "hc-merger" && d.Name == name[:i] {
+				d.Name, d.Per = name, PerProject
+				return d, true
+			}
+		}
 	}
 	return Def{}, false
+}
+
+// Base: 「이름@값」의 이름 부분(merger_front_wait@x → merger_front_wait). 낱개면 Name
+func (d Def) Base() string {
+	if i := strings.IndexByte(d.Name, '@'); i >= 0 {
+		return d.Name[:i]
+	}
+	return d.Name
 }
 
 // Of: 묶음 손잡이 저장 이름의 값 부분(seats@x → x). 낱개면 빈 값
@@ -369,10 +387,15 @@ const (
 	FromKnob    Source = "손잡이"
 )
 
-// Effective: 손잡이 > 설정(빈 값이 아니면) > 기본. 손잡이면 그 줄도
+// Effective: 손잡이 > 설정(빈 값이 아니면) > 기본. 손잡이면 그 줄도. 프로젝트별(PerProject)은 그 값이 없으면 공통 손잡이 차례로
 func Effective(d Def, es map[string]Entry, confVal string, now time.Time) (string, Source, *Entry) {
 	if e, ok := es[d.Name]; ok && e.Live(now) {
 		return e.Value, FromKnob, &e
+	}
+	if d.Per == PerProject {
+		if b, ok := Find(d.Base()); ok {
+			return Effective(b, es, confVal, now)
+		}
 	}
 	if confVal != "" {
 		return confVal, FromConf, nil

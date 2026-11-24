@@ -74,6 +74,13 @@
 - 손잡이: `merger_batch`(개 — 묶음 크기), `merger_tick`(초 — 빈 바퀴 쉼), `merger_spec_start`·`merger_spec_timeout`·`merger_front_wait`·`merger_pre_max`(초), `merger_pre_rebuild`(번),
   `merger_front_dispatch`·`merger_front_local`(`0`|`1`), `merger_idle_load`(%), `merger_busy_wait`(초), `merger_busy_max`(번), `merger_conflict`(`agent`|`event`|`reject`), `merger_resolve_max`(초), `merger_resolve_stuck`(분 — 풀이 터미널 멈춤 사건 문턱, 0 끔).
   각 손잡이가 덮는 환경 변수는 `knob ls`의 설명 끝 괄호.
+- 프로젝트별 덮어쓰기(merger-knob-per-project, 2026-11-24): 저장소마다 검증 시간이 크게 달라 병합기 손잡이를 저장소 하나에만 다르게 줄 수 있다.
+  - 꼴: `hc-fill knob set <병합기 손잡이>@<프로젝트> <값> --why …` — 위 `merger_*` 손잡이만 받고, 프로젝트는 이 기계(지휘 기계)에 설정 `repo` 줄이 있는 이름만 받는다(오타·원격에 올릴 클론이 없는 프로젝트는 거절). 범위·`--for`·`--until`·`--pin`·`--force`는 낱개와 같다.
+  - 병합기가 읽는 차례: `<이름>@<그 병합기의 프로젝트>` → `<이름>`(공통) → 일지 폴더 파일 → 환경 변수 → 기본. 프로젝트별 값의 기한이 지나면 공통으로 돌아간다.
+  - 원격 참조에는 지휘 기계의 hc-fill이 **그 저장소 몫으로 푼 값**을 이름 그대로 올린다(프로젝트 이름은 싣지 않는다) — 병합기·검증 일꾼의 읽기 코드는 그대로이고, 다른 프로젝트의 값은 그 저장소 원격에 새지 않는다.
+    프로젝트별 값이 없으면 올라가는 내용은 전과 바이트까지 같다.
+  - `hc-fill knob unset <이름>@<프로젝트>` — 그 프로젝트도 공통 값으로 돌아간다. `knob ls`에는 공통 줄 바로 밑에 둔 프로젝트별 값만 한 줄씩(설명 끝 「프로젝트 … 몫」).
+  - 본보기 — 검증이 긴 저장소만 맨 앞 기다림 상한을 길게: `hc-fill knob set merger_front_wait@<검증이 긴 프로젝트> 1500 --why "전체 추측 검증 10~15분"`, 공통 `merger_front_wait`는 기본 600 그대로.
 - 빈 바퀴 쉼은 상주 부모가 정하므로, 일꾼이 읽은 참조를 `<일지 폴더>/knobs.remote`(SHA 한 줄 + 메시지)에 두고 부모가 쉬기 전마다 읽는다(기한은 그때 다시 본다).
 - 참조가 없거나 못 읽은 바퀴는 손잡이 없이(옛 파일·환경 변수·기본) 돈다.
 - 옮기지 않은 것: 충돌 풀이를 띄울 명령 `resolve_launch`(명령 글이라 범위로 거를 수 없다 — 옛 파일·환경 변수 그대로), 기술 상한(`HC_LANE_SPEC_IDLE_MAX`·`HERDR_TIMEOUT_*`·`HC_LANE_FETCH_WAITS`).

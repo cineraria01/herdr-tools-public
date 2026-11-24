@@ -19,11 +19,11 @@ const (
 	remoteHead = "hc-knobs"
 )
 
-// FormatRemote: 원격 커밋 메시지. 실을 것이 없으면 빈 글(참조를 지움)
+// FormatRemote: 원격 커밋 메시지. 실을 것이 없으면 빈 글(참조를 지움). 「이름@…」 줄은 싣지 않는다 — 프로젝트별 값은 ForProject로 먼저 푼다
 func FormatRemote(es map[string]Entry, now time.Time) string {
 	var ns []string
 	for n, e := range es {
-		if d, ok := Find(n); ok && d.Remote && e.Live(now) {
+		if d, ok := Find(n); ok && d.Remote && d.Per == "" && e.Live(now) {
 			ns = append(ns, n)
 		}
 	}
@@ -41,6 +41,22 @@ func FormatRemote(es map[string]Entry, now time.Time) string {
 		b.WriteString(n + "\t" + es[n].Value + "\t" + u + "\n")
 	}
 	return b.String()
+}
+
+// ForProject: 프로젝트 p의 저장소 원격에 올릴 몫 — 살아 있는 「<이름>@p」가 공통 「<이름>」을 덮는다(기한은 그 줄 것).
+// 다른 프로젝트의 「<이름>@…」은 FormatRemote가 싣지 않으니 새지 않고, 프로젝트별 값이 없으면 es 그대로(원격 내용이 바이트까지 같다)
+func ForProject(es map[string]Entry, p string, now time.Time) map[string]Entry {
+	o := make(map[string]Entry, len(es))
+	for n, e := range es {
+		o[n] = e
+	}
+	for n, e := range es {
+		if d, ok := Find(n); ok && d.Per == PerProject && d.Of() == p && e.Live(now) {
+			e.Name = d.Base()
+			o[e.Name] = e
+		}
+	}
+	return o
 }
 
 // Remote: 원격에서 읽은 값(기한 안·표에 있음·범위 안만)
@@ -66,7 +82,7 @@ func ParseRemote(msg string, now time.Time) Remote {
 			}
 			e.Until = u
 		}
-		if d, ok := Find(e.Name); ok && d.Remote && e.Live(now) {
+		if d, ok := Find(e.Name); ok && d.Remote && d.Per == "" && e.Live(now) {
 			r[e.Name] = e.Value
 		}
 	}
