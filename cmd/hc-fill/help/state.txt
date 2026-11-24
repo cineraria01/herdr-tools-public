@@ -1,0 +1,6 @@
+        hc-fill state [--json]
+  state   상태 한 장(docs/ops/state.md) — 기계(코어당 부하·에이전트/자리·레인/상한·건강·조정·안 띄운 까닭)·대기열(상태별 수·가장 오래 기다린 줄과
+         까닭)·레인(단계·머문 시간·마지막 사건)·병합 줄·배포(기록상 깔린 판·밀린 커밋)·감시·손잡이·최근 조치·최근 사건·눈에 띄는 것을 한 번에.
+         --json은 칸 이름이 고정된 한 줄. 읽기만 한다. 바퀴가 남긴 기록(load.tsv·merger-alive.tsv·last.tsv·tick.tsv)을 다시 쓰고
+         새로 부르는 것은 hc ls·hc machine ls 한 번씩과 배포 밀림의 git rev-list뿐 — 재료마다 나이·호출 수·초를 sources에.
+         모르는 칸은 모름(json null과 까닭). 지문(fingerprint)이 지난번과 같으면 다시 읽지 않아도 된다

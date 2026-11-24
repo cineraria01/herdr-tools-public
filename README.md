@@ -102,5 +102,6 @@ README에는 아래 목차 줄만 둔다.
 - [운영 사건 목록 (받으면 할 수 있는 것)](docs/ops/events.md)
 - [운영 일지 (hc-fill journal)](docs/ops/journal.md)
 - [손잡이 (hc-fill knob)](docs/ops/knobs.md)
+- [상태 한 장 (hc-fill state)](docs/ops/state.md)
 - [파일 크기: 줄 수 톱니바퀴](docs/repo/line-budget.md)
 - [시험](docs/repo/tests.md)

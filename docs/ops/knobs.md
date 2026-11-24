@@ -33,6 +33,7 @@
 - 지금 표(본보기, 모두 hc-fill 설정 키): `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
   부하 보고 고르기([부하](../hc-fill/load-steer.md)): `load_band`·`load_busy`(%), `load_starve`·`skew_min`·`skew_every`(분).
   기계 닿지 않음([끊김](../hc-fill/unreach.md)): `unreach`(분).
+  상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%).
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
 - 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.
