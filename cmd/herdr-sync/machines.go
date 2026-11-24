@@ -445,6 +445,17 @@ func syncMachines(machines []string, mq *qres) {
 		row("맥", rdiff, rconf)
 	}
 	fmt.Print(rows + saved)
+	if rel != nil && macBins && !check { // 맥은 새 판을 깔았는데 바이너리를 못 깐 워커
+		var old []string
+		for _, m := range live {
+			if len(binLost[m]) > 0 {
+				old = append(old, m)
+			}
+		}
+		if l := halfLine(rel.c12, old); l != "" {
+			fmt.Println(l)
+		}
+	}
 }
 
 // publish: 설정 publish.repo가 있으면 범용 저장소(저장소 맞추기는 끝남)를 공개 저장소로 내보낸다(herdr-tools-publish, 기록 없이·검사 뒤).

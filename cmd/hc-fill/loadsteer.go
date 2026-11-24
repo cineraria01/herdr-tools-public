@@ -471,6 +471,9 @@ func machineCmd(args []string) {
 		machineJSON()
 		exit(0)
 	}
+	if len(args) > 0 && args[0] == "--rename" { // 기계 이름 바꾸기(rename.go)
+		machineRename(args[1:])
+	}
 	args, dryM := takeDry(args)
 	if len(args) == 0 {
 		for _, l := range machineLines(true) {

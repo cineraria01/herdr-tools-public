@@ -59,3 +59,11 @@ func autoJournal(on bool, why string) {
 	}
 	journal.Record(os.Stderr, journal.Entry{By: journalBy(), Tool: "herdr-sync", Action: act, Target: "스스로 배포", Why: why, Result: "됨", Undo: undo})
 }
+
+func autoPubJournal(on bool, why string) {
+	act, undo := "auto-publish off", "herdr-sync --auto-publish on"
+	if on {
+		act, undo = "auto-publish on", "herdr-sync --auto-publish off"
+	}
+	journal.Record(os.Stderr, journal.Entry{By: journalBy(), Tool: "herdr-sync", Action: act, Target: "스스로 배포 공개 단계", Why: why, Result: "됨", Undo: undo})
+}

@@ -8,7 +8,8 @@ package main
 //     커밋을 -ldflags -X로 새김, 상한 HERDR_TIMEOUT_BUILD 600초). 그 커밋의 트리가 범용 저장소 HEAD와 다르면 올리지 않는다(gofix-ops A02).
 //     publish.repo 릴리스 bin-<커밋 12자>에 <도구>·<도구>-linux-amd64·SHA256SUMS. 이미 올린 자산은 덮지 않는다(A05)
 //   - 깔기(installSh — 기계마다, 맥도): 받은 것의 sha256이 맥이 계산한 값과 같으면 그것을, 못 받으면(릴리스 없음·통신·해시·다른 CPU)
-//     그 기계 ~/.local/lib/herdr-go(Go 소스 나무 줄이 깐다)의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다.
+//     그 기계 ~/.local/lib/herdr-go(Go 소스 나무 줄이 깐다)의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다(판은 맥이 보낸
+//     파일 목록 files로만 재고, 짓기는 그 목록만 꺼낸 깨끗한 폴더에서 — 저장소에서 지운 파일이 남아도 끼지 않게, sync-auto-fix).
 //     어느 쪽이든 같은 폴더 임시 파일 → mv 한 번(본체 하나가 한 세대 — 옛 「.bin/<도구> + .src 두 파일」을 따로 바꾸던 길은 없다, R-01·R-11).
 //     mv가 안 되면 옛 본체 그대로다(되돌리기는 --at — 올린 판만, rollback.go). 기록(~/.local/state/herdr-sync/bin.tsv: 도구·본체 sha256·소스 판)은
 //     「이미 이 판인가」와 「그 기계에서 따로 바꿨나」를 알아보는 데만 쓴다 — 실행은 기록을 보지 않는다. 본체가 기록의 sha와 다르면
@@ -21,7 +22,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -66,8 +66,16 @@ gob() {
   return 0
 }
 um=$(uname -m); [ "$um" != amd64 ] || um=x86_64
-cur=
-[ ! -f "$g/go.mod" ] || cur=$(cd "$g" && find go.mod cmd internal -type f ! -path '*/.*' 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cksum | cksum | awk '{print $1"."$2}')
+cur= w=${st%/*}/gosrc wok=
+[ -f "$g/go.mod" ] || files=
+[ ! -f "$g/go.mod" ] || [ -n "${files:-}" ] || files=$(cd "$g" && find go.mod cmd internal -type f ! -path '*/.*' 2>/dev/null | LC_ALL=C sort)
+[ -z "${files:-}" ] || cur=$(cd "$g" && printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 cksum 2>/dev/null | cksum | awk '{print $1"."$2}')
+# 짓기는 그 목록만 꺼낸 깨끗한 폴더에서 — 저장소에서 지운 파일이 그 기계 소스 폴더에 남아도(지움은 바이너리를 깐 뒤) 판·짓기에 끼지 않는다
+prep() {
+  [ -z "$wok" ] || return 0
+  rm -rf "$w" && mkdir -p "$w" || return 1
+  (cd "$g" && printf '%s\n' "$files" | COPYFILE_DISABLE=1 tar -cf - -T -) | (cd "$w" && tar -xf -) && [ -f "$w/go.mod" ] && wok=1
+}
 [ "$mode" = check ] || mkdir -p "$b" "${st%/*}" || exit 1
 rec() {
   { [ ! -f "$st" ] || awk -F'\t' -v t="$1" '$1 != t' "$st"; printf '%s\t%s\t%s\n' "$1" "$2" "$src"; } > "$st.$$" && mv -f "$st.$$" "$st" && return 0
@@ -106,7 +114,8 @@ while [ $# -ge 3 ]; do
     go=$(gob)
     if [ -z "$go" ]; then printf 'E\t%s\t%s · 그 기계에 go가 없다\n' "$t" "$why"; continue; fi
     if [ -z "$cur" ] || [ "$cur" != "$src" ]; then printf 'E\t%s\t%s · 그 기계 Go 소스 판이 범용 저장소와 다르다\n' "$t" "$why"; continue; fi
-    if ! (cd "$g" && GOTOOLCHAIN=local CGO_ENABLED=0 GOOS= GOARCH= GOFLAGS= \
+    if ! prep; then printf 'E\t%s\t%s · 짓는 폴더를 꺼내지 못했다\n' "$t" "$why"; continue; fi
+    if ! (cd "$w" && GOTOOLCHAIN=local CGO_ENABLED=0 GOOS= GOARCH= GOFLAGS= \
         "$go" build -trimpath -buildvcs=false -ldflags "-X herdr-tools/internal/version.Commit=$c12" -o "$n" "./cmd/$t" </dev/null >"$n.log" 2>&1); then
       printf 'E\t%s\t%s · 그 기계에서 짓지 못했다: %s\n' "$t" "$why" "$(tail -n 1 "$n.log" 2>/dev/null)"; rm -f "$n" "$n.log"; continue
     fi
@@ -132,6 +141,7 @@ done
 // relInfo: 이번 실행의 바이너리 판 — 받을 곳(릴리스가 이 빌드와 같다고 확인됐을 때만 tag)과 짓는 판
 type relInfo struct {
 	c12, src  string            // 새길 커밋 12자 · 소스 판(srcDigest)
+	files     []string          // 그 판의 파일 목록(srcFiles) — 기계는 이것만으로 판을 재고 짓는다
 	base, tag string            // 받는 주소 앞부분 · 릴리스 태그 — 비면 받지 않고 기계마다 짓는다
 	sums      map[string]string // 자산 이름 → sha256
 	lx        map[string]bool   // linux/amd64 자산이 있는 도구
@@ -232,13 +242,13 @@ func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 		// proc가 무리째(짓던 go·컴파일러 자손까지) 거둔 뒤 돌아오고 결과는 모름 — 돌아온 뒤 본체·bin.tsv를 쓰는 자손이 남지 않는다.
 		// herdr-sync가 신호를 받으면 onSignals의 StopCurrent가 이 무리를 다 거둔 뒤에 끝낸다(잠금은 그 뒤에 놓인다)
 		bm := buildMax()
-		c = exec.Command("sh", append([]string{"-c", takeSh(m, tools) + budgetSh(int(bm/time.Second)), "_"}, args...)...)
+		c = exec.Command("sh", append([]string{"-c", takeSh(m, tools) + filesSh(rel.files) + budgetSh(int(bm/time.Second)), "_"}, args...)...)
 		c.Stderr = &errb
 		b, err := proc.OutputMax(c, bm)
 		out, rc = string(b), proc.Code(err)
 	} else {
 		// 조각이 installBudget 안에 끝내고(남은 도구는 E 「시간 상한」), hc 상한까지 남은 몫은 마지막 짓기·보고 몫
-		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", takeSh(m, tools) + budgetSh(installBudget), "_"}, args...)...)
+		c = exec.Command("hc", append([]string{"exec", "--timeout", strconv.Itoa(hcExecMax), "--on", m, "--", "sh", "-c", takeSh(m, tools) + filesSh(rel.files) + budgetSh(installBudget), "_"}, args...)...)
 		c.Stderr = &errb
 		out, rc = output(c)
 	}
@@ -344,30 +354,13 @@ func githubSlug(url string) string {
 	return ""
 }
 
-// gh: 표준 출력·종료 코드·표준 오류(그대로도 흘린다). 상한(proc.Limit — gh는 HERDR_TIMEOUT_REMOTE)에 걸리면 124 = 모름
-func gh(args ...string) (string, int, string) {
-	var eb bytes.Buffer
-	c := exec.Command("gh", args...)
-	c.Stderr = io.MultiWriter(os.Stderr, &eb)
-	out, rc := output(c)
-	return out, rc, eb.String()
-}
-
-// buildMax: 릴리스 빌드 하나의 상한(A09) — 넘으면 그 무리째(컴파일러 자손까지) 끄고 이번 릴리스를 보류한다
-func buildMax() time.Duration {
-	if n, err := strconv.Atoi(os.Getenv("HERDR_TIMEOUT_BUILD")); err == nil && n > 0 {
-		return time.Duration(n) * time.Second
-	}
-	return 600 * time.Second
-}
-
 // binsPrepare: 이번 실행의 바이너리 판(바이너리 줄이 없으면 nil). --check가 아니면 공개 내보내기(publish) 뒤 릴리스를 짓고 올린다 —
 // 기계 맞추기보다 먼저(새 본체가 깔린 뒤에 설정·지움이 옛 포장을 걷게)
 func binsPrepare(pubwarn func(string)) *relInfo {
 	checked, pub := "", ""
 	auto := os.Getenv("HERDR_SYNC_NO_PUBLISH") != "" && !check // 스스로 배포(landed.go) — 공개 단계 없음
 	if auto {
-		say("공개 건너뜀 — 스스로 배포는 공개 저장소 내보내기·릴리스 올리기를 하지 않는다(올려 둔 릴리스가 있으면 받는다)")
+		say("공개 건너뜀 — 스스로 배포는 공개 저장소 내보내기·릴리스 올리기를 하지 않는다(올려 둔 릴리스만 받는다 — 없으면 아무 데도 깔지 않는다)")
 	} else if !check {
 		checked, pub = pubChecked, pubRepo // 게시는 pinCommit이 맥 값을 읽기 전에 했다(pin.go)
 	}
@@ -375,12 +368,12 @@ func binsPrepare(pubwarn func(string)) *relInfo {
 		return nil
 	}
 	head, rc := gitq("-C", REPO, "rev-parse", "HEAD")
-	src, err := srcDigest(REPO)
+	files, src, err := srcFiles(REPO)
 	if rc != 0 || len(head) < 12 || err != nil {
 		pubwarn("바이너리 판을 읽지 못했다(범용 저장소 HEAD·소스) — 바이너리를 깔지 않는다")
 		return &relInfo{c12: "unknown", src: "unknown"}
 	}
-	rel := &relInfo{c12: head[:12], src: src}
+	rel := &relInfo{c12: head[:12], src: src, files: files}
 	if !check && pub != "" {
 		release(rel, pub, checked, pubwarn)
 	}

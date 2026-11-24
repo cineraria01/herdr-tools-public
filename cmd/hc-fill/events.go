@@ -28,10 +28,7 @@ func mgres(lane, sid string) string {
 	if sid == "" {
 		return ""
 	}
-	mg := map[string]bool{}
-	for _, m := range strings.Fields(MGM) {
-		mg[m] = true
-	}
+	mg := mgSet() // 이름 바꾼 기계의 옛 이름도(rename.go)
 	l := ""
 	for _, e := range EV {
 		r := splitRow(e)

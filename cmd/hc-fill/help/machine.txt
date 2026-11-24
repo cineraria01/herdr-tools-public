@@ -1,5 +1,9 @@
         hc-fill machine [--json] | machines | machine <기계> (--seats <n>|- | --pause | --resume) [--for <분>] [--why <까닭>] [--force] [--dry-run]
+        hc-fill machine --rename <옛> <새> [--dry-run] [--json] [--why <까닭>]
   machine 기계마다 한 줄 — 1분 부하/코어(코어당)·자리 쓴/상한·실행 중 조정(누가·언제까지·왜)·지난 바퀴에 안 띄운 까닭(status 끝에도).
          <기계> --seats: 그 기계 자리 상한을 다음 바퀴부터 바꾼다(- 면 설정 값으로). --pause: 새 레인을 안 띄운다(떠 있는 레인·그 감사는
          그대로), --resume: 푼다. --for가 지나면 설정 값으로. --seats n·--pause는 --why 꼭. 손잡이 seats@<기계>·pause@<기계>(knob ls),
          조정 기록 ~/.local/share/hc-fill/machine.log. 대기 레인을 다른 기계로: hc-fill edit <레인> --only <기계>(docs/hc-fill/load-steer.md)
+         --rename <옛> <새>: 기계 이름을 설정·상태 파일·손잡이·병합기 켬 표식(refs/herdr/merger/<기계>)에서 한 번에 바꾼다(run·대기열 잠금 안,
+         도중 실패면 전부 되돌림, 떠 있는 레인·감사는 그대로 이어 봄). 차례: --dry-run → 실행 → 「다음:」의 merger restart → 설정 커밋(직접).
+         되돌리기 hc-fill machine --rename <새> <옛>(docs/hc-fill/machine-rename.md)

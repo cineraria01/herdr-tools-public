@@ -141,6 +141,7 @@ func onlandLeft() []string {
 // onlandTick: 바퀴마다 — 착지한 줄을 그 이름 pending에 넣고 실행기(<SELF> _onland <이름>)를 배경으로 띄운다. 남은 차례도 다시 띄운다
 // (실행기가 이미 돌면 새 실행기는 잠금을 못 잡아 바로 끝 — 도는 쪽이 걷는다)
 func onlandTick() {
+	onlandSyntaxTick() // 설정 명령의 구문만(onland_syntax.go)
 	fire := map[string]bool{}
 	if !dry {
 		for _, n := range onlandLeft() {

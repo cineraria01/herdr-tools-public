@@ -27,11 +27,13 @@
 - 충돌(그 기계에서 따로 고침): 맥 값으로 덮기 `herdr-sync --take <기계>:<경로>`, 그 기계 값을 맥으로 가져오기 `herdr-sync --pull <기계>:<경로>`. 덮은 직전 판은 그 기계 `~/.local/state/herdr-sync/bak/<시각>/`에 남는다.
 - 되돌리기는 도구 바이너리만(`--at`) — 지침·설정은 개인 저장소를 git으로 되돌린 뒤 보통 배포.
 - 스스로 배포: `herdr-sync --auto on --why "<까닭>"` · 끄기 `herdr-sync --auto off --why "<까닭>"`.
+- 스스로 배포가 공개 단계(내보내기·릴리스 올림)까지 하게: `herdr-sync --auto-publish on --why "<까닭>"`(기본 끔 — 끄면 릴리스가 없는 커밋은 배포하지 않는다).
 - 배포·되돌리기는 운영 일지(`hc-fill journal`)에 되돌리는 `--at` 명령과 함께 남는다 — `--why`를 붙인다.
 
 ## 사건을 받으면
 
 - `on-land-deploy` 중간 「배포할 것 <k>커밋」: `herdr-sync --status`로 보고 배포할지 정한다(병합 줄이 남았으면 기다려도 된다).
+- 막힘 「스스로 배포 못 함: 이 커밋의 릴리스가 없다」: 아무 데도 안 깔렸다 — `herdr-sync --why "<까닭>"`로 배포하거나 `--auto-publish on`.
 - 막힘 「스스로 배포 실패 (종료 n)」: `herdr-sync --log 5`와 `herdr-sync --check`로 어느 기계가 실패·충돌인지 본다.
 - 충돌: 그 기계에서 누가 왜 고쳤는지 모르면 덮기 전에 사람에게.
 - 종료 75(다른 herdr-sync가 돎): 기다렸다가 같은 줄을 다시.

@@ -2,7 +2,7 @@ package main
 
 // 19. 배포 기록·상태·되돌리기·착지 뒤(2026-11-24 deploy-log-rollback): ① 배포 → 기록 한 줄(기계별 결과) ② 부분 실패 → 기록에 실패 기계
 // ③ --status가 기계별 판·밀린 커밋을 보임(닿지 못한 기계는 모름) ④ --at <옛 커밋> → 그 판이 깔리고 다음 보통 배포가 충돌 없이 새 판으로
-// ⑤ 없는 커밋 → 거절·목록 ⑦ 스스로 배포 켬 → 줄이 빈 뒤 한 번(공개 단계 없음), 끔 → 안 함 ⑧ 스스로 배포 실패 → 0 아닌 종료(hc-fill 막힘).
+// ⑤ 없는 커밋 → 거절·목록 ⑦ 스스로 배포 켬 → 줄이 빈 뒤 한 번 보고, 릴리스 없으면 안 깖(공개 단계 없음), 끔 → 안 함 ⑧ 스스로 배포 실패 → 0 아닌 종료(hc-fill 막힘).
 // ⑥(착지 알림 합침)은 hc-fill 쪽 단위 시험(onland_every_test.go). 가짜 gh·file:// 릴리스, 실제 기계·네트워크 없음.
 
 import (
@@ -165,18 +165,20 @@ func TestContractF(t *testing.T) {
 	out.Close()
 	s.r = ct.Res{Out: ct.Read(T + "/landed.out")}
 	c3 := ct.Git(T+"/repo", "rev-parse", "HEAD")[:12]
-	s.ok("⑦ 켬: 줄이 빈 뒤 한 번 배포(기록 부른 곳 스스로)", werr == nil && logRows(T) == n+1 && strings.Contains(s.lastLog(), " 부른 곳 스스로 ") && !s.contains("기다림 상한"))
-	s.r = ct.Res{Out: ct.Read(T + "/landed.out")}
-	s.ok("⑦ 켬: 공개 단계(내보내기·릴리스 올림) 없음, 기계는 각자 지음", s.contains("공개 건너뜀") && ct.Read(T+"/published") == pub &&
-		!strings.Contains(strings.TrimPrefix(ct.Read(T+"/gh.calls"), calls), "release create") && hello() == "hello "+c3)
-	s.ok("⑦ 켬: 끝 줄이 결과", s.contains("스스로 배포 끝 — 배포할 것 1커밋: lane-three"))
+	// 줄이 빈 뒤 — 그 커밋의 릴리스가 없고 공개 단계는 꺼져 있으니 깔 수 없는 배포를 시작하지 않는다(sync-auto-fix — 맥만 깔리던 반쪽 배포)
+	s.ok("⑦ 켬: 줄이 빈 뒤 한 번 보고 — 릴리스 없음이면 배포하지 않고 종료 1", werr != nil && logRows(T) == n && !s.contains("기다림 상한") &&
+		s.contains("스스로 배포 못 함: 이 커밋의 릴리스가 없다 (bin-"+c3+")"))
+	s.ok("⑦ 켬: 공개 단계(내보내기·릴리스 올림) 없음, 아무 데도 안 깖", ct.Read(T+"/published") == pub &&
+		!strings.Contains(strings.TrimPrefix(ct.Read(T+"/gh.calls"), calls), "release create") && hello() == "hello "+c2)
 
-	// ⑧ 스스로 배포 실패 → 0 아닌 종료(hc-fill이 막힘 사건으로)
+	// ⑧ 스스로 배포 실패 → 0 아닌 종료(hc-fill이 막힘 사건으로) — 공개 단계까지 켜서 배포에 닿게
+	s.run("--auto-publish", "on")
 	s.putx(wb, "#!/bin/sh\necho hand\n")
 	s.landCommit("lane-four: 넷째")
 	s.runEnv([]string{"HERDR_SYNC_AUTO_WAIT=0"}, "--landed")
-	s.ok("⑧ 실패: 종료 1·끝 줄 「스스로 배포 실패」·기록에 충돌", s.r.RC == 1 && s.contains("스스로 배포 실패 (종료 1) — 배포할 것 1커밋: lane-four") &&
-		strings.Contains(s.lastLog(), "w1=충돌"))
+	s.ok("⑧ 실패: 종료 1·끝 줄 「스스로 배포 실패」·기록에 충돌", s.r.RC == 1 && s.contains("스스로 배포 실패 (종료 1) — 배포할 것 2커밋: lane-three lane-four") &&
+		strings.Contains(s.lastLog(), "w1=충돌") && strings.Contains(s.lastLog(), " 부른 곳 스스로 "))
+	s.run("--auto-publish", "off")
 	s.run("--auto", "off")
 	s.ok("--auto off", s.r.RC == 0 && s.has("스스로 배포 끔") && !ct.Exists(s.MAC+"/.local/state/herdr-sync/auto-deploy"))
 	s.run("--log", "x")

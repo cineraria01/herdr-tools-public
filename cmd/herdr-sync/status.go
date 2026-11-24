@@ -142,6 +142,14 @@ func machineCommit(rows [][3]string, log []logRow) (c12, desc string) {
 	return c12, desc
 }
 
+// halfLine: 반쪽 배포 한 줄 — 맥 판(mac)보다 옛 판인 워커(old)가 있으면. 배포 끝 요약과 --status가 같은 글을 쓴다
+func halfLine(mac string, old []string) string {
+	if mac == "" || len(old) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("맥만 새 판 %s — 워커 %d대 옛 판 (%s) · herdr-sync로 맞춘다", mac, len(old), strings.Join(old, " "))
+}
+
 // behind: from..origin/main 커밋 수와 제목 머리(오래된 것부터, 겹침 없이). from을 모르면 n=-1
 func behind(from string) (int, []string) {
 	out, rc := gitq("-C", REPO, "log", "--format=%s", from+"..origin/main")
@@ -248,8 +256,8 @@ func showStatus(machines []string) int {
 		run = "없음"
 	}
 	fmt.Printf("origin/main %s%s · 지금 도는 배포 %s\n", om, note, run)
-	var lines []string
-	from := ""
+	var lines, old []string
+	from, macK := "", -1
 	for _, m := range append([]string{"맥"}, machines...) {
 		rows, ok := machineBins(m)
 		if !ok {
@@ -257,19 +265,25 @@ func showStatus(machines []string) int {
 			continue
 		}
 		c, d := machineCommit(rows, log)
-		if m == "맥" {
-			from = c
-		}
+		k := -1
 		if c != "" {
-			if k, _ := behind(c); k >= 0 {
+			if k, _ = behind(c); k >= 0 {
 				d += " · 뒤 " + strconv.Itoa(k) + "커밋"
 			}
+		}
+		if m == "맥" {
+			from, macK = c, k
+		} else if macK >= 0 && k > macK {
+			old = append(old, m)
 		}
 		lines = append(lines, m+": "+d)
 	}
 	p, _ := pendingLine(from)
 	fmt.Println(p + " (맥 기준)")
 	fmt.Println(strings.Join(lines, "\n"))
+	if l := halfLine(from, old); l != "" {
+		fmt.Println(l)
+	}
 	for _, l := range statusResident(resident.Dir(), time.Now()) {
 		fmt.Println(l)
 	}
@@ -277,10 +291,9 @@ func showStatus(machines []string) int {
 		l := log[len(log)-1]
 		fmt.Printf("마지막 배포 %s %s 종료 %s · %s · 부른 곳 %s\n", l.when, l.kind, l.rc, l.c12, l.by)
 	}
-	if autoOn() {
-		fmt.Println("스스로 배포 켬 (" + autoFile() + ")")
-	} else {
-		fmt.Println("스스로 배포 끔")
+	fmt.Println(autoLine())
+	if autoPubOn() {
+		fmt.Println(autoPubLine())
 	}
 	return 0
 }

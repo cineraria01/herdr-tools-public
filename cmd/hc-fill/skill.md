@@ -34,6 +34,7 @@
 - 우선순위: `hc-fill prio <레인> 긴급|높음|보통|낮음 --why <까닭>`
 - 손잡이: `hc-fill knob set <이름> <값> --why <까닭> [--for <분>]` · 되돌리기 `hc-fill knob unset <이름>`
 - 기계: `hc-fill machine <기계> --seats <n> --why <까닭> [--for <분>]` · `--pause` · 되돌리기 `--resume` 또는 `--seats -`
+- 기계 이름 바꾸기: hc가 새 이름을 보인 뒤 `hc-fill machine --rename <옛> <새> --dry-run` → `--why <까닭>`으로 실행 → 출력 「다음:」대로 `hc-fill merger restart <프로젝트>` → 설정 파일 커밋(이 명령은 커밋 안 함). 되돌리기 `hc-fill machine --rename <새> <옛>`
 - 빼기: `hc-fill rm <레인> --why <까닭>` (주차 중이면 `--force`가 있어야 — 준비 커밋을 버린다). 되돌리는 add 한 줄이 일지에 남는다.
 - 병합기 다시 띄우기: `hc-fill merger restart <프로젝트>`
 - 조치마다 일지에 「되돌리는 명령」이 남는다 — `hc-fill journal`에서 그대로 부른다.

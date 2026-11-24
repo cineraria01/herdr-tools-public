@@ -299,4 +299,8 @@ func statusTick() {
 	if s := tickStatus(); s != "" {
 		fmt.Println(s)
 	}
+	msgs, _, _ := onlandSyntax() // 착지 뒤 명령 구문 오류(onland_syntax.go)
+	for _, m := range msgs {
+		fmt.Println(m)
+	}
 }

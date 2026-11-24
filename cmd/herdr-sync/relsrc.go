@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"herdr-tools/internal/cksum"
 	"herdr-tools/internal/proc"
@@ -24,6 +25,12 @@ import (
 // 상대 경로 바이트 순으로 「crc 크기 경로」 줄로 적은 목록의 cksum(crc.크기). 숨김 파일·숨김 폴더 아래는 뺀다(herdr-sync 나무 줄이 걷지 않아 기계에 없다).
 // installSh의 cur(`find … ! -path '*/.*' | LC_ALL=C sort | xargs cksum | cksum`)와 같은 값
 func srcDigest(dir string) (string, error) {
+	_, d, err := srcFiles(dir)
+	return d, err
+}
+
+// srcFiles: srcDigest가 세는 파일(상대 경로, 바이트 순)과 그 판 — 기계에서 지을 때 이 목록만 판을 재고 꺼내 짓는다(filesSh)
+func srcFiles(dir string) ([]string, string, error) {
 	var files []string
 	for _, top := range []string{"go.mod", "cmd", "internal"} {
 		err := filepath.WalkDir(filepath.Join(dir, top), func(p string, d fs.DirEntry, err error) error {
@@ -46,7 +53,7 @@ func srcDigest(dir string) (string, error) {
 			return nil
 		})
 		if err != nil {
-			return "", fmt.Errorf("소스 걷기 %s: %w", top, err)
+			return nil, "", fmt.Errorf("소스 걷기 %s: %w", top, err)
 		}
 	}
 	sort.Strings(files)
@@ -54,16 +61,38 @@ func srcDigest(dir string) (string, error) {
 	for _, f := range files {
 		fh, err := os.Open(filepath.Join(dir, f))
 		if err != nil {
-			return "", fmt.Errorf("소스 읽기 %s: %w", f, err)
+			return nil, "", fmt.Errorf("소스 읽기 %s: %w", f, err)
 		}
 		c, n, err := cksum.Reader(fh)
 		fh.Close()
 		if err != nil {
-			return "", err
+			return nil, "", err
 		}
 		fmt.Fprintf(&b, "%d %d %s\n", c, n, f)
 	}
-	return cksum.Dot(b.Bytes()), nil
+	return files, cksum.Dot(b.Bytes()), nil
+}
+
+// filesSh: installSh 앞에 붙이는 파일 목록 변수(files, 줄마다 하나). 비면 그 기계가 제 폴더를 걷는다(옛 길)
+func filesSh(files []string) string {
+	return "files='" + strings.ReplaceAll(strings.Join(files, "\n"), "'", `'\''`) + "'\n"
+}
+
+// gh: 표준 출력·종료 코드·표준 오류(그대로도 흘린다). 상한(proc.Limit — gh는 HERDR_TIMEOUT_REMOTE)에 걸리면 124 = 모름
+func gh(args ...string) (string, int, string) {
+	var eb bytes.Buffer
+	c := exec.Command("gh", args...)
+	c.Stderr = io.MultiWriter(os.Stderr, &eb)
+	out, rc := output(c)
+	return out, rc, eb.String()
+}
+
+// buildMax: 릴리스 빌드 하나의 상한(A09) — 넘으면 그 무리째(컴파일러 자손까지) 끄고 이번 릴리스를 보류한다
+func buildMax() time.Duration {
+	if n, err := strconv.Atoi(os.Getenv("HERDR_TIMEOUT_BUILD")); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return 600 * time.Second
 }
 
 func goBin() string {

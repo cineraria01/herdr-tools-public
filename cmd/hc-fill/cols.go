@@ -295,6 +295,11 @@ const (
 	nuAddr = 2
 	nuAt   = 3
 
+	// 기계 옛 이름 machine-alias.tsv 「옛 새 바꾼 초」(rename.go — 병합기가 옛 이름으로 적은 결과 사건을 새 이름 것으로)
+	aaOld = 1
+	aaNew = 2
+	aaAt  = 3
+
 	// 첫 칸이 열쇠인 「열쇠 값」 줄(knobs-remote.tsv, 받은편지 요청 머리, spec-verifiers.tsv 등) — lsFirst는 어느 파일이든 첫 칸으로 찾는다
 	kvKey = 1
 	kvVal = 2

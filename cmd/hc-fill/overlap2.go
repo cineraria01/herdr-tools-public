@@ -206,10 +206,7 @@ func ownDone(n, a, start string) bool {
 		return false
 	}
 	t := lcCut(lx, evTime)
-	mg := map[string]bool{}
-	for _, x := range fields(MGM) {
-		mg[x] = true
-	}
+	mg := mgSet() // 이름 바꾼 기계의 옛 이름도(rename.go)
 	for _, l := range EV {
 		e := splitRow(l)
 		if t != "" && e.F(evLane) == n && e.F(evState) == "착지" && mg[e.F(evMach)] && !strings.Contains(e.F(evMsg), "제출 ID ") && e.F(evTime) > t {
