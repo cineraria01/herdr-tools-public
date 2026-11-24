@@ -48,6 +48,8 @@ func runRound() {
 	mergerTick()
 	tickMark("specverifiers")
 	specVerifiersTick()
+	tickMark("knobs")
+	knobsRemoteTick()
 	tickMark("onland")
 	onlandTick() // 대기열이 비어도(착지한 줄이 빠진 뒤) 돈다
 	tickMark("conf")

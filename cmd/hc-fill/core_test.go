@@ -148,6 +148,7 @@ func TestLandedUnknownOnGitFailure(t *testing.T) {
 func TestCountSeatsSimple(t *testing.T) {
 	setData(t)
 	HOME = t.TempDir()
+	defer func(o bool) { dry = o }(dry) // 뒤 시험에 dry를 남기지 않는다(ops-knobs-reland: 뒤의 TestKnobRemoteTick이 push 대신 dry-run으로 돌았다)
 	dry, AGENT, LOCAL = true, "claude-code", "here"
 	LANEADDR = []string{"b/l1"}
 	ALLM = []string{"s"}

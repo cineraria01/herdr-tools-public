@@ -30,8 +30,16 @@ func restAfter(l string, n int) string {
 	return strings.TrimRight(s, " \t")
 }
 
-// conf <키>: 그 키 첫 줄의 나머지(키 혼자면 빈 값)
+// conf <키>: 그 키 첫 줄의 나머지(키 혼자면 빈 값). 살아 있는 손잡이(hc-fill knob)가 있으면 그 값이 앞선다(knob.go)
 func conf(k string) string {
+	if v, ok := knobConf(k); ok {
+		return v
+	}
+	return confRaw(k)
+}
+
+// confRaw: 손잡이를 보지 않은 설정 줄 값
+func confRaw(k string) string {
 	for _, l := range confLines {
 		if f := fields(l); len(f) > 0 && f[0] == k {
 			return restAfter(l, 1)

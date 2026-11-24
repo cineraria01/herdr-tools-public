@@ -12,6 +12,7 @@ import (
 func TestCountSeatsEndedKeepShell(t *testing.T) {
 	setData(t)
 	HOME = t.TempDir()
+	defer func(o bool) { dry = o }(dry) // 뒤 시험에 dry를 남기지 않는다
 	dry, AGENT, LOCAL = true, "claude-code", "here"
 	ALLM, AUDN, AWT, NOWL, EVBAD = nil, nil, nil, nil, false
 	r := t.TempDir()

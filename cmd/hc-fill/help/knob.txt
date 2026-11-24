@@ -1,0 +1,4 @@
+        hc-fill knob ls [--json] | knob set <이름> <값> --why <까닭> [--for <분> | --until <시각>] [--pin] [--force] | knob unset <이름> [--force]
+  knob   실행 중에 바로 먹는 손잡이(docs/ops/knobs.md). ls: 이름·지금 값·출처(기본/설정/손잡이)·누가·왜·언제까지·범위·설명.
+         set: 다음 바퀴부터 설정 값보다 앞선다(--why 꼭, --for·--until이 지나면 설정 값으로, --pin이면 --force 없이 못 바꿈).
+         등록 표에 없는 이름·범위 밖 값은 거절한다. 저장 ~/.local/state/herdr-ops/knobs.tsv(git 밖)
