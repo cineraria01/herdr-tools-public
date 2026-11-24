@@ -50,6 +50,24 @@ func deployInstalled(lines []string) (ver map[string]string, order []string, las
 	return ver, order, lastAt
 }
 
+// deploySkipOnly: 배포 기록에 결과가 건너뜀뿐인 기계(이 기계 판의 배포 대상이 아님 — ops-state-trim)
+func deploySkipOnly(lines []string) map[string]bool {
+	o := map[string]bool{}
+	for _, l := range lines {
+		f := strings.Split(l, "\t")
+		if len(f) < 8 {
+			continue
+		}
+		for _, mr := range strings.Fields(f[7]) {
+			if m, r, ok := strings.Cut(mr, "="); ok {
+				_, seen := o[m]
+				o[m] = r == "건너뜀" && (!seen || o[m])
+			}
+		}
+	}
+	return o
+}
+
 // stateDeploy: s.Deploy를 채우고 재료 한 줄을 돌려준다
 func stateDeploy(s *opsstate.State, now time.Time) opsstate.Source {
 	src := opsstate.Source{Name: "deploy"}
@@ -59,6 +77,7 @@ func stateDeploy(s *opsstate.State, now time.Time) opsstate.Source {
 		return src
 	}
 	ver, order, at := deployInstalled(lines(b))
+	skip := deploySkipOnly(lines(b))
 	if !at.IsZero() {
 		src.AgeS = ptrI(int(now.Sub(at).Seconds()))
 	}
@@ -69,6 +88,9 @@ func stateDeploy(s *opsstate.State, now time.Time) opsstate.Source {
 		d := opsstate.Deploy{Machine: m, Version: ver[m], Why: "배포 기록상 판"}
 		if d.Version == "" {
 			d.Why = "기록에 깐 판 없음(실패·충돌만)"
+			if skip[m] {
+				d.Why = opsstate.DeployNotTarget
+			}
 			s.Deploy = append(s.Deploy, d)
 			continue
 		}

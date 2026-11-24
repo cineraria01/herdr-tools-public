@@ -53,6 +53,7 @@ var Defs = []Def{
 	{Name: "state_stage", Tool: "hc-fill", Default: "90", Min: 0, Max: 10080, Unit: "분", Desc: "레인이 같은 단계에 이만큼 머물면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_hot", Tool: "hc-fill", Default: "200", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 이 값 이상인 기계와 state_cool 이하인 기계가 함께 있으면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_cool", Tool: "hc-fill", Default: "50", Min: 0, Max: 10000, Unit: "%", Desc: "치우침의 한가한 쪽 코어당 부하"},
+	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
 	// knobs-migrate(2026-11-24): 고정으로 박혔던 hc-fill 설정 키(설정 줄보다 앞선다 — conf가 먼저 본다). 기본은 지금 코드의 값 그대로

@@ -34,6 +34,7 @@ type State struct {
 	Journal     []string    `json:"journal"`
 	Events      []string    `json:"events"`
 	Notable     []string    `json:"notable"`
+	Hidden      *Hidden     `json:"hidden"`
 }
 
 // Source: 재료 하나 — 어디서 언제 읽었나, 이번 호출에서 든 원격 호출 수·초
@@ -99,6 +100,11 @@ func (h *Health) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// known: 건강 넷 가운데 하나라도 값이 있나
+func (h Health) known() bool {
+	return h.Sleep != "" || h.Keychain != "" || h.DiskFreeGB != nil || h.Tailscale != ""
+}
+
 // MachineUnknown: 닿지 못한 기계 — 잰 칸은 모두 모름
 func MachineUnknown(name, why string) Machine { return Machine{Name: name, Reach: "unknown", Why: why} }
 
@@ -128,6 +134,9 @@ type MergeLine struct {
 	LastRoundAgeS *int     `json:"last_round_age_s"`
 	RecentVerifyS *float64 `json:"recent_verify_s"`
 	SkipRatio     *float64 `json:"skip_ratio"`
+	Lands         *int     `json:"lands"`
+	Skipped       *int     `json:"skipped"`
+	Delegated     *int     `json:"delegated"`
 	Why           string   `json:"why"`
 }
 
@@ -209,7 +218,7 @@ func Notable(s State, th Thresholds) []string {
 		o = append(o, "코어당 부하 치우침: 바쁨 "+strings.Join(hot, ", ")+" · 한가 "+strings.Join(cool, ", "))
 	}
 	for _, l := range s.Lanes {
-		if th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 && !strings.HasPrefix(l.Stage, "착지") {
+		if th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 && !Finished(l) {
 			o = append(o, fmt.Sprintf("레인 %s: 같은 단계에 %d분 — %s", l.Name, *l.StageAgeS/60, l.Stage))
 		}
 	}
@@ -284,6 +293,9 @@ func Fingerprint(s State) string {
 		w("qo", o.Lane, o.Why)
 	}
 	for _, l := range s.Lanes {
+		if Finished(l) { // 끝난 줄이 창 밖으로 나가도(기본 출력에서 숨겨져도) 지문은 그대로 — 착지는 사건·대기열 수에 남는다
+			continue
+		}
 		w("l", l.Name, l.Machine, minutesRe.ReplaceAllString(l.Stage, "분"), l.LastEvent)
 	}
 	for _, m := range s.Merge {
@@ -373,6 +385,11 @@ func Human(w io.Writer, s State) error {
 	p("재료: %s", or(strings.Join(src, " · "), "-"))
 
 	p("\n기계")
+	// 추린 출력(Hidden 있음)은 건강 값이 있는 기계 줄에만 건강을 적고, 모두 모름이면 절 끝에 한 줄
+	trim, anyH := s.Hidden != nil, false
+	for _, m := range s.Machines {
+		anyH = anyH || m.Reach == "ok" && m.Health.known()
+	}
 	for _, m := range s.Machines {
 		if m.Reach != "ok" {
 			p("  %s  모름(%s)%s", m.Name, or(m.Why, "까닭 모름"), steer(m))
@@ -382,10 +399,16 @@ func Human(w io.Writer, s State) error {
 		if m.LoadPerCore != nil {
 			ld = fmt.Sprintf("부하 %s/%s(코어당 %.2f)", fval(m.Load1, "%.1f"), ival(m.Cores), *m.LoadPerCore)
 		}
-		hl := m.Health
-		p("  %s  %s  에이전트 %s/%s  레인 %s/%s  건강 잠자기 %s·키체인 %s·디스크 %s·tailscale %s%s",
-			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap),
-			or(hl.Sleep, "모름"), or(hl.Keychain, "모름"), fval(hl.DiskFreeGB, "%.0fGB"), or(hl.Tailscale, "모름"), steer(m))
+		hl, ht := m.Health, ""
+		if !trim || hl.known() {
+			ht = fmt.Sprintf("  건강 잠자기 %s·키체인 %s·디스크 %s·tailscale %s",
+				or(hl.Sleep, "모름"), or(hl.Keychain, "모름"), fval(hl.DiskFreeGB, "%.0fGB"), or(hl.Tailscale, "모름"))
+		}
+		p("  %s  %s  에이전트 %s/%s  레인 %s/%s%s%s",
+			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), ht, steer(m))
+	}
+	if trim && !anyH && len(s.Machines) > 0 {
+		p("  건강 값 없음 — 점검이 아직 안 남김")
 	}
 
 	var ks []string
@@ -409,20 +432,30 @@ func Human(w io.Writer, s State) error {
 			p("  없음")
 		}
 	}
-	sec("레인", len(s.Lanes))
+	hid := s.Hidden
+	if hid == nil {
+		hid = &Hidden{}
+	}
+	sec("레인", len(s.Lanes)+hid.Lanes)
 	for _, l := range s.Lanes {
 		p("  %s  %s  %s  %s째  마지막 %s", l.Name, or(l.Machine, "-"), l.Stage, age(l.StageAgeS), or(l.LastEvent, "없음"))
+	}
+	if hid.Lanes > 0 {
+		p("  끝난 레인 %d줄 숨김(--all)", hid.Lanes)
 	}
 	sec("병합 줄", len(s.Merge))
 	for _, m := range s.Merge {
 		t := fmt.Sprintf("  %s  줄 %s · 병합기 %s · 마지막 바퀴 %s 전 · 최근 검증 %s · 건너뜀 %s",
 			m.Project, ival(m.Length), m.Merger, age(m.LastRoundAgeS), fval(m.RecentVerifyS, "%.0f초"), fval(pct(m.SkipRatio), "%.0f%%"))
+		if m.Lands != nil {
+			t += fmt.Sprintf("(최근 착지 %d번 중 %s번) · 검증 맡김 %s번", *m.Lands, ival(m.Skipped), ival(m.Delegated))
+		}
 		if m.Why != "" {
 			t += " (" + m.Why + ")"
 		}
 		p("%s", t)
 	}
-	sec("배포", len(s.Deploy))
+	sec("배포", len(s.Deploy)+hid.Deploy)
 	for _, d := range s.Deploy {
 		if d.Version == "" {
 			p("  %s  모름(%s)", d.Machine, or(d.Why, "까닭 모름"))
@@ -434,13 +467,19 @@ func Human(w io.Writer, s State) error {
 		}
 		p("%s", t)
 	}
-	sec("감시", len(s.Watch))
+	if hid.Deploy > 0 {
+		p("  대상 아님 %d대(--all)", hid.Deploy)
+	}
+	sec("감시", len(s.Watch)+hid.Watch)
 	for _, x := range s.Watch {
 		st := "모름"
 		if x.Alive != nil {
 			st = map[bool]string{true: "돎", false: "안 돎"}[*x.Alive]
 		}
 		p("  %s  %s", x.Owner, st)
+	}
+	if hid.Watch > 0 {
+		p("  안 도는 지휘 흔적 %d개(--all)", hid.Watch)
 	}
 	sec("손잡이", len(s.Knobs))
 	for _, k := range s.Knobs {

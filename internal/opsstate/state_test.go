@@ -51,6 +51,7 @@ func fake() State {
 		Knobs:   []Knob{{Name: "idle", Value: "20", By: "t1", Why: "밤", Until: "2026-11-24 18:00"}},
 		Journal: []string{"12:00 knob set idle 20"},
 		Events:  []string{"11:58 lane-ok 완료"},
+		Hidden:  &Hidden{Lanes: 3, Watch: 1},
 	}
 }
 

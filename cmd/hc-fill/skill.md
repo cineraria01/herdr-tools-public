@@ -17,7 +17,7 @@
 
 ## 상태 보기
 
-- `hc-fill state --json` — 한 장에 기계·대기열·레인·병합·배포·손잡이·사건. 지문(fingerprint)이 같으면 다시 볼 필요 없다. 칸: docs/ops/state.md
+- `hc-fill state --json` — 한 장에 기계·대기열·레인·병합·배포·손잡이·사건. 지문(fingerprint)이 같으면 다시 볼 필요 없다. 기본은 움직이는 것만(숨긴 수 hidden), 전체는 `--all`. 칸: docs/ops/state.md
 - `hc-fill ls --json` — 대기열 줄마다(칸: docs/ops/agents.md). 사람용 표는 `hc-fill ls`.
 - `hc-fill status` — 레인마다 단계·기계·예상, 끝에 기계 줄과 병합기.
 - `hc-fill machine --json` — 기계마다 부하·자리·조정·안 띄운 까닭.

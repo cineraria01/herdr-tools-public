@@ -18,19 +18,30 @@ import (
 
 func init() { register("state", stateCmd) }
 
-// stateCmd: state [--json]
+// stateCmd: state [--json] [--all] — 기본은 추린 것(opsstate.Trim, 끝난 레인 창 손잡이 state_done), --all은 전체.
+// 지문은 늘 추린 것으로(--all도 같은 지문), 눈에 띄는 것은 보이는 것으로
 func stateCmd(args []string) {
-	js := false
-	switch {
-	case len(args) == 0:
-	case len(args) == 1 && args[0] == "--json":
-		js = true
-	default:
-		usage()
+	js, all := false, false
+	for _, a := range args {
+		switch {
+		case a == "--json" && !js:
+			js = true
+		case a == "--all" && !all:
+			all = true
+		default:
+			usage()
+		}
 	}
 	s := stateCollect(time.Now())
-	s.Notable = opsstate.Notable(s, stateThresholds())
-	s.Fingerprint = opsstate.Fingerprint(s)
+	th := stateThresholds()
+	tr := opsstate.Trim(s, knobInt("state_done"))
+	tr.Notable = opsstate.Notable(tr, th)
+	tr.Fingerprint = opsstate.Fingerprint(tr)
+	if all {
+		s.Notable, s.Fingerprint = opsstate.Notable(s, th), tr.Fingerprint
+	} else {
+		s = tr
+	}
 	var err error
 	if js {
 		err = opsstate.JSON(os.Stdout, s)
@@ -177,21 +188,24 @@ func stateCollect(now time.Time) opsstate.State {
 		s.Machines = append(s.Machines, x)
 	}
 
-	// 병합 줄: run 바퀴의 병합기 살아 있음 기록. 병합기 바퀴 시각·검증 시간·건너뜀은 병합기 기계에만 있어 모름
+	// 병합 줄: run 바퀴의 병합기 살아 있음 기록. 병합기 바퀴 시각·검증 시간·건너뜀은 병합기 기계 일지에만 — 이 기계 병합기면
+	// 로컬 일지에서 읽고(statemerge.go), 다른 기계면 모름
 	mr := maLoad()
 	var ps []string
 	for p := range mr {
 		ps = append(ps, p)
 	}
 	sort.Strings(ps)
+	mj := stateMergeJournal(mr, rows)
 	for _, p := range ps {
 		x := mr[p]
-		g := opsstate.MergeLine{Project: p, Merger: x.St, Why: "병합기 바퀴 시각·검증 시간·건너뜀은 병합기 기계 일지에만 — 아직 안 모음"}
+		g := opsstate.MergeLine{Project: p, Merger: x.St}
 		if n, err := strconv.Atoi(x.K); err == nil {
 			g.Length = ptrI(n)
 		}
+		mj(&g, x, now)
 		if x.Why != "" && x.Why != "-" {
-			g.Why = x.Why + " · " + g.Why
+			g.Why = strings.TrimSuffix(x.Why+" · "+g.Why, " · ")
 		}
 		s.Merge = append(s.Merge, g)
 	}

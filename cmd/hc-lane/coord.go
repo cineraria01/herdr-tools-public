@@ -170,7 +170,8 @@ func coordRead(path string) ([]string, int) {
 
 // coordSet: 살아 있고 레인·감시 터미널이 아니면 지휘 정보로 적는다. launch면 띄운 시각을 지금으로, 아니면 같은 pid의 옛 시각 그대로
 func coordSet(addr string, launch bool) bool {
-	pid, name, ll, rc := tinfo(addr)
+	t, found, err := hcGet(10, addr)
+	pid, name, ll, rc := tinfoOf(t, found, err)
 	if rc != 0 || ll {
 		return false
 	}
@@ -186,7 +187,11 @@ func coordSet(addr string, launch bool) bool {
 		return false
 	}
 	// 사용자 전용 장부 — 구판이 0666으로 만든 기존 파일도 갈 때 0600으로 좁힌다(재감사2 lane/R-221·merger/R-206)
-	return atomic.WriteFileMode(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o600) == nil
+	if atomic.WriteFileMode(f, []byte(addr+tab+pid+tab+flat(name)+tab+ts+"\n"), 0o600) != nil {
+		return false
+	}
+	coordCwdRepo(addr, t)
+	return true
 }
 
 // coordRepoFile: 지휘가 다루는 저장소 기록 <evdir>/coordrepo.<주소> 「pid<탭>저장소」(watch-project-route) — coord.<주소> 꼴은 그대로 두려고
@@ -206,6 +211,28 @@ func coordRepoAdd(addr, rid string) {
 	}
 	if err := appendLines(f, l); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane: 경고 — 지휘 저장소 기록을 쓰지 못했다(그 지휘는 모든 저장소 사건을 받는다): %s\n", f)
+	}
+}
+
+// coordCwdRepo: 지휘 터미널이 서 있는 폴더(띄운 폴더 cwd·전경 폴더 foreground.cwd)의 저장소도 그 지휘가 다룬다고 적는다(coord-cwd-repo —
+// 저장소 A 폴더에서 B에만 레인을 넣은 지휘의 기록에 A가 없어 A 받은편지 레인 사건이 모든 지휘에게 갔다). coordSet·coordCheck(watch 바퀴마다
+// wcheck)가 부르니 옛 판이 적은 지휘도 다음 바퀴에 채워진다. 넓히기만: 기록이 없는 지휘(모름 = 모든 저장소)는 그대로, 저장소 아님·원격
+// 없음·읽기 실패는 안 넣음, 다른 기계 터미널(주소에 /)은 그 폴더가 이 기계 것이 아니라 안 봄.
+// ponytail: 첫 레인을 띄운 순간(기록 모름 → 그 저장소)부터 다음 바퀴까지는 작업 폴더 저장소가 빠진다 — 그사이 그 사건은 겹칠 수는 있어도 안 빠진다
+func coordCwdRepo(addr string, t hcjson.Terminal) {
+	if strings.Contains(addr, "/") {
+		return
+	}
+	if _, known := coordRepos(addr); !known {
+		return
+	}
+	for _, d := range []string{t.Cwd, t.NowCwd} {
+		if d == "" {
+			continue
+		}
+		if u, rc := capt(10, errDrop, "git", "-C", d, "config", "--get", "remote.origin.url"); rc == 0 {
+			coordRepoAdd(addr, repoID(u))
+		}
 	}
 }
 
@@ -277,6 +304,7 @@ func coordCheck(addr string) (cad, why string, rc int) {
 	case 2:
 		return cad, fmt.Sprintf("%s 에이전트 확인 못 함 — %s", cad, why), 2
 	}
+	coordCwdRepo(cad, t)
 	return cad, "", 0
 }
 
