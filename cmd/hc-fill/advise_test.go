@@ -51,7 +51,7 @@ func TestAdviseCollect(t *testing.T) {
 	}
 	c, ok := by["free-wait:lane-c"]
 	if !ok || c.Sure != opsstate.SureYes || len(c.Next) != 1 ||
-		c.Next[0] != "hc-fill rm lane-c --why '겹침 풀기(hc-fill advise)' && hc-fill add --name lane-c --project 'app' --brief '"+DATA+"/briefs/added/lane-c.md' --priority 보통 --coord 'm/t1' --overlap-ok" {
+		c.Next[0] != "hc-fill edit lane-c --overlap-ok --why '겹침 풀기(hc-fill advise)'" {
 		t.Errorf("겹침 대기: %+v\n전체 %+v", c, a.Items)
 	}
 	if !strings.Contains(c.Evidence, "빈 자리 2(m 2)") || !strings.Contains(c.Evidence, "lane-a 작업 중(working)") {

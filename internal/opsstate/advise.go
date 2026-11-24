@@ -75,9 +75,7 @@ type Wait struct {
 	Keys          []string // 겹치는 파일·폴더(overlap.tsv — 두 개까지만 적힌다)
 	Solo          bool     // 단독 대기
 	Reject        string   // 띄우기 거절 까닭
-	Parked        bool     // 주차 중(rm은 --force가 있어야 — 준비 커밋을 버린다)
 	Can           []string // 띄울 수 있는 기계(저장소 있음·기계 제한). nil = 모름(모든 기계로 본다)
-	Readd         string   // rm 뒤 다시 넣는 add 한 줄
 }
 
 func shq(s string) string {
@@ -182,7 +180,8 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		}
 		return "단계 모름(떠 있는 레인에 없음)"
 	}
-	old := func(w Wait) bool { return w.AgeS == nil || *w.AgeS >= th.IdleMin*60 }
+	// 손잡이 idle 0이면 끔(문서 「0이면 끔」 — 나이 ≥ 0이 늘 참이라 모든 대기 줄이 항목이 됐다, advise-fixes)
+	old := func(w Wait) bool { return th.IdleMin > 0 && (w.AgeS == nil || *w.AgeS >= th.IdleMin*60) }
 	waitBy := map[string]Wait{}
 	for _, w := range f.Waits {
 		waitBy[w.Lane] = w
@@ -272,12 +271,10 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			default:
 				gain = "파일 " + strings.Join(w.Keys, ",") + " 함께 고침(두 개까지만 적힘) — 착지 때 rebase 충돌 풀이"
 			}
-			next := []string{"hc-fill rm " + w.Lane + " --why '겹침 풀기(hc-fill advise)' && " + w.Readd + " --overlap-ok"}
+			// edit는 줄 ID·주차 표식·다른 칸을 그대로 두고 겹침칸만 바꾼다 — rm && add는 add가 실패하면 줄이 사라지고 옵션이 안 돌아왔다(advise-fixes)
+			next := []string{"hc-fill edit " + w.Lane + " --overlap-ok --why '겹침 풀기(hc-fill advise)'"}
 			if w.Solo {
 				next, sure = nil, SureHuman
-			} else if w.Parked || w.Readd == "" {
-				next, sure = nil, SureHuman // 주차 중이면 rm이 준비 커밋을 버린다(되돌릴 수 없음)
-				gain += " · 주차 중이거나 다시 넣을 줄을 몰라 명령을 내지 않음"
 			}
 			add(Item{Key: "free-wait:" + w.Lane, Kind: "free-wait",
 				What:     fmt.Sprintf("풀 수 있는 대기: %s(%s %s)", w.Lane, what, w.Front),
@@ -314,16 +311,15 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 				it.Sure = SureHuman
 				it.Evidence += " · 터미널 주소 모름"
 			} else {
-				it.Next = []string{"hc read " + addr}
-				for _, e := range extra {
-					it.Next = append(it.Next, "hc send "+addr+" "+shq(e))
-				}
+				it.Next = append([]string{"hc read " + addr}, extra...)
 			}
 			add(it)
 		}
 		switch {
 		case strings.HasPrefix(l.Stage, "작업 중(error"):
-			look("lane-error", "멈춘 레인(터미널 error)", "그대로 두면 이 레인은 더 나아가지 않고 자리를 잡는다", "이어서 진행하라")
+			// 맨 hc send가 아니라 nudge — 주소의 터미널 이름 대조·이미 보고한 실행 거절·nudge_every 되풀이 막기를 거친다(advise-fixes)
+			look("lane-error", "멈춘 레인(터미널 error)", "그대로 두면 이 레인은 더 나아가지 않고 자리를 잡는다",
+				"hc-fill nudge "+shq(l.Name)+" --why '멈춘 레인(hc-fill advise)'")
 		case strings.HasPrefix(l.Stage, "작업 중(blocked"):
 			look("lane-blocked", "멈춘 레인(터미널이 답을 기다림)", "물음·권한 창에 답할 때까지 자리를 잡는다")
 		case strings.HasPrefix(l.Stage, "작업 중(done"):
@@ -402,14 +398,14 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		}
 	}
 
-	// 감시
-	for _, w := range s.Watch {
+	// 감시 — Trim이 숨긴 안 도는 감시까지(숨긴 뒤에 보면 이 갈래에 닿지 않았다, advise-fixes). 지휘가 사라진 흔적(Need 거짓)은 빼고
+	for _, w := range append(append([]Watch(nil), s.Watch...), s.goneWatch...) {
 		switch {
 		case w.Alive == nil:
 			add(unknown("watch:"+w.Owner, "지휘 "+w.Owner+" 감시", "hc ls 못 읽음"))
-		case !*w.Alive:
+		case !*w.Alive && w.Need:
 			add(Item{Key: "watch:" + w.Owner, Kind: "watch", What: "지휘 " + w.Owner + " 감시 안 돎(열린 레인 있음)",
-				Evidence: "감시 터미널이 hc ls에 없음", Cost: "그 지휘가 레인 사건을 받지 못한다",
+				Evidence: "지휘 터미널은 있는데 감시 터미널이 hc ls에 없음", Cost: "그 지휘가 레인 사건을 받지 못한다",
 				Next: []string{"hc-lane coord --watch " + w.Owner}, Sure: SureYes})
 		}
 	}

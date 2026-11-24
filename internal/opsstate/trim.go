@@ -39,9 +39,11 @@ func Trim(s State, doneMin int) State {
 		t.Lanes = append(t.Lanes, l)
 	}
 	t.Watch = []Watch{}
+	t.goneWatch = append([]Watch(nil), s.goneWatch...) // 두 번 추려도 남는다
 	for _, w := range s.Watch {
 		if w.Alive != nil && !*w.Alive {
 			h.Watch++
+			t.goneWatch = append(t.goneWatch, w) // 출력에선 숨겨도 손댈 것 「감시 안 돎」은 본다(advise-fixes)
 			continue
 		}
 		t.Watch = append(t.Watch, w)

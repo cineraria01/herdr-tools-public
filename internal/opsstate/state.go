@@ -35,6 +35,7 @@ type State struct {
 	Events      []string    `json:"events"`
 	Notable     []string    `json:"notable"`
 	Hidden      *Hidden     `json:"hidden"`
+	goneWatch   []Watch     // Trim이 숨긴 안 도는 감시 — Advise가 본다(숨기기 전 상태로 판정)
 }
 
 // Source: 재료 하나 — 어디서 언제 읽었나, 이번 호출에서 든 원격 호출 수·초
@@ -184,6 +185,9 @@ func (d *Deploy) UnmarshalJSON(b []byte) error {
 type Watch struct {
 	Owner string `json:"owner"`
 	Alive *bool  `json:"alive"`
+	// Need: 감시가 있어야 한다 — 지휘 터미널이 hc ls에 있고 착지·판정 전 열린 줄이 있다(손댈 것 「감시 안 돎」만 쓴다, 출력 칸 아님).
+	// 지휘가 사라진 흔적은 거짓: 그 지휘의 사건은 다른 살아 있는 지휘의 감시가 받는다(hc-lane watch wfilter)
+	Need bool `json:"-"`
 }
 
 type Knob struct {

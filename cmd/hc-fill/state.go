@@ -244,25 +244,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		s.Merge = append(s.Merge, g)
 	}
 
-	// 감시: 열린 줄이 있는 주인 지휘마다 그 감시 터미널(hc-lane이 띄우는 이름 lane-watch-<주인>)이 hc ls에 있나
-	seen := map[string]bool{}
-	for _, r := range rows {
-		o := r.F(qOwner)
-		if o == "" || o == "-" || seen[o] || !(r.F(qState) == "up" || r.F(qState) == "wait" && r.F(qEarly) == "parked") {
-			continue
-		}
-		seen[o] = true
-		w := opsstate.Watch{Owner: o}
-		if termsOK {
-			w.Alive = ptrB(false)
-			for _, t := range terms {
-				if t.Name == watchName(o) {
-					w.Alive = ptrB(true)
-				}
-			}
-		}
-		s.Watch = append(s.Watch, w)
-	}
+	s.Watch = stateWatch(rows, last, terms, termsOK)
 
 	// 손잡이(살아 있는 것)
 	es := knobEntries()
@@ -297,6 +279,43 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	f.DeployHold = deployHoldIf(s.Deploy, now)
 	s.Sources = []opsstate.Source{tick, hc, dep, jr}
 	return s, f
+}
+
+// stateWatch: 열린 줄이 있는 주인 지휘마다 그 감시 터미널(hc-lane이 띄우는 이름 lane-watch-<주인>)이 hc ls에 있나.
+// Need(손댈 것 「감시 안 돎」만 씀): 착지·판정 전 열린 줄(watchOwners와 같은 「열림」 — 착지한 줄의 감시는 한가로 끝나는 것이 맞다)이
+// 있고 지휘 터미널이 hc ls에 있다. 지휘가 사라진 흔적은 그 사건을 다른 살아 있는 지휘의 감시가 받는다(hc-lane watch wfilter, advise-fixes)
+func stateWatch(rows []Row, last map[string]Row, terms []lsTerm, termsOK bool) []opsstate.Watch {
+	ws := []opsstate.Watch{}
+	seen, open := map[string]bool{}, map[string]bool{}
+	for _, r := range rows {
+		o := r.F(qOwner)
+		if o == "" || o == "-" || !(r.F(qState) == "up" || r.F(qState) == "wait" && r.F(qEarly) == "parked") {
+			continue
+		}
+		if x := last[r.F(qName)]; r.F(qState) == "wait" || x == nil || x.F(lsRID) != r.F(qRID) || x.F(lsState) != "착지" && x.F(lsState) != "판정" {
+			open[o] = true
+		}
+		if seen[o] {
+			continue
+		}
+		seen[o] = true
+		w := opsstate.Watch{Owner: o}
+		if termsOK {
+			w.Alive = ptrB(false)
+			for _, t := range terms {
+				if t.Name == watchName(o) {
+					w.Alive = ptrB(true)
+				}
+			}
+		}
+		ws = append(ws, w)
+	}
+	for i, w := range ws {
+		for _, t := range terms { // 이 기계 터미널은 주소에 기계가 안 붙는다
+			ws[i].Need = ws[i].Need || open[w.Owner] && (t.Addr == w.Owner || LOCAL+"/"+t.Addr == w.Owner)
+		}
+	}
+	return ws
 }
 
 // watchName: hc-lane이 지휘 주소로 짓는 감시 터미널 이름(cmd/hc-lane/launchaux.go watchFor·hcx.go ckey와 같은 규칙)

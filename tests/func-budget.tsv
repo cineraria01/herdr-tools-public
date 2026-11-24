@@ -1,6 +1,5 @@
 # 함수 길이 예산(tests/repo TestFuncBudget): 한도(200줄)를 이미 넘은 함수만 「<천장> <경로> <함수>」(메서드는 <형>.<이름>). 천장은 지금 줄 수에 여유를 둔 값(25줄 단위 올림, 여유 10줄 미만이면 한 칸 더) — 넘으면 실패, 여유가 50줄 이상이면 내린다. 레인은 올리지 못한다 — 내리기·지우기만
 275 cmd/hc-fill/launch2.go launch
-225 cmd/hc-fill/state.go stateCollectF
 325 cmd/hc-lane/stats.go statsReport
 275 cmd/hc-lane/submit.go submitCmd
 225 cmd/hc-lane/watch.go ev.loop

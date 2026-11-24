@@ -145,8 +145,8 @@ func digestText(dig []string, since time.Duration) string {
 	var ops []string
 	for _, l := range dig {
 		x := events.Cols(l)
-		if x.KindOf() == events.KindOps {
-			ops = append(ops, wpart(l))
+		if x.KindOf() == events.KindOps { // 끝 줄과 같은 안내는 떼고 끝에 한 번(착지 뒤 명령 성공이 「→ hc-fill status ‖ → hc-fill status」로 갔다)
+			ops = append(ops, strings.TrimSuffix(wpart(l), " "+digestTail))
 			continue
 		}
 		// 감사 레인(hc-fill이 띄우는 audit-<레인>)의 판정은 그 레인 줄에 「감사 …」로 접는다
@@ -170,8 +170,11 @@ func digestText(dig []string, since time.Duration) string {
 		parts = append(parts, lane+": "+strings.Join(chain[lane], " → "))
 	}
 	parts = append(parts, ops...)
-	return strings.Join(append(parts, "→ hc-fill status"), " ‖ ")
+	return strings.Join(append(parts, digestTail), " ‖ ")
 }
+
+// digestTail: 묶음 끝 줄
+const digestTail = "→ hc-fill status"
 
 // digestCut: 앞 n글자(룬), 잘랐으면 「…」
 func digestCut(s string, n int) string {

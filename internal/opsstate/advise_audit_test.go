@@ -22,8 +22,10 @@ func TestFingerprintAgeUnits(t *testing.T) {
 	fpOf := func(stage int, wait int) string {
 		s := aBase()
 		s.Lanes[0].StageAgeS = ip(stage)
-		f := Facts{Waits: []Wait{{Lane: "doc-a", Project: "p", AgeS: ip(wait), Front: "lane-front", Keys: []string{"docs/x.md"}, Readd: readd("doc-a")}}}
-		s.Notable = Summaries(Advise(s, f, Thresholds{IdleMin: 0}))
+		// idle 0은 끔(advise-fixes) — 겹침 줄은 오래 기다린 것으로 앞 레인 단계 나이를, 기다린 나이는 나이와 무관한 거절 줄이 근거에 낸다
+		f := Facts{Waits: []Wait{{Lane: "doc-a", Project: "p", AgeS: ip(3600), Front: "lane-front", Keys: []string{"docs/x.md"}},
+			{Lane: "rj", Project: "p", AgeS: ip(wait), Reject: "가지가 이미 있음"}}}
+		s.Notable = Summaries(Advise(s, f, Thresholds{IdleMin: 1}))
 		if len(s.Notable) == 0 {
 			t.Fatal("항목 없음")
 		}

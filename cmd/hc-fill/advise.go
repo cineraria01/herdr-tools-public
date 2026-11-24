@@ -60,10 +60,10 @@ func adviseNow(now time.Time) opsstate.Advice {
 	return opsstate.Advice{Schema: opsstate.AdviseSchema, At: now, Fingerprint: opsstate.Fingerprint(tr), Items: it}
 }
 
-// adviseWait <대기 줄>: 그 줄이 무엇을 기다리나 — 거절·겹침(overlap.tsv, run 바퀴가 적음)·선행, 띄울 수 있는 기계, 다시 넣는 add 한 줄
+// adviseWait <대기 줄>: 그 줄이 무엇을 기다리나 — 거절·겹침(overlap.tsv, run 바퀴가 적음)·선행, 띄울 수 있는 기계
 func adviseWait(r Row, now time.Time) opsstate.Wait {
 	name, p := r.F(qName), r.F(qProj)
-	w := opsstate.Wait{Lane: name, Project: p, Reject: rejWhy(name, r.F(qRID)), Parked: r.F(qEarly) == "parked", Can: []string{}}
+	w := opsstate.Wait{Lane: name, Project: p, Reject: rejWhy(name, r.F(qRID)), Can: []string{}}
 	if a, ok := stateAddedAge(r.F(qAdded), now); ok {
 		w.AgeS = ptrI(a)
 	}
@@ -85,16 +85,6 @@ func adviseWait(r Row, now time.Time) opsstate.Wait {
 			w.Can = append(w.Can, mc.Name)
 		}
 	}
-	// 받은편지 줄은 rm이 요청을 취소한다 — 다시 넣는 줄을 내지 않는다(사람이 정한다)
-	if _, _, inbox := replyOf(r.F(qReply)); !inbox {
-		w.Readd = rmUndo(r)
-		if r.F(qEarly) == "no-early" {
-			w.Readd += " --no-early"
-		}
-		if r.F(qAudit) == "no-audit" {
-			w.Readd += " --no-audit"
-		}
-	}
 	return w
 }
 
@@ -107,6 +97,45 @@ func adviseKnown() map[string]bool {
 		}
 	}
 	return k
+}
+
+// adviseHeld <손댈 것>: 지난 열쇠 가운데 이번에 판정 못 한 재료로 찾는 것(읽었고 항목이 없을 때만 지운다). 병합기 모름은 그 프로젝트의
+// merger·merge-stall·merge-slow, 배포 모름은 그 기계(재료 deploy 모름이면 모든 deploy), 감시 모름은 그 지휘, 상주 판 모름은 resident.
+// hc·바퀴 기록·기계 연결 모름은 자리·레인 판정 모두가 기대므로 전부, 모르는 꼴도 전부(모름은 모름). 일지(journal)는 손댈 것의 재료가 아니다
+func adviseHeld(items []opsstate.Item) func(string) bool {
+	all := false
+	var exact, pre []string
+	for _, it := range items {
+		if it.Kind != "unknown" {
+			continue
+		}
+		k := strings.TrimPrefix(it.Key, "unknown:")
+		kind, name, _ := strings.Cut(k, ":")
+		switch {
+		case k == "source:journal":
+		case k == "source:deploy":
+			pre = append(pre, "deploy:")
+		case k == "resident":
+			pre = append(pre, "resident:")
+		case kind == "deploy" || kind == "watch":
+			exact = append(exact, k)
+		case kind == "merger":
+			exact = append(exact, k, "merge-stall:"+name, "merge-slow:"+name)
+		default:
+			all = true
+		}
+	}
+	return func(key string) bool {
+		if all || has(exact, key) {
+			return true
+		}
+		for _, p := range pre {
+			if strings.HasPrefix(key, p) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // adviseTick <지금>: advise_every분(손잡이, 0이면 끔)마다 손댈 것을 다시 보고, 지난번 목록(<DATA>/advise.tsv — 첫 줄 본 초, 그다음
@@ -129,13 +158,26 @@ func adviseTick(now time.Time) {
 	}
 	var keep []string
 	var fresh []opsstate.Item
-	for _, it := range adviseNow(now).Items {
+	items := adviseNow(now).Items
+	// 재료를 못 읽은 바퀴: 그 재료로 찾는 지난 열쇠는 그대로 두고(지우면 회복한 바퀴에 같은 사건이 다시 나갔다), 그 재료에 딸린 새 항목도
+	// 보내지 않고 미룬다(hc ls 한 번 못 읽을 때마다 단계 「모름」 레인이 lane-long으로 새로 나갔다) — 다음에 읽힌 바퀴에도 있으면 그때 한 번(advise-fixes)
+	held := adviseHeld(items)
+	now1 := map[string]bool{}
+	for _, it := range items {
+		now1[it.Key] = true
 		switch {
 		case it.Kind == "unknown":
 		case prev[it.Key]:
 			keep = append(keep, it.Key)
+		case held(it.Key):
 		default:
 			fresh = append(fresh, it)
+		}
+	}
+	for _, k := range ls[min(1, len(ls)):] {
+		if !now1[k] && held(k) {
+			keep = append(keep, k)
+			now1[k] = true
 		}
 	}
 	if len(fresh) > 0 {

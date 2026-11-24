@@ -24,10 +24,6 @@ func aBase() State {
 	}
 }
 
-func readd(n string) string {
-	return "hc-fill add --name " + n + " --project p --brief /b/" + n + ".md --priority 보통"
-}
-
 func kinds(it []Item, k string) []Item {
 	var o []Item
 	for _, x := range it {
@@ -41,8 +37,8 @@ func kinds(it []Item, k string) []Item {
 // ① 빈 자리 3 + 대기 줄 둘이 문서 한 파일 겹침으로 대기 → 풀 수 있는 대기 둘, 확실, 다음 명령 줄이 그대로 칠 수 있는 꼴
 func TestAdviseFreeWaitDoc(t *testing.T) {
 	f := Facts{Waits: []Wait{
-		{Lane: "doc-a", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"docs/x.md"}, Readd: readd("doc-a")},
-		{Lane: "doc-b", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"docs/x.md"}, Readd: readd("doc-b")},
+		{Lane: "doc-a", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"docs/x.md"}},
+		{Lane: "doc-b", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"docs/x.md"}},
 	}}
 	it := kinds(Advise(aBase(), f, ath), "free-wait")
 	if len(it) != 2 {
@@ -52,7 +48,7 @@ func TestAdviseFreeWaitDoc(t *testing.T) {
 	if x.Sure != SureYes {
 		t.Errorf("문서 한 파일 겹침인데 확신 %q", x.Sure)
 	}
-	want := "hc-fill rm doc-a --why '겹침 풀기(hc-fill advise)' && " + readd("doc-a") + " --overlap-ok"
+	want := "hc-fill edit doc-a --overlap-ok --why '겹침 풀기(hc-fill advise)'"
 	if len(x.Next) != 1 || x.Next[0] != want {
 		t.Errorf("다음 명령:\n got %q\nwant %q", x.Next, want)
 	}
@@ -80,7 +76,7 @@ func TestAdviseFreeWaitDoc(t *testing.T) {
 
 // ② 꾸러미 전체 겹침 → 판단 필요, 놓치면에 기다림과 충돌 풀이 비용 둘 다
 func TestAdviseFreeWaitPackage(t *testing.T) {
-	f := Facts{Waits: []Wait{{Lane: "pkg-a", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"cmd/x/"}, Readd: readd("pkg-a")}}}
+	f := Facts{Waits: []Wait{{Lane: "pkg-a", Project: "p", AgeS: ip(30 * 60), Front: "lane-front", Keys: []string{"cmd/x/"}}}}
 	it := kinds(Advise(aBase(), f, ath), "free-wait")
 	if len(it) != 1 || it[0].Sure != SureJudge {
 		t.Fatalf("꾸러미 겹침: %+v", it)
@@ -88,16 +84,12 @@ func TestAdviseFreeWaitPackage(t *testing.T) {
 	if c := it[0].Cost; !strings.Contains(c, "기다림") || !strings.Contains(c, "충돌") {
 		t.Errorf("놓치면에 기다림·충돌 비용: %s", c)
 	}
-	// 코드 한 파일도 판단 필요, 단독은 다시 넣어도 안 풀려 사람이 정한다(명령 없음), 주차 중이면 rm이 준비 커밋을 버려 사람이 정한다
+	// 코드 한 파일도 판단 필요, 단독은 겹침을 꺼도 안 풀려 사람이 정한다(명령 없음)
 	f.Waits[0].Keys = []string{"cmd/x/a.go"}
 	if it := kinds(Advise(aBase(), f, ath), "free-wait"); len(it) != 1 || it[0].Sure != SureJudge {
 		t.Errorf("코드 한 파일: %+v", it)
 	}
-	f.Waits[0].Parked = true
-	if it := kinds(Advise(aBase(), f, ath), "free-wait"); len(it) != 1 || it[0].Sure != SureHuman || len(it[0].Next) != 0 {
-		t.Errorf("주차 중: %+v", it)
-	}
-	f.Waits[0].Keys, f.Waits[0].Solo, f.Waits[0].Parked = nil, true, false
+	f.Waits[0].Keys, f.Waits[0].Solo = nil, true
 	if it := kinds(Advise(aBase(), f, ath), "free-wait"); len(it) != 1 || it[0].Sure != SureHuman || len(it[0].Next) != 0 {
 		t.Errorf("단독: %+v", it)
 	}
@@ -106,10 +98,10 @@ func TestAdviseFreeWaitPackage(t *testing.T) {
 // ③ 한 줄 사슬 넷 → 사슬 항목(길이·노는 자리·코어), 사슬 가운데 줄은 따로 항목을 내지 않는다
 func TestAdviseChain(t *testing.T) {
 	f := Facts{Waits: []Wait{
-		{Lane: "c1", Project: "p", AgeS: ip(3600), After: []string{"lane-front"}, Readd: readd("c1")},
-		{Lane: "c2", Project: "p", AgeS: ip(3600), After: []string{"c1"}, Readd: readd("c2")},
-		{Lane: "c3", Project: "p", AgeS: ip(3600), After: []string{"c2"}, Readd: readd("c3")},
-		{Lane: "c4", Project: "p", AgeS: ip(3600), After: []string{"c3"}, Readd: readd("c4")},
+		{Lane: "c1", Project: "p", AgeS: ip(3600), After: []string{"lane-front"}},
+		{Lane: "c2", Project: "p", AgeS: ip(3600), After: []string{"c1"}},
+		{Lane: "c3", Project: "p", AgeS: ip(3600), After: []string{"c2"}},
+		{Lane: "c4", Project: "p", AgeS: ip(3600), After: []string{"c3"}},
 	}}
 	it := Advise(aBase(), f, ath)
 	ch := kinds(it, "chain")
@@ -139,7 +131,7 @@ func TestAdviseLaneError(t *testing.T) {
 	if len(it) != 1 {
 		t.Fatalf("멈춘 레인: %+v", Advise(s, Facts{}, ath))
 	}
-	if strings.Join(it[0].Next, "\n") != "hc read w/t5\nhc send w/t5 '이어서 진행하라'" {
+	if strings.Join(it[0].Next, "\n") != "hc read w/t5\nhc-fill nudge lane-front --why '멈춘 레인(hc-fill advise)'" {
 		t.Errorf("다음 명령: %q", it[0].Next)
 	}
 	// 주소를 모르면 그대로 칠 수 없으니 명령을 내지 않고 사람이 정한다
@@ -221,10 +213,10 @@ func TestAdviseNoPlaceholders(t *testing.T) {
 	s.Lanes = append(s.Lanes, Lane{Name: "aud", Machine: "a", Stage: "감사 대기(자리 없음 40분)", StageAgeS: ip(60)},
 		Lane{Name: "blk", Machine: "a", Stage: "작업 중(blocked)"}, Lane{Name: "dn", Machine: "a", Stage: "작업 중(done)"})
 	s.Merge = append(s.Merge, MergeLine{Project: "q", Length: ip(1), Merger: "gone"}, MergeLine{Project: "r", Length: ip(2), Merger: "alive", LastRoundAgeS: ip(3600)})
-	s.Watch = []Watch{{Owner: "t2", Alive: bp(false)}}
+	s.Watch = []Watch{{Owner: "t2", Alive: bp(false), Need: true}}
 	f := Facts{Addr: map[string]string{"aud": "a/t1", "blk": "a/t2", "dn": "a/t3", "lane-stuck": "a/t4"},
-		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음", Readd: readd("rj")},
-			{Lane: "only-a", Project: "p", AgeS: ip(60), Can: []string{"a"}, Readd: readd("only-a")}}} // 바쁜 a로만 갈 줄 — 치우침
+		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음"},
+			{Lane: "only-a", Project: "p", AgeS: ip(60), Can: []string{"a"}}}} // 바쁜 a로만 갈 줄 — 치우침
 	s.Machines[0].Live = ip(2)
 	it := Advise(s, f, ath)
 	seen := map[string]bool{}

@@ -274,3 +274,19 @@ func TestDigestable(t *testing.T) {
 		}
 	}
 }
+
+// advise-fixes ⑥: 착지 뒤 명령 성공(운영, 다음 명령 hc-fill status)이 든 묶음 — 끝 안내 「→ hc-fill status」가 정확히 한 번
+// (고치기 전: 「… (m) → hc-fill status ‖ → hc-fill status」). 다른 다음 명령(hc-fill advise)은 그대로
+func TestDigestTailOnce(t *testing.T) {
+	l := func(lane, st, msg, key string) string {
+		return strings.TrimSuffix(dgLine(1, lane, st, "-", msg, "t1", key), "\n")
+	}
+	got := digestText([]string{l("lane-a", "완료", "끝", ""), l("on-land-build", "중간", "착지 뒤 build 성공", ""),
+		l("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1")}, time.Minute)
+	if n := strings.Count(got, "→ hc-fill status"); n != 1 || !strings.HasSuffix(got, " ‖ → hc-fill status") {
+		t.Errorf("끝 안내 %d번: %s", n, got)
+	}
+	if !strings.Contains(got, "착지 뒤 build 성공 (t5) ‖") || !strings.Contains(got, "(t5) → hc-fill advise ‖") {
+		t.Errorf("운영 줄: %s", got)
+	}
+}
