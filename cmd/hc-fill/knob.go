@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,6 +95,26 @@ func knobRows(now time.Time) []knobRow {
 	es := knobEntries()
 	var rs []knobRow
 	for _, d := range knob.Defs {
+		if d.Per != "" { // 묶음 손잡이(seats@<기계> 등)는 둔 값만 한 줄씩
+			var ns []string
+			for n, e := range es {
+				if strings.HasPrefix(n, d.Name) && e.Live(now) {
+					ns = append(ns, n)
+				}
+			}
+			sort.Strings(ns)
+			for _, n := range ns {
+				e := es[n]
+				fd, _ := knob.Find(n)
+				r := knobRow{Name: n, Value: e.Value, Source: string(knob.FromKnob), Tool: d.Tool, Unit: d.Unit, Range: fd.Range(), Remote: d.Remote, Desc: d.Desc,
+					By: e.By, Why: e.Why, Pin: e.Pin, At: stamp(e.At)}
+				if e.Until != 0 {
+					r.Until = stamp(e.Until)
+				}
+				rs = append(rs, r)
+			}
+			continue
+		}
 		cv := ""
 		if d.Tool == "hc-fill" {
 			cv = confRaw(d.Name)
@@ -189,6 +210,9 @@ func knobSet(args []string, now time.Time) error {
 	if err := d.Check(val); err != nil {
 		return err
 	}
+	if d.Per == "기계" && !machineKnown(d.Of()) {
+		return fmt.Errorf("설정에 없는 기계: %s — machine 줄의 이름만", d.Of())
+	}
 	e := knob.Entry{Name: name, Value: val, By: knobBy(), Why: why, At: now.Unix(), Pin: pin}
 	switch {
 	case forM != "":
@@ -214,6 +238,9 @@ func knobSet(args []string, now time.Time) error {
 	u := "기한 없음"
 	if e.Until != 0 {
 		u = stamp(e.Until) + "까지(지나면 설정 값으로)"
+	}
+	if old == "" { // 묶음 손잡이(seats@<기계> 등)는 표 기본이 없다 — 설정 줄 값
+		old, src = "설정 값", knob.FromConf
 	}
 	say("손잡이 %s = %s (전: %s, %s) — 다음 바퀴부터, %s", name, val, old, src, u)
 	undo := "hc-fill knob unset " + name
@@ -254,6 +281,9 @@ func knobUnset(args []string, now time.Time) error {
 		return err
 	}
 	v, src, _ := knob.Effective(d, nil, confRaw(d.Name), now)
+	if v == "" { // 묶음 손잡이(seats@<기계> 등) — 설정 줄 값으로
+		v, src = "설정 값", knob.FromConf
+	}
 	if !had {
 		say("손잡이 %s: 둔 값이 없다 — 지금 %s(%s)", d.Name, v, src)
 		return nil

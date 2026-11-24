@@ -1,0 +1,5 @@
+        hc-fill machine | machines | machine <기계> (--seats <n>|- | --pause | --resume) [--for <분>] [--why <까닭>] [--force]
+  machine 기계마다 한 줄 — 1분 부하/코어(코어당)·자리 쓴/상한·실행 중 조정(누가·언제까지·왜)·지난 바퀴에 안 띄운 까닭(status 끝에도).
+         <기계> --seats: 그 기계 자리 상한을 다음 바퀴부터 바꾼다(- 면 설정 값으로). --pause: 새 레인을 안 띄운다(떠 있는 레인·그 감사는
+         그대로), --resume: 푼다. --for가 지나면 설정 값으로. --seats n·--pause는 --why 꼭. 손잡이 seats@<기계>·pause@<기계>(knob ls),
+         조정 기록 ~/.local/share/hc-fill/machine.log. 대기 레인을 다른 기계로: hc-fill edit <레인> --only <기계>(docs/hc-fill/load-steer.md)

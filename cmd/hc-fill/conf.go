@@ -59,6 +59,9 @@ func machines() []Machine {
 			continue
 		}
 		m := Machine{F1(f, 1), F1(f, 2), dash(F1(f, 3)), dash(F1(f, 4))}
+		if v, ok := knobConf("seats@" + m.Name); ok { // 실행 중 자리 조정(hc-fill machine <기계> --seats, loadsteer.go)
+			m.Cap = v
+		}
 		ms = append(ms, m)
 	}
 	return ms

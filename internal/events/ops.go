@@ -15,6 +15,7 @@ const (
 // 운영 사건 이름(레인 칸). merger-·on-land-는 뒤에 프로젝트·이름이 붙는다
 const (
 	OpsFillIdle  = "hc-fill-idle"
+	OpsFillSkew  = "hc-fill-skew"
 	OpsFill      = "hc-fill"
 	OpsMerger    = "merger"
 	OpsMergerP   = "merger-"  // + <프로젝트>
@@ -31,6 +32,7 @@ type Op struct{ Name, Next string }
 // Ops: 운영 사건 목록 — docs/ops/events.md의 「## <이름>」과 「다음:」 줄이 이 표와 같아야 한다(ops_test)
 var Ops = []Op{
 	{OpsFillIdle, "hc-fill ls"},
+	{OpsFillSkew, "hc-fill machine"},
 	{OpsFill, "hc-fill status"},
 	{OpsMerger, "hc-lane logs"},
 	{OpsMergerP + "<프로젝트>", "hc-fill status"},

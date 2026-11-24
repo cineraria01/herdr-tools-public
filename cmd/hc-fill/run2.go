@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 func launchRows() {
@@ -20,8 +21,11 @@ func launchRows() {
 		ov = "block"
 	}
 	OVM, OWN, OVWAIT = ov, nil, nil
+	LOADS, MWHY = map[string]mLoad{}, map[string]string{} // 부하(loadsteer.go) — actTick이 같은 호출로 읽은 기계부터 채운다
 	tickMark("owners")
 	syncOwners()
+	tickMark("load")
+	loadTick()
 	NDOLD, NDNOW = readLines(DATA+"/need.tsv"), nil
 	ELIST, UPNOW, ECAPHIT, ECAPM = "", "", false, ""
 	SEENOFF = nil
@@ -59,6 +63,7 @@ func launchRows() {
 			}
 		}
 	}
+	loadEnd(time.Now())
 	tickMark("ownfinish")
 	ownFinish()
 	tickMark("watchown")
@@ -334,7 +339,7 @@ func waitRow(r Row) {
 	if dash(ef) == "parked" {
 		RESUME, RSEC = true, resumeSec(name, after, bBranch)
 	}
-	AK, PAFT, PSOLO, PRIO = dash(ak), after, dash(ovk), r.F(13)
+	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(13), r.F(10)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
 	RESUME, RSEC = false, ""
 	if placed || GOTADDR {
@@ -486,7 +491,7 @@ func earlyRows() {
 		if !strings.HasPrefix(dash(ak), "audit=") {
 			NEED = needs(SB)
 		}
-		AK, PAFT, PSOLO, PRIO = dash(ak), after, dash(ovk), r.F(13)
+		AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(13), r.F(10)
 		place(name, prj, SB, only, dash(reply), dash(owner), after)
 		ESEC = ""
 		if placed || GOTADDR {

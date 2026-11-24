@@ -22,6 +22,6 @@
   시험 틀(대기 줄 30개·선행 60개 + 먼저 띄운 줄 15개·선행 30개, 자리 0)에서 launch·after 단계 바깥 명령 181·69번 → 5·1번, 줄 60개에서도 같다.
   한계: 시각이 분 단위라 같은 분에 착지한 같은 이름의 옛 실행 표식도 센다.
   표식이 없는 옛 착지·대기열에 없는 선행은 제목 규칙만. 그래서 `add`·받은편지는 커밋 종류와 같은 이름(`feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`)을 레인 이름·`--after`(`after`)로 받지 않는다 — 종류 자리가 이름이 빈 채로도 맞아 아무 `fix: …` 커밋에나 맞는다(`fix-login`처럼 그 낱말로 시작하는 이름은 받음, 받은편지는 `rejected/<이름>.why`에 사유).
-  설정의 machine 차례에서 처음 자리가 남는 기계에 `hc-lane --on <기계> --repo <그 기계 경로> -- <launch 틀>`로 띄운다.
+  자리가 남는 기계 가운데 코어당 부하가 낮은 기계부터(모르거나 비슷하면 설정의 machine 차례 — [부하](load-steer.md)) `hc-lane --on <기계> --repo <그 기계 경로> -- <launch 틀>`로 띄운다.
   지시문에 `hc-lane --print-steps` 착지 줄을 붙인 run 지시문은 그 기계 `~/.local/share/hc-fill/runs/<레인>-run.md`에 둔다.
   local 기계에 띄운 것은 `herdr-balance --main <주인 지휘, 없으면 설정 coord> --add`로 붙이고, 다른 기계에 띄운 것은 hc-lane이 맥 창의 그 기계 공간에 탭으로 보이게 한다.

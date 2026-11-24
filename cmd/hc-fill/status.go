@@ -291,7 +291,11 @@ func statusCmd(args []string) {
 }
 
 // statusTick: 표 끝에 바퀴 계측 한 줄(tick.go — 지휘가 바퀴가 느려진 것을 바로 본다). 기록이 없으면 찍지 않는다
+// 그 앞에 기계마다 한 줄(fill-load-steer — 부하·자리·실행 중 조정·안 띄운 까닭, 바퀴 기록 load.tsv가 있을 때)
 func statusTick() {
+	for _, l := range machineLines(false) {
+		fmt.Println("기계 " + l)
+	}
 	if s := tickStatus(); s != "" {
 		fmt.Println(s)
 	}

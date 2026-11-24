@@ -23,11 +23,13 @@ var ACTPARK map[string]bool
 const actNS = "refs/hc-fill/act/"
 
 // actScript: 인자 「프로젝트 레인 작업트리 기준」 넷씩. 읽은 레인마다 「p<TAB>n<TAB>+」, 파일마다 「p<TAB>n<TAB>=파일」,
+// 맨 앞에 그 기계 부하 한 줄 「load <1분> <코어>」(loadSnip — actParse는 칸 수가 달라 안 읽는다).
 // 못 읽은 레인은 「p<TAB>n<TAB>!까닭」(early-own-chain — 760번 난 「못 읽음」의 원인을 몰랐다).
 // 바꾼 파일 = 기준과의 merge-base부터 작업 트리까지(커밋·스테이지·안 올린 것) + 추적 안 하는 새 파일.
 // shx.Script로 감싼다 — 끝 표식이 성공을 정하므로 마지막 빈 줄 건너뛰기의 1이 조각 전체를 실패로 만들지 않고(fill/R-216:
 // 추적 파일만 고친 작업 트리가 「못 읽음」이 돼 겹침을 놓쳤다), 잘린 출력은 표식이 없어 못 읽음이 된다
-var actScript = shx.Script(`while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
+var actScript = shx.Script(loadSnip + `
+while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
 case $w in "~/"*) w=$HOME/${w#"~/"} ;; esac
 [ -d "$w" ] || { printf '%s\t%s\t!작업 트리 없음 %s\n' "$p" "$n" "$w"; continue; }
 mb=$(git -C "$w" merge-base HEAD "$b" 2>/dev/null) || { printf '%s\t%s\t!merge-base HEAD %s 종료 %s\n' "$p" "$n" "$b" "$?"; continue; }
@@ -170,6 +172,9 @@ func actTick(rows []Row) {
 					why[args[i]+"\t"+args[i+1]] = "@" + m + " 조회 " + w
 				}
 				return
+			}
+			if l := loadParse(out); l.OK { // 같은 호출에 실은 부하 한 줄(fill-load-steer)
+				loadPut(m, l)
 			}
 			for k, v := range actParse(out) {
 				ACT[k] = v

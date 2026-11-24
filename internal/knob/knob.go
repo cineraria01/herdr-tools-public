@@ -29,6 +29,7 @@ type Def struct {
 	Unit     string   // 단위(분·시간 등, 표시용)
 	Remote   bool     // 다른 기계의 도구가 읽음 — 원격 참조 Ref에 싣는다
 	Desc     string
+	Per      string // 묶음 손잡이: Name이 「접두@」이고 저장 이름은 「접두@<Per 값>」(예: seats@<기계>). 빈 값이면 낱개
 }
 
 // Defs: 등록 표. 새 손잡이는 여기에 한 줄 더하고, 도구는 한 함수(hc-fill은 conf, 다른 기계는 ReadRemote → Remote.Get)로 읽는다
@@ -41,16 +42,40 @@ var Defs = []Def{
 	{Name: "early_wait", Tool: "hc-fill", Default: "5", Min: 1, Max: 48, Unit: "시간", Desc: "먼저 띄운 레인이 선행을 기다리는 기한"},
 	{Name: "auto_submit", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "감사 통과 뒤 쉬는 레인 대신 대기열이 제출할 프로젝트(쉼표, - = 끔)"},
 	{Name: "auto_submit_max", Tool: "hc-fill", Default: "120", Min: 10, Max: 600, Unit: "초", Desc: "대기열 제출 한 번의 시간 상한(넘으면 에이전트에 넘김)"},
+	// 부하 보고 고르기(2026-11-24 fill-load-steer, docs/hc-fill/load-steer.md). 코어당 부하는 ×100 정수(%)
+	{Name: "load_band", Tool: "hc-fill", Default: "25", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 차이가 이 안이면 비슷함 — 설정 machine 차례"},
+	{Name: "load_busy", Tool: "hc-fill", Default: "300", Min: 0, Max: 10000, Unit: "%", Desc: "후보가 모두 코어당 부하 이 값을 넘으면 그 바퀴는 안 띄움(0이면 끔)"},
+	{Name: "load_starve", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "모두 바쁨이어도 이만큼 기다린 줄은 가장 덜 바쁜 기계에"},
+	{Name: "skew_min", Tool: "hc-fill", Default: "10", Min: 1, Max: 1440, Unit: "분", Desc: "한 기계가 load_busy를 넘은 채 한가한 기계가 있으면 이만큼 뒤 치우침 사건"},
+	{Name: "skew_every", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "치우침 사건 되풀이 간격(0이면 끔)"},
+	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
+	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
 }
 
-// Find: 표에서 이름으로
+// Find: 표에서 이름으로. 묶음 손잡이(「접두@값」)는 Name을 그 저장 이름으로 바꾼 사본을 돌려준다
 func Find(name string) (Def, bool) {
 	for _, d := range Defs {
-		if d.Name == name {
+		if d.Name == name && d.Per == "" {
 			return d, true
 		}
 	}
+	if i := strings.IndexByte(name, '@'); i > 0 && i < len(name)-1 && !strings.ContainsAny(name[i+1:], "@\t\n ") {
+		for _, d := range Defs {
+			if d.Per != "" && d.Name == name[:i+1] {
+				d.Name = name
+				return d, true
+			}
+		}
+	}
 	return Def{}, false
+}
+
+// Of: 묶음 손잡이 저장 이름의 값 부분(seats@x → x). 낱개면 빈 값
+func (d Def) Of() string {
+	if d.Per == "" {
+		return ""
+	}
+	return d.Name[strings.IndexByte(d.Name, '@')+1:]
 }
 
 // Range: 허용 범위 글

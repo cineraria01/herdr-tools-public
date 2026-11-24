@@ -165,7 +165,7 @@ func idleTick() {
 				hasRepo = true
 			}
 		}
-		if !hasRepo || (m != LOCAL && !connHas(m)) {
+		if !hasRepo || (m != LOCAL && !connHas(m)) || machPaused(m) { // 멈춘 기계(hc-fill machine --pause)의 빈 자리는 알리지 않는다
 			continue
 		}
 		fr := int(num(mc.Cap)) - agentsOn(m)

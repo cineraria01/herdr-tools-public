@@ -346,7 +346,8 @@ func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, boo
 	return strings.Split(strings.TrimSuffix(out, "\x00"), "\x00"), true
 }
 
-// place <레인> <프로젝트> <지시문> <기계제한> <되돌릴곳> <주인> [<선행 — 먼저 띄움일 때>]: machine 차례에서 처음 자리가 남는 기계에.
+// place <레인> <프로젝트> <지시문> <기계제한> <되돌릴곳> <주인> [<선행 — 먼저 띄움일 때>]: 자리가 남는 기계 가운데 코어당 부하가
+// 낮은 기계부터(모르거나 비슷하면 machine 차례 — steer, loadsteer.go. 자동 감사 줄은 machine 차례 그대로).
 // placed 띄움 · bad 지시문을 못 읽어 이 바퀴엔 그만. stuck을 고쳐 적는다. 쓰기 줄은 터미널 주소를 받은 때 실행 기록에 적고 GOTADDR
 func place(lane, p, brief, only, reply, owner, after string) {
 	placed, bad, GOTADDR = false, false, false
@@ -369,56 +370,12 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			aseatWait(lane, full)
 		}
 	}()
-	for _, mc := range machines() {
-		m := mc.Name
-		if only != "-" && !inlist(m, only) {
-			continue
-		}
-		if !mhas(m, NEED) { // 지시문 「필요:」 능력이 없는 기계
-			continue
-		}
-		stk := 0
-		for _, s := range strings.Split(stuck, ",") {
-			if strings.HasPrefix(s, m+"=") {
-				stk++
-			}
-		}
-		if stk != 0 {
-			continue
-		}
-		repo := repoOf(p, m)
-		if repo == "" {
-			continue
-		}
-		if isa {
-			repo = strings.TrimSuffix(repo, "/") + ".wt/" + AK[len("audit="):] // 자동 감사: 그 레인 작업 트리에서 --read
-		}
-		if m != LOCAL && !connHas(m) {
-			if !inlist(m, OFF) {
-				say("건너뜀 %s: 연결 안 됨", m)
-				OFF += "," + m
-			}
-			continue
-		}
-		if has(AGUNK, m) { // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
-			continue
-		}
-		own := 0
-		if isa && RSV[lane] == m { // 자동 감사 줄은 제 몫으로 잡아 둔 자리를 쓴다
-			own = 1
-		}
-		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m)-own >= c {
-			if err == nil {
-				full = m
-			}
-			continue
-		}
-		// 자동 감사 줄은 레인상한을 보지 않고 레인 수에도 안 든다
-		if !isa && mc.LCap != "-" {
-			if lc, err := strconv.Atoi(mc.LCap); err != nil || lanesOn(m) >= lc {
-				continue
-			}
-		}
+	// 자리가 남는 후보(machine 차례) → 부하 차례·모두 바쁨 관문(자동 감사 줄은 빼고) → 차례대로 띄우기(placeCands, loadsteer.go)
+	cands, repos, fm := placeCands(lane, p, only, isa)
+	full = fm
+	for _, mc := range cands {
+		m, repo := mc.Name, repos[mc.Name]
+		mwhy(m, "")
 		if dry {
 			pre, suf := "", ""
 			if after != "" {

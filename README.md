@@ -50,6 +50,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 받은편지](docs/hc-fill/inbox.md)
 - [hc-fill: 마지막 보고](docs/hc-fill/last-report.md)
 - [hc-fill: 띄운 뒤 확인](docs/hc-fill/launch-check.md)
+- [hc-fill: 부하 보고 고르기](docs/hc-fill/load-steer.md)
 - [hc-fill: 기계 능력](docs/hc-fill/machine-caps.md)
 - [hc-fill: 착지 뒤 명령](docs/hc-fill/on-land.md)
 - [hc-fill 겹침: 실제 변경 (go-overlap-actual, 2026-11-22)](docs/hc-fill/overlap-actual.md)

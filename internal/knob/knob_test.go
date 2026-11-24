@@ -22,7 +22,7 @@ func TestSafetyNotKnobs(t *testing.T) {
 		}
 	}
 	for _, d := range Defs {
-		if d.Check(d.Default) != nil {
+		if d.Per == "" && d.Check(d.Default) != nil { // 묶음 손잡이(seats@ 등)는 기본이 없다 — 설정 줄 값이 기본
 			t.Errorf("%s 기본값 %q가 자기 범위 밖", d.Name, d.Default)
 		}
 	}
