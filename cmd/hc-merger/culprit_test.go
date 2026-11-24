@@ -36,6 +36,7 @@ func (s *sfx) specGroupOf(id string) string {
 
 // 범인 맨 앞 [a,b,c]: 지금은 병합기 검증 3번 뒤 a 반송 — 고친 뒤 2번 안에 a 반송, b·c 착지
 func TestCulpritFrontRejectedEarly(t *testing.T) {
+	oldFront(t)
 	s := culpritFx(t, true)
 	_, sa := s.sub2(1000000001, "a", "", "", "bad.txt", "a\n", false)
 	s.submit(1000000002, "b", "보통")
@@ -82,6 +83,7 @@ func TestCulpritFrontRejectedEarly(t *testing.T) {
 
 // 범인이 마지막 [a,b,c(범인)]: 병합기 검증 횟수는 지금과 같다(3). 묶음 실패가 없던 추측 실패(c)는 지금처럼 직접 검증해 반송
 func TestCulpritLastSameCount(t *testing.T) {
+	oldFront(t)
 	s := culpritFx(t, true)
 	s.submit(1000000001, "a", "보통")
 	s.submit(1000000002, "b", "보통")
@@ -102,6 +104,7 @@ func TestCulpritLastSameCount(t *testing.T) {
 
 // 추측이 「모름」(시험 실패와 환경 문제를 가를 수 없음 — 실패한 시험 줄 없이 종료 1)이면 반송 근거로 쓰지 않고 지금 길
 func TestCulpritUnknownFallsBack(t *testing.T) {
+	oldFront(t)
 	s := culpritFx(t, false)
 	s.sub2(1000000001, "a", "", "", "bad.txt", "a\n", false)
 	s.submit(1000000002, "b", "보통")
@@ -154,6 +157,7 @@ func TestCulpritNoVerifiersUnchanged(t *testing.T) {
 // merger-culprit-env-gap(감사 atoy3kt-wnph24 낮음 2): 맨 앞 혼자 추측이 환경 실패(go test 「FAIL <꾸러미> [setup failed]」 — 네트워크·
 // 모듈 캐시)뿐이면 test=0(모름) — 반송 근거로 쓰지 않고 병합기가 직접 검증한다(고치기 전에는 test=1로 적혀 검증 없이 반송)
 func TestCulpritSetupFailedFallsBack(t *testing.T) {
+	oldFront(t)
 	s := culpritOut(t, "go: downloading example.invalid/x v1.0.0\n# m/a\na/a.go:2:8: module lookup disabled by GOPROXY=off\nFAIL\tm/a [setup failed]\nFAIL")
 	s.sub2(1000000001, "a", "", "", "bad.txt", "a\n", false)
 	s.submit(1000000002, "b", "보통")

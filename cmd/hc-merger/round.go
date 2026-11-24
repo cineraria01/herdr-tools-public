@@ -40,6 +40,7 @@ type M struct {
 	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
 	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
 	vw                              vwhy   // 이번 착지의 검증 길(일지 까닭 칸 — why.go)
+	wmach                           string // 맨 앞을 기다리는 바퀴의 검증 기계(손잡이 0으로 맡기지 못해 기다리면 -) — 추측 기다림 일지 줄
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
 }
 
@@ -431,7 +432,15 @@ func (m *M) round() {
 	}
 	// 기다림이 끝났다 — 이 바퀴의 착지·반송 줄보다 먼저
 	m.specWaitEnd()
-	if sd == specCulprit { // 혼자 착지가 실패했을 때와 같은 길(judge 끝) — 검증 한 바퀴를 더 쓰지 않는다
+	if sd == specShrink { // 묶음 착지 실패와 같은 길(judge) — 병합기 검증 없이
+		m.jround(jBatchFail, m.cwhy, ", 로그 "+m.clog)
+		m.writeCap(len(m.b) - 1)
+		if m.fin() {
+			m.mq = "x"
+		}
+		return
+	}
+	if sd == specReject { // 혼자 착지가 실패했을 때와 같은 길(judge 끝) — 검증 한 바퀴를 더 쓰지 않는다
 		if !m.fin() {
 			return
 		}

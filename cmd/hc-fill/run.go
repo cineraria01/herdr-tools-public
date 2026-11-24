@@ -263,12 +263,13 @@ func readTables() {
 
 // auditSeats: 자리에서 뺄 자동 감사 레인 이름(AUDN)과, 감사 줄이 자리를 쥔 동안의 쓰기 레인 주소(AWT)
 func auditSeats() {
-	AUDN, AWT = nil, nil
+	AUDN, AWT, RSVW, RSV = nil, nil, map[string]string{}, map[string]string{}
 	if AUD == "" || !isFile(Q) {
 		return
 	}
 	rows := qRows()
 	hold := ","
+	wl := map[string]string{} // 쓰기 레인 → 아직 안 뜬(wait) 감사 줄
 	for _, r := range rows {
 		if !strings.HasPrefix(r.F(15), "audit=") {
 			continue
@@ -279,6 +280,7 @@ func auditSeats() {
 			if strings.Contains(","+r.F(9)+",", ","+r.F(5)+"=") {
 				continue
 			}
+			wl[strings.TrimPrefix(r.F(15), "audit=")] = r.F(1)
 		case "up":
 			if s := alive(r.F(8)); s == "gone" || s == "done" || s == "idle" {
 				continue
@@ -297,8 +299,16 @@ func auditSeats() {
 	for _, r := range rows {
 		if r.F(6) == "up" && r.F(15) == "auto" && w[r.F(1)] && strings.Contains(hold, ","+r.F(1)+",") {
 			AWT = append(AWT, r.F(8))
+			if an, ok := wl[r.F(1)]; ok {
+				RSVW[r.F(8)] = an
+			}
 		}
 	}
+	wait := map[string]bool{}
+	for _, an := range wl {
+		wait[an] = true
+	}
+	aseatPrune(wait)
 }
 
 var talRe = regexp.MustCompile(`^## 이어서: ([a-z0-9_-]+) `)
@@ -437,7 +447,12 @@ func countSeats() {
 			say("%s%s, 자동 감사 레인 → 안 셈", pre, ts)
 			continue
 		case has(AWT, ta):
-			say("%s%s, 자동 감사 기다림(자리는 감사 줄이) → 안 셈", pre, ts)
+			if an, ok := RSVW[ta]; ok { // 감사가 아직 안 떴다 — 그 감사 몫으로 잡아 둔다(다른 줄이 못 가져감)
+				RSV[an] = tm
+				say("%s%s, 자동 감사 기다림(자리는 감사 줄이) → 안 셈, %s 몫으로 잡아 둠", pre, ts, an)
+			} else {
+				say("%s%s, 자동 감사 기다림(자리는 감사 줄이) → 안 셈", pre, ts)
+			}
 			continue
 		case has(ALLM, tm):
 			SEATS = append(SEATS, tm)

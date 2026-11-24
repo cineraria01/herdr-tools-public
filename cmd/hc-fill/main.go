@@ -66,7 +66,7 @@ func main() {
 	}
 	confLines = lines(text)
 	single := map[string]bool{}
-	for _, k := range strings.Fields("local agent coord task launch gc early early_wait idle hold audit audit_max audit_final wake_every ack_max overlap done_stall inbox_audit dup_warn lows lows_hour lows_min") {
+	for _, k := range strings.Fields("local agent coord task launch gc early early_wait idle hold audit audit_max audit_seat_rounds audit_final wake_every ack_max overlap done_stall inbox_audit dup_warn lows lows_hour lows_min") {
 		single[k] = true
 	}
 	cntk := map[string]int{}

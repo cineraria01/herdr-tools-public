@@ -287,7 +287,7 @@ u=$(git -C "$d" rev-list -n 1 HEAD --not --branches --remotes) && [ -z "$u" ] &&
 	return rc == 0 && sub(v) == "CLEAN"
 }
 
-func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) }
+func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) + rsvOn(m, "") }
 
 // lanes_on: hc-fill이 그 기계에 띄워 살아 있는 레인 수. 자동 감사 줄은 빼고 센다. 감사를 기다리는 쓰기 레인은 센다
 func lanesOn(m string) int {

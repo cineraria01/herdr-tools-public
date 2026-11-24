@@ -356,12 +356,17 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		return
 	}
 	isa := strings.HasPrefix(dash(AK), "audit=")
-	failed := false
+	failed, full, n0 := false, "", len(NOW)
 	defer func() {
 		if placed || GOTADDR {
 			rejOK(lane)
 		} else if failed {
 			rejFail(lane, LFWHY, owner, reply)
+		}
+		if isa && len(NOW) > n0 { // 감사가 떴다(또는 미확정으로 그 기계 자리를 찼다) — 잡아 둔 몫을 놓는다(겹쳐 세지 않음)
+			delete(RSV, lane)
+		} else if isa && full != "" && !placed && !bad && !failed {
+			aseatWait(lane, full)
 		}
 	}()
 	for _, mc := range machines() {
@@ -398,7 +403,14 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		if has(AGUNK, m) { // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
 			continue
 		}
-		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m) >= c {
+		own := 0
+		if isa && RSV[lane] == m { // 자동 감사 줄은 제 몫으로 잡아 둔 자리를 쓴다
+			own = 1
+		}
+		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m)-own >= c {
+			if err == nil {
+				full = m
+			}
 			continue
 		}
 		// 자동 감사 줄은 레인상한을 보지 않고 레인 수에도 안 든다

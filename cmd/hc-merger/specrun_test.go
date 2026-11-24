@@ -120,6 +120,7 @@ func (s *sfx) sub(sec int, lane string, bad bool) {
 // A·B·C: 첫 바퀴에 A는 직접 검증해 착지, B·C(=main+A+B+C)는 검증 기계 둘에서 함께. 통과 뒤 B·C는 검증 없이 차례로 착지,
 // 병합기는 바퀴마다 새로 떠도(로컬 추측 참조 없이) 원격으로 이어 가고, 끝나면 추측 참조를 모두 치운다
 func TestSpecChainLandsInOrder(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)
@@ -154,6 +155,7 @@ func TestSpecChainLandsInOrder(t *testing.T) {
 
 // B가 실패: B는 지금 규칙대로(직접 검증 → 반송), B를 품은 C 추측은 버리고 main+A+C를 다시 띄워 그 결과로 C가 착지
 func TestSpecFailRespeculates(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", true)
@@ -196,6 +198,7 @@ func TestSpecFailRespeculates(t *testing.T) {
 
 // 검증 기계에 못 띄움 → 모름, 그 제출은 병합기가 직접 검증
 func TestSpecDispatchLostFallsBack(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	t.Setenv("HC_RC", "1")
 	s.sub(1000000001, "a", false)
@@ -222,6 +225,7 @@ func TestSpecDispatchLostFallsBack(t *testing.T) {
 
 // 띄웠는데 일꾼이 끝내 안 뜸(그 기계에 hc-lane이 없는 등) → 떴다는 표식 없이 HC_LANE_SPEC_START가 지나면 모름, 직접 검증
 func TestSpecWorkerNeverStarted(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	t.Setenv("HC_LANE_SPEC_START", "0")
 	s.sub(1000000001, "a", false)
@@ -238,6 +242,7 @@ func TestSpecWorkerNeverStarted(t *testing.T) {
 
 // 그 사이 main이 움직이면 앞 추측(과 그 검증 기록)은 버리고 새 기준에서 다시 — 착지는 직접 검증
 func TestSpecMainMovedDiscards(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)
@@ -269,6 +274,7 @@ func TestSpecMainMovedDiscards(t *testing.T) {
 
 // 묶음 둘(크기 2): 맨 앞 묶음 A+B는 직접, 뒤 묶음 C+D를 한 추측으로 띄워 통과하면 한 번에 검증 없이 착지
 func TestSpecBatchGroup(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	for i, l := range []string{"a", "b", "c", "d"} {
 		s.sub(1000000001+i, l, false)

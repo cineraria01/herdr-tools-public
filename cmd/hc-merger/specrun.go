@@ -64,19 +64,35 @@ func (m *M) spec() (specDecision, string) {
 	st := specWalk(m.btree, groups, c.rows)
 	if m.specCulpritWhy(c, st) { // 뒤 추측은 반송할 맨 앞을 품었다 — 더 짓지 않고 치운다(미리 줄 추측은 지킨다)
 		m.specClean(c, append(st[:len(st):len(st)], m.specPre(c, busy, now)...))
-		return specCulprit, ""
+		return specReject, ""
 	}
-	m.specSolo(c, busy, now)
+	disp := m.frontDispatch()
+	// 빈 검증 기계의 차례: 맨 앞 → 맨 앞 혼자(cap 바퀴) → 뒤 무리. 옛 길(맨 앞은 병합기가 직접)은 혼자를 먼저(감사 atozd0z-zklwye 중간 —
+	// 혼자가 하나뿐인 기계를 먼저 가져가 맨 앞 k−1을 병합기가 직접 검증했다)
+	soloDone := !disp
+	if !disp {
+		m.specSolo(c, busy, now, false)
+	}
+	var ff frontFail
+	if disp { // 맨 앞이 실패·모름이면 뒤 추측보다 먼저 다시 띄운다(specfront.go — 한 번 더 확인 · 손잡이 front_local 0의 다시 띄움)
+		ff = m.specFrontRedo(c, specWalk(m.btree, groups, c.rows), busy, now)
+	}
 	for {
 		st = specWalk(m.btree, groups, c.rows)
+		if !soloDone && st[0].row != nil { // 맨 앞 자리를 정했다 — 혼자 다음, 뒤 무리는 그 뒤
+			m.specSolo(c, busy, now, true)
+			soloDone = true
+			continue
+		}
 		last := st[len(st)-1]
 		v := m.specFree(c.vers, busy)
 		if last.row != nil || v.Machine == "" {
 			break
 		}
-		if len(st) == 1 {
-			v = verified.Verifier{} // 맨 앞은 병합기가 직접 검증 — 짓기만(뒤 추측의 부모)
+		if len(st) == 1 && !disp {
+			v = verified.Verifier{} // 손잡이 front_dispatch 0 — 맨 앞은 병합기가 직접 검증, 짓기만(뒤 추측의 부모)
 		}
+		// 맨 앞 무리도 뒤 무리와 같은 꼴로 검증 기계에 맡긴다(merger-verify-dispatch) — 병합기 기계는 기록을 보고 넣기만
 		r, ok := m.specBuild(st, v, now)
 		if !ok {
 			break
@@ -86,33 +102,44 @@ func (m *M) spec() (specDecision, string) {
 			busy[v.Machine] = true
 		}
 	}
-	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go)
-	m.specClean(c, append(st[:len(st):len(st)], m.specPre(c, busy, now)...))
+	if !soloDone { // 맨 앞을 못 지음(빈 기계 없음·짓기 실패) — 지금 그대로 혼자에 기회를
+		m.specSolo(c, busy, now, true)
+	}
+	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go). 맨 앞 혼자 추측은 길 밖이어도 지킨다 — 묶음이 검증 기계에서
+	// 실패해 줄이는 바퀴(specShrink)는 혼자 추측이 끝난 뒤라, 치우면 범인 반송 근거를 잃고 다시 돌린다
+	m.specClean(c, append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...))
 	d := specFront(st)
 	over := false
 	if w := specFrontWait(); d == specWaitFront && now-st[0].row.at > w {
 		over = true
 		// 기다릴 값어치는 남은 시간이 직접 검증보다 짧을 때뿐 — 검증 기계가 죽었거나 바쁘거나 느리면 그 뒤 큐 전체가 멈춘다.
 		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
-		fmt.Printf("hc-lane merger: 미리 검증이 %d초 넘게 도는 중 — 병합기가 직접 검증한다(%s)\n", w, st[0].row.machine)
+		fmt.Printf("hc-lane merger: 맨 앞 검증이 %d초 넘게 도는 중(%s)\n", w, st[0].row.machine)
 		d = specLand
 	}
-	m.vw.why = frontWhy(st, c.rows, over)
-	switch d {
-	case specLandFast:
+	m.vw.why = frontWhy(st, c.rows, over, disp)
+	m.wmach = ""
+	switch {
+	case d == specWaitFront:
+		m.wmach = st[0].row.machine
+	case d == specLand && disp:
+		d = m.specFrontLand(c, st, ff) // 반송·줄이기·직접 검증·기다림(손잡이 front_local 0)
+	}
+	switch {
+	case d == specLandFast:
 		fmt.Printf("hc-lane merger: 추측 검증 통과 — %s (트리 %s, %s) 착지가 검증을 건너뛴다\n", st[0].g.lanes, first8(st[0].row.tree), st[0].row.machine)
 		m.vw = vwhy{why: "통과", id: first8(st[0].row.id), mach: st[0].row.machine}
 		return d, st[0].row.tree
-	case specWaitFront:
+	case d == specWaitFront && m.wmach != "-":
 		fmt.Printf("hc-lane merger: 추측 검증 도는 중 — %s (%s) 결과를 기다린다\n", st[0].g.lanes, st[0].row.machine)
 	}
 	return d, ""
 }
 
-// specSolo: 묶음이 실패해 줄인 바퀴(cap)에 앞 k−1(≥2)을 병합기가 직접 검증하는 동안 「맨 앞 혼자」를 빈 검증 기계에 먼저 맡긴다
-// (merger-batch-culprit). 아이디는 다음 바퀴 맨 앞이 혼자일 때의 무리(기준 트리 + 맨 앞)와 같아, 그 바퀴 specWalk가 결과를 그대로 읽는다.
-// 기계가 없거나 바쁘거나 이미 그 추측이 있으면 아무것도 안 한다(지금 그대로)
-func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64) {
+// specSolo: 묶음이 실패해 줄인 바퀴(cap)에 앞 k−1(≥2)을 검증하는 동안(disp면 검증 기계에서, 아니면 병합기가 직접) 「맨 앞 혼자」를 빈
+// 검증 기계에 맡긴다(merger-batch-culprit). 아이디는 다음 바퀴 맨 앞이 혼자일 때의 무리(기준 트리 + 맨 앞)와 같아, 그 바퀴 specWalk가
+// 결과를 그대로 읽는다. 기계가 없거나 바쁘거나 이미 그 추측이 있으면 아무것도 안 한다(지금 그대로)
+func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64, disp bool) {
 	if m.capN() == 0 || len(m.b) < 2 {
 		return
 	}
@@ -138,7 +165,11 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64) {
 		if err := writeVia(m.mj+"/solo", id+"\n"); err != nil {
 			fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측 표식을 적지 못했다 — 실패해도 지금처럼 직접 검증한다")
 		}
-		m.jmembers(m.b[:1], jSolo, fmt.Sprintf("묶음 실패 뒤 맨 앞 혼자를 %s 에 추측 검증으로 맡김(앞 %d개는 병합기가 직접)", v.Machine, len(m.b)), "", m.r0, now)
+		where := "병합기가 직접"
+		if disp {
+			where = "검증 기계에"
+		}
+		m.jmembers(m.b[:1], jSolo, fmt.Sprintf("묶음 실패 뒤 맨 앞 혼자를 %s 에 추측 검증으로 맡김(앞 %d개는 %s)", v.Machine, len(m.b), where), "", m.r0, now)
 	}
 }
 
@@ -152,38 +183,46 @@ func (m *M) specCulpritWhy(c *specCtx, st []specStep) bool {
 		fmt.Printf("hc-lane merger: 맨 앞 %s 의 실패한 추측은 이 cap 바퀴에 지은 혼자 추측이 아니다(미리 줄 등) — 지금처럼 직접 검증\n", st[0].g.lanes)
 		return false
 	}
-	ref := specFails + st[0].row.id
-	sha := c.refs[ref]
-	if fetchr(true, "-q", "origin", ref) != 0 { // 받기만(FETCH_HEAD) — 로컬 참조를 남기지 않는다
-		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측의 실패 기록을 받지 못했다 — 지금처럼 직접 검증")
+	kv, test, ok := m.specFailRec(c, st[0].row.id)
+	if !ok || kv["test"] != "1" || test == "" || kv["exit"] == "" {
+		fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측 실패는 시험 실패와 환경 문제를 가를 수 없다 — 지금처럼 직접 검증\n", st[0].g.lanes)
 		return false
 	}
-	body, rc := out("cat-file", "commit", sha)
+	m.clog = kv["machine"] + ":" + kv["log"]
+	m.cwhy = fmt.Sprintf("착지 실패(종료 %s, 추측 검증 — %s 에서 맨 앞 혼자 기준 %s 위 시험 실패, 첫 실패 「%s」)", kv["exit"], kv["machine"], first8(m.B), test)
+	fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측이 시험 실패(%s) — 병합기 검증 없이 반송\n", st[0].g.lanes, kv["machine"])
+	return true
+}
+
+// specFailRec: 추측 실패 기록(spec-fail 참조)의 제목 칸(id·machine·at·log·exit·test)과 본문(첫 실패 시험 줄). 못 받거나 못 읽거나 꼴이
+// 다르면 ok=false(모름)
+func (m *M) specFailRec(c *specCtx, id string) (kv map[string]string, test string, ok bool) {
+	ref := specFails + id
+	if fetchr(true, "-q", "origin", ref) != 0 { // 받기만(FETCH_HEAD) — 로컬 참조를 남기지 않는다
+		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 추측의 실패 기록을 받지 못했다(모름)")
+		return nil, "", false
+	}
+	body, rc := out("cat-file", "commit", c.refs[ref])
 	if rc != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측의 실패 기록을 읽지 못했다 — 지금처럼 직접 검증")
-		return false
+		fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 추측의 실패 기록을 읽지 못했다(모름)")
+		return nil, "", false
 	}
 	_, msg, _ := strings.Cut(body, "\n\n")
 	subj, test, _ := strings.Cut(msg, "\n\n")
-	kv := map[string]string{}
+	if !strings.HasPrefix(subj, "hc-merger-spec-fail ") {
+		return nil, "", false
+	}
+	kv = map[string]string{}
 	for _, f := range strings.Fields(subj) {
 		if k, v, ok := strings.Cut(f, "="); ok {
 			kv[k] = v
 		}
 	}
-	test = strings.TrimSpace(test)
-	if !strings.HasPrefix(subj, "hc-merger-spec-fail ") || kv["test"] != "1" || test == "" || kv["exit"] == "" {
-		fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측 실패는 시험 실패와 환경 문제를 가를 수 없다 — 지금처럼 직접 검증\n", st[0].g.lanes)
-		return false
+	kv["log"] = ""
+	if _, rest, ok := strings.Cut(subj, " log="); ok { // 로그 경로에 빈칸이 있을 수 있다
+		kv["log"], _, _ = strings.Cut(rest, " exit=")
 	}
-	lg := ""
-	if _, rest, ok := strings.Cut(subj, " log="); ok {
-		lg, _, _ = strings.Cut(rest, " exit=")
-	}
-	m.clog = kv["machine"] + ":" + lg
-	m.cwhy = fmt.Sprintf("착지 실패(종료 %s, 추측 검증 — %s 에서 맨 앞 혼자 기준 %s 위 시험 실패, 첫 실패 「%s」)", kv["exit"], kv["machine"], first8(m.B), test)
-	fmt.Printf("hc-lane merger: 맨 앞 %s 혼자 추측이 시험 실패(%s) — 병합기 검증 없이 반송\n", st[0].g.lanes, kv["machine"])
-	return true
+	return kv, strings.TrimSpace(test), true
 }
 
 // specLoad: m.qs(바퀴의 ls-remote)에서 추측 참조를 읽는다. 목록도 추측도 없거나 못 읽으면 ok=false(지금 그대로)
@@ -407,19 +446,24 @@ func (m *M) specBuild(st []specStep, v verified.Verifier, now int64) (specRow, b
 	case "local":
 		r.dispatchX, r.state = true, specLost
 	case "run":
-		r.state = specRun
-		if !m.specDispatch(v, id) {
-			// 못 띄웠다 — 모름으로 고쳐 둔다(고치기도 못 하면 시간 넘김 뒤 모름)
-			r.dispatchX, r.state, r.machine = true, specLost, "-"
-			if lc, ok := commitTree("", tree, pc, specMsg(s.parent, s.g.key, "-", now, "lost")); ok &&
-				runO("push", "-q", "--force-with-lease="+ref+":"+cm, "origin", lc+":"+ref) == 0 {
-				r.commit = lc
-			}
-		} else {
-			fmt.Printf("hc-lane merger: 추측 검증 띄움 — %s → %s (부모 트리 %s)\n", s.g.lanes, mch, first8(s.parent))
-		}
+		m.specLaunch(&r, v, s.g.lanes, now)
 	}
 	return r, true
+}
+
+// specLaunch: 원격에 state=run으로 올린 추측 r을 기계 v에 띄운다. 못 띄우면 모름(state=lost)으로 고쳐 둔다(고치기도 못 하면 시간 넘김 뒤 모름)
+func (m *M) specLaunch(r *specRow, v verified.Verifier, lanes string, now int64) {
+	r.state = specRun
+	if m.specDispatch(v, r.id) {
+		fmt.Printf("hc-lane merger: 추측 검증 띄움 — %s → %s (부모 트리 %s)\n", lanes, v.Machine, first8(r.parent))
+		return
+	}
+	ref, cm := specRefs+r.id, r.commit
+	r.dispatchX, r.state, r.machine = true, specLost, "-"
+	if lc, ok := commitTree("", r.tree, cm+"^", specMsg(r.parent, r.group, "-", now, "lost")); ok &&
+		runO("push", "-q", "--force-with-lease="+ref+":"+cm, "origin", lc+":"+ref) == 0 {
+		r.commit = lc
+	}
 }
 
 // specStack: 부모 커밋 위에 제출들을 차례로 얹은 트리(착지의 rebase --reapply-cherry-picks와 같은 명령). 충돌이면 built=false

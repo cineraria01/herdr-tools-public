@@ -10,7 +10,8 @@ package main
 // 단위
 //   - 무리(group): 착지 한 번에 들어갈 것 — 맨 앞은 이번 바퀴의 묶음(m.b, merger-batch-audited 포함), 그 뒤는 큐 차례를 묶음 크기씩
 //     자른 것(다음 바퀴의 pickBatch가 고를 꼴 — 다르게 고르면 열쇠가 달라 그 추측은 안 쓰일 뿐). 열쇠 = 제출 SHA들을 +로 이음.
-//     맨 앞 무리에 줄이 없으면 그 추측은 짓기만 하고 띄우지 않는다(state=local — 병합기가 지금처럼 직접 검증하며, 뒤 추측의 부모가 된다).
+//     맨 앞 무리도 뒤 무리와 같이 빈 검증 기계에 띄운다(merger-verify-dispatch — specfront.go). 손잡이 front_dispatch 0이면 옛 길:
+//     짓기만 하고 띄우지 않는다(state=local — 병합기가 직접 검증하며, 뒤 추측의 부모가 된다).
 //   - 추측(spec): 「부모 트리 + 무리」 하나. 아이디 = sha256(부모 트리 + " " + 열쇠) 앞 40자. 원격 참조
 //     refs/hc-merger/spec/<아이디> → 커밋(트리 = 그 추측의 후보 트리, 부모 = 부모 추측 커밋 또는 origin/<기본>, 제목 specMsg).
 //     충돌로 못 지은 추측도 참조를 둔다(state=conflict, 트리 = 부모 트리) — 바퀴마다 다시 짓지 않게.
@@ -28,7 +29,8 @@ package main
 //     착지의 rb와 같은 명령) push한 뒤 그 기계에 띄우고 다시 따라간다.
 //  3. 맨 앞 무리: 통과면 착지(착지가 기록을 보고 검증을 건너뜀) · 도는 중이면 착지하지 않고 이 바퀴를 끝냄(다음 바퀴에 다시 —
 //     띄운 지 HC_LANE_SPEC_FRONT_WAIT(기본 600초)를 넘기면 모름, specrun.go specFrontWait) ·
-//     그 밖(실패·충돌·모름·줄 없음)이면 지금처럼 착지(병합기 기계 검증 — 실패면 지금 규칙대로 반송, 묶음이면 줄여서 다시).
+//     그 밖(실패·충돌·모름·줄 없음)이면 specfront.go specFrontLand(혼자 시험 실패는 다른 기계에서 한 번 더 확인 뒤 반송, 묶음 시험 실패는
+//     줄여서 다시, 모름·맡길 기계 없음은 손잡이 front_local — 기본은 착지(병합기 기계 검증), 0이면 기다림·사건 한 번).
 //  4. 따라간 길에 없는 추측(착지했거나 반송됐거나 main이 움직임)은 도는 중이 아니면 참조 셋을 지운다(본 값 lease). 도는 중이면 그 기계가
 //     끝낼 때까지 둔다(그 기계는 그동안 바쁨 — 검증 기계 일꾼은 결과를 쓰기 전에 spec 참조가 아직 있는지 본다).
 //  5. 미리 줄(specpre.go): 위를 다 챙긴 뒤 빈 검증 기계가 남으면, 완료 보고한 레인 표식(refs/merge-pre/*)마다 「기준 + 그 커밋」 추측을
@@ -195,7 +197,8 @@ const (
 	specLand      specDecision = iota // 지금처럼 착지(병합기 기계 검증)
 	specLandFast                      // 착지 — 기록이 있어 착지가 검증을 건너뛴다
 	specWaitFront                     // 맨 앞 추측이 도는 중 — 이 바퀴는 착지하지 않는다
-	specCulprit                       // 묶음 실패 뒤 맨 앞 혼자 추측이 시험 실패 — 착지 없이 반송(specrun.go specCulpritWhy)
+	specReject                        // 맨 앞 혼자가 검증 기계에서 시험 실패(묶음 실패 뒤 혼자 추측 — specCulpritWhy, 두 기계 — specfront.go) — 착지 없이 반송
+	specShrink                        // 묶음 맨 앞이 검증 기계에서 시험 실패 — 착지 없이 마지막을 빼고 다시(specfront.go)
 )
 
 func specFront(st []specStep) specDecision {

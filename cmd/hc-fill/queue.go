@@ -536,11 +536,11 @@ func anote(n string) string {
 	if _, ok := readFile(DATA + "/audit.tsv"); !ok {
 		return "" // 셸 판: awk가 파일을 못 열면 빈 글
 	}
-	var r, s, f, v string
+	var id, r, s, f, v string
 	g := false
 	for _, x := range readRows(DATA + "/audit.tsv") {
 		if x.NF() >= 17 && x.F(2) == n {
-			r, s, f, v, g = x.F(3), x.F(8), x.F(9), x.F(10), true
+			id, r, s, f, v, g = x.F(1), x.F(3), x.F(8), x.F(9), x.F(10), true
 		} else if x.NF() >= 5 && x.NF() < 17 && x.F(1) == n {
 			r, f, s, g = x.F(3), x.F(4), "old", true
 		}
@@ -549,6 +549,12 @@ func anote(n string) string {
 	case !g:
 		return "자동 감사(완료 기다림)"
 	case s == "opening" || s == "queued":
+		if q := qrow("audit-" + id); q != nil && q.F(6) == "wait" { // 감사 줄이 아직 안 떴다
+			if m := aseatMin("audit-" + id); m >= 0 {
+				return "감사 대기(자리 없음 " + strconv.FormatInt(m, 10) + "분)"
+			}
+			return "감사 대기(" + r + "번째)"
+		}
 		return "감사 중(" + r + "번째)"
 	case s == "deliver":
 		if v == "pass" {

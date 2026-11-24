@@ -116,6 +116,7 @@ func TestFrontWaitLateFail(t *testing.T) {
 
 // ⑤ 뒤쪽 무리의 도는 중 추측은 상한과 무관하게 지금 그대로(통과로 보고 더 깊이 — 다시 짓지 않는다)
 func TestFrontWaitBackUnaffected(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)
@@ -203,6 +204,7 @@ func TestPreMaxDefault(t *testing.T) {
 // 나(preverify 2차 감사 낮음 2): cap이 끝나면 solo도 지운다 — 같은 sha 재제출 + 기준 그대로 + 묶음 실패가 다시 겹쳐도 옛 solo가
 // 같은 아이디의 미리 줄 추측 실패를 반송 근거로 믿게 하지 않는다(병합기가 직접 검증한 뒤 반송)
 func TestSoloClearedWithCap(t *testing.T) {
+	oldFront(t)
 	s := culpritFx(t, true)
 	_, sa := s.sub2(1000000001, "a", "", "", "bad.txt", "a\n", false)
 	s.submit(1000000002, "b", "보통")

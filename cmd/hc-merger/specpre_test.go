@@ -130,6 +130,7 @@ func TestPreSpecRunningWaits(t *testing.T) {
 
 // ④ 그 사이 기준이 움직임 → 아이디가 달라 기록이 안 맞고 지금처럼 직접 검증(병합기가 통과로 치지 않음 — HERDR_SPEC_TREE 빈 값)
 func TestPreSpecBaseMovedVerifies(t *testing.T) {
+	oldFront(t)
 	s := preFx(t)
 	sha := s.pre("p", time.Now().Unix(), false)
 	s.round(1)
@@ -227,6 +228,7 @@ func TestPreSpecOnlyNeverLands(t *testing.T) {
 
 // ⑧ 진짜 줄 추측이 먼저 기계를 받는다: 큐 A·B와 표식 P·Q, 검증 기계 둘 → v1은 B(진짜 줄), v2는 P, Q는 기다림
 func TestPreSpecQueueFirst(t *testing.T) {
+	oldFront(t)
 	s := preFx(t)
 	now := time.Now().Unix()
 	p := s.pre("p", now, false)
@@ -247,6 +249,7 @@ func TestPreSpecQueueFirst(t *testing.T) {
 // ⑨(감사 atoz3el-ese56i 중간): 미리 줄 추측이 도는 중에 묶음 [p,q]로 제출돼 묶음이 실패하고, 그 뒤 미리 검증이 시험 실패로 끝나도
 // cap 바퀴의 맨 앞 [p]는 그 기록만으로 반송하지 않고 지금처럼 병합기가 직접 검증한다(맨 앞 혼자 추측으로 믿는 것은 cap 바퀴에 지은 것뿐)
 func TestPreSpecFailNotCulprit(t *testing.T) {
+	oldFront(t)
 	s := culpritFx(t, true)
 	p := s.pre("p", time.Now().Unix(), true)
 	s.round(2)

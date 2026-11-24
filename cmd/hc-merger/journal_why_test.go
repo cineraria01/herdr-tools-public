@@ -56,6 +56,7 @@ func TestJournalWhyFastSkip(t *testing.T) {
 
 // ② 직접 검증 까닭: 추측 없음
 func TestJournalWhyNoSpec(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.round(1)
@@ -75,6 +76,7 @@ func TestJournalWhyNoSpec(t *testing.T) {
 
 // ② 직접 검증 까닭: 묶음
 func TestJournalWhyBatch(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)
@@ -88,6 +90,7 @@ func TestJournalWhyBatch(t *testing.T) {
 
 // ② 직접 검증 까닭: 기준 움직임(미리 검증은 통과했지만 제출 전에 기준이 움직임)
 func TestJournalWhyBaseMoved(t *testing.T) {
+	oldFront(t)
 	s := preFx(t)
 	sha := s.pre("p", time.Now().Unix(), false)
 	s.round(1)
@@ -128,7 +131,8 @@ func TestJournalWhyFrontWaitCap(t *testing.T) {
 	}
 }
 
-// ② 맨 앞 추측 상태 → 까닭(모름은 검증 기계에 띄운 추측이 시간 넘김·안 뜸 — 병합기가 직접 지은 맨 앞(기계 -)은 추측 없음)
+// ② 맨 앞 추측 상태 → 까닭(모름은 검증 기계에 띄운 추측이 시간 넘김·안 뜸 — 병합기가 직접 지은 맨 앞(기계 -)은 추측 없음).
+// 맨 앞도 맡기면(disp — merger-verify-dispatch) 줄이 없는 것은 빈 검증 기계가 없었다는 뜻, 기계 - 줄은 못 띄움·준비 실패(모름)
 func TestFrontWhyTable(t *testing.T) {
 	g := newGroup([]entry{{s: "s1", l: "a"}})
 	g2 := newGroup([]entry{{s: "s1", l: "a"}, {s: "s2", l: "b"}})
@@ -140,19 +144,24 @@ func TestFrontWhyTable(t *testing.T) {
 		st   []specStep
 		rows []specRow
 		over bool
+		disp bool
 		want string
 	}{
-		{"줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, "추측 없음"},
-		{"병합기가 지은 맨 앞", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, "추측 없음"},
-		{"검증 기계 추측 시간 넘김", []specStep{{g: g, parent: "B", row: row(specLost, "v1", "B", "s1")}}, nil, false, "모름"},
-		{"충돌", []specStep{{g: g, parent: "B", row: row(specConflict, "-", "B", "s1")}}, nil, false, "모름"},
-		{"실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, "추측 실패"},
-		{"도는 중 상한 넘김", []specStep{{g: g, parent: "B", row: row(specRun, "v1", "B", "s1")}}, nil, true, "맨 앞 기다림 상한"},
-		{"묶음", []specStep{{g: g2, parent: "B"}}, nil, false, "묶음"},
-		{"옛 기준의 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, "기준 움직임"},
-		{"다른 레인의 옛 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s9")}, false, "추측 없음"},
+		{"줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, false, "추측 없음"},
+		{"병합기가 지은 맨 앞", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, false, "추측 없음"},
+		{"검증 기계 추측 시간 넘김", []specStep{{g: g, parent: "B", row: row(specLost, "v1", "B", "s1")}}, nil, false, false, "모름"},
+		{"충돌", []specStep{{g: g, parent: "B", row: row(specConflict, "-", "B", "s1")}}, nil, false, false, "모름"},
+		{"실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, false, "추측 실패"},
+		{"도는 중 상한 넘김", []specStep{{g: g, parent: "B", row: row(specRun, "v1", "B", "s1")}}, nil, true, false, "맨 앞 기다림 상한"},
+		{"묶음", []specStep{{g: g2, parent: "B"}}, nil, false, false, "묶음"},
+		{"옛 기준의 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, false, "기준 움직임"},
+		{"다른 레인의 옛 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s9")}, false, false, "추측 없음"},
+		{"맡김 · 줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, true, "맡길 기계 없음"},
+		{"맡김 · 묶음 줄 없음", []specStep{{g: g2, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, true, "맡길 기계 없음"},
+		{"맡김 · 못 띄움(기계 -)", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, true, "모름"},
+		{"맡김 · 실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, true, "추측 실패"},
 	} {
-		if got := frontWhy(c.st, c.rows, c.over); got != c.want {
+		if got := frontWhy(c.st, c.rows, c.over, c.disp); got != c.want {
 			t.Errorf("%s: %q, 바람 %q", c.name, got, c.want)
 		}
 	}

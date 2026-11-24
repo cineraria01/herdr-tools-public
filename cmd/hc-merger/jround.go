@@ -111,15 +111,19 @@ func scanFail(path string, off int64, test bool) string {
 func (m *M) specWaitNote() {
 	now := time.Now().Unix()
 	first, n := now, 0
-	if f, l, k, b, ok := m.specWaitRead(); ok {
+	if f, l, k, b, mach, ok := m.specWaitRead(); ok {
 		if sameFront(b, m.b) {
 			first, n = f, k
 		} else {
-			m.specWaitLine(f, l, k, b)
+			m.specWaitLine(f, l, k, b, mach)
 		}
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d %d %d\n", first, now, n+1)
+	fmt.Fprintf(&sb, "%d %d %d", first, now, n+1)
+	if m.wmach != "" {
+		sb.WriteString(" " + m.wmach)
+	}
+	sb.WriteString("\n")
 	for _, e := range m.b {
 		fmt.Fprintf(&sb, "%s %s %s %s\n", e.q, e.s, e.l, e.m)
 	}
@@ -130,8 +134,8 @@ func (m *M) specWaitNote() {
 
 // specWaitEnd: 추측 판정이 기다림이 아닐 때 바로(그 바퀴의 착지·반송 줄보다 먼저) — 모아 둔 기다림이 있으면 한 줄로 적고 지운다
 func (m *M) specWaitEnd() {
-	if f, l, k, b, ok := m.specWaitRead(); ok {
-		m.specWaitLine(f, l, k, b)
+	if f, l, k, b, mach, ok := m.specWaitRead(); ok {
+		m.specWaitLine(f, l, k, b, mach)
 		removeQuiet(m.mj + "/specwait")
 	}
 }
@@ -142,18 +146,28 @@ func (m *M) specWaitEarly() {
 	if len(m.sfront) == 0 {
 		return
 	}
-	if _, _, _, b, ok := m.specWaitRead(); ok && !sameFront(b, m.sfront) {
+	if _, _, _, b, _, ok := m.specWaitRead(); ok && !sameFront(b, m.sfront) {
 		m.specWaitEnd()
 	}
 }
 
-func (m *M) specWaitLine(first, last int64, n int, b []entry) {
-	m.jmembers(b, jSpecWait, fmt.Sprintf("추측 검증 기다림 %d바퀴", n), "", first, last)
+// specWaitLine: 한 번의 기다림 = 한 줄. mach = 마지막 바퀴에 맨 앞을 맡긴 검증 기계(「검증 맡김(<기계>)」 — merger-verify-dispatch),
+// -면 손잡이 0으로 맡기지 못해 기다림, 빈 값이면 옛 기록(덧붙이지 않음)
+func (m *M) specWaitLine(first, last int64, n int, b []entry, mach string) {
+	what := fmt.Sprintf("추측 검증 기다림 %d바퀴", n)
+	switch mach {
+	case "":
+	case "-":
+		what += ", 맡길 기계를 기다림(직접 검증 안 함)"
+	default:
+		what += ", 검증 맡김(" + mach + ")"
+	}
+	m.jmembers(b, jSpecWait, what, "", first, last)
 }
 
-// specWaitRead: 「<처음 초> <마지막 초> <횟수>」 + 구성원마다 「<큐 참조> <제출 SHA> <레인> <기록 SHA|->」(cur와 같은 꼴). 없으면 ok=false,
-// 깨졌으면 지우고 ok=false(줄 하나가 빠질 뿐)
-func (m *M) specWaitRead() (first, last int64, n int, b []entry, ok bool) {
+// specWaitRead: 「<처음 초> <마지막 초> <횟수> [<검증 기계|->]」 + 구성원마다 「<큐 참조> <제출 SHA> <레인> <기록 SHA|->」(cur와 같은 꼴).
+// 없으면 ok=false, 깨졌으면 지우고 ok=false(줄 하나가 빠질 뿐)
+func (m *M) specWaitRead() (first, last int64, n int, b []entry, mach string, ok bool) {
 	p := m.mj + "/specwait"
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -162,22 +176,26 @@ func (m *M) specWaitRead() (first, last int64, n int, b []entry, ok bool) {
 	ls := strings.Split(strings.TrimSpace(string(data)), "\n")
 	h := strings.Fields(ls[0])
 	var e1, e2, e3 error
-	if len(h) == 3 {
+	hok := len(h) == 3 || len(h) == 4
+	if hok {
 		first, e1 = strconv.ParseInt(h[0], 10, 64)
 		last, e2 = strconv.ParseInt(h[1], 10, 64)
 		n, e3 = strconv.Atoi(h[2])
+		if len(h) == 4 {
+			mach = h[3]
+		}
 	}
 	for _, l := range ls[1:] {
 		if f := strings.Fields(l); len(f) == 4 {
 			b = append(b, entry{q: f[0], s: f[1], l: f[2], m: f[3]})
 		}
 	}
-	if len(h) != 3 || e1 != nil || e2 != nil || e3 != nil || len(b) == 0 || len(b) != len(ls)-1 {
+	if !hok || e1 != nil || e2 != nil || e3 != nil || len(b) == 0 || len(b) != len(ls)-1 {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 추측 기다림 기록 %s 이 깨졌다 — 버린다(일지 줄 하나가 빠진다)\n", p)
 		removeQuiet(p)
-		return 0, 0, 0, nil, false
+		return 0, 0, 0, nil, "", false
 	}
-	return first, last, n, b, true
+	return first, last, n, b, mach, true
 }
 
 // sameFront: 같은 기다림인가 — 맨 앞 제출(큐 참조·SHA)만 본다(뒤 구성원이 바뀌어도 같은 맨 앞을 기다린다)

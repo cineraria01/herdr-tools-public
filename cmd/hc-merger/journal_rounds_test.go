@@ -161,6 +161,7 @@ func (f *fx) queueHead(sec int, lane string) {
 
 // 추측 기다림 28바퀴 = 한 줄(시작 ~ 끝, 되풀이 횟수). 기다림이 끝난 바퀴에 적고, 그 뒤 착지 줄은 그대로
 func TestJournalSpecWaitOneLine(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)
@@ -192,6 +193,7 @@ func TestJournalSpecWaitOneLine(t *testing.T) {
 // 감사 atoy0ft-aprr7a 낮음 둘: 추측 판정까지 못 간 바퀴(켬 표식이 잠깐 없음)가 기다림을 두 줄로 쪼개지 않고, 기다림이 끝난 바퀴는
 // 「추측 기다림」 줄을 그 바퀴의 착지 줄보다 먼저 적는다
 func TestJournalSpecWaitEarlyRoundAndOrder(t *testing.T) {
+	oldFront(t)
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
 	s.sub(1000000002, "b", false)

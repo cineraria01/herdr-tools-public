@@ -16,6 +16,7 @@ import (
 )
 
 func TestSpecSetupUsesShellEnv(t *testing.T) {
+	oldFront(t)
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("zsh 없음 — ~/.zshrc 셸 환경 길은 zsh가 있는 기계 몫(없으면 지금 PATH 그대로)")
 	}

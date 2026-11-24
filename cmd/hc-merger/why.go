@@ -1,8 +1,9 @@
 package main
 
 // 병합기 일지의 검증 길(merger-journal-why, 2026-11-24): 착지·반송 줄의 까닭 칸 끝에 「, 검증 건너뜀(추측 <아이디 8> · <기계>)」 또는
-// 「, 직접 검증(<까닭>)」을 붙인다(칸 수는 그대로). 까닭은 spec()이 맨 앞 무리를 보고 정하고(추측 없음 · 묶음 · 기준 움직임 · 추측 실패 ·
-// 맨 앞 기다림 상한 · 모름), 맨 앞 추측이 통과했으면 착지 로그로 마저 가른다(검증 스크립트의 「건너뜀 검증」 줄 → 건너뜀, 착지의 「rebase한
+// 「, 직접 검증(<까닭>)」을 붙인다(칸 수는 그대로). 까닭은 spec()이 맨 앞 무리를 보고 정하고(추측 없음 · 맡길 기계 없음 · 묶음 · 기준
+// 움직임 · 추측 실패 · 맨 앞 기다림 상한 · 모름 — 묶음·기준 움직임은 맨 앞을 맡기지 않을 때만), 맨 앞을 맡겨 기다린 바퀴는 「추측 기다림」 줄에 「검증 맡김(<기계>)」
+// (jround.go specWaitLine), 맨 앞 추측이 통과했으면 착지 로그로 마저 가른다(검증 스크립트의 「건너뜀 검증」 줄 → 건너뜀, 착지의 「rebase한
 // 트리가 다르다」 → 기준 움직임, 그 밖 → 모름). 요약은 hc-lane merger --why [N].
 
 import (
@@ -17,9 +18,10 @@ import (
 // vwhy: 이번 착지의 검증 길. why가 비면 모름(일지에 붙이지 않는다). id가 있으면 맨 앞 추측이 통과(착지 로그로 마저 가른다)
 type vwhy struct{ why, id, mach string }
 
-// frontWhy: 맨 앞 무리를 병합기가 직접 검증하는 까닭. rows = 이번 바퀴에 읽은 추측 전부(옛 기준의 같은 무리를 찾는다), over = 맨 앞
-// 기다림 상한을 넘김
-func frontWhy(st []specStep, rows []specRow, over bool) string {
+// frontWhy: 맨 앞 무리를 병합기가 직접 검증하는(손잡이 front_local 0이면 기다리는) 까닭. rows = 이번 바퀴에 읽은 추측 전부(옛 기준의 같은
+// 무리를 찾는다), over = 맨 앞 기다림 상한을 넘김, disp = 맨 앞도 검증 기계에 맡김(merger-verify-dispatch — 그러면 줄이 없다는 것은 빈
+// 검증 기계가 없었다는 뜻이다)
+func frontWhy(st []specStep, rows []specRow, over, disp bool) string {
 	if over {
 		return "맨 앞 기다림 상한"
 	}
@@ -27,14 +29,17 @@ func frontWhy(st []specStep, rows []specRow, over bool) string {
 		return "모름"
 	}
 	f := st[0]
+	if f.row == nil && disp {
+		return "맡길 기계 없음"
+	}
 	if r := f.row; r != nil && r.machine != "-" { // 검증 기계에 띄운 추측
 		if r.state == specFail {
 			return "추측 실패"
 		}
 		return "모름" // 시간 넘김·안 뜸(통과·도는 중은 여기 안 온다)
 	}
-	if r := f.row; r != nil && r.state == specConflict {
-		return "모름"
+	if r := f.row; r != nil && (r.state == specConflict || disp) {
+		return "모름" // 충돌 · 맡겼는데 못 띄움·준비 실패(state=lost, 기계 -)
 	}
 	if len(f.g.shas) > 1 {
 		return "묶음"
