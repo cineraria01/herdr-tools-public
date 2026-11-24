@@ -32,29 +32,39 @@ var (
 // not_found). 시작했을 수 있다 — hc-fill은 다른 기계에 또 띄우지 않고 그 시도·주소를 남긴다(재감사2 lane/R-211, fill/R-201)
 const startUnsure = 8
 
-// startPoll: 시작 확인 hc get 한 번. 0 status 잡힘(g는 그 응답 JSON), 1 확인된 안 잡힘(살아 있고 status null), 3 확인된 끝남, 2 모름
-func startPoll(a string) (int, string) {
+// spoll: startPoll 판정 — 0값이 모름
+type spoll int
+
+const (
+	spUnknown  spoll = iota // 모름(조회 실패·not_found·다른 터미널·status 칸 없음)
+	spStatus                // status 잡힘
+	spNoStatus              // 확인된 안 잡힘(살아 있고 status null)
+	spFinished              // 확인된 끝남
+)
+
+// startPoll: 시작 확인 hc get 한 번. status가 잡히면 g는 그 응답 JSON
+func startPoll(a string) (spoll, string) {
 	t, found, err := hcGet(10, a)
 	if err != nil || !found {
-		return 2, ""
+		return spUnknown, ""
 	}
 	if t.HasName && t.Name != name {
-		return 2, "" // 그 주소가 다른 터미널이다
+		return spUnknown, "" // 그 주소가 다른 터미널이다
 	}
 	if t.State == "finished" {
-		return 3, ""
+		return spFinished, ""
 	}
 	if _, ok := t.Raw["status"]; !ok {
-		return 2, "" // 칸 자체가 없는 부분 응답 — null(아직 안 잡힘)과 다르다
+		return spUnknown, "" // 칸 자체가 없는 부분 응답 — null(아직 안 잡힘)과 다르다
 	}
 	if t.Status == "" {
-		return 1, ""
+		return spNoStatus, ""
 	}
 	g, err := json.Marshal(t.Raw)
 	if err != nil {
-		return 2, ""
+		return spUnknown, ""
 	}
-	return 0, string(g)
+	return spStatus, string(g)
 }
 
 // hcRead: 실패한(시간 넘김 포함) hc read의 반쪽 화면은 빈 화면으로 — 그것으로 신뢰·가져오기 키를 보내지 않는다(gofix E07)
@@ -102,10 +112,10 @@ func startCheck(a string) int {
 	why, last, unk := "", false, false
 	for {
 		pr, g := startPoll(a)
-		if pr == 2 {
+		if pr == spUnknown {
 			unk = true
 		}
-		if pr == 0 {
+		if pr == spStatus {
 			start = "ok"
 			if _, err := exec.LookPath("jq"); fwait == 0 || err != nil {
 				return 0
@@ -118,7 +128,7 @@ func startCheck(a string) int {
 			}
 			return 0
 		}
-		if pr == 3 {
+		if pr == spFinished {
 			why, unk = "터미널이 끝났다", false
 			break
 		}

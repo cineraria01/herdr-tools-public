@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 // launch <레인> <지시문> <기계> <저장소> <되돌릴곳> <주인 지휘|-> → ADDR. 0 띄움 · 1 실패(다음 기계) · 2 이 레인은 이번 바퀴에 그만 ·
@@ -130,13 +131,14 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	// 주인 지휘가 지금 살아 있나: 그 사이 지휘가 끝났으면(없음이 확인됨 — ownerCheck) 주인 없이(-, 사건은 모든 지휘에게) 띄우고 watch는
 	// 살아 있는 지휘에게. 그 밖(시간 넘김·연결 실패·살아 있으나 pid 없음)은 모름 — 주인을 풀지 않고 이번 바퀴는 미룬다(gofix-fill F06·L8, 재감사 R-09)
 	if own != "" {
-		switch rc, why := ownerCheck(own); rc {
-		case 1:
+		switch st, why := ownerCheck(own); st {
+		case tri.No:
 			say("알림: %s 의 주인 지휘 %s 가 지금 없다 — 주인 없이 띄움(사건은 모든 지휘에게) (%s)", lane, own, why)
 			own = ""
-		case 2:
+		case tri.Unknown:
 			say("미룸 %s: 주인 지휘 %s 확인을 못 함 — 다음 바퀴에 (%s)", lane, own, why)
 			return 2
+		case tri.Yes:
 		}
 	}
 	task := strings.ReplaceAll(TASK, "{run}", rf)
@@ -284,27 +286,27 @@ func launchUnsure(rc int, out string) bool {
 	return strings.Contains(out, "hc run 결과를 확인하지 못했다") || strings.Contains(out, "결과 모름") || strings.Contains(out, "panic:")
 }
 
-// ownerCheck <주인 지휘>: 0 살아 있음, 1 없음 확인, 2 모름(까닭 why). hc-lane coord --check 1은 「없거나 끝남」과 「살아 있으나 pid 없음」이
+// ownerCheck <주인 지휘>: 있음 살아 있음, 없음 확인, 모름(까닭 why). hc-lane coord --check 1은 「없거나 끝남」과 「살아 있으나 pid 없음」이
 // 같은 꼴이라 그대로 믿지 않는다 — 다른 실행(pid·이름 다름)이거나 hc get이 끝남(not_found·finished)을 확인했을 때만 없음(재감사 R-09)
-func ownerCheck(own string) (int, string) {
+func ownerCheck(own string) (tri.State, string) {
 	ce, rc := Cmd{Name: "hc-lane", Args: []string{"coord", "--check", own}, Err: errMerge}.Run()
 	why := lastLine(sub(ce))
 	switch {
 	case rc == 0:
-		return 0, ""
+		return tri.Yes, ""
 	case rc != 1:
-		return 2, fmt.Sprintf("종료 %d %s", rc, why)
+		return tri.Unknown, fmt.Sprintf("종료 %d %s", rc, why)
 	case strings.Contains(why, "지휘 정보(") && strings.Contains(why, "와 다름"),
 		strings.Contains(why, "에이전트가 끝나 셸만 남음"): // 대화형 셸만 남은 지휘(hc-lane coordCheck — watch-agent-guard)
-		return 1, why
+		return tri.No, why
 	}
 	pr, pn := PRUN, PNAME // pget이 채우는 실행 키는 부른 쪽 것 그대로
-	gone := pget(own) == 3
+	gone := pget(own) == pDone
 	PRUN, PNAME = pr, pn
 	if gone {
-		return 1, why
+		return tri.No, why
 	}
-	return 2, why + " — hc get은 끝남을 확인하지 못함"
+	return tri.Unknown, why + " — hc get은 끝남을 확인하지 못함"
 }
 
 // balanceMax: herdr-balance 한 번의 상한 — HC_FILL_BALANCE_TIMEOUT초(빼면 30)
@@ -413,14 +415,14 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		if lr != 0 && lr != 5 && lr != 6 {
 			continue
 		}
-		ss := 1
+		ss := tri.No // 5: 띄웠지만 시작 확인 실패
 		switch lr {
 		case 0:
 			ss = startState(ADDR, lane)
 		case 6: // 안쪽 hc-lane이 시작 확인 미확정(종료 8) — 확인된 시작 실패가 아니다(재감사2 fill/R-201)
-			ss = 2
+			ss = tri.Unknown
 		}
-		if ss == 2 { // 시작 확인(hc get)을 못 함 — 띄운 주소가 있으니 시작했을 수 있다: 미확정(?)으로 두고 다른 기계에 또 띄우지 않는다(재감사 R-01·R-05)
+		if ss == tri.Unknown { // 시작 확인(hc get)을 못 함 — 띄운 주소가 있으니 시작했을 수 있다: 미확정(?)으로 두고 다른 기계에 또 띄우지 않는다(재감사 R-01·R-05)
 			say("모름 %s @%s %s: 시작 확인(hc get)을 못 함 — 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, m, ADDR)
 			// 받은 주소를 시도 기록 8칸에 — 다음 바퀴가 hc get으로 확정한다(fill/R-4M01). 못 적으면 주소 모름 미확정 그대로
 			if !dry && tryEdit(lane, func(r Row) Row {
@@ -440,7 +442,7 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			GOTADDR = true
 		}
 		NOW = append(NOW, m) // 상태가 안 잡혀도 자리는 차 있다
-		if ss == 0 {
+		if ss == tri.Yes {
 			if !isa {
 				NOWL = append(NOWL, m)
 			}

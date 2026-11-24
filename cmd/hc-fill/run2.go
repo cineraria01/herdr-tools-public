@@ -372,7 +372,7 @@ func adopt(name, rid, reply string, t *Term) {
 			return
 		}
 	}
-	if pget(t.Addr) != 0 {
+	if pget(t.Addr) != pLive {
 		PRUN = "-"
 	}
 	if tryput(name, rid, t.M, te, tu, t.Addr, PRUN) == 0 {

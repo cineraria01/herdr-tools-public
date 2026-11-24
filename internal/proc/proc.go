@@ -193,6 +193,7 @@ func stopOwned(pg int, start string, grace time.Duration, live bool) {
 		}
 	case groupNone:
 		drop(pg, live)
+	case groupUnknown: // 건드리지 않는다
 	}
 }
 

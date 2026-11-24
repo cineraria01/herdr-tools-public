@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 func autoFile() string    { return STATE + "/auto-deploy" }
@@ -78,10 +79,10 @@ func autoCmd(args []string, f string, line func() string, journal func(bool, str
 	return 0
 }
 
-// noRelease: 스스로 배포가 깔 수 없는 까닭 한 줄(st 1 없음 · 2 모름)
-func noRelease(c12 string, st int, why string) string {
+// noRelease: 스스로 배포가 깔 수 없는 까닭 한 줄(st 없음·모름)
+func noRelease(c12 string, st tri.State, why string) string {
 	s := "이 커밋의 릴리스가 없다 (bin-" + c12 + ")"
-	if st != 1 {
+	if st != tri.No {
 		s = "이 커밋의 릴리스가 있는지 모른다 (bin-" + c12 + " — " + why + ")"
 	}
 	return "스스로 배포 못 함: " + s + " — herdr-sync로 배포하거나 herdr-sync --auto-publish on"
@@ -104,9 +105,9 @@ func autoGate() string {
 	case rc == 0:
 		return ""
 	case strings.TrimSpace(errs) == "release not found":
-		return noRelease(om[:12], 1, "")
+		return noRelease(om[:12], tri.No, "")
 	}
-	return noRelease(om[:12], 2, "gh release view 실패(인증·통신·시간 넘김)")
+	return noRelease(om[:12], tri.Unknown, "gh release view 실패(인증·통신·시간 넘김)")
 }
 
 // envSecs: 초(소수 받음), 없거나 틀리면 def
@@ -181,7 +182,7 @@ func autoRelease(rel *relInfo) *relInfo {
 		return rel
 	}
 	r, st, why := fetchRelease(slug, rel.c12, rel.src)
-	if st != 0 {
+	if st != tri.Yes {
 		die("%s", noRelease(rel.c12, st, why))
 	}
 	r.at, r.files = false, rel.files

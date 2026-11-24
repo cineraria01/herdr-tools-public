@@ -16,6 +16,7 @@ import (
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 // emit: 커서에 적고 찍는다. watch는 먼저 지휘 터미널에 한 줄로 밀어 주고(hc send), 보낸 뒤에만 커서에 적는다.
@@ -94,7 +95,7 @@ func stripCtl(s string) string {
 func (e *ev) wfilter(lines []string) []string {
 	w0 := lastSeg(e.wto)
 	recipientRun := ""
-	occ := map[string]int{}
+	occ := map[string]tri.State{}
 	e.occ, e.seenc = occ, map[string]seenCache{}
 	e.pruneDefer()
 	orc := map[string]string{}
@@ -177,7 +178,7 @@ func (e *ev) wfilter(lines []string) []string {
 			_, _, r = coordCheck(o)
 			occ[o] = r
 		}
-		if r != 1 {
+		if r != tri.No {
 			continue
 		}
 		if !e.prevseen(a, l, o) && e.repoSend(l) {
@@ -355,13 +356,13 @@ func (e *ev) wdialog(scr string) bool {
 // wcheck: 이 watch의 지휘 정보가 맞나. 다르거나 없으면 「지휘 없음」을 남기고 끝낸다(종료 0), 모르면 거짓, 맞으면 참
 func (e *ev) wcheck() bool {
 	_, why, c := coordCheck(e.wto)
-	if c == 1 && e.wpar {
+	if c == tri.No && e.wpar {
 		if _, err := os.Stat(coordFile(e.wto)); os.IsNotExist(err) {
 			coordSet(e.wto, false)
 			_, why, c = coordCheck(e.wto)
 		}
 	}
-	if c == 2 {
+	if c == tri.Unknown {
 		fmt.Fprintf(os.Stderr, "hc-lane watch: 지휘 %s 확인 못 함(%s) — 다음 바퀴에 다시\n", e.wto, why)
 		// 모름이 lane.watch_hold_max 넘게 이어지면 watch.log에 한 번 — 보내지도 끝내지도 않는다(모름을 있음·없음으로 읽지 않는다)
 		n := time.Now().Unix()
@@ -377,7 +378,7 @@ func (e *ev) wcheck() bool {
 		return false
 	}
 	e.wu0, e.wuLogged = 0, false
-	if c != 0 {
+	if c != tri.Yes {
 		w := "지휘 없음"
 		if strings.Contains(why, "에이전트") {
 			w = "에이전트 없음"

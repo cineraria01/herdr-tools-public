@@ -95,12 +95,13 @@ func sendCmd(a []string) int {
 			continue
 		}
 		switch r, why := sendOwner(recs, t, me); r {
-		case 1:
+		case sownOther:
 			continue
-		case 2:
+		case sownHold:
 			fmt.Printf("보류 %s %s — %s\n", ad, n, why)
 			held++
 			continue
+		case sownMine:
 		}
 		if !aud && (strings.HasPrefix(n, "audit-") || km[[2]string{lastSeg(ad), n}] == "read") {
 			continue
@@ -129,11 +130,20 @@ func sendCmd(a []string) int {
 	return 0
 }
 
-// sendOwner: 살아 있는 레인 t가 지휘 me의 것인가. 0 이 지휘의 것, 1 남의 것·주인 모름, 2 보류(소유 충돌 — 보내지 않는다).
+// sown: sendOwner 판정 — 0값이 보류(보내지 않는 쪽)
+type sown int
+
+const (
+	sownHold  sown = iota // 보류(소유 충돌·모름 쪽 — 보내지 않고 센다)
+	sownMine              // 이 지휘의 것
+	sownOther             // 남의 것·주인 모름(건너뜀)
+)
+
+// sendOwner: 살아 있는 레인 t가 지휘 me의 것인가.
 // 레인 기록(lanes.tsv 「주소 이름 주인 [종류]」)은 주소와 이름이 지금 터미널과 같은 줄만 쓴다 — 이름이 다른 줄은 그 주소의 옛 실행이다(주소 재사용).
 // 그 줄들의 주인이 둘 이상이거나, 주인이 지금 hc 부모와 다르면 충돌이다. 맞는 줄이 없거나 주인이 「-」면 지금 부모로(재감사2 lane/R-209).
 // ponytail: 기록에 실행 신원(created_ms)이 없어 같은 이름으로 같은 주소를 다시 쓴 실행은 이름·부모로만 가른다 — 기록에 created_ms를 더하면 그것도 맞춘다
-func sendOwner(recs []string, t hcjson.Terminal, me string) (int, string) {
+func sendOwner(recs []string, t hcjson.Terminal, me string) (sown, string) {
 	par := ""
 	if t.Parent != "" {
 		par = lastSeg(t.Parent)
@@ -149,19 +159,19 @@ func sendOwner(recs []string, t hcjson.Terminal, me string) (int, string) {
 		}
 	}
 	if len(own) > 1 {
-		return 2, "레인 기록에 주인이 둘 이상이다"
+		return sownHold, "레인 기록에 주인이 둘 이상이다"
 	}
 	o := par
 	for k := range own {
 		if par != "" && k != par {
-			return 2, fmt.Sprintf("레인 기록의 주인 %s 와 지금 부모 %s 가 다르다", k, par)
+			return sownHold, fmt.Sprintf("레인 기록의 주인 %s 와 지금 부모 %s 가 다르다", k, par)
 		}
 		o = k
 	}
 	if o == "" || o != me {
-		return 1, ""
+		return sownOther, ""
 	}
-	return 0, ""
+	return sownMine, ""
 }
 
 // earlyWaitCmd: early-wait <선행…> — hc-fill이 써 주는 선행 상태(after.tsv)로 먼저 띄움 레인이 계속 기다릴지

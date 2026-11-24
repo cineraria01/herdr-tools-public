@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/tri"
 )
 
 // evUnk: 사건을 못 읽은 기계(EV의 「모름 <기계>」 줄)
@@ -186,7 +187,7 @@ func parkTick() {
 		if q.F(qState) != "up" || (ef != "early" && ef != "parked") || n == "" {
 			continue
 		}
-		if parkev(n, a, m) != 0 {
+		if parkev(n, a, m) != tri.Yes {
 			continue
 		}
 		w := ""

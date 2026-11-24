@@ -10,26 +10,17 @@ import (
 	"strings"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
-// State: 조회 결과
-type State int
+// State: 조회 결과 — 공용 세 값 형(tri.State, 0값이 모름). git이 실패하면 모름 — 그 바퀴는 아무것도 바꾸지 않는다
+type State = tri.State
 
 const (
-	Unknown State = iota // 모름: git이 실패했다 — 그 바퀴는 아무것도 바꾸지 않는다
-	Yes                  // 있음
-	No                   // 없음: git이 명시적으로 없다고 했다
+	Unknown = tri.Unknown
+	Yes     = tri.Yes
+	No      = tri.No // git이 명시적으로 없다고 했다
 )
-
-func (s State) String() string {
-	switch s {
-	case Yes:
-		return "있음"
-	case No:
-		return "없음"
-	}
-	return "모름"
-}
 
 // Run: git을 dir(빈 값이면 지금 폴더)에서. stdout·stderr가 nil이면 버린다. 표준 입력은 /dev/null. 셸 종료 코드를 돌려준다
 func Run(dir string, stdout, stderr io.Writer, args ...string) int {

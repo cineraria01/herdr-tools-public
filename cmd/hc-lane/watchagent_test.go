@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/tri"
 )
 
 func agentSample(t *testing.T, name string) []byte {
@@ -54,19 +55,19 @@ func parseSample(t *testing.T, b []byte) (hcjson.Terminal, bool, error) {
 	return hcjson.ParseGet(b, 0, a.Address)
 }
 
-// 판정: 0 있음, 1 없음(대화형 셸만 남음), 2 모름
+// 판정: 있음, 없음(대화형 셸만 남음), 모름
 func TestAgentState(t *testing.T) {
-	cases := map[string]int{
-		"1-shell-agent-working":   0, // ① 대화형 셸 + 에이전트 도는 중(전경 = 실행기) — ⑤ 배경 명령 중도 같은 꼴(실측: 전경은 실행기 그대로)
-		"v22-shell-agent-working": 0,
-		"2-shell-agent-exited":    1, // ② 에이전트가 끝나 셸만
-		"2-shell-fresh":           1,
-		"v22-shell-agent-exited":  1,
-		"3-zshc-agent-idle":       0, // ③ zsh -c 꼴 — 전경 pid가 맨 위 pid와 같아도 셸이 터미널을 읽지 않는다
-		"3-zshc-agent-exited":     0, // ③ 에이전트가 끝난 뒤 zsh가 마지막 명령(sleep)으로 exec — 셸이 아니다
-		"4-shell-agent-idle":      0, // ④ 턴 사이 쉼
-		"4-shell-agent-done":      0,
-		"6-shell-codex":           0, // ⑥ Codex — status를 안 알리지만 전경이 실행기
+	cases := map[string]tri.State{
+		"1-shell-agent-working":   tri.Yes, // ① 대화형 셸 + 에이전트 도는 중(전경 = 실행기) — ⑤ 배경 명령 중도 같은 꼴(실측: 전경은 실행기 그대로)
+		"v22-shell-agent-working": tri.Yes,
+		"2-shell-agent-exited":    tri.No, // ② 에이전트가 끝나 셸만
+		"2-shell-fresh":           tri.No,
+		"v22-shell-agent-exited":  tri.No,
+		"3-zshc-agent-idle":       tri.Yes, // ③ zsh -c 꼴 — 전경 pid가 맨 위 pid와 같아도 셸이 터미널을 읽지 않는다
+		"3-zshc-agent-exited":     tri.Yes, // ③ 에이전트가 끝난 뒤 zsh가 마지막 명령(sleep)으로 exec — 셸이 아니다
+		"4-shell-agent-idle":      tri.Yes, // ④ 턴 사이 쉼
+		"4-shell-agent-done":      tri.Yes,
+		"6-shell-codex":           tri.Yes, // ⑥ Codex — status를 안 알리지만 전경이 실행기
 	}
 	for n, want := range cases {
 		tm, found, err := parseSample(t, agentSample(t, n))
@@ -74,7 +75,7 @@ func TestAgentState(t *testing.T) {
 			t.Fatalf("%s: 견본을 못 읽음 %v", n, err)
 		}
 		if got, why := agentState(tm); got != want {
-			t.Errorf("%s: 판정 %d(%s), 바람 %d", n, got, why, want)
+			t.Errorf("%s: 판정 %v(%s), 바람 %v", n, got, why, want)
 		}
 	}
 	ex := agentSample(t, "2-shell-agent-exited")
@@ -91,24 +92,24 @@ func TestAgentState(t *testing.T) {
 		if err != nil || !found {
 			t.Fatalf("%s: 못 읽음 %v", n, err)
 		}
-		if got, _ := agentState(tm); got != 2 {
-			t.Errorf("%s: 판정 %d, 바람 2(모름)", n, got)
+		if got, _ := agentState(tm); got != tri.Unknown {
+			t.Errorf("%s: 판정 %v, 바람 모름", n, got)
 		}
 	}
 	for _, sh := range [][]string{{"-zsh"}, {"/bin/bash", "--login"}, {"fish", "-l"}, {"sh"}} {
 		b := agentEdit(t, ex, map[string]any{"foreground": map[string]any{"argv": sh, "pid": 50980}})
 		tm, _, _ := parseSample(t, b)
-		if got, _ := agentState(tm); got != 1 {
-			t.Errorf("대화형 셸 %q: 판정 %d, 바람 1", sh, got)
+		if got, _ := agentState(tm); got != tri.No {
+			t.Errorf("대화형 셸 %q: 판정 %v, 바람 없음", sh, got)
 		}
 	}
 	// 중첩 셸(small-usage-fixes): 맨 위 zsh -l, 전경은 pid가 다른 대화형 bash — 맨 위 셸과 같은 판정(status null 없음 · 남음 모름)
 	nest := map[string]any{"argv": []string{"bash"}, "pid": 7}
-	for st, want := range map[string]int{"null": 1, `{"app":"claude-code","state":"working"}`: 2} {
+	for st, want := range map[string]tri.State{"null": tri.No, `{"app":"claude-code","state":"working"}`: tri.Unknown} {
 		b := agentEdit(t, ex, map[string]any{"foreground": nest, "status": json.RawMessage(st)})
 		tm, _, _ := parseSample(t, b)
 		if got, why := agentState(tm); got != want {
-			t.Errorf("중첩 셸, status %s: 판정 %d(%s), 바람 %d", st, got, why, want)
+			t.Errorf("중첩 셸, status %s: 판정 %v(%s), 바람 %v", st, got, why, want)
 		}
 	}
 	// 전경 pid가 셸과 다르면 argv 없이도 있음, 판정 칸(foreground·argv)이 둘 다 없으면 확인을 건너뜀(옛 동작 — 가짜 hc 꼴)
@@ -117,15 +118,15 @@ func TestAgentState(t *testing.T) {
 		"foreground·argv 없음": agentEdit(t, ex, map[string]any{"foreground": nil, "argv": nil}),
 	} {
 		tm, _, _ := parseSample(t, b)
-		if got, _ := agentState(tm); got != 0 {
-			t.Errorf("%s: 판정 %d, 바람 0", n, got)
+		if got, _ := agentState(tm); got != tri.Yes {
+			t.Errorf("%s: 판정 %v, 바람 있음", n, got)
 		}
 	}
 	for _, sh := range [][]string{{"bash", "-lc", "x"}, {"zsh", "script.sh"}, {"node", "x.js"}} {
 		b := agentEdit(t, ex, map[string]any{"foreground": map[string]any{"argv": sh, "pid": 50980}})
 		tm, _, _ := parseSample(t, b)
-		if got, _ := agentState(tm); got != 0 {
-			t.Errorf("셸이 터미널을 읽지 않는 꼴 %q: 판정 %d, 바람 0", sh, got)
+		if got, _ := agentState(tm); got != tri.Yes {
+			t.Errorf("셸이 터미널을 읽지 않는 꼴 %q: 판정 %v, 바람 있음", sh, got)
 		}
 	}
 }

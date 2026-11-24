@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/tri"
 )
 
 // 차수 줄 변수(셸 판 aid ln rnd prun sha am pa ast afx av awk awt alc alw anv afl, 그리고 an·rep) — a_round 계열이 함께 쓴다
@@ -181,7 +183,7 @@ func joblast(name, addr, state string) string {
 	// 종료를 확정해야 하는 곳(받은편지 회신 등)은 pget을 직접 부르니 그대로 hc get으로 본다
 	if lsGone(addr) {
 		PRUN, PNAME = "", ""
-	} else if pget(addr) == 0 && PNAME == name {
+	} else if pget(addr) == pLive && PNAME == name {
 		return runlast(name, addr, PRUN, state)
 	}
 	return lastev(name, addr, state)
@@ -224,14 +226,14 @@ func runlast(name, addr, run, state string) string {
 	return l
 }
 
-// parkev <레인> <주소> <기계>: 그 실행의 마지막 report가 「주차」인가. 0 주차 · 1 아님 · 2 모름. PKL = 그 줄(「정리됨」은 건너뜀)
-func parkev(lane, addr, m string) int {
+// parkev <레인> <주소> <기계>: 그 실행의 마지막 report가 「주차」인가 — 있음·없음·모름. PKL = 그 줄(「정리됨」은 건너뜀)
+func parkev(lane, addr, m string) tri.State {
 	PKL = ""
 	if EVBAD {
-		return 2
+		return tri.Unknown
 	}
 	if m != LOCAL && (!connHas(m) || has(evUnk(), m)) {
-		return 2
+		return tri.Unknown
 	}
 	saved := EV
 	var f []string
@@ -243,10 +245,7 @@ func parkev(lane, addr, m string) int {
 	EV = f
 	PKL = joblast(lane, addr, "")
 	EV = saved
-	if evF(PKL, evState) == "주차" {
-		return 0
-	}
-	return 1
+	return tri.Of(evF(PKL, evState) == "주차")
 }
 
 // aesc <레인> <주인|-> <글> [<키>]: 그 레인 주인 지휘(없으면 모든 지휘)에 막힘 사건. 0 남김(dry-run 포함)
@@ -320,27 +319,36 @@ printf "void\t%s\n" "$2" >"$t" && { ln "$t" "$x" 2>/dev/null; rm -f "$t"; }; [ -
 // auOK: 셸 판 aok — local이거나 연결됐고 사건을 읽은 기계
 func auOK(m string) bool { return m == LOCAL || (connHas(m) && !has(AUNK, m)) }
 
-// a_void <aid> <레인> <기계>: 0 void를 잡음, 2 레인이 이미 수거·착지 시작(→ taken), 1 모름
-func aVoid(aid, lane, m string) int {
+// avoid: aVoid 판정 — 0값이 모름
+type avoid int
+
+const (
+	avUnknown avoid = iota // 모름(기계·사건을 못 읽음, 원격 실패, 모르는 답)
+	avVoid                 // void를 잡음
+	avTaken                // 레인이 이미 수거·착지 시작(→ taken)
+)
+
+// a_void <aid> <레인> <기계>
+func aVoid(aid, lane, m string) avoid {
 	if !auOK(m) {
-		return 1
+		return avUnknown
 	}
 	if dry {
-		return 0
+		return avVoid
 	}
 	vo, rc := onm(nil, m, sVvoid, "~/.local/share/hc-fill/verdicts/"+lane, aid, utcnow())
 	if rc != 0 {
-		return 1
+		return avUnknown
 	}
 	switch vo = sub(vo); vo {
 	case "void":
-		return 0
+		return avVoid
 	case "taken", "landing":
 		aupd(aid, cv{atState, "taken"})
 		fmt.Println("감사 " + aid + ": 레인이 이미 판정을 받음(" + vo + ") — 끝")
-		return 2
+		return avTaken
 	}
-	return 1
+	return avUnknown
 }
 
 // abase <프로젝트> <기계>: 기본 가지 참조(local repo 줄이 있으면 여기서, 없으면 그 기계에서). ok=false면 모름

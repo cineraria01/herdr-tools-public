@@ -90,7 +90,7 @@ func (m *M) prescan() {
 		}
 		v, lg := m.prescanOne(B, hb, ms, ln, &trials)
 		seen[ms] = true // 모름도 본 것으로 — 바퀴마다 되풀이하지 않고 차례에 맡긴다(상한에 걸려 못 본 것만 다음 바퀴에)
-		if v != 1 {
+		if v != psConflict {
 			continue
 		}
 		m.B = B
@@ -117,40 +117,53 @@ func (m *M) prescan() {
 	}
 }
 
-// prescanOne: 0 깨끗(또는 건드리지 않음) · 1 실제 rebase도 충돌(lg = 그 rebase 로그) · 2 모름. rebase를 해 보면 trials를 하나 센다
-func (m *M) prescanOne(B, hb, s, ln string, trials *int) (int, string) {
-	if runQ("merge-base", "--is-ancestor", s, B) != 1 {
-		return 0, "" // 이미 들었거나 모름 — 차례에
+// pscan: 미리 훑기 판정 — 0값이 모름
+type pscan int
+
+const (
+	psUnknown  pscan = iota // 모름(git 실패 — 차례에 맡긴다)
+	psPass                  // 깨끗·건드리지 않음(이미 들었음·차례의 판정과 다를 수 있는 꼴)
+	psConflict              // 실제 rebase도 충돌(lg = 그 rebase 로그)
+)
+
+// prescanOne: 제출 s를 기준 B 위로 미리 훑는다. rebase를 해 보면 trials를 하나 센다
+func (m *M) prescanOne(B, hb, s, ln string, trials *int) (pscan, string) {
+	switch runQ("merge-base", "--is-ancestor", s, B) {
+	case 1:
+	case 0:
+		return psPass, "" // 이미 들었음 — 차례에
+	default:
+		return psUnknown, ""
 	}
 	switch _, rc := gitx.MergeConflicts("", B, s); rc {
 	case 0:
-		return 0, ""
+		return psPass, ""
 	case 1:
 	default:
-		return 2, ""
+		return psUnknown, ""
 	}
 	mg, rc1 := outQ("rev-list", "-1", "--merges", B+".."+s)
 	hl, rc2 := outQ("ls-tree", "--name-only", s, "--", ".claude/herdr-land.sh")
 	eq, rc3 := gitx.CherryEquivalent("", B, s)
 	if rc1 != 0 || rc2 != 0 || rc3 != 0 {
-		return 2, ""
+		return psUnknown, ""
 	}
 	// 병합 풀이를 다시 만드는 착지·착지 스크립트 반송·기준과 같은 patch-id 커밋(전용 착지 스크립트의 일반 rebase는 건너뛰고
 	// 내장 착지의 --reapply-cherry-picks는 다시 얹는다 — 감사 atoxvrv-yecgh5 중간 2) — 차례의 판정과 다를 수 있다
 	if mg != "" || (hl != "" && hb == "") || eq {
-		return 0, ""
+		return psPass, ""
 	}
 	*trials++
 	lg := fmt.Sprintf("%s/%s-prescan-%s-%d.log", m.ml, ln, time.Now().Format("20060102-150405"), os.Getpid())
 	return m.trial(B, s, lg), lg
 }
 
-// trial: 임시 작업 트리에서 s를 B 위로 rebase해 본다(착지 rb와 같은 명령, 이 클론의 rerere 그대로, 훅 없음). 1 내용 충돌로 멈추고 rerere가
-// 손대지 않음 · 0 깨끗 · 2 그 밖(모름). 멈춘 rebase는 abort(rerere 기록도 rerere clear로 지워진다), 작업 트리는 지운다
-func (m *M) trial(B, s, lg string) int {
+// trial: 임시 작업 트리에서 s를 B 위로 rebase해 본다(착지 rb와 같은 명령, 이 클론의 rerere 그대로, 훅 없음). 충돌은 내용 충돌로 멈추고
+// rerere가 손대지 않았을 때만, 그 밖의 실패는 모름. 멈춘 rebase는 abort(rerere 기록도 rerere clear로 지워진다), 작업 트리는 지운다
+func (m *M) trial(B, s, lg string) pscan {
 	wt, err := mktempDir(m.mwr)
 	if err != nil {
-		return 2
+		return psUnknown
 	}
 	defer func() {
 		if run("worktree", "remove", "-f", "-f", wt) != 0 {
@@ -158,7 +171,7 @@ func (m *M) trial(B, s, lg string) int {
 		}
 	}()
 	if inLog("", lg, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "-f", "--detach", wt, s) != 0 {
-		return 2
+		return psUnknown
 	}
 	var b bytes.Buffer
 	c := exec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", "-q", "--reapply-cherry-picks", B)
@@ -169,12 +182,12 @@ func (m *M) trial(B, s, lg string) int {
 		f.Close()
 	}
 	if rc == 0 {
-		return 0
+		return psPass
 	}
-	v := 2
+	v := psUnknown
 	if rc == 1 && gitx.Run(wt, nil, nil, "rev-parse", "-q", "--verify", "REBASE_HEAD") == 0 &&
 		strings.Contains(b.String(), "CONFLICT (") && !rerereTouched.Match(b.Bytes()) {
-		v = 1
+		v = psConflict
 	}
 	inLog(wt, lg, "rebase", "--abort")
 	return v

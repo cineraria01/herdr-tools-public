@@ -1,0 +1,4 @@
+#!/bin/bash
+# 가짜 sysctl: 부하(vm.loadavg)만 고정값 — hc-fill 부하 조각이 시험 기계의 실제 부하를 읽지 않게. 나머지는 진짜 sysctl로
+case " $* " in *" vm.loadavg "*) echo "{ 0.10 0.10 0.10 }"; exit 0 ;; esac
+exec /usr/sbin/sysctl "$@"

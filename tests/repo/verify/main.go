@@ -14,8 +14,7 @@
 // (2026-11-22 verify-go-timeout — 다른 꾸러미와 함께 돌면 10분을 넘겼다). 그다음 조각(go test 여럿)을 함께 돌린다
 // (2026-11-23 verify-shard — 꾸러미 안 시험은 차례로 돌아 검증 전체가 tests/hclane 하나의 시간이었다: 병합기 970초 중 927초):
 // splits의 꾸러미는 part마다 조각 하나(-run <part>, -skip <앞 part 전부>)와 나머지 조각(-skip <part 전부>)으로, 그 밖 꾸러미는 모아
-// 한 조각(-skip ^TestCotenantGuard$ <꾸러미…>)으로 — 시험(하위 시험)마다 처음 고른 조각 하나에서만 돈다. secs가 있는 part는
-// HCFILL_SEC 절 묶음마다 조각 하나이고 마지막 묶음은 소스의 reg(…)에서 읽은 나머지 절 전부다(못 읽으면 그 시험은 한 조각).
+// 한 조각(-skip ^TestCotenantGuard$ <꾸러미…>)으로 — 시험(하위 시험)마다 처음 고른 조각 하나에서만 돈다.
 // 조각 출력은 끝날 때 한 덩이로(「-- [i/n] … 끝」 다음) 찍는다. 함께 도는 자리 수는 HERDR_VERIFY_JOBS=<수>(없으면 코어 수)다:
 // 조각은 한 자리, 나머지 조각은 go test -p <그 1/3>로 그만큼 자리를 쓴다(그 값을 주면 cotenant 단계의 -p에도).
 // go list가 실패하면 옛 꼴 한 번(-skip ^TestCotenantGuard$ ./...).
@@ -38,7 +37,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -53,12 +51,10 @@ const (
 	cotenant     = "^TestCotenantGuard$"
 )
 
-// part: 오래 걸리는 꾸러미에서 따로 떼는 시험. est는 실측 초(띄우는 차례에만 쓴다). secs가 있으면 HCFILL_SEC 절 묶음마다 조각 하나
+// part: 오래 걸리는 꾸러미에서 따로 떼는 시험(-run 꼴 — 하위 시험 묶음은 '^TestX$/^(a|b)$'). est는 실측 초(띄우는 차례에만 쓴다)
 type part struct {
-	run    string
-	est    int
-	secs   [][]string
-	secEst []int // secs 묶음마다 실측 초(묶음의 첫 절로 맞춘다, 나머지 절 묶음은 est − 합). 없으면 묶음마다 est ÷ 묶음 수
+	run string
+	est int
 }
 
 // split: 꾸러미와 part들. rest는 나머지 조각의 실측 초
@@ -68,8 +64,9 @@ type split struct {
 	rest  int
 }
 
-// splits: 2026-11-23 워커 맥(10코어) 실측(-json, 조각 없이 돈 시험 시간 — 병합기 기계도 비슷). 하위 시험 묶음은 앞 절 상태에 기대는
-// 절(s20c←s20b, s21a2~4←s21a1)을 떼지 않는 경계로 나눴다 — 새 절이 떼어 낸 절의 상태에 기대면 그 묶음에 넣는다.
+// splits: 2026-11-23 워커 맥(10코어) 실측(-json, 조각 없이 돈 시험 시간 — 병합기 기계도 비슷). hc-lane·hc-fill 계약 시험은 절마다
+// 하위 시험이고 절은 저마다 새 상태에서 돈다(2026-11-24 contract-subtests) — 묶음은 시간만 보고 나눈다(옛 판은 앞 절 상태에 기대는
+// s20c←s20b·s21a2~4←s21a1을 못 뗐고, hc-fill은 HCFILL_SEC 환경 변수로 절 묶음을 골랐다).
 // 꾸러미 이름이 바뀌면 그 split은 그냥 안 쓰인다(그 꾸러미는 나머지 한 조각에서 통째로 돈다).
 // est는 조각들이 자리 10(코어 수)에서 함께 돌 때 잰 초(2026-11-23 verify-shard-tune) — 긴 것부터 띄우고, 짧은 조각이 끝물의 빈자리를
 // 채운다. 이름 범위 part(^TestRecovery[A-C] 등)는 새 시험이 이름대로 저절로 들고, 어디에도 안 맞으면 그 꾸러미 나머지 조각에 든다.
@@ -97,10 +94,15 @@ type split struct {
 // k,k2,q,r 묶음(52초)이 고른 est(합 ÷ 묶음 수 32초) 탓에 215초째에 떠 꼬리가 됐다. 그래서 묶음마다 실측 est(secEst).
 // 뒤(5번): 조각 단계 251~257초, 빈 자리·초 101~116(4~5%), 검증 275~280초(한 번은 흔들림 다시 돌기로 306초) — 바닥(쥔 자리·초 ÷ 자리)
 // 241~246초에 10초 안팎. 앞 단계(vet·tests/repo·TestCotenantGuard 홀로·메모리 디스크)는 24초 안팎이라 그대로 둔다.
+// 절을 하위 시험으로 나눈 뒤(2026-11-24 contract-subtests, 워커 맥 10코어): 절마다 새 상태를 만들어도 TestHcFill 전체는 옛 판과 같았다
+// (같은 때 함께 돌려 542 → 545초). 그래서 hc-fill은 가장 긴 k를 따로 떼 7묶음, hc-lane은 s21a4(약 75초)를 s21a1~3에서 뗐다. est는 그 검증
+// 한 번의 실측 × 0.8(그 판은 바깥 부하로 hc-merger 나머지 조각이 175 → 360초라 다른 est와 눈금을 맞췄다) — hc-fill 묶음 실측 61·60·54·47·
+// 42·37·29초·나머지 19초, s21a4 75·s21a1~3 52초. 검증 rc 0, 조각 단계 361초(빈 몫 8%).
 var splits = []split{
 	{mod + "tests/hclane", []part{
 		{run: "^TestHcLane$/^s21b1$", est: 48},
-		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 123},
+		{run: "^TestHcLane$/^s21a4$", est: 60},
+		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3)$", est: 42},
 		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 67},
 		{run: "^TestHcLane$/^(s13-14|s19)$", est: 42},
 		{run: "^TestHcLane$/^(s22-23|s08-11|s17-18|s24-keepoff)$", est: 41},
@@ -108,9 +110,14 @@ var splits = []split{
 		{run: "^TestGofix", est: 77},
 	}, 47},
 	{mod + "tests/hcfill", []part{
-		{run: "^TestHcFill$", est: 224, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}},
-			secEst: []int{29, 28, 33, 42, 31, 52}},
-	}, 1},
+		{run: "^TestHcFill$/^k$", est: 49},
+		{run: "^TestHcFill$/^(e2|f|j)$", est: 48},
+		{run: "^TestHcFill$/^(f2|k2|q|r)$", est: 43},
+		{run: "^TestHcFill$/^(a|b|c)$", est: 38},
+		{run: "^TestHcFill$/^(c2|d|d2)$", est: 34},
+		{run: "^TestHcFill$/^(g|h)$", est: 30},
+		{run: "^TestHcFill$/^(e|i)$", est: 23},
+	}, 15},
 	{mod + "tests/merger", []part{
 		{run: "^TestMergerContractA$", est: 32},
 		{run: "^TestMergerContractB$", est: 31},
@@ -211,14 +218,7 @@ func shards(root string, pkgs, base []string, sp []split, n int) []shard {
 			if len(prev) > 0 {
 				a = append(a, "-skip", strings.Join(prev, "|"))
 			}
-			a = append(a, p)
-			groups := secGroups(filepath.Join(root, strings.TrimPrefix(p, mod)), pt.secs)
-			if len(groups) == 0 {
-				out = append(out, shard{argv: a, est: pt.est})
-			}
-			for _, g := range groups {
-				out = append(out, shard{argv: a, env: []string{"HCFILL_SEC=" + strings.Join(g, ",")}, est: groupEst(pt, g, len(groups))})
-			}
+			out = append(out, shard{argv: append(a, p), est: pt.est})
 			prev = append(prev, pt.run)
 		}
 		a := append([]string{}, one...)
@@ -231,23 +231,6 @@ func shards(root string, pkgs, base []string, sp []split, n int) []shard {
 	return out
 }
 
-// groupEst: 절 묶음 g의 est — secEst에서 첫 절이 같은 묶음의 값, 못 찾으면 나머지 절 묶음(est − secEst 합), secEst가 없으면 est ÷ n
-func groupEst(pt part, g []string, n int) int {
-	if len(pt.secEst) == 0 {
-		return pt.est / n
-	}
-	left := pt.est
-	for j, w := range pt.secs {
-		if j < len(pt.secEst) {
-			if len(w) > 0 && w[0] == g[0] {
-				return pt.secEst[j]
-			}
-			left -= pt.secEst[j]
-		}
-	}
-	return max(left, 1)
-}
-
 func indexOf(a []string, s string) int {
 	for i, x := range a {
 		if x == s {
@@ -255,70 +238,6 @@ func indexOf(a []string, s string) int {
 		}
 	}
 	return -1
-}
-
-var (
-	regCall = regexp.MustCompile(`\breg\(`)
-	regLit  = regexp.MustCompile(`\breg\([0-9]+, "([^"]+)"`)
-)
-
-// sections: dir의 *_test.go에서 reg(<차례>, "<이름>", …)로 등록한 절 이름. 글자 그대로가 아닌 reg 호출이 있거나 하나도 없으면 nil
-func sections(dir string) []string {
-	fs, _ := filepath.Glob(filepath.Join(dir, "*_test.go"))
-	var names []string
-	calls := 0
-	for _, f := range fs {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return nil
-		}
-		s := string(b)
-		calls += len(regCall.FindAllString(s, -1)) - strings.Count(s, "func reg(")
-		for _, m := range regLit.FindAllStringSubmatch(s, -1) {
-			names = append(names, m[1])
-		}
-	}
-	if len(names) == 0 || len(names) != calls {
-		return nil
-	}
-	return names
-}
-
-// secGroups: want 묶음(있는 절만)에 나머지 절 전부를 한 묶음으로 더한다. want가 없거나 절을 못 읽으면 nil(나누지 않음)
-func secGroups(dir string, want [][]string) [][]string {
-	if len(want) == 0 {
-		return nil
-	}
-	all := sections(dir)
-	if all == nil {
-		return nil
-	}
-	has, used := map[string]bool{}, map[string]bool{}
-	for _, n := range all {
-		has[n] = true
-	}
-	var out [][]string
-	for _, g := range want {
-		var k []string
-		for _, n := range g {
-			if has[n] && !used[n] {
-				k, used[n] = append(k, n), true
-			}
-		}
-		if len(k) > 0 {
-			out = append(out, k)
-		}
-	}
-	var left []string
-	for _, n := range all {
-		if !used[n] {
-			left, used[n] = append(left, n), true
-		}
-	}
-	if len(left) > 0 {
-		out = append(out, left)
-	}
-	return out
 }
 
 // verify: 종료 코드. 0 통과 · 1 실패 · 2 틀린 인자 · 128+신호 끊김

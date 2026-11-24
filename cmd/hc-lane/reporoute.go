@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/tri"
 )
 
 // repoSend: 주인 없는·주인이 사라진 사건을 이 watch가 보내나. 사건의 저장소를 모름·이 지휘가 그 저장소를 다룸·이 지휘의 저장소를 모름
@@ -15,7 +16,7 @@ import (
 // 「그 지휘가 보낼 수 있을 것」을 추론하지 않는다(지휘 지시 — watch 없음·커서 바닥 뒤 같은 구멍이 감사 1·2차에 나왔다): 그 지휘의
 // seen.<지휘>에 이 사건이 있으면 받은 것으로 치고 커서에 적는다(다시 안 봄), 없으면 이 watch가 처음 미룬 때부터 유예
 // (lane.watch_repo_grace, e.rgrace) 동안만 미루고 그 뒤에는 보낸다. 그 지휘 커서를 못 읽으면 보낸다.
-// 그래서 「아무도 안 받음」은 없고 최악은 유예 뒤 겹침이다. 확인된 끝남(coordCheck 1)인 지휘에게는 미루지 않는다(빠른 길 — 받았는지는 본다)
+// 그래서 「아무도 안 받음」은 없고 최악은 유예 뒤 겹침이다. 확인된 끝남(coordCheck 없음)인 지휘에게는 미루지 않는다(빠른 길 — 받았는지는 본다)
 func (e *ev) repoSend(l string) bool {
 	r := e.evrepo(l)
 	if r == "" {
@@ -45,7 +46,7 @@ func (e *ev) repoSend(l string) bool {
 			e.appendCur(k)
 			return false
 		}
-		if sr == 2 {
+		if sr == tri.Unknown {
 			bad = true
 			continue
 		}
@@ -54,7 +55,7 @@ func (e *ev) repoSend(l string) bool {
 			_, _, cr = coordCheck(c[0])
 			e.occ[lastSeg(c[0])] = cr
 		}
-		if cr != 1 {
+		if cr != tri.No {
 			wait = true
 		}
 	}
@@ -89,18 +90,20 @@ func (e *ev) pruneDefer() {
 	}
 }
 
-// seenOf: 그 지휘 커서 seen.<지휘>의 사건 열쇠 — 바퀴마다 지휘 하나에 한 번 읽는다(e.seenc, wfilter가 비움). 1 파일 없음(빈 모음), 2 못 읽음
-func (e *ev) seenOf(addr string) (map[string]bool, int) {
+// seenOf: 그 지휘 커서 seen.<지휘>의 사건 열쇠 — 바퀴마다 지휘 하나에 한 번 읽는다(e.seenc, wfilter가 비움). 있음 읽음, 없음 파일 없음(빈 모음), 모름 못 읽음
+func (e *ev) seenOf(addr string) (map[string]bool, tri.State) {
 	if s, ok := e.seenc[addr]; ok {
 		return s.k, s.rc
 	}
 	s := seenCache{k: map[string]bool{}}
 	ls, err := readLines(e.ed + "/seen." + ckey(addr))
 	switch {
+	case err == nil:
+		s.rc = tri.Yes
 	case os.IsNotExist(err):
-		s.rc = 1
-	case err != nil:
-		s.rc = 2
+		s.rc = tri.No
+	default:
+		s.rc = tri.Unknown
 	}
 	for _, x := range ls {
 		if !strings.HasPrefix(x, "#since"+tab) {
@@ -113,7 +116,7 @@ func (e *ev) seenOf(addr string) (map[string]bool, int) {
 
 type seenCache struct {
 	k  map[string]bool
-	rc int
+	rc tri.State
 }
 
 // evrepo: 사건 레인의 저장소 — 13칸, 없으면 이 바퀴에 읽은 사건에서 그 레인 이름의 13칸(병합기·hc-fill·멈춤처럼 --name으로 적은 줄).

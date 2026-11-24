@@ -10,6 +10,7 @@ import (
 
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/tri"
 )
 
 // round: 한 바퀴(stopped 한 번) 동안의 ps·hc get 기억
@@ -17,7 +18,7 @@ type round struct {
 	e     *ev
 	ps    map[string][][3]string // 기계 → (pid, ppid, command)
 	psbad map[string]bool
-	pl    map[string]int
+	pl    map[string]pstate
 	mls   string // " 이름 … " 또는 fail, 빈 값 = 아직
 }
 
@@ -98,7 +99,7 @@ func (e *ev) stopped(evl, mu []string) []string {
 		fmt.Fprintln(os.Stderr, "hc-lane wait: hc ls 실패 — 이번 바퀴는 멈춘 레인을 못 봤다")
 		return []string{"#hc-ls-fail"}
 	}
-	rd := &round{e: e, ps: map[string][][3]string{}, psbad: map[string]bool{}, pl: map[string]int{}}
+	rd := &round{e: e, ps: map[string][][3]string{}, psbad: map[string]bool{}, pl: map[string]pstate{}}
 	me := machineName()
 	km := e.lkinds()
 	var out []string
@@ -128,8 +129,8 @@ func (e *ev) stopped(evl, mu []string) []string {
 			// killed가 지휘의 hc kill인지: parent가 없거나 아직 살아 있을 때만 조용히 넘긴다
 			kq := false
 			if why != "" && rs == "killed" {
-				// 지휘가 살아 있음이 확인될 때만 조용히(그 지휘의 hc kill) — 모름(2·3)은 알린다(숨기지 않는 쪽)
-				kq = pa == "" || pa == "-" || rd.palive(pa) == 0
+				// 지휘가 살아 있음이 확인될 때만 조용히(그 지휘의 hc kill) — 모름·기계 모름은 알린다(숨기지 않는 쪽)
+				kq = pa == "" || pa == "-" || rd.palive(pa) == pLive
 			}
 			if kq {
 				k := "멈춤" + tab + lastSeg(a) + tab + flat(nm) + tab + why + " turn " + tn
@@ -229,11 +230,11 @@ func (rd *round) wtbusy(a, cw string) bool {
 	return false
 }
 
-// procbusy: 그 pid의 자손 가운데 명령 줄에 lane.wait_procs 글자가 든 것이 살아 있나. 0 있음, 1 없음, 2 모름
-func (rd *round) procbusy(a, pid string) int {
+// procbusy: 그 pid의 자손 가운데 명령 줄에 lane.wait_procs 글자가 든 것이 살아 있나. 있음·없음·모름(ps 실패)
+func (rd *round) procbusy(a, pid string) tri.State {
 	pm, ok := rd.psget(a)
 	if !ok {
-		return 2
+		return tri.Unknown
 	}
 	par := map[string]string{}
 	cmd := map[string]string{}
@@ -257,12 +258,12 @@ func (rd *round) procbusy(a, pid string) int {
 		q := par[p]
 		for k := 0; q != "" && atoi(q) > 1 && k < 10000; k++ {
 			if q == pid {
-				return 0
+				return tri.Yes
 			}
 			q = par[q]
 		}
 	}
-	return 1
+	return tri.No
 }
 
 // resting: 쉬는 레인이 정말 멈췄나(유예·배경 작업·화면 표시)
@@ -307,7 +308,7 @@ func (rd *round) resting(a, k, cw string) bool {
 	if tp == "0" || tp == "1" {
 		tp = ""
 	}
-	if e.wprocs != "" && tp != "" && rd.procbusy(a, tp) == 0 {
+	if e.wprocs != "" && tp != "" && rd.procbusy(a, tp) == tri.Yes {
 		return false
 	}
 	if !e.wbusyOn {
@@ -347,33 +348,49 @@ func (rd *round) pnorm(pa string) string {
 	return pa
 }
 
-// plive: 그 터미널이 지금 살아 있나(hcjson.ParseGet). 0 살아 있음, 1 확인된 없음·끝남, 3 그 주소의 기계를 모름(machine_unknown), 2 모름
-func (rd *round) plive(a string) int {
+// pstate: plive 판정 — 0값이 모름
+type pstate int
+
+const (
+	pUnknown   pstate = iota // 모름(조회 실패·잘린 응답)
+	pLive                    // 살아 있음
+	pGone                    // 확인된 없음·끝남
+	pNoMachine               // 그 주소의 기계를 모름(machine_unknown) — palive가 앞부분을 떼고 다시 묻는다
+)
+
+// plive: 그 터미널이 지금 살아 있나(hcjson.ParseGet)
+func (rd *round) plive(a string) pstate {
 	if r, ok := rd.pl[a]; ok {
 		return r
 	}
 	g, rc := hcGetRaw(10, a)
 	t, found, err := hcjson.ParseGet([]byte(g), rc, a)
-	r := 2
+	r := pUnknown
 	switch {
 	case err == nil:
-		r = getState(t, found, nil)
+		switch getState(t, found, nil) {
+		case tri.Yes:
+			r = pLive
+		case tri.No:
+			r = pGone
+		case tri.Unknown:
+		}
 	case strings.Contains(g, `"machine_unknown"`):
-		r = 3
+		r = pNoMachine
 	}
 	rd.pl[a] = r
 	return r
 }
 
 // palive: parent를 그대로 먼저 묻고, machine_unknown일 때만 앞부분을 떼고 다시
-func (rd *round) palive(pa string) int {
+func (rd *round) palive(pa string) pstate {
 	r := rd.plive(pa)
-	if r != 3 {
+	if r != pNoMachine {
 		return r
 	}
 	q := rd.pnorm(pa)
 	if q == pa {
-		return 2 // 기계 목록으로 떼지 못했다 — 그 지휘가 사는지 모른다
+		return pUnknown // 기계 목록으로 떼지 못했다 — 그 지휘가 사는지 모른다
 	}
 	return rd.plive(q)
 }

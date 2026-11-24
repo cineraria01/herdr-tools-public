@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/tri"
 )
 
 func init() {
@@ -79,10 +81,11 @@ func landCmd() int {
 	// 병합기가 켜졌으면 큐에 제출한다. 켬 상태를 모르면 종료 75로 재시도를 기다린다
 	if os.Getenv("HERDR_MERGER") != "1" {
 		switch mgon() {
-		case 0:
+		case tri.Yes:
 			submitCmd()
-		case 2:
+		case tri.Unknown:
 			exit(75)
+		case tri.No:
 		}
 	}
 	// 이 착지의 인자는 이 착지만 쓴다 — 검증 자식에 물려주지 않는다

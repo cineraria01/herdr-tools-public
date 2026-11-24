@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/tri"
 )
 
 // entry: 묶음에 담긴 제출 하나
@@ -73,34 +75,28 @@ func ianc(a, b string) bool {
 	return false
 }
 
-// sameTree: 기준과 합친 트리가 기준 트리와 같은가. 0 예 · 1 아니오 · 2 모름
-func (m *M) sameTree(s string) int {
+// sameTree: 기준과 합친 트리가 기준 트리와 같은가 — 있음(같음)·없음·모름
+func (m *M) sameTree(s string) tri.State {
 	tree, rc := out("merge-tree", "--write-tree", m.B, s)
 	switch rc {
 	case 0:
-		if tree == m.btree {
-			return 0
-		}
-		return 1
+		return tri.Of(tree == m.btree)
 	case 1:
-		return 1
+		return tri.No
 	}
-	return 2
+	return tri.Unknown
 }
 
-// touch: 갈래점 뒤 커밋 하나라도 「한 묶음에 하나만」 경로를 건드렸나. 0 예 · 1 아니오 · 2 모름
-func (m *M) touch(s string) int {
+// touch: 갈래점 뒤 커밋 하나라도 「한 묶음에 하나만」 경로를 건드렸나 — 있음·없음·모름
+func (m *M) touch(s string) tri.State {
 	if len(m.solo) == 0 {
-		return 1
+		return tri.No
 	}
 	hit, rc := out(append([]string{"rev-list", "-n", "1", m.B + ".." + s, "--"}, m.solo...)...)
 	if rc != 0 {
-		return 2
+		return tri.Unknown
 	}
-	if hit != "" {
-		return 0
-	}
-	return 1
+	return tri.Of(hit != "")
 }
 
 func (m *M) keep(idx ...int) {
@@ -377,12 +373,13 @@ func (m *M) round() {
 		return
 	}
 	switch m.sameTree(m.b[0].s) {
-	case 0:
+	case tri.Yes:
 		m.existing(m.B, "제출 내용이 이미 "+m.base+" 에 있음(합친 트리가 같음)")
 		return
-	case 2:
+	case tri.Unknown:
 		m.defer_("git merge-tree 실패")
 		return
+	case tri.No:
 	}
 	// 착지 스크립트는 기본 브랜치 판을 쓴다. 기본 브랜치에 없는 스크립트를 제출이 새로 들이면 반송
 	hl, rc1 := out("ls-tree", "--name-only", m.b[0].s, "--", ".claude/herdr-land.sh")
@@ -535,11 +532,12 @@ func (m *M) filterBatch() bool {
 	}
 	su := false
 	switch m.touch(m.b[0].s) {
-	case 0:
+	case tri.Yes:
 		su = true
-	case 2:
+	case tri.Unknown:
 		m.defer_("묶음 경로 이력 조회 실패")
 		return false
+	case tri.No:
 	}
 	if len(m.b) > 1 {
 		k := []int{0}
@@ -549,11 +547,12 @@ func (m *M) filterBatch() bool {
 				continue
 			}
 			switch m.sameTree(s) {
-			case 0:
+			case tri.Yes:
 				continue
-			case 2:
+			case tri.Unknown:
 				m.defer_("git merge-tree 실패")
 				return false
+			case tri.No:
 			}
 			hl, rc := out("ls-tree", "--name-only", s, "--", ".claude/herdr-land.sh")
 			if rc != 0 {
@@ -567,14 +566,15 @@ func (m *M) filterBatch() bool {
 				continue // 다름·모름 모두 큐에 그대로(반송 아님) — 맨 앞이 되면 다시 확인한다(모름이면 그때 쉰다)
 			}
 			switch m.touch(s) {
-			case 0:
+			case tri.Yes:
 				if su {
 					continue
 				}
 				su = true
-			case 2:
+			case tri.Unknown:
 				m.defer_("묶음 경로 이력 조회 실패")
 				return false
+			case tri.No:
 			}
 			k = append(k, i)
 		}

@@ -13,6 +13,7 @@ import (
 
 	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 // decodeAll: 글 안의 JSON 값들(jq 입력 흐름). 못 읽는 곳이 있으면 ok=false
@@ -187,66 +188,86 @@ func onm(in io.Reader, m, body string, args ...string) (string, int) {
 	return Cmd{Name: "hc", Args: append(h, a...), In: in, Err: errPass}.Run()
 }
 
-// pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms>)·PNAME. 0 살아 있음, 3 끝남 확정(완전한 not_found·finished), 1 모름
-// (hcGet 오류, live인데 created_ms·name 칸이 없음 — 실행 신원을 모르면 주소 재사용을 가를 수 없다)
-func pget(addr string) int {
+// pstate: pget 판정 — 0값이 모름
+type pstate int
+
+const (
+	pUnknown pstate = iota // 모름(hcGet 오류, live인데 created_ms·name 칸이 없음 — 실행 신원을 모르면 주소 재사용을 가를 수 없다)
+	pLive                  // 살아 있음(PRUN·PNAME 채움)
+	pDone                  // 끝남 확정(완전한 not_found·finished)
+)
+
+// pget <주소>: PRUN(<기계 접두 없는 터미널>@<created_ms>)·PNAME
+func pget(addr string) pstate {
 	PRUN, PNAME = "", ""
 	t, found, err := hcGet(addr)
 	switch {
 	case err != nil:
-		return 1
+		return pUnknown
 	case !found || t.State == "finished":
-		return 3
+		return pDone
 	}
 	if _, ok := t.Raw["name"]; !ok || t.Created <= 0 {
-		return 1
+		return pUnknown
 	}
 	PRUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(t.Created, 10)
 	PNAME = orDash(t.Name)
-	return 0
+	return pLive
 }
 
-// startState <주소> <레인>: 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지. 0 잡힘(START_RUN), 1 안 잡힘 확정(그 레인 터미널이
-// 살아 있고 status가 null·끝남), 2 모름(조회 실패·잘린 응답·status 칸 없음·다른 이름이나 주소·시작 시각 없음·not_found — 시작했을 수 있다,
-// 재감사 R-01·R-05, 재감사2 fill/R-201). 마감까지 한 번이라도 모름이었고 끝남이 확인되지 않았으면 2
-func startState(addr, lane string) int {
+// startState <주소> <레인>: 띄운 터미널의 hc get status가 WAIT초 안에 잡히는지. 있음 잡힘(START_RUN), 없음 안 잡힘 확정(그 레인 터미널이
+// 살아 있고 status가 null·끝남), 모름(조회 실패·잘린 응답·status 칸 없음·다른 이름이나 주소·시작 시각 없음·not_found — 시작했을 수 있다,
+// 재감사 R-01·R-05, 재감사2 fill/R-201). 마감까지 한 번이라도 모름이었고 끝남이 확인되지 않았으면 모름
+func startState(addr, lane string) tri.State {
 	end := time.Now().Unix() + int64(WAIT)
 	unk := false
 	for {
-		r := startOnce(addr, lane)
-		switch {
-		case r == 0 || r == 3:
-			return min(r, 1)
-		case r == 2:
+		switch startOnce(addr, lane) {
+		case soStatus:
+			return tri.Yes
+		case soFinished:
+			return tri.No
+		case soUnknown:
 			unk = true
+		case soNoStatus:
 		}
 		if time.Now().Unix() >= end {
 			if unk {
-				return 2
+				return tri.Unknown
 			}
-			return 1
+			return tri.No
 		}
 		time.Sleep(time.Duration(POLL) * time.Second)
 	}
 }
 
-// startOnce: startState 한 번(hcGet — hcjson.ParseGet). 0 잡힘, 1 살아 있고 status null, 3 끝남 확인, 2 모름
-func startOnce(addr, lane string) int {
+// sonce: startOnce 판정 — 0값이 모름
+type sonce int
+
+const (
+	soUnknown  sonce = iota // 모름
+	soStatus                // status 잡힘(START_RUN 채움)
+	soNoStatus              // 살아 있고 status null
+	soFinished              // 끝남 확인
+)
+
+// startOnce: startState 한 번(hcGet — hcjson.ParseGet)
+func startOnce(addr, lane string) sonce {
 	t, found, err := hcGet(addr)
 	if err != nil || !found || !t.HasName || t.Name != lane {
-		return 2 // 모름·확인 직후 사라짐(두 조회가 어긋남)·그 주소가 다른 터미널
+		return soUnknown // 모름·확인 직후 사라짐(두 조회가 어긋남)·그 주소가 다른 터미널
 	}
 	if t.State == "finished" {
-		return 3
+		return soFinished
 	}
 	if _, ok := t.Raw["status"]; !ok || t.Created <= 0 {
-		return 2 // status 칸 자체가 없거나 실행 신원이 없는 부분 응답 — null(아직 안 잡힘)과 다르다
+		return soUnknown // status 칸 자체가 없거나 실행 신원이 없는 부분 응답 — null(아직 안 잡힘)과 다르다
 	}
 	if t.Status == "" {
-		return 1
+		return soNoStatus
 	}
 	START_RUN = addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(t.Created, 10)
-	return 0
+	return soStatus
 }
 
 // alive <주소>: 이번 바퀴 터미널 표의 상태, 없으면 gone

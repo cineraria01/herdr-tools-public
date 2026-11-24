@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"herdr-tools/internal/tri"
 )
 
 // landPush: 원격 <기본>에 보낸다. 끝났으면 종료 코드(0 이상), 다른 쪽 착지가 앞서 거절됐으면 -1(처음부터 다시)
@@ -184,15 +186,15 @@ func countNonEmpty(s string) int {
 	return n
 }
 
-// mgon: 원격 refs/herdr/merger/<기계>가 있으면 land는 제출하고 그 기계가 착지한다. 0 켜짐(mg에 기계), 1 꺼짐, 2 모름
-func mgon() int {
+// mgon: 원격 refs/herdr/merger/<기계>가 있으면 land는 제출하고 그 기계가 착지한다. 있음 켜짐(mg에 기계), 없음 꺼짐, 모름
+func mgon() tri.State {
 	switch gitRunQ("remote", "get-url", "origin") {
 	case 0:
 	case 2:
-		return 1
+		return tri.No
 	default:
 		eprintf("hc-lane land: 원격 설정(git remote get-url origin)을 읽지 못해 병합기가 켜졌는지 모른다 — 착지하지 않았다. 같은 줄을 다시\n")
-		return 2
+		return tri.Unknown
 	}
 	var mgt string
 	for _, w := range waitsEnv("HC_LANE_MGON_WAITS") {
@@ -202,7 +204,7 @@ func mgon() int {
 		}
 		if w == "-" {
 			eprintf("hc-lane land: 원격을 읽지 못해 병합기가 켜졌는지 모른다 — 착지하지 않았다. 같은 줄을 다시\n")
-			return 2
+			return tri.Unknown
 		}
 		sleepS(w)
 	}
@@ -213,10 +215,7 @@ func mgon() int {
 			break
 		}
 	}
-	if mg != "" {
-		return 0
-	}
-	return 1
+	return tri.Of(mg != "")
 }
 
 // tclean: 색인·추적 파일이 HEAD와 같은가. git status가 실패하면 「깨끗함」으로 읽지 않고 멈춘다

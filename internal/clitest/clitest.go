@@ -138,11 +138,24 @@ func BinPlain(t *testing.T, dir, name string) string {
 	return p
 }
 
-// build: root에서 cmd/<name>을 out으로(tags가 비면 태그 없이)
+// BuildOverlayEnv: 변이 확인용 손잡이(2026-11-24 contract-subtests) — 값이 go build -overlay JSON의 절대 경로면 Bin·BinPlain이
+// 짓는 도구에 그 overlay를 준다. 저장소 사본 없이 「이 변이에 그 절이 실패한다」를 본다(docs/repo/tests.md 「변이 확인」).
+// 시험 프로세스가 뜰 때 한 번 읽는다 — Isolate가 환경을 허용 목록으로 줄인 뒤에 짓는 시험도 받게
+const BuildOverlayEnv = "HERDR_BUILD_OVERLAY"
+
+var buildOverlay = os.Getenv(BuildOverlayEnv)
+
+// build: root에서 cmd/<name>을 out으로(tags가 비면 태그 없이, buildOverlay가 있으면 -overlay)
 func build(root, out, name, tags string) error {
 	args := []string{"build"}
 	if tags != "" {
 		args = append(args, "-tags", tags)
+	}
+	if buildOverlay != "" {
+		if !filepath.IsAbs(buildOverlay) { // go build는 작업 폴더(root) 기준으로 읽어 시험의 폴더와 어긋난다
+			return fmt.Errorf("%s=%s: 절대 경로여야 한다", BuildOverlayEnv, buildOverlay)
+		}
+		args = append(args, "-overlay", buildOverlay)
 	}
 	r := Cmd{Dir: root, Env: []string{"CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH="}, Combined: true, Max: 10 * time.Minute}.
 		Run("go", append(args, "-o", out, "./cmd/"+name)...)

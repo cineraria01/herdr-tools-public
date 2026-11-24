@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/tri"
 )
 
 // ---- 착지 로그: 검증(또는 herdr-land.sh) 출력을 화면 그대로 + 상태 폴더 land-logs/<레인>-<시각>-<pid>.log ----
@@ -316,14 +318,15 @@ func rb(onto string) int {
 				exit(75)
 			}
 			switch rebaseStopped() {
-			case 1:
+			case tri.No:
 				if strings.Contains(ro, "index.lock") {
 					lerr("hc-lane land: rebase가 시작되지 못했다(내용 충돌 아님 — 색인 잠금). 같은 줄을 다시")
 					exit(75)
 				}
-			case 2:
+			case tri.Unknown:
 				lerr("hc-lane land: rebase 실패. 멈춘 rebase가 있는지 확인하지 못했다(git rev-parse 실패) — 같은 줄을 다시")
 				exit(75)
+			case tri.Yes:
 			}
 		}
 	}
@@ -333,18 +336,18 @@ func rb(onto string) int {
 	return rr
 }
 
-// rebaseStopped: 0 멈춘 rebase가 있음(rebase-merge·rebase-apply), 1 없음, 2 모름(git·파일 조회 실패)
-func rebaseStopped() int {
+// rebaseStopped: 있음 멈춘 rebase가 있음(rebase-merge·rebase-apply), 없음, 모름(git·파일 조회 실패)
+func rebaseStopped() tri.State {
 	for _, f := range []string{"rebase-merge", "rebase-apply"} {
 		gp, r := gitOut("rev-parse", "--git-path", f)
 		if r != 0 || gp == "" {
-			return 2
+			return tri.Unknown
 		}
 		if _, err := os.Lstat(gp); err == nil {
-			return 0
+			return tri.Yes
 		} else if !os.IsNotExist(err) {
-			return 2
+			return tri.Unknown
 		}
 	}
-	return 1
+	return tri.No
 }

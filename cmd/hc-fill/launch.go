@@ -520,7 +520,7 @@ func tryget(name, rid, m string) (string, bool) {
 func parkCandidate(name, rid, m, addr, st string) int {
 	attempt, _ := tryget(name, rid, m)
 	if strings.SplitN(attempt, "\t", 2)[0] == "resumed" {
-		if EVBAD || has(EV, "모름 "+m) || pget(addr) != 0 {
+		if EVBAD || has(EV, "모름 "+m) || pget(addr) != pLive {
 			return 2
 		}
 		if runlast(name, addr, PRUN, "주차") == "" {

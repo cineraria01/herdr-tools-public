@@ -119,6 +119,7 @@ func Lookup(dir, tree string, stderr io.Writer) (Rec, gitx.State) {
 		return Rec{}, gitx.Unknown
 	case gitx.No:
 		return Rec{}, gitx.No
+	case gitx.Yes:
 	}
 	if b != r.Script {
 		return Rec{}, gitx.No

@@ -488,7 +488,7 @@ func TestRunShardsStop(t *testing.T) {
 	}
 }
 
-// 진짜 go로: 임시 모듈의 시험(하위 시험·HCFILL_SEC 절 포함)이 조각들에서 정확히 한 번씩 돌고, 표에 없는 새 시험도 들고,
+// 진짜 go로: 임시 모듈의 시험(하위 시험·reg 절 포함 — 없는 절을 고르는 part도)이 조각들에서 정확히 한 번씩 돌고, 표에 없는 새 시험도 들고,
 // TestCotenantGuard는 안 돈다
 func TestShardsRealGo(t *testing.T) {
 	M := tmp(t)
@@ -498,9 +498,9 @@ func TestShardsRealGo(t *testing.T) {
 		"p/p_test.go": "package p\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n" + mark +
 			"func TestA(t *testing.T) {\n\tfor _, s := range []string{\"x\", \"y\", \"z\"} {\n\t\tt.Run(s, func(t *testing.T) { mark(\"TestA/\" + s) })\n\t}\n}\n" +
 			"func TestB(t *testing.T)   { mark(\"TestB\") }\nfunc TestC(t *testing.T)   { mark(\"TestC\") }\nfunc TestNew(t *testing.T) { mark(\"TestNew\") }\n",
-		"s/s_test.go": "package s\n\nimport (\n\t\"os\"\n\t\"strings\"\n\t\"testing\"\n)\n\n" + mark +
+		"s/s_test.go": "package s\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n" + mark +
 			"var secs []string\n\nfunc reg(order int, name string) { secs = append(secs, name) }\n\nfunc init() { reg(1, \"s1\"); reg(2, \"s2\"); reg(3, \"s3\") }\n\n" +
-			"func TestS(t *testing.T) {\n\tonly := os.Getenv(\"HCFILL_SEC\")\n\tfor _, n := range secs {\n\t\tif only == \"\" || strings.Contains(\",\"+only+\",\", \",\"+n+\",\") {\n\t\t\tmark(\"TestS/\" + n)\n\t\t}\n\t}\n}\n" +
+			"func TestS(t *testing.T) {\n\tfor _, n := range secs {\n\t\tt.Run(n, func(t *testing.T) { mark(\"TestS/\" + n) })\n\t}\n}\n" +
 			"func TestT(t *testing.T) { mark(\"TestT\") }\n",
 		"q/q_test.go": "package q\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n" + mark +
 			"func TestQ(t *testing.T)              { mark(\"TestQ\") }\nfunc TestCotenantGuard(t *testing.T) { mark(\"TestCotenantGuard\") }\n",
@@ -513,11 +513,10 @@ func TestShardsRealGo(t *testing.T) {
 	}
 	atoms := filepath.Join(t.TempDir(), "atoms")
 	t.Setenv("ATOMS", atoms)
-	t.Setenv("HCFILL_SEC", "")
 	t.Setenv("GOFLAGS", "")
 	sp := []split{
 		{mod + "p", []part{{run: "^TestA$/^x$"}, {run: "^TestA$/^(y)$"}, {run: "^TestA$"}, {run: "^TestB$"}}, 0},
-		{mod + "s", []part{{run: "^TestS$", secs: [][]string{{"s2"}, {"gone"}}}}, 0},
+		{mod + "s", []part{{run: "^TestS$/^(s2)$"}, {run: "^TestS$/^(gone)$"}}, 0},
 	}
 	pkgs, err := goList(M)
 	if err != nil {
@@ -585,7 +584,7 @@ func TestSplitsCoverRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	sh := shards(root, pkgs, []string{"go", "test"}, splits, 12)
-	type sel struct{ run, skip, sec string }
+	type sel struct{ run, skip string }
 	byPkg, inRest := map[string][]sel{}, map[string]int{}
 	for _, s := range sh {
 		var x sel
@@ -605,8 +604,8 @@ func TestSplitsCoverRepo(t *testing.T) {
 				ps = append(ps, a)
 			}
 		}
-		for _, e := range s.env {
-			x.sec = strings.TrimPrefix(e, "HCFILL_SEC=")
+		if len(s.env) > 0 {
+			t.Errorf("조각 %v에 환경 %v — 조각은 -run·-skip으로만 고른다", s.argv, s.env)
 		}
 		if len(ps) > 1 || x.skip == cotenant {
 			for _, p := range ps {
@@ -650,7 +649,7 @@ func TestSplitsCoverRepo(t *testing.T) {
 			}
 			sub := false
 			for _, pt := range s.parts {
-				sub = sub || ((pt.secs != nil || strings.Contains(pt.run, "/")) && selects(pt.run, "", []string{n}))
+				sub = sub || (strings.Contains(pt.run, "/") && selects(pt.run, "", []string{n}))
 			}
 			if !sub {
 				paths = append(paths, []string{n})
@@ -664,9 +663,6 @@ func TestSplitsCoverRepo(t *testing.T) {
 			}
 		}
 		for _, pt := range s.parts {
-			if pt.secs != nil && (s.pkg != mod+"tests/hcfill" || pt.run != "^TestHcFill$") {
-				t.Errorf("%s: part %q의 secs — HCFILL_SEC는 tests/hcfill TestHcFill만 읽는다", s.pkg, pt.run)
-			}
 			hit := false
 			for _, p := range paths {
 				hit = hit || selects(pt.run, "", p) && (len(p) == 2 || !strings.Contains(pt.run, "/")) // 하위 시험 part는 절까지 맞아야
@@ -678,7 +674,7 @@ func TestSplitsCoverRepo(t *testing.T) {
 		for _, p := range paths {
 			n := 0
 			for _, x := range byPkg[s.pkg] {
-				if selects(x.run, x.skip, p) && (x.sec == "" || len(p) < 2 || strings.Contains(","+x.sec+",", ","+p[1]+",")) {
+				if selects(x.run, x.skip, p) {
 					n++
 				}
 			}
@@ -689,18 +685,29 @@ func TestSplitsCoverRepo(t *testing.T) {
 	}
 }
 
-// 절 묶음 est: secEst는 첫 절로 맞추고(빠진 묶음이 있어도), 나머지 절 묶음은 est − 합, secEst가 없으면 est ÷ 묶음 수
-func TestGroupEst(t *testing.T) {
-	pt := part{est: 100, secs: [][]string{{"a", "b"}, {"c"}, {"d"}}, secEst: []int{30, 50, 15}}
-	for _, c := range []struct {
-		g    []string
-		want int
-	}{{[]string{"a", "b"}, 30}, {[]string{"c"}, 50}, {[]string{"d"}, 15}, {[]string{"x", "y"}, 5}, {[]string{"b"}, 5}} {
-		if got := groupEst(pt, c.g, 4); got != c.want {
-			t.Errorf("%v: %d여야 %d", c.g, c.want, got)
+var (
+	regCall = regexp.MustCompile(`\breg\(`)
+	regLit  = regexp.MustCompile(`\breg\([0-9]+, "([^"]+)"`)
+)
+
+// sections: dir의 *_test.go에서 reg(<차례>, "<이름>", …)로 등록한 절(하위 시험) 이름. 글자 그대로가 아닌 reg 호출이 있거나 하나도 없으면 nil
+func sections(dir string) []string {
+	fs, _ := filepath.Glob(filepath.Join(dir, "*_test.go"))
+	var names []string
+	calls := 0
+	for _, f := range fs {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil
+		}
+		s := string(b)
+		calls += len(regCall.FindAllString(s, -1)) - strings.Count(s, "func reg(")
+		for _, m := range regLit.FindAllStringSubmatch(s, -1) {
+			names = append(names, m[1])
 		}
 	}
-	if got := groupEst(part{est: 100}, []string{"a"}, 4); got != 25 {
-		t.Errorf("secEst 없음: 25여야 %d", got)
+	if len(names) == 0 || len(names) != calls {
+		return nil
 	}
+	return names
 }

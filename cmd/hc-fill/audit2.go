@@ -97,11 +97,11 @@ func aQueued() {
 	}
 	// 부모 실행이 그대로인가(같은 주소·같은 created_ms). 끝남 확정이면 지휘로, 모르면 다음 바퀴
 	pr := pget(auPa)
-	if pr == 1 {
+	if pr == pUnknown {
 		fmt.Println("감사 판정 미룸 " + auAn + ": 부모 " + auPa + " 를 확인하지 못했다(hc get)")
 		return
 	}
-	if pr == 3 || PRUN != auPrun {
+	if pr == pDone || PRUN != auPrun {
 		aEsc(auAid, "parent-ended", auLn+" 감사 "+auRnd+"번째 판정이 왔는데 부모 실행("+auPrun+")이 끝났다 — 지휘 판단 ("+head(auSha, 8)+", "+auAn+" @"+qm+" "+rep+")")
 		return
 	}
@@ -197,11 +197,11 @@ func aDeliver() {
 	auRep = auRest(arow(auAid), atNote)
 	// 파일 공개 전에 부모 실행·최신 완료를 재확인한다. 이미 수거했으면 a_void가 그 표시를 보존한다
 	pr := pget(auPa)
-	if pr == 1 {
+	if pr == pUnknown {
 		return
 	}
-	if pr == 3 || PRUN != auPrun {
-		if aVoid(auAid, auLn, auAm) == 0 {
+	if pr == pDone || PRUN != auPrun {
+		if aVoid(auAid, auLn, auAm) == avVoid {
 			aEsc(auAid, "parent-ended", auLn+" 감사 "+auRnd+"번째 판정("+auAv+")을 수거하기 전에 부모 실행("+auPrun+")이 끝났다 — 지휘 판단 ("+auAn+" "+auRep+")")
 		}
 		return
@@ -212,7 +212,7 @@ func aDeliver() {
 		return
 	}
 	if !auSameSha(auSha, evF(le, evSHA)) {
-		if aVoid(auAid, auLn, auAm) == 0 {
+		if aVoid(auAid, auLn, auAm) == avVoid {
 			aupd(auAid, cv{atState, "superseded"})
 			fmt.Println("판정 취소 " + auAn + ": " + auLn + " 이 수거 전에 새 완료를 적었다 — 새 차수로")
 		}
@@ -361,7 +361,7 @@ func aCleanup() {
 // 모르거나 kill이 실패하면 false(부른 쪽이 지금처럼 지휘에 알린다). 2026-11-22 지휘가 하루 세 번 손으로 닫았다
 func aCloseTerm(cn, qa string) bool {
 	run := attemptRun(cn, qa)
-	if run == "" || pget(qa) != 0 || PNAME != cn || PRUN != run {
+	if run == "" || pget(qa) != pLive || PNAME != cn || PRUN != run {
 		return false
 	}
 	if _, rc := (Cmd{Name: "hc", Args: []string{"kill", qa}, Err: errMerge}).Run(); rc != 0 {
@@ -381,7 +381,7 @@ func auSameRound(r Row, s string) bool {
 
 // a_open: 쓰기 레인(up·auto)이 그 실행으로 적은 최신 「완료 <sha>」가 아직 감사되지 않았으면 새 차수(완료 뒤 중간 보고가 끼어도)
 func aOpen(n, p, m, la string) {
-	if lastev(n, la, "완료") == "" || pget(la) != 0 {
+	if lastev(n, la, "완료") == "" || pget(la) != pLive {
 		return
 	}
 	lc := runlast(n, la, PRUN, "완료")
@@ -429,10 +429,10 @@ func aOpen(n, p, m, la string) {
 				continue
 			}
 			switch aVoid(oa, n, om) {
-			case 0:
+			case avVoid:
 				aupd(oa, cv{atState, "superseded"})
-			case 2:
-			default:
+			case avTaken:
+			case avUnknown:
 				fmt.Println("자동 감사 미룸 " + n + ": 지난 판정 " + oa + " 취소를 확인하지 못했다")
 				return
 			}

@@ -19,6 +19,7 @@ import (
 	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 var (
@@ -205,7 +206,7 @@ func contains(l []string, s string) bool {
 // coordIs: 살아 있고 레인·감시 터미널이 아니다(셸 판 coord_is)
 func coordIs(addr string) bool {
 	_, _, ll, r := tinfo(addr)
-	return r == 0 && !ll
+	return r == tri.Yes && !ll
 }
 
 // localAddr: 대상 기계의 터미널이면 그 기계 쪽 주소(앞의 「<기계>/」를 뗀 것)

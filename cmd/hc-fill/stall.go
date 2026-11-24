@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/tri"
 )
 
 // stallDone <대기열 줄> <완료 사건> <완료 sha>: 멈춤이 아니라 끝난 레인인가 — (끝남, 모름)(2026-11-21 헛알림 — flaky-land 1420분·
@@ -60,13 +61,14 @@ func stallMerger(q Row, ev, sha string) (bool, bool) {
 	lns, unk := stallNames(q)
 	for _, ln := range lns {
 		lms, lmf := LMS, LMFROM // lmark(onlandHit 안)는 선행 판정용 전역을 쓴다 — 이 바퀴의 다른 판정을 흐리지 않게 되돌린다
-		_, rc := onlandHit(ln, int64(num(st)))
+		_, hit := onlandHit(ln, int64(num(st)))
 		LMS, LMFROM = lms, lmf
-		switch rc {
-		case 0:
+		switch hit {
+		case tri.Yes:
 			return true, false
-		case 2:
+		case tri.Unknown:
 			unk = true
+		case tri.No:
 		}
 	}
 	same := func(full string) bool { return len(sha) >= 7 && strings.HasPrefix(full, sha) }

@@ -24,7 +24,7 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - `clitest.EnvAllow`만 바깥에서 받는다: 실행 경로 `PATH`, 임시 폴더 `TMPDIR`·`HERDR_VERIFY_BOOT_TMPDIR`(검증 실행기의 메모리 디스크와 부팅 볼륨 — 그대로 넘어간다), `USER`·`LOGNAME`·`SHELL`·`TERM`, 언어 `LANG`·`LC_ALL`·`LC_CTYPE`, `TZ`, 그리고 시험 바이너리가 스스로 넣는 일지·운영 기록 `HERDR_TOOLS_JOURNAL`·`HERDR_TOOLS_OPLOG`(`internal/journal`·`internal/oplog`의 init이 `/dev/null`로 — 시험이 띄운 도구가 실제 일지에 쌓지 않게).
 - `clitest.Env(T, keep…)`는 시험 틀의 자식 환경 바탕이다 — 허용 목록·keep의 바깥 값, `HOME=T`(임시), `GIT_CEILING_DIRECTORIES`(T 위 저장소를 못 찾게). 틀은 그 위에 자기 값(가짜 명령 PATH·git 이름·설정 폴더)을 덧씌운다.
 - `clitest.Isolate(t, T, keep…)`는 시험 프로세스 자신의 환경을 허용 목록으로 줄인다(`os.Environ()`을 물려주는 `clitest.Cmd`·`Git`의 자식도 같아진다). 이 프로세스가 `go build`·`go test`를 부르니 `HOME`·`PWD`(go test가 꾸러미 폴더로 넣는다)와 go 도구 값(`GO*`·`CGO_*`)은 남긴다.
-- 시험이 바깥 값을 꼭 읽어야 하면(시험 전용 덮어쓰기 `HC_FILL_EXAMPLE`·`HCFILL_SEC` 같은 것) 시험 프로세스에서 `os.Getenv`로 읽어 자식에 값을 넘기고(`Isolate`보다 먼저), 자식이 바깥 이름 그대로 받아야 하면 `Env`·`Isolate`의 keep에 이름을 적는다 — 허용 목록 자체는 늘리지 않는다.
+- 시험이 바깥 값을 꼭 읽어야 하면(시험 전용 덮어쓰기 `HC_FILL_EXAMPLE`·`HERDR_BUILD_OVERLAY` 같은 것) 시험 프로세스에서 `os.Getenv`로 읽어 자식에 값을 넘기고(`Isolate`보다 먼저), 자식이 바깥 이름 그대로 받아야 하면 `Env`·`Isolate`의 keep에 이름을 적는다 — 허용 목록 자체는 늘리지 않는다.
 - `clitest.Poison`·`Leaked`: 레인 터미널·병합기 값(`clitest.LaneEnv`, 아직 없는 손잡이 자리 하나 포함)을 넣고 틀의 자식 환경에 남은 것을 본다. 틀마다 `TestKitEnvNoLeak`(`tests/{util,hclane,merger,hcfill}/envleak_test.go`)가 지킨다 — 새 시험 틀은 `clitest.Env`에서 시작하고 같은 시험을 하나 둔다.
 
 ## 시험의 기다림 — 새 장면을 쓸 때의 규칙
@@ -56,10 +56,11 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
   꾸러미마다 part(`-run` 꼴)를 적으면 part마다 조각 하나(앞 part가 고른 것은 `-skip`)와 그 꾸러미 나머지 조각(`-skip` part 전부)이 생긴다.
   표에 없는 꾸러미는 모아 한 조각이다.
   그래서 시험(하위 시험·절)은 조각 하나에서 한 번만 돌고, 새 시험·새 꾸러미는 나머지 조각에 저절로 든다(시험 파일은 옮기지 않는다).
-- `tests/hcfill`의 `TestHcFill`은 `HCFILL_SEC` 절 묶음으로 나눈다.
-  마지막 묶음은 소스의 `reg(<차례>, "<이름>", …)`에서 읽은 나머지 절 전부다(글자 그대로가 아닌 reg 호출이 있으면 나누지 않는다).
-- `tests/hclane`의 `TestHcLane`은 하위 시험 묶음으로 나눈다.
-  앞 절 상태에 기대는 절(`s20c`←`s20b`, `s21a2`~`s21a4`←`s21a1`)은 떼지 않는다 — 새 절이 떼어 낸 절의 상태에 기대면 그 묶음에 넣는다.
+- `tests/hcfill`의 `TestHcFill`과 `tests/hclane`의 `TestHcLane`은 절(`reg(<차례>, "<이름>", …)`)마다 하위 시험이고, 표는 `-run '^TestHcFill$/^(a|b|c)$'` 꼴 part로 묶는다 — 어느 part에도 안 든 절은 그 꾸러미 나머지 조각에 든다.
+  절은 저마다 새 상태(임시 폴더·가짜 HOME·설정·환경)에서 시작하니(2026-11-24 contract-subtests) 혼자·어떤 차례로도 돌고, 묶음은 시간만 보고 나눈다.
+  전에는 한 상태를 차례로 이어 써서 `TestHcFill`은 환경 변수(`HCFILL_SEC`)로만 고를 수 있었고 `TestHcLane`은 앞 절 상태에 기대는 절을 떼지 못했다.
+  새 절도 앞 절 상태에 기대지 않는다 — 필요한 상태는 그 절의 준비에서 제품 명령으로 만든다.
+  절 하나 고르기: `go test -run '^TestHcFill$/^k2$' ./tests/hcfill/`.
   레인을 띄우는 장면은 띄우기의 시작 확인을 보지 않으면 `--start-wait 0`을 준다 — 가짜 hc에서는 상태가 안 잡혀 상한(기본 60초)을 끝까지 기다린다(2026-11-24 s21b1-trim: 가장 긴 조각 `s21b1` 약 290초 → 약 60초).
 - 두 계약 시험은 최상위 시험 여럿이다(2026-11-23 contract-split — 시험 하나일 때 가장 긴 조각이라 표로 못 나눴다): 병합기 `TestMergerContractA`~`E`(`tests/merger`), herdr-sync `TestContractA`~`E`(`cmd/herdr-sync`).
   묶음마다 자기 준비를 스스로 하니(뒤 묶음이 기대는 상태는 준비에서 제품 명령을 돌려 만든다) 혼자서도·어떤 차례로도 돈다.
@@ -75,8 +76,8 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - 검증 잠금: 무거운 단계(`TestCotenantGuard`·조각) 앞에서 기계 단위 잠금(사용자 캐시 폴더 `herdr-tools/verify.lock`, flock)을 얻어 같은 기계의 검증 둘이 겹치지 않게 하고(기다린 초 한 줄, 검증 시간에서 뺀다), 30분 상한을 넘기면 경고 한 줄 뒤 그대로 진행하며, `HERDR_VERIFY_NO_LOCK=1`이면 잠금을 안 본다.
 - 조각 출력은 끝날 때 한 덩이로 찍힌다(`== [i/n] …` 띄움, `-- [i/n] … 끝 <초> 종료 <코드> · +<시작>~+<끝>초 자리 <수>` 다음에 그 출력).
   싼 단계·홀로 단계도 `-- … 끝 <초> 종료 <코드> · +<시작>~+<끝>초` 한 줄이고(검증 시작부터의 초, 잠금 기다림은 뺀다), 조각 단계 끝에 「조각 단계 <초> · … — 자리 n, 쥔 자리·초, 빈 자리·초 (%)」 한 줄이다.
-  2026-11-24 verify-pack-measure(워커 맥 10코어): 빈 몫 8~9% → 4~5% — 나머지 조각(자리 3) 안의 `tests/repo/verify`(150초)가 늦게 떠 그 조각이 단계를 묶어 따로 떼고, est를 실측으로(hc-fill 절 묶음마다 `secEst`). 조각 단계 274~285 → 251~257초.
-  이름표에는 조각마다 다른 환경(`HCFILL_SEC=…`)만 찍고, 모든 조각에 같은 메모리 디스크 환경(`TMPDIR`·`HERDR_VERIFY_BOOT_TMPDIR`)은 띄울 때만 넘긴다(단계 앞 「메모리 디스크 …」 한 줄이 알린다).
+  2026-11-24 verify-pack-measure(워커 맥 10코어): 빈 몫 8~9% → 4~5% — 나머지 조각(자리 3) 안의 `tests/repo/verify`(150초)가 늦게 떠 그 조각이 단계를 묶어 따로 떼고, est를 실측으로(hc-fill 절 묶음마다 — 지금은 묶음이 part 하나씩이라 part의 est). 조각 단계 274~285 → 251~257초.
+  이름표에는 조각마다 다른 환경만 찍고(지금 표에는 없다 — 조각은 `-run`·`-skip`으로만 고른다), 모든 조각에 같은 메모리 디스크 환경(`TMPDIR`·`HERDR_VERIFY_BOOT_TMPDIR`)은 띄울 때만 넘긴다(단계 앞 「메모리 디스크 …」 한 줄이 알린다).
   실패 줄(`--- FAIL:`·`FAIL <꾸러미>`)은 그대로다.
   고아 검사는 조각마다 끝나자마자 그 무리를 보고(늦게 보면 pid가 한 바퀴 돌아 남의 새 무리를 끌 수 있다), 떼어 띄워 부모가 1이 된 것은 조각이 다 끝난 뒤 한 번 본다(함께 도는 다른 조각의 것을 고아로 읽지 않게).
 - 메모리 디스크(2026-11-24 verify-ramdisk, `tests/repo/verify/ramtmp.go`): 자리를 늘려도 검증이 안 줄었고(자리 10·20·30에 546·530·527초) 병목은 디스크의 작은 쓰기였다(시험들이 임시 폴더에 git 저장소를 만들고 커밋·push하기를 되풀이).
@@ -137,6 +138,21 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - 검증 끝 요약에 「이 기계에서 최근 7일 흔들림: <시험> k번, …」 한 줄(기록이 없으면 안 찍는다). `go run ./tests/repo/verify --flaky`는 기록 전부를 시험별 횟수·마지막 시각으로 보인다.
 - **흔들림 기록이 쌓인 시험은 고친다.** 다시 돌기는 진짜 간헐 버그를 가릴 수 있다 — 그래서 줄·기록·요약에 남긴다. 시간 단언을 빼거나 기다림을 조건 폴링으로 바꾼다(위 「시험의 기다림」).
 - 시험: `TestRetryPhase`·`TestNoRetry`·`TestFailedTests`·`TestFlakyLog`(판정·기록), `TestRetry*`·`TestVerifyFlakyArg`(가짜 go로 verify 전체 — 흔들림 통과·두 번 실패·경합·상한·끔·혼자 다시·홀로 단계), `TestRetryFlakyNoPassRecord`(진짜 go — 흔들려 통과한 조각은 통과 기록 없음).
+
+## 변이 확인 — 저장소 사본 없이
+
+「이 변이(제품 코드를 일부러 틀리게)에 그 절이 실패한다」는 `HERDR_BUILD_OVERLAY`로 본다(2026-11-24 contract-subtests — 전에는 도구 짓기가 빌드 옵션을 비워 `-overlay`가 지은 도구에 닿지 않아 변이마다 저장소 사본을 만들었다).
+- 값은 `go build -overlay` JSON의 **절대 경로**다(상대 경로면 짓기가 오류로 멈춘다). `clitest.Bin`·`BinPlain`이 짓는 도구에만 들고, 시험 바이너리 자신의 짓기에는 안 든다.
+- 시험 프로세스가 뜰 때 한 번 읽는다 — `Isolate`가 환경을 줄인 뒤에 짓는 시험도 받는다. 시험 전용이다(`internal/clitest`는 시험에만 링크된다).
+- 쓰는 법: 고친 파일 사본을 작업 트리 밖에 두고 overlay에 「원래 경로 → 사본」을 적어(없는 파일을 더할 수도 있다) 그 절만 돌린다.
+
+```sh
+d=$(mktemp -d); sed 's/<원래>/<변이>/' cmd/hc-fill/<파일>.go > "$d/m.go"
+printf '{"Replace":{"%s":"%s"}}' "$PWD/cmd/hc-fill/<파일>.go" "$d/m.go" > "$d/ov.json"
+HERDR_BUILD_OVERLAY="$d/ov.json" go test -count=1 -run '^TestHcFill$/^k2$' ./tests/hcfill/   # 실패해야
+```
+
+- 시험: `internal/clitest` `TestBuildOverlay`(더한 파일이 지은 도구에 든다·손잡이 없으면 안 든다·상대 경로 오류).
 
 ## 시험 손잡이 — 배포 바이너리에는 없다
 

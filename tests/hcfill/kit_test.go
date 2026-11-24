@@ -4,7 +4,7 @@
 // 단언 이름·차례는 셸 시험의 것 그대로다(절마다 파일 하나 — reg로 차례를 적는다). 판은 Go 하나다(2026-11-22 go-shell-remove).
 //
 // 설정은 HC_FILL_EXAMPLE·HC_FILL_AUDIT_EXAMPLE(없으면 저장소 config.example).
-// 일부 절만: HCFILL_SEC=<이름,…>(reg 이름 — 절은 차례대로 상태를 이어 쓰니 앞 절 없이 돌리면 그 절 안에서만 맞는다).
+// 절마다 하위 시험이고 저마다 새 상태에서 돈다 — 일부 절만: go test -run '^TestHcFill$/^(a|k2)$' ./tests/hcfill/
 // 실행: go test ./tests/hcfill/
 package hcfill_test
 
@@ -47,22 +47,17 @@ var sections []section
 // reg: 절을 차례 order로 등록한다(파일마다 init에서).
 func reg(order int, name string, f func(k *K)) { sections = append(sections, section{order, name, f}) }
 
+// TestHcFill: 절마다 하위 시험 하나 — 절은 저마다 새 K(임시 폴더·가짜 HOME·설정)에서 돌아 혼자·어떤 차례로도 맞는다
+// (2026-11-24 contract-subtests: 옛 판은 한 K를 차례로 이어 써 -run으로 고를 수 없었다). 고르기는 -run '^TestHcFill$/^(a|b)$'.
 func TestHcFill(t *testing.T) {
 	sort.SliceStable(sections, func(i, j int) bool { return sections[i].order < sections[j].order })
-	only := map[string]bool{}
-	for _, s := range strings.Split(os.Getenv("HCFILL_SEC"), ",") {
-		if s != "" {
-			only[s] = true
-		}
-	}
-	k := newK(t)
 	for _, s := range sections {
-		if len(only) > 0 && !only[s.name] {
-			continue
-		}
-		s.f(k)
+		t.Run(s.name, func(t *testing.T) {
+			k := newK(t)
+			s.f(k)
+			t.Logf("# %d/%d 통과", k.n-k.fails, k.n)
+		})
 	}
-	t.Logf("# %d/%d 통과", k.n-k.fails, k.n)
 }
 
 // K: 시험 하나의 상태(셸 시험의 전역 변수들).
@@ -110,7 +105,7 @@ func newK(t *testing.T) *K {
 		// macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
 	mkdirs(t, T+"/bin", T+"/conf", k.HOME)
-	for _, f := range []string{"hc", "hc-lane", "git", "herdr-balance"} {
+	for _, f := range []string{"hc", "hc-lane", "git", "herdr-balance", "sysctl"} {
 		b, err := os.ReadFile(filepath.Join(repo, "tests", "hcfill", "testdata", f))
 		if err != nil {
 			t.Fatal(err)

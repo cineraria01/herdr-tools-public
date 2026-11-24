@@ -12,6 +12,7 @@ import (
 
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 func init() { register("_gc", gcMain) }
@@ -251,7 +252,7 @@ func idleTick() {
 				iall = true
 				continue
 			}
-			if rc, _ := ownerCheck(o); rc != 1 { // 없음이 확인된 주인만 뺀다(모름을 빼면 받는 쪽이 모든 지휘로 넓어진다 — 재감사 R-09)
+			if st, _ := ownerCheck(o); st != tri.No { // 없음이 확인된 주인만 뺀다(모름을 빼면 받는 쪽이 모든 지휘로 넓어진다 — 재감사 R-09)
 				if ito != "" {
 					ito += ","
 				}

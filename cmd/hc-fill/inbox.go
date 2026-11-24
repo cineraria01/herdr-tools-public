@@ -416,11 +416,11 @@ func inbFix(n, m, a, rp string) {
 	}
 	// 종료를 확인한 뒤 보고를 읽어, 마지막 mv와 종료가 같은 바퀴에 일어나도 본문을 놓치지 않는다.
 	endrc := pget(a)
-	if endrc == 0 {
+	if endrc == pLive {
 		if started := attemptRun(n, a); started != "" && PRUN != started {
-			endrc = 3
+			endrc = pDone
 		} else if PNAME != "" && PNAME != "-" && PNAME != n && !lalive(a, n) {
-			endrc = 3
+			endrc = pDone
 		}
 	}
 	ro, rc := onm(nil, m, inbReportSh, rpth)
@@ -441,7 +441,7 @@ func inbFix(n, m, a, rp string) {
 		return
 	}
 	if body == "" || !rdone(body) {
-		if endrc != 3 {
+		if endrc != pDone {
 			if !lalive(a, n) {
 				say("되돌려 주기 미룸 %s: 터미널 종료를 확인하지 못했다", n)
 			}

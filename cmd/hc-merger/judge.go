@@ -14,6 +14,7 @@ import (
 
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 // judge: 착지(종료 m.lr) 뒤. 종료 코드와 상관없이 먼저 원격이 후보를 담았는지 본다(응답 유실로 1이어도 들어갔을 수 있다).
@@ -41,7 +42,7 @@ func (m *M) judge() {
 	if m.b[0].d != "" {
 		for _, e := range m.b {
 			switch m.proof(e.d) {
-			case 0:
+			case tri.Yes:
 				if firstProof != "" && firstProof != m.hs {
 					if !m.recover() {
 						m.mer, m.mq = true, ""
@@ -50,8 +51,8 @@ func (m *M) judge() {
 				}
 				proven++
 				firstProof = m.hs
-			case 1:
-			default:
+			case tri.No:
+			case tri.Unknown:
 				m.mer, m.mq = true, ""
 				return
 			}
@@ -192,17 +193,17 @@ func (m *M) proofload(ids []string) bool {
 	return true
 }
 
-// proof: 0 그 제출 ID 표식이 기본 브랜치 이력에 있음(m.hs = 그 SHA) · 1 표식 없음 · 2 모름
-func (m *M) proof(id string) int {
+// proof: 있음 그 제출 ID 표식이 기본 브랜치 이력에 있음(m.hs = 그 SHA) · 없음 표식 없음 · 모름
+func (m *M) proof(id string) tri.State {
 	m.hs = refsha(m.lk2, "refs/hc-landed/"+id)
 	if m.hs == "" {
-		return 1
+		return tri.No
 	}
 	if run("merge-base", "--is-ancestor", m.hs, m.O) == 0 {
-		return 0
+		return tri.Yes
 	}
 	fmt.Fprintf(os.Stderr, "hc-lane merger: 제출 ID %s 표식이 %s 이력에 있는지 확인하지 못했다 — 일지를 보존한다\n", id, m.base)
-	return 2
+	return tri.Unknown
 }
 
 // recover: 일지가 있으면(앞 실행이 끊김) 먼저 정리. true 정리함(새로 골라도 됨) · false 원격을 못 봐 쉼
@@ -268,10 +269,10 @@ func (m *M) recover() bool {
 	for _, e := range m.b {
 		if e.d != "" {
 			switch m.proof(e.d) {
-			case 0:
-			case 1:
+			case tri.Yes:
+			case tri.No:
 				continue
-			default:
+			case tri.Unknown:
 				m.mer = true
 				return false
 			}

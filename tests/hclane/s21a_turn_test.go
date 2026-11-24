@@ -44,6 +44,9 @@ func s21aFev(sev, name string) []string {
 }
 
 func s21aTurn(k *K) {
+	// 혼자 돌게(contract-subtests): 옛 판은 s21a1의 저장소(t18)와 지시문(BRIEF.md)을 물려받았다
+	k.mk("t18")
+	write(k.t, k.s21aBD()+"/BRIEF.md", "# 할 일\n본문 줄\n")
 	R, T := k.R, k.T
 	BD := k.s21aBD()
 	SD := T + "/submit-state"

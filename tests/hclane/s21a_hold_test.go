@@ -54,8 +54,12 @@ func s21aMdperm() string {
 }
 
 func s21aHold(k *K) {
+	// 혼자 돌게(contract-subtests): 옛 판은 s21a3의 저장소(t18f)와 watch 환경(상태 폴더·빈 목록·짧은 틱·지휘 정보 coord.t7cc)을 물려받았다
+	k.mk("t18f")
+	k.set("XDG_STATE_HOME="+k.T+"/wst", `HC_FAKE_LS={"terminals":[]}`, "HC_LANE_WAIT_TICK=1")
 	R, T := k.R, k.T
 	WD := k.s21aWD()
+	write(k.t, WD+"/coord.t7cc", "t7cc\t4242\tt7cc\t0\n")
 	live := []string{"HC_FAKE_LIVE=t7cc"}
 	send := func() string { return read(k.HCLOG + ".send") }
 	we := func() string { return read(T + "/we") }

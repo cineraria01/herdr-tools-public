@@ -32,6 +32,10 @@ func s20lineN(out string, subs ...string) int {
 func s20now() string { return time.Now().UTC().Format("2006-01-02T15:04:05Z") }
 
 func s20Stop(k *K) {
+	// 혼자 돌게(contract-subtests) — 옛 판은 앞 절에서 물려받았다: 띄우기 장면(s20Notify)의 저장소(s20a의 t20)와,
+	// 이미 있는 커서(바닥 없음 — s20b). 커서가 없으면 새 커서는 2시간 전부터라 아래 고정 시각(2026-11-16) 정리됨 사건을 못 본다
+	k.mk("t20c")
+	write(k.t, filepath.Join(k.T, ".local/state/hc-lane/seen"), "")
 	EV := k.s20ev()
 	has := func(s string) bool { return strings.Contains(k.out, s) }
 	wt0 := []string{"wait", "--timeout", "0"}

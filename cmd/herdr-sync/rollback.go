@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"herdr-tools/internal/toolcfg"
+	"herdr-tools/internal/tri"
 )
 
 var atRef string // --at 값
@@ -35,39 +36,39 @@ func relSlug() (string, string) {
 	return "", "설정 publish.repo가 GitHub 저장소가 아니다"
 }
 
-// fetchRelease: 올려 둔 bin-<c12> 릴리스의 받을 곳(주소·sha256·리눅스 자산). 0 있음 · 1 없음(gh가 「release not found」) · 2 모름
-func fetchRelease(slug, c12, src string) (*relInfo, int, string) {
+// fetchRelease: 올려 둔 bin-<c12> 릴리스의 받을 곳(주소·sha256·리눅스 자산). 있음 · 없음(gh가 「release not found」) · 모름
+func fetchRelease(slug, c12, src string) (*relInfo, tri.State, string) {
 	tag := "bin-" + c12
 	if _, rc, errs := gh("release", "view", tag, "--repo", slug, "--json", "assets", "--jq", ".assets[].name"); rc != 0 {
 		if strings.TrimSpace(errs) == "release not found" {
-			return nil, 1, ""
+			return nil, tri.No, ""
 		}
-		return nil, 2, "gh release view 실패(인증·통신·시간 넘김)"
+		return nil, tri.Unknown, "gh release view 실패(인증·통신·시간 넘김)"
 	}
 	d := TMP + "/relat"
 	if err := os.MkdirAll(d, 0o700); err != nil {
-		return nil, 2, "임시 폴더"
+		return nil, tri.Unknown, "임시 폴더"
 	}
 	if _, rc, _ := gh("release", "download", tag, "--repo", slug, "--pattern", "SHA256SUMS", "--dir", d, "--clobber"); rc != 0 {
-		return nil, 2, "gh release download SHA256SUMS 실패"
+		return nil, tri.Unknown, "gh release download SHA256SUMS 실패"
 	}
 	b, err := os.ReadFile(d + "/SHA256SUMS")
 	if err != nil {
-		return nil, 2, "받은 SHA256SUMS를 읽지 못했다"
+		return nil, tri.Unknown, "받은 SHA256SUMS를 읽지 못했다"
 	}
 	rel := &relInfo{c12: c12, src: src, tag: tag, sums: map[string]string{}, lx: map[string]bool{}, at: true,
 		base: envOr("HERDR_SYNC_RELEASE_URL", "https://github.com/"+slug+"/releases/download")}
 	for _, l := range splitLines(string(b)) {
 		f := strings.Fields(l)
 		if len(f) != 2 {
-			return nil, 2, "SHA256SUMS 줄이 깨졌다"
+			return nil, tri.Unknown, "SHA256SUMS 줄이 깨졌다"
 		}
 		rel.sums[f[1]] = f[0]
 		if t, ok := strings.CutSuffix(f[1], "-linux-amd64"); ok {
 			rel.lx[t] = true
 		}
 	}
-	return rel, 0, ""
+	return rel, tri.Yes, ""
 }
 
 // releaseList: 올린 판(bin-…) 목록 — 거절할 때 보인다
@@ -128,10 +129,11 @@ func rollback(machines []string) {
 	}
 	rel, st, why := fetchRelease(slug, c12, "at:"+c12)
 	switch st {
-	case 1:
+	case tri.No:
 		die("되돌리기: 그 판의 릴리스가 없다 (bin-%s) — 올린 판만 깐다. 올린 판: %s", c12, releaseList(slug))
-	case 2:
+	case tri.Unknown:
 		die("되돌리기: 릴리스를 읽지 못했다 bin-%s (%s) — 모름, 아무것도 깔지 않음", c12, why)
+	case tri.Yes:
 	}
 	deployC12, deploySrc, deployReached = c12, rel.src, true
 	say("되돌리기 bin-%s (바이너리만)", c12)

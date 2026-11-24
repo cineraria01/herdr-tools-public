@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/tri"
 )
 
 // cwdFake: get은 $D/get.<주소>(없으면 확인된 not_found)
@@ -91,7 +93,7 @@ func repoList(a string) string {
 
 // sends: 주인 없는 저장소 r 레인 사건을 그 지휘의 watch가 보내나(유예 길게 — 미룸은 거짓)
 func sends(k *cwdKit, a, r string) bool {
-	e := &ev{ed: k.d + "/st/hc-lane", wto: a, occ: map[string]int{}, seenc: map[string]seenCache{}, rgrace: time.Hour,
+	e := &ev{ed: k.d + "/st/hc-lane", wto: a, occ: map[string]tri.State{}, seenc: map[string]seenCache{}, rgrace: time.Hour,
 		rdefer: map[string]time.Time{}, lrepo: map[string]string{}}
 	l := strings.Join([]string{utcNow(), "m", "t8", "inbox-x", "중간", "-", "요약", "-", "-", "-", "*", "-", r}, tab)
 	return e.repoSend(l)
@@ -106,8 +108,8 @@ func TestCoordCwdRepoRoutes(t *testing.T) {
 	k.coord("tx1", "1111", a, cwdB)
 	k.coord("ty2", "2222", "/", cwdB)
 	// X의 watch 바퀴(wcheck → coordCheck)가 먼저 돈다 — 필터 전에
-	if _, why, rc := coordCheck("tx1"); rc != 0 {
-		t.Fatalf("coordCheck tx1 %d %s", rc, why)
+	if _, why, rc := coordCheck("tx1"); rc != tri.Yes {
+		t.Fatalf("coordCheck tx1 %v %s", rc, why)
 	}
 	if got := repoList("tx1"); got != cwdA+","+cwdB {
 		t.Errorf("① X 기록 %q, 기대 A·B", got)
@@ -136,8 +138,8 @@ func TestCoordCwdRepoNoRepo(t *testing.T) {
 	k.coord("tn3", "3333", n, cwdB)
 	k.coord("tz4", "4444", a)
 	for _, c := range []string{"ty2", "tn3", "tz4"} {
-		if _, why, rc := coordCheck(c); rc != 0 {
-			t.Fatalf("coordCheck %s %d %s", c, rc, why)
+		if _, why, rc := coordCheck(c); rc != tri.Yes {
+			t.Fatalf("coordCheck %s %v %s", c, rc, why)
 		}
 	}
 	if repoList("ty2") != cwdB || repoList("tn3") != cwdB {
@@ -170,7 +172,7 @@ func TestCoordCwdRepoBackfill(t *testing.T) {
 		t.Errorf("③ 같은 저장소는 한 줄: %q", b)
 	}
 	k.coord("tw5", "5555", a, cwdB)
-	if _, _, rc := coordCheck("tw5"); rc != 0 || repoList("tw5") != cwdA+","+cwdB {
-		t.Errorf("③ 다음 watch 바퀴(coordCheck)에도 채워진다: %d %q", rc, repoList("tw5"))
+	if _, _, rc := coordCheck("tw5"); rc != tri.Yes || repoList("tw5") != cwdA+","+cwdB {
+		t.Errorf("③ 다음 watch 바퀴(coordCheck)에도 채워진다: %v %q", rc, repoList("tw5"))
 	}
 }

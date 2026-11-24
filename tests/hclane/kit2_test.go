@@ -25,22 +25,16 @@ type sec struct {
 
 var secs []sec
 
-// reg: 절 하나를 셸 시험 차례(order)로 등록한다. 절끼리 export·설정을 물려받으니 한 판 안에서는 같은 K로 차례로 돈다.
+// reg: 절 하나를 셸 시험 차례(order)로 등록한다.
 func reg(order int, name string, f func(*K)) { secs = append(secs, sec{order, name, f}) }
 
-// TestHcLane: 절을 차례로 하위 시험으로(go test -run 'TestHcLane/s20' 꼴로 골라 돌 수 있다 — 앞 절 상태가 필요한 절은 함께).
+// TestHcLane: 절마다 하위 시험 하나 — 절은 저마다 새 K(임시 폴더·환경)에서 돌아 혼자·어떤 차례로도 맞는다(2026-11-24
+// contract-subtests: 옛 판은 한 K를 이어 써 s20c←s20b·s21a2~4←s21a1처럼 앞 절 상태에 기댔다). 고르기는 -run '^TestHcLane$/^s20c$'.
 func TestHcLane(t *testing.T) {
 	sort.SliceStable(secs, func(i, j int) bool { return secs[i].order < secs[j].order })
-	withK(t, func(k *K) {
-		for _, s := range secs {
-			k.t.Run(s.name, func(t *testing.T) {
-				pt := k.t
-				k.t = t
-				defer func() { k.t = pt }()
-				s.f(k)
-			})
-		}
-	})
+	for _, s := range secs {
+		t.Run(s.name, func(t *testing.T) { withK(t, s.f) })
+	}
 }
 
 // conf <줄…>: $T/.config/herdr-tools/config를 그 줄들로. noconf: 지운다.

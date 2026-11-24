@@ -16,6 +16,7 @@ import (
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/selfexec"
+	"herdr-tools/internal/tri"
 )
 
 func init() {
@@ -57,8 +58,8 @@ type ev struct {
 	lsok         bool
 	pmap         [][]string
 	lk           string
-	lrepo        map[string]string // 이 바퀴 사건의 레인 이름 → 13칸 저장소(laneRepos)
-	occ          map[string]int    // 이 바퀴 wfilter의 지휘 확인(coordCheck) 결과
+	lrepo        map[string]string    // 이 바퀴 사건의 레인 이름 → 13칸 저장소(laneRepos)
+	occ          map[string]tri.State // 이 바퀴 wfilter의 지휘 확인(coordCheck) 결과
 	seenc        map[string]seenCache
 	rgrace       time.Duration        // 남의 저장소 주인 없는 사건을 미루는 유예(repoSend)
 	rdefer       map[string]time.Time // 미룬 열쇠 → 이 watch가 처음 미룬 때(바퀴를 넘어 남음)
@@ -353,13 +354,13 @@ func (e *ev) loop(to int64) int {
 		if e.ec == "watch" {
 			e.self.Check()
 			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13, hcjson.ParseGet)
-			if st := getState(hcGet(10, e.wto)); st == 0 {
+			if st := getState(hcGet(10, e.wto)); st == tri.Yes {
 				gone = 0
 				if !e.wcheck() {
 					wsleep()
 					continue
 				}
-			} else if st == 1 {
+			} else if st == tri.No {
 				gone++
 				if gone >= 3 {
 					e.wend("지휘 사라짐", fmt.Sprintf("지휘 터미널 %s 사라짐(hc get %d바퀴 없음·끝남) — 끝낸다", e.wto, gone))

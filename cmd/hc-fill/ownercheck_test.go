@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"testing"
+
+	"herdr-tools/internal/tri"
 )
 
 // watch-agent-guard: hc-lane coord --check가 「에이전트가 끝나 셸만 남음」(종료 1)이면 주인 없음이 확인된 것 — 모름(미룸)이 아니다.
@@ -14,7 +16,7 @@ func TestOwnerCheckShellOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	if rc, why := ownerCheck("t1"); rc != 1 {
-		t.Fatalf("셸만 남은 주인 = %d(%s), 바람 1", rc, why)
+	if st, why := ownerCheck("t1"); st != tri.No {
+		t.Fatalf("셸만 남은 주인 = %v(%s), 바람 없음", st, why)
 	}
 }

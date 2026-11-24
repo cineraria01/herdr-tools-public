@@ -28,6 +28,7 @@ import (
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 const (
@@ -95,26 +96,26 @@ func onlandPut(lane, name, prj, owner string) {
 }
 
 // onlandHit <레인> <접수초>: FR·FB(fetchProj 뒤)에서 접수 뒤의 착지 — 제목 머리가 그 레인인 커밋(커밋 시각이 접수 뒤) 또는
-// 병합기 표식 refs/hc-landed/<레인>/<초>. 0 착지(그 sha) · 1 아직 · 2 모름
-func onlandHit(lane string, since int64) (string, int) {
+// 병합기 표식 refs/hc-landed/<레인>/<초>. 있음 착지(그 sha) · 없음 아직 · 모름
+func onlandHit(lane string, since int64) (string, tri.State) {
 	o, rc := run("git", "-C", FR, "log", FB, "--format=%H %ct %s", fmt.Sprintf("--since=%d", since-3600))
 	if rc != 0 {
-		return "", 2
+		return "", tri.Unknown
 	}
 	re := regexp.MustCompile(`^([a-z]+(\([^)]*\))?!?: *)?` + regexp.QuoteMeta(lane) + `([^a-z0-9_-]|$)`)
 	for _, l := range lines(o) {
 		f := strings.SplitN(l, " ", 3)
 		if len(f) == 3 && int64(num(f[1])) >= since && re.MatchString(f[2]) {
-			return f[0], 0
+			return f[0], tri.Yes
 		}
 	}
 	switch lmark(lane, strconv.FormatInt(since, 10)) {
 	case 0:
-		return LMS, 0
+		return LMS, tri.Yes
 	case 2:
-		return "", 2
+		return "", tri.Unknown
 	}
-	return "", 1
+	return "", tri.No
 }
 
 // onlandLeft: 걷지 못한 차례(남은 pending·running)가 있는 이름들 — 실행기를 못 띄웠거나 실행기가 죽은 뒤(fill R-212).
@@ -172,11 +173,11 @@ func onlandTick() {
 			say("착지 뒤 %s ← %s: 판정 못 함(%s fetch·repo 줄) — 다음 바퀴에", name, lane, p)
 			continue
 		}
-		sha, rc := onlandHit(lane, ts)
-		if rc == 2 {
+		sha, st := onlandHit(lane, ts)
+		if st == tri.Unknown {
 			say("착지 뒤 %s ← %s: 판정 못 함(커밋·착지 표식 조회 실패) — 다음 바퀴에", name, lane)
 		}
-		if rc != 0 {
+		if st != tri.Yes {
 			continue
 		}
 		if dry {

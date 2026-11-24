@@ -14,6 +14,7 @@ import (
 
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/tri"
 )
 
 // rcRefuse: 띄우기의 입력 거절 — 다시 해도 같은 결과(가지·작업 트리가 이미 있음, 지시문 없음, 주차 가지 없음 등). hc-fill은 이 코드를
@@ -120,9 +121,9 @@ func watchFor(co string) int {
 	if _, alive := watchAlive(evdir() + "/watch." + wk); alive {
 		return 0
 	}
-	if _, why, r := coordCheck(co); r != 0 {
+	if _, why, r := coordCheck(co); r != tri.Yes {
 		errf("hc-lane: 지휘 없음 — %s. 감시(watch)를 띄우지 않음(사건은 events에 남는다)\n", why)
-		return r
+		return exitOf(r)
 	}
 	wn := strings.ToLower(wk)
 	if len(wn) > 21 {
