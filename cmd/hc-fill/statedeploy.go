@@ -83,8 +83,8 @@ func deploySkipOnly(lines []string) map[string]bool {
 }
 
 // deployHold: 배포 밀림을 아직 따지지 않을 까닭(opsstate.Facts.DeployHold) — 배포가 지금 돈다(herdr-sync 표식 deploying의 pid가 살아 있음) ·
-// 착지 뒤 명령 차례(onland pending·running)가 남음 · 마지막 착지(착지마다 기준 onland/*.head가 바뀐 때, 범용 저장소 origin/main 커밋 시각
-// 가운데 늦은 것)가 손잡이 deploy_grace분 안. 없으면 빈 값(2026-11-24 지휘 — 착지 뒤 배포가 도는 1~2분에 밀림 사건이 거짓으로 나갔다)
+// 착지 뒤 명령 차례(onland pending·running)가 남음 · 마지막 착지(착지마다 기준 onland/*.head가 바뀐 때, 범용 저장소 클론이 origin/main
+// 끝을 처음 본 때(landSeen) 가운데 늦은 것)가 손잡이 deploy_grace분 안. 없으면 빈 값(2026-11-24 지휘 — 착지 뒤 배포가 도는 1~2분에 밀림 사건이 거짓으로 나갔다)
 func deployHold(now time.Time) string {
 	if b, err := os.ReadFile(HOME + "/.local/state/herdr-sync/deploying"); err == nil {
 		f := strings.Split(strings.TrimSpace(string(b)), "\t")
@@ -104,22 +104,44 @@ func deployHold(now time.Time) string {
 		return ""
 	}
 	var last time.Time
+	src := ""
 	if hs, err := filepath.Glob(onlandDir() + "/*.head"); err == nil {
 		for _, h := range hs {
 			if st, err := os.Stat(h); err == nil && st.ModTime().After(last) && deploys(strings.TrimSuffix(filepath.Base(h), ".head")) {
-				last = st.ModTime()
+				last, src = st.ModTime(), "착지마다 기준 "+filepath.Base(h)
 			}
 		}
 	}
-	if out, rc := run("git", "-C", stateRepo(), "log", "-1", "--format=%ct", "origin/main"); rc == 0 {
-		if s, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64); err == nil && time.Unix(s, 0).After(last) {
-			last = time.Unix(s, 0)
-		}
+	if t, s := landSeen(stateRepo()); t.After(last) {
+		last, src = t, s
 	}
 	if a := now.Sub(last); !last.IsZero() && a < time.Duration(g)*time.Minute { // now 뒤(음수)도 방금 착지
-		return fmt.Sprintf("마지막 착지 %d분 전(손잡이 deploy_grace %d분 안)", max(0, int(a.Minutes())), g)
+		return fmt.Sprintf("마지막 착지 %d분 전(%s, 손잡이 deploy_grace %d분 안)", max(0, int(a.Minutes())), src, g)
 	}
 	return ""
+}
+
+// landSeen: 범용 저장소 클론이 origin/main의 지금 끝을 처음 본 때와 그 값의 출처 — reflog 맨 위 줄(그 sha가 지금 끝일 때), 없으면
+// 참조 파일 고친 때(packed면 없음). 커밋 시각은 착지 시각이 아니다(감사를 거친 커밋은 착지 때 이미 오래됐다 — deploy-hold-landtime).
+// FETCH_HEAD는 보지 않는다 — 바퀴마다 fetch가 고쳐 보류가 끝나지 않는다. 모르면 0
+func landSeen(repo string) (time.Time, string) {
+	const ref = "refs/remotes/origin/main"
+	tip, rc := run("git", "-C", repo, "rev-parse", "-q", "--verify", ref)
+	if rc != 0 {
+		return time.Time{}, ""
+	}
+	if out, rc := run("git", "-C", repo, "log", "-g", "-1", "--date=unix", "--format=%H %gd", ref); rc == 0 {
+		h, gd, _ := strings.Cut(strings.TrimSpace(out), " ")
+		if s, err := strconv.ParseInt(strings.TrimSuffix(gd[strings.LastIndex(gd, "{")+1:], "}"), 10, 64); err == nil && h == strings.TrimSpace(tip) {
+			return time.Unix(s, 0), "origin/main 끝을 처음 본 때(reflog)"
+		}
+	}
+	if p, rc := run("git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-path", ref); rc == 0 {
+		if st, err := os.Stat(strings.TrimSpace(p)); err == nil {
+			return st.ModTime(), "origin/main 참조 파일 고친 때"
+		}
+	}
+	return time.Time{}, ""
 }
 
 // deployHoldIf: 밀린 기계가 있을 때만 보류 까닭을 잰다(deployHold), 없으면 빈 값

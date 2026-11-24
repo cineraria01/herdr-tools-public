@@ -65,6 +65,7 @@ var Defs = []Def{
 	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
 	{Name: "deploy_grace", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "마지막 착지 뒤 이만큼은 배포 밀림을 손댈 것으로 안 침(배포 도는 중·착지 뒤 명령 차례 남음도 안 침, 0이면 착지 시각은 안 봄)"},
+	{Name: "onland_retry_wait", Tool: "hc-fill", Default: "10", Min: 0, Max: 120, Unit: "분", Desc: "착지 뒤 명령이 종료 75(일시 실패 — 다른 herdr-sync가 돎 등)면 이만큼까지 30초마다 다시 돌림(0이면 안 다시, 바로 막힘)"},
 	// 운영 에이전트(2026-11-24 ops-agent, docs/ops/agent.md). 이름이 agent가 아닌 까닭: hc-fill 설정 agent(에이전트 CLI 종류)를 덮는다.
 	// 운영 에이전트 실행 안에서는 ops_agent* 손잡이를 바꾸지 못한다(자기 권한 넓히기 막기 — hc-fill opsagent.go)
 	{Name: "ops_agent", Tool: "hc-fill", Default: "끔", Enum: []string{"끔", "판단만", "조치"}, Desc: "운영 에이전트 — 끔 · 판단만(hc-fill 조치 명령을 일지에 「하려던 것」으로만) · 조치"},

@@ -9,7 +9,10 @@ package main
 // 착지 뒤 done은 그 머리가 착지 커밋에 들었는지를 착지 사건 글 끝에 적는다(「 · PR 머리 <sha8> 들어감」·「 · PR 머리 안 들어감(…)」) —
 // hc-fill이 그것으로 Merged인지 닫을지를 정한다. 머리 가지가 없으면 글이 전과 같다.
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 const prHeadPat = "refs/heads/pr/*"
 
@@ -17,10 +20,14 @@ const prHeadPat = "refs/heads/pr/*"
 // hc-fill add --pr-of, 2026-11-24 fill-polish-1124). 그 레인의 머리 가지는 pr/<원래>
 const prOfPat = "refs/herdr/pr-of/*"
 
+// relandTail: 다시 맞춤 레인 이름의 꼬리(<원래>-reland·<원래>-reland<k>) — 대기열 cmd/hc-fill/reland.go relandSuf와 같은 규칙(시험이 대조한다)
+var relandTail = regexp.MustCompile(`-reland[0-9]*$`)
+
 func prRef(lane string) string { return "refs/heads/pr/" + lane }
 
-// prLane: 그 레인의 PR 머리 가지 이름 — 제 머리 가지 pr/<레인>이 있으면 레인, 없고 짝 참조가 있으면 원래 레인, 둘 다 없으면 레인.
-// list는 이 바퀴의 ls-remote(prHeadPat·prOfPat을 담은 것)
+// prLane: 그 레인의 PR 머리 가지 이름 — 제 머리 가지 pr/<레인>이 있으면 레인, 없고 짝 참조가 있으면 원래 레인, 그것도 없고 다시 맞춤
+// 꼴 이름(relandTail)이면 꼬리를 뗀 이름의 머리 가지 pr/<원래>가 원격에 있을 때 원래 레인(2026-11-24 pr-reland-head — 다시 맞춤 레인이
+// 대기열의 짝 참조보다 먼저 제출돼 원래 PR이 Merged가 아니라 닫혔다), 다 없으면 레인. list는 이 바퀴의 ls-remote(prHeadPat·prOfPat을 담은 것)
 func prLane(list, lane string) string {
 	if refsha(list, prRef(lane)) != "" {
 		return lane
@@ -31,16 +38,27 @@ func prLane(list, lane string) string {
 			return f[1][len(pre):]
 		}
 	}
+	if b := relandTail.ReplaceAllString(lane, ""); b != lane && b != "" && refsha(list, prRef(b)) != "" {
+		return b
+	}
 	return lane
 }
 
-// prHeads: 「<머리 레인>=<제출 SHA>=<본 머리 값>」를 빈칸으로(머리 가지가 있는 구성원만 — 머리 레인은 prLane)
+// prHeads: 「<머리 레인>=<제출 SHA>=<본 머리 값>」를 빈칸으로(머리 가지가 있는 구성원만 — 머리 레인은 prLane). 같은 머리 가지를 두
+// 구성원이 가리키면 뒤 차례 구성원 것만 — 한 push에 같은 가지를 두 번 올리지 않게
 func (m *M) prHeads() string {
 	var o []string
+	at := map[string]int{}
 	for _, e := range m.b {
 		hl := prLane(m.qs, e.l)
 		if h := refsha(m.qs, prRef(hl)); h != "" {
-			o = append(o, hl+"="+e.s+"="+h)
+			v := hl + "=" + e.s + "=" + h
+			if i, ok := at[hl]; ok {
+				o[i] = v
+				continue
+			}
+			at[hl] = len(o)
+			o = append(o, v)
 		}
 	}
 	return strings.Join(o, " ")

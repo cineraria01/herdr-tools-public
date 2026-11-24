@@ -41,6 +41,9 @@ func onlandDir() string { return DATA + "/onland" }
 // onlandPoll: 앞 실행기의 명령이 끝나기를 볼 때 쉬는 틈(시험이 줄인다)
 var onlandPoll = time.Second
 
+// 종료 75 다시 돌리기: 상한은 손잡이 onland_retry_wait × onlandRetryUnit(분), 틈 onlandRetryPoll(시험이 줄인다)
+var onlandRetryUnit, onlandRetryPoll = time.Minute, 30 * time.Second
+
 // onlandPrevDone: 앞 실행기(죽어 잠금을 놓은 것)가 띄운 같은 이름 명령이 끝났는가 — 기록한 그 프로세스가 돌거나, 우두머리가 끝났는데
 // 무리가 남았거나, 모르면(proc.ChildBusy) 명령 상한만큼 기다린다. 그래도 남으면 거짓(pending은 그대로 — 다음 착지 때 다시)
 func onlandPrevDone(name string) bool {
@@ -355,7 +358,7 @@ func onlandOnce(name string, rs []Row) {
 	p, cmdline := onlandConf(name)
 	repo := repoOf(p, LOCAL)
 	lg := fmt.Sprintf("%s/%s-%s.log", onlandDir(), name, time.Now().Format("20060102-150405"))
-	rc, why := 0, ""
+	rc, why, tries := 0, "", 1
 	switch {
 	case cmdline == "":
 		rc, why = 1, "설정에 on-land "+name+" 줄이 없어짐"
@@ -368,12 +371,22 @@ func onlandOnce(name string, rs []Row) {
 			break
 		}
 		fmt.Fprintf(out, "--- %s %s ← %s (%s)\n$ %s\n", stampLog(), name, strings.Join(lanes, ","), head(sha, 8), cmdline)
-		c := exec.Command("sh", "-c", cmdline)
-		c.Dir = repo
-		c.Stdout, c.Stderr = out, out
-		c.Env = append(os.Environ(), "HC_ONLAND_NAME="+name, "HC_ONLAND_LANES="+strings.Join(lanes, ","), "HC_ONLAND_SHA="+sha)
-		rc = proc.WaitMax(c, onlandDir()+"/"+name+".child", onlandMax) // 명령 무리를 자식 기록에(다음 실행기가 본다)
-		fmt.Fprintf(out, "--- 종료 %d\n", rc)
+		// 종료 75 = 일시 실패(예: 다른 herdr-sync가 잠금을 쥠 — 손 배포와 겹침): 손잡이 onland_retry_wait 상한 안에서 틈마다 다시 돌려
+		// 75가 아닌 결과를 본다(잠금이 풀리면 명령이 스스로 「할 것」을 다시 본다). 상한까지 75면 지금처럼 막힘(deploy-hold-landtime)
+		end := time.Now().Add(time.Duration(knobInt("onland_retry_wait")) * onlandRetryUnit)
+		for try := 1; ; try++ {
+			c := exec.Command("sh", "-c", cmdline)
+			c.Dir = repo
+			c.Stdout, c.Stderr = out, out
+			c.Env = append(os.Environ(), "HC_ONLAND_NAME="+name, "HC_ONLAND_LANES="+strings.Join(lanes, ","), "HC_ONLAND_SHA="+sha)
+			rc = proc.WaitMax(c, onlandDir()+"/"+name+".child", onlandMax) // 명령 무리를 자식 기록에(다음 실행기가 본다)
+			fmt.Fprintf(out, "--- 종료 %d\n", rc)
+			if tries = try; rc != 75 || !time.Now().Add(onlandRetryPoll).Before(end) {
+				break
+			}
+			time.Sleep(onlandRetryPoll)
+			fmt.Fprintf(out, "--- %s 종료 75(일시 실패) — 다시\n", stampLog())
+		}
 		out.Close()
 		if rc == proc.TimeoutCode {
 			why = fmt.Sprintf("상한 %s 넘김", onlandMax)
@@ -385,10 +398,17 @@ func onlandOnce(name string, rs []Row) {
 			tail = ": " + t
 		}
 	}
-	st, msg := "중간", fmt.Sprintf("착지 뒤 %s 성공%s — %s 착지(%s) · 로그 %s", name, tail, strings.Join(lanes, ","), head(sha, 8), lg)
+	retry := ""
+	if tries > 1 {
+		retry = fmt.Sprintf(" (종료 75 뒤 다시 — %d번째)", tries)
+	}
+	st, msg := "중간", fmt.Sprintf("착지 뒤 %s 성공%s%s — %s 착지(%s) · 로그 %s", name, tail, retry, strings.Join(lanes, ","), head(sha, 8), lg)
 	if rc != 0 {
 		if why == "" {
 			why = "종료 " + strconv.Itoa(rc)
+			if tries > 1 {
+				why += fmt.Sprintf(", %d번 돌림", tries)
+			}
 		}
 		st, msg = "막힘", fmt.Sprintf("착지 뒤 %s 실패(%s)%s — %s 착지(%s) · 로그 %s", name, why, tail, strings.Join(lanes, ","), head(sha, 8), lg)
 	}
