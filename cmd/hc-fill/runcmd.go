@@ -45,6 +45,7 @@ func watchCmd(args []string) {
 	}
 	if busy {
 		fmt.Fprintf(os.Stderr, "hc-fill: watch가 이미 돌고 있다(%s/watch.lock)\n", DATA)
+		next("새로 띄우지 않는다 — 바퀴 결과는 hc-fill state --json으로 본다") // agent-skill-guides
 		busyExit()
 	}
 	heldLocks = append(heldLocks, f)

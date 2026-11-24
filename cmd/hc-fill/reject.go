@@ -176,7 +176,7 @@ func retryCmd(args []string) {
 	name := args[0]
 	if !qHasName(name) {
 		DRC = 2
-		die("대기열에 없다: %s", name)
+		noLane(name)
 	}
 	held := rejWhy(name, curRid(name))
 	switch n := rejDrop(name); {

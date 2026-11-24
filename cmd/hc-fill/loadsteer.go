@@ -467,6 +467,11 @@ func machineLines(withEmpty bool) []string {
 
 // machine [<기계> (--seats <n>|- | --pause | --resume) [--for <분>] [--why <글>] [--force]] — 인자 없으면 기계 줄
 func machineCmd(args []string) {
+	if len(args) == 1 && args[0] == "--json" {
+		machineJSON()
+		exit(0)
+	}
+	args, dryM := takeDry(args)
 	if len(args) == 0 {
 		for _, l := range machineLines(true) {
 			fmt.Println(l)
@@ -513,6 +518,9 @@ func machineCmd(args []string) {
 		if a = []string{k}; force {
 			a = append(a, "--force")
 		}
+		if dryM {
+			a = append(a, "--dry-run")
+		}
 		err = knobUnset(a, now)
 	} else {
 		v := val
@@ -526,10 +534,16 @@ func machineCmd(args []string) {
 		if force {
 			a = append(a, "--force")
 		}
+		if dryM {
+			a = append(a, "--dry-run")
+		}
 		err = knobSet(a, now)
 	}
 	if err != nil {
 		die("%v", err)
+	}
+	if dryM { // 미리 보기는 조정 기록도 안 남긴다
+		exit(0)
 	}
 	what := act
 	if act == "seats" {

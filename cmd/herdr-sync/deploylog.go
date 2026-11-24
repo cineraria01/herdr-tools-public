@@ -178,6 +178,7 @@ func readLog() ([]logRow, error) {
 
 // showLog: --log [n] — 마지막 n줄(기본 20), 오래된 것부터
 func showLog(args []string) int {
+	args, js := takeJSON(args)
 	n := 20
 	if len(args) > 1 {
 		fmt.Fprint(os.Stderr, usage)
@@ -196,12 +197,15 @@ func showLog(args []string) int {
 		fmt.Fprintf(os.Stderr, "herdr-sync: 배포 기록을 읽지 못했다 (%s): %v\n", deployLogFile(), err)
 		return 1
 	}
+	if len(rs) > n {
+		rs = rs[len(rs)-n:]
+	}
+	if js {
+		return logJSON(rs)
+	}
 	if len(rs) == 0 {
 		fmt.Println("배포 기록 없음")
 		return 0
-	}
-	if len(rs) > n {
-		rs = rs[len(rs)-n:]
 	}
 	for _, r := range rs {
 		fmt.Printf("%s %s 종료 %s · 범용 %s · 개인 %s · 부른 곳 %s · %s\n", r.when, r.kind, r.rc, r.c12, r.conf, r.by, r.res)

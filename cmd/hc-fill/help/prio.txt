@@ -1,2 +1,2 @@
   prio   레인의 우선순위를 바꾼다. 띄울 때 레인 환경 HC_LANE_PRIORITY(병합기 제출 우선)로 넘어가고, 떠 있는 레인이 이미 병합기 큐에
-         냈으면 큐 메타(refs/merge-queue-meta/<항목>) 제목의 priority=도 lease로 바꾼다(못 바꾸면 경고만)
+         냈으면 큐 메타(refs/merge-queue-meta/<항목>) 제목의 priority=도 lease로 바꾼다(못 바꾸면 경고만). --dry-run은 전 → 후만 찍는다

@@ -147,8 +147,16 @@ func lsCmd(args []string) {
 	if raw, mrc := run("hc", "machine", "ls", "--json"); mrc == 0 {
 		conn, connKnown = jsonList(raw, "machines", "name", isConnected)
 	}
-	fmt.Println(lsLine("레인", "프로젝트", "상태", "주소", "주인", "우선", "선행·비고"))
+	js := lsWantJSON(args)
+	var jrows []lsRow
+	if !js {
+		fmt.Println(lsLine("레인", "프로젝트", "상태", "주소", "주인", "우선", "선행·비고"))
+	}
 	if !isFile(Q) {
+		if js {
+			lsPrintJSON(nil)
+			exit(0)
+		}
 		maPrint() // 병합기 한 줄(mergeralive.go)은 표 끝에
 		exit(0)
 	}
@@ -264,6 +272,11 @@ func lsCmd(args []string) {
 			}
 		}
 		note = strings.TrimPrefix(note, " ")
+		if js {
+			jrows = append(jrows, lsRow{Lane: name, Project: proj, State: s, Code: state, Address: a, Owner: dash(owner),
+				Priority: plabel(prio), After: lsList(after), Only: lsList(only), Last: lr, Note: note})
+			continue
+		}
 		if lr != "" {
 			if note != "" {
 				note = lr + " · " + note
@@ -272,6 +285,10 @@ func lsCmd(args []string) {
 			}
 		}
 		fmt.Println(lsLine(name, proj, s, a, dash(owner), plabel(prio), note))
+	}
+	if js {
+		lsPrintJSON(jrows)
+		exit(0)
 	}
 	maPrint()
 	exit(0)

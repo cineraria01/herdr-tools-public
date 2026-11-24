@@ -1,1 +1,2 @@
   rm     주차 중인 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 지우지 않는다(종료 2)
+         --dry-run: 뺄 줄·상태·되돌리는 add 한 줄만 「미리 보기:」로 찍고 아무것도 안 바꾼다(prio·knob set|unset·machine <기계>도 같다)

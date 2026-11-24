@@ -83,7 +83,7 @@ func editCmd(args []string) {
 	rc := withRun(func() {
 		r := qrow(name)
 		if r == nil {
-			die("대기열에 없다: %s", name)
+			noLane(name)
 		}
 		undo = editUndo(r, after != "", only != "", brief != "", prio != "")
 		st, prj = r.F(6), r.F(2)
@@ -174,6 +174,7 @@ func withRun(fn func()) int {
 
 // rmCmd: rm <이름> [--force]. 주차 중인 줄은 --force 없이 지우지 않는다(종료 2)
 func rmCmd(args []string) {
+	args, dryR := takeDry(args)
 	args, why := takeWhy(args)
 	name, force, st, undo := "", false, "", "-"
 	for _, a := range args {
@@ -188,6 +189,10 @@ func rmCmd(args []string) {
 	}
 	if name == "" {
 		usage()
+	}
+	if dryR {
+		rmPreview(name, force)
+		exit(0)
 	}
 	rc := withQ(func() {
 		r := qrow(name)

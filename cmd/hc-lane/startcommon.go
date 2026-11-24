@@ -86,6 +86,7 @@ func xjson(stdout, stderr io.Writer, args []string) int {
 	}
 	if perr != nil {
 		fmt.Fprintf(stderr, "hc-lane: %v\n", perr)
+		fmt.Fprintln(stderr, "hc-lane: 다음: hc machine ls로 그 기계가 연결됐는지 본다(끊겼으면 붙은 뒤 같은 줄을 다시, 오래면 다른 기계로)") // agent-skill-guides
 		return rcHc
 	}
 	stderr.Write(r.Stderr)

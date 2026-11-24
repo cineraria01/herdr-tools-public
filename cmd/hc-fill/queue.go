@@ -51,6 +51,7 @@ func withQ(fn func()) (rc int) {
 	}
 	f := lockWait(DATA+"/queue.lock", 30*time.Second)
 	if f == nil {
+		next("다른 hc-fill이 대기열을 고치는 중이다 — 잠시 뒤 같은 줄을 다시(잠금 파일은 지우지 않는다)") // agent-skill-guides
 		return 75
 	}
 	qHeld = true
@@ -501,7 +502,7 @@ func qInadd(n, p, brief, after, only, prio, dest, rid string) (string, int) {
 // q_rm <이름>: 받은편지 줄은 결과가 아직 없으면 취소문을 고정해 요청자에게 간다(잠금 안)
 func qRm(n string) {
 	if !qHasNameW(n) {
-		die("대기열에 없다: %s", n)
+		noLane(n)
 	}
 	if rmigrate() != 0 {
 		die("받은편지 줄 옮기기 실패")

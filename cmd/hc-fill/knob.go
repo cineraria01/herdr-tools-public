@@ -173,6 +173,7 @@ func knobLs(args []string) error {
 
 // knobSet: set <이름> <값> --why <글> [--for <분> | --until <시각>] [--pin] [--force]
 func knobSet(args []string, now time.Time) error {
+	args, dryK := takeDry(args)
 	var pos []string
 	why, forM, until, pin, force := "", "", "", false, false
 	for i := 0; i < len(args); i++ {
@@ -234,6 +235,9 @@ func knobSet(args []string, now time.Time) error {
 		e.Until = t.Unix()
 	}
 	old, src, oe := knob.Effective(d, knobEntries(), confRaw(name), now)
+	if dryK {
+		return knobPreview(name, "= "+val, force, now)
+	}
 	if err := knob.Set(knob.Path(HOME), e, force, now); err != nil {
 		return err
 	}
@@ -257,6 +261,7 @@ func knobSet(args []string, now time.Time) error {
 }
 
 func knobUnset(args []string, now time.Time) error {
+	args, dryK := takeDry(args)
 	args, why := takeWhy(args)
 	var pos []string
 	force := false
@@ -278,6 +283,9 @@ func knobUnset(args []string, now time.Time) error {
 		return unknownKnob(pos[0])
 	}
 	ov, osrc, oe := knob.Effective(d, knobEntries(), confRaw(d.Name), now)
+	if dryK {
+		return knobPreview(pos[0], "지움", force, now)
+	}
 	had, err := knob.Unset(knob.Path(HOME), d.Name, force, now)
 	if err != nil {
 		return err

@@ -329,6 +329,10 @@ func main() {
 		fmt.Println(version.String("hc-sweep"))
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--skill" { // 에이전트 안내(skill.go)
+		fmt.Print(skillText)
+		return
+	}
 	os.Exit(sweepMain(os.Args[1:]))
 }
 

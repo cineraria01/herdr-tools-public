@@ -27,6 +27,10 @@ func main() {
 		fmt.Println(version.String("hc-fill")) // 릴리스 바이너리는 커밋 12자(gofix-fill F19)
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--skill" { // 에이전트 안내(skill.go) — 설정 없이도
+		fmt.Print(skillText)
+		return
+	}
 	// 문자열 비교는 바이트로(셸 판과 같은 환경을 자식에게도)
 	if v, ok := os.LookupEnv("LC_ALL"); ok && v != "" {
 		os.Setenv("LC_CTYPE", v)

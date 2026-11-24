@@ -289,7 +289,8 @@ func thenLocked(tl, pre, prj, brief string) {
 
 func usage() {
 	fmt.Fprint(os.Stderr, usageText)
-	oplog.Usage() // 사용법은 이상이 아니다 — exit 줄을 남기지 않는다
+	next("hc-fill --skill(에이전트 안내 — 흔한 흐름·상태 보기·되돌리기)을 읽고, 위 사용법의 인자만 쓴다") // agent-skill-guides
+	oplog.Usage()                                                          // 사용법은 이상이 아니다 — exit 줄을 남기지 않는다
 	exit(2)
 }
 

@@ -93,7 +93,8 @@ func TestCliArgErrorIsUsageInOpLog(t *testing.T) {
 	} {
 		_, ops, env := cuEnv(t)
 		r := runBin(t, bin, env, c.args...)
-		if r.rc != 1 || (c.err != "" && r.err != c.err) {
+		// 첫 줄 그대로(agent-skill-guides가 가까운 인자가 없을 때 「다음:」 둘째 줄을 더했다)
+		if r.rc != 1 || (c.err != "" && !strings.HasPrefix(r.err, c.err)) {
 			t.Errorf("%q: 종료 1·글 그대로여야: %+v", c.args, r)
 		}
 		if ks := opKinds(t, ops); len(ks) != 1 || ks[0] != "usage 1" {
@@ -111,8 +112,9 @@ func TestCliUnknownArgSuggests(t *testing.T) {
 		t.Fatalf("--name → --lane 권함: %+v", r)
 	}
 	r = runBin(t, bin, env, "events", "--bogus")
-	if strings.Count(r.err, "\n") != 1 {
-		t.Fatalf("가까운 인자가 없으면 권함 줄 없음: %q", r.err)
+	// 가까운 인자가 없으면 「대신 …?」 권함 없이, 안내를 가리키는 「다음:」 한 줄만(agent-skill-guides)
+	if strings.Count(r.err, "\n") != 2 || strings.Contains(r.err, " 대신 ") || !strings.Contains(r.err, "\nhc-lane: 다음: ") {
+		t.Fatalf("가까운 인자가 없으면 권함 줄 없이 「다음:」만: %q", r.err)
 	}
 }
 

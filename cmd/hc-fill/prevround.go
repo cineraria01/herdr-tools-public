@@ -94,7 +94,7 @@ func noteCmd(args []string) {
 	}
 	r := qrow(lane)
 	if r == nil {
-		die("대기열에 없다: %s", lane)
+		noLane(lane)
 	}
 	m, addr := r.F(7), r.F(8)
 	if r.F(6) != "up" || m == "" || m == "-" || addr == "" || addr == "-" {

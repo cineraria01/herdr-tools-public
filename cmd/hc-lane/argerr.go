@@ -26,8 +26,13 @@ func argFail(rc int, msg string) {
 }
 
 // unknownArg: 「알 수 없는 인자: <x><tail>」, 가까운 아는 인자가 있으면 둘째 줄에 권함
+// 가까운 인자가 없으면 「다음:」 한 줄로 안내를 가리킨다(agent-skill-guides — 짐작한 인자를 되풀이하지 않게)
 func unknownArg(x, tail string, known ...string) {
-	dieArg("알 수 없는 인자: %s%s%s", x, tail, argHint(x, known))
+	h := argHint(x, known)
+	if h == "" {
+		h = "\nhc-lane: 다음: hc-lane --skill(에이전트 안내)이나 hc-lane --help(사용법)로 인자를 본다"
+	}
+	dieArg("알 수 없는 인자: %s%s%s", x, tail, h)
 }
 
 // argHint: x와 가장 가까운 아는 인자를 「\nhc-lane: <x> 대신 <k>?」로(없으면 ""). 「--」를 뺀 이름의 편집 거리가 2 이하이고

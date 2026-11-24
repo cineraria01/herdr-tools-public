@@ -47,6 +47,10 @@ func main() {
 		fmt.Println(version.String("hc-merger")) // 릴리스 커밋이 보이게(B25)
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--skill" { // 에이전트 안내(skill.go)
+		fmt.Print(skillText)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--spec-verify" { // 추측 검증 일꾼(specverify.go)
 		os.Exit(specVerifyMain(os.Args[2:]))
 	}

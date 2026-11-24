@@ -11,6 +11,7 @@ import (
 func init() { register("prio", prioCmd) }
 
 func prioCmd(args []string) {
+	args, dryP := takeDry(args)
 	args, why := takeWhy(args)
 	if len(args) != 2 {
 		usage()
@@ -18,6 +19,10 @@ func prioCmd(args []string) {
 	p, ok := pnorm(args[1])
 	if !ok {
 		die("우선순위는 긴급|높음|보통|낮음(urgent|high|normal|low): %s", args[1])
+	}
+	if dryP {
+		prioPreview(args[0], p)
+		exit(0)
 	}
 	st, prj, op := "", "", ""
 	rc := withQ(func() {
@@ -29,7 +34,7 @@ func prioCmd(args []string) {
 			}
 		}
 		if st == "" {
-			die("대기열에 없다: %s", args[0])
+			noLane(args[0])
 		}
 		var out []Row
 		for _, x := range rows {

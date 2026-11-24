@@ -36,7 +36,7 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
   herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
   herdr-sync --at <커밋> [--check] [<기계>…]  올려 둔 그 커밋의 릴리스 바이너리만 깐다(되돌리기, 짓지 않음)
   herdr-sync --status [<기계>…]   기계마다 깔린 판·origin/main과의 차이·병합 줄·도는 배포 (고치지 않음)
-  herdr-sync --log [<n>]          배포 기록 마지막 n줄 (기본 20)
+  herdr-sync --log [<n>] [--json] 배포 기록 마지막 n줄 (기본 20, --json은 칸 이름 꼴 — docs/ops/agents.md)
   herdr-sync --auto [on|off]      착지 뒤 스스로 배포 손잡이 (기본 끔) · --landed는 hc-fill 착지 뒤 명령이 부른다
   --why <까닭>                    배포·되돌리기·--auto on|off에 붙이면 운영 일지(hc-fill journal)의 「왜」로 남는다 (권함)
 

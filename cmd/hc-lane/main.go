@@ -61,6 +61,10 @@ func main() {
 		fmt.Println(version.String("hc-lane")) // 다른 도구처럼 릴리스 커밋이 보이게(cli-usage-version)
 		return
 	}
+	if len(a) > 0 && a[0] == "--skill" { // 에이전트 안내(skill.go)
+		fmt.Print(skillText)
+		return
+	}
 	s, rest, ok := pick(a)
 	if !ok {
 		usage()
