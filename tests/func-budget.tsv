@@ -2,9 +2,6 @@
 202 cmd/hc-fill/add.go addCmd
 255 cmd/hc-fill/launch2.go launch
 207 cmd/hc-fill/state.go stateCollectF
-441 cmd/hc-lane/clean.go cleanMain
-315 cmd/hc-lane/gc.go gcMain
-447 cmd/hc-lane/launch.go launchMain
 292 cmd/hc-lane/stats.go statsReport
 265 cmd/hc-lane/submit.go submitCmd
 203 cmd/hc-lane/watch.go ev.loop
