@@ -1,7 +1,8 @@
 package main
 
 // 추측 병렬 검증 — 검증 기계 일꾼: hc-lane merger --spec-verify <아이디> <기본 브랜치>(병합기가 hc run --on <기계> --cwd <그 기계 클론>으로 띄움).
-// spec 참조를 받아 <클론>.spec-wt/<아이디 8>에 분리 작업 트리 → 준비 훅 → 부하가 높으면 기다림 → 저장소 검증 → 통과면 verified 기록,
+// spec 참조를 받아 검증 자리 기다림(busy_wait초 안에 한가해지지 않으면 state=busy를 남기고 끝 — verifierpick.go) →
+// <클론>.spec-wt/<아이디 8>에 분리 작업 트리 → 준비 훅 → 저장소 검증 → 통과면 verified 기록,
 // 실패면 spec-fail 참조, 준비 실패·검증이 트리를 바꿈이면 state=lost(모름) → 작업 트리 정리. 결과를 쓰기 전에 spec 참조가 그대로인지 본다
 // (병합기가 버린 추측에 결과를 남기지 않게). 종료: 0 결과를 씀(또는 버려진 추측) · 1 못 함 · 2 인자 · 75 원격 받기 실패·죽은 앞 일꾼의
 // 자식 무리가 남음(proc.Orphans — 준비 훅·검증 명령은 고아 기록에 올라 다음 일꾼이 거두거나 미룬다)
@@ -11,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +45,7 @@ func specVerifyMain(a []string) int {
 	tree, rc2 := out("rev-parse", "-q", "--verify", ref+"^{tree}")
 	subj, rc3 := out("log", "-1", "--format=%s", cm)
 	r, ok := parseSpec(subj)
-	if rc1 != 0 || rc2 != 0 || rc3 != 0 || !ok || r.conflict || r.dispatchX {
+	if rc1 != 0 || rc2 != 0 || rc3 != 0 || !ok || r.conflict || r.dispatchX || r.busy {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: --spec-verify — %s 는 검증할 추측이 아니다\n", ref)
 		return 1
 	}
@@ -65,6 +65,17 @@ func specVerifyMain(a []string) int {
 	}
 	specRmWT(wt)
 	lg := wt + ".log"
+	// 검증 자리를 busy_wait초 안에 못 얻으면 검증하지 않고 「바쁨」(verifierpick.go) — 병합기가 곧바로 다른 한가한 기계로 다시 고른다
+	if lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {
+		waited := specBusyWait(lf)
+		lf.Close()
+		if waited != "" {
+			return specWriteBusy(r, waited)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: --spec-verify — 로그를 열지 못했다: %v\n", err)
+		return 1
+	}
 	if inLog("", lg, "worktree", "add", "-q", "-f", "--detach", wt, cm) != 0 {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: --spec-verify — 작업 트리를 만들지 못했다(로그 %s)\n", lg)
 		return 1
@@ -83,7 +94,7 @@ const (
 	resLost
 )
 
-// specRunVerify: 준비 훅 → 부하 기다림 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지. 실패면 ev에 근거
+// specRunVerify: 준비 훅 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지. 실패면 ev에 근거
 func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specResult {
 	lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err != nil {
@@ -100,7 +111,6 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specRes
 			return resLost
 		}
 	}
-	specLoadWait(lf)
 	if _, err := os.Stat(wt + "/" + verified.Script); err != nil {
 		fmt.Fprintf(lf, "hc-lane merger: 추측 트리에 %s 가 없다 — 모름\n", verified.Script)
 		return resLost
@@ -215,19 +225,25 @@ func specRmWT(wt string) {
 	runQ("worktree", "prune")
 }
 
-// specLoadWait: 1분 부하가 코어 수를 넘으면 30초씩 기다린다(HC_LANE_SPEC_LOAD_WAIT 초, 기본 900). 레인·검증 자리와 다투지 않게 —
-// 검증 자리 자체는 저장소 검증 스크립트의 기계 잠금(기계별 검증 자리 수 등)이 나눈다.
-// ponytail: 부하 한 값만 본다, hc-fill 레인 자리 수까지 보려면 검증 기계 목록에 자리 정보를 싣는다
-func specLoadWait(lf *os.File) {
-	limit := time.Now().Add(time.Duration(intSetting("HC_LANE_SPEC_LOAD_WAIT", os.Getenv("HC_LANE_SPEC_LOAD_WAIT"), 900, 0)) * time.Second)
-	for {
-		l, ok := load1()
-		if !ok || l <= float64(runtime.NumCPU()) || time.Now().After(limit) {
-			return
-		}
-		fmt.Fprintf(lf, "hc-lane merger: 부하 %.1f > 코어 %d — 30초 기다림\n", l, runtime.NumCPU())
-		time.Sleep(30 * time.Second)
+// specWriteBusy: 「바쁨」 — spec 참조를 그 기계·state=busy(본문 = 기다린 것 한 줄, 한 번 더 확인 메모가 있으면 그 뒤에)로 고쳐 쓴다.
+// 참조가 그새 바뀌었으면(병합기가 버렸거나 다시 띄움) 남기지 않는다. 통과·실패 기록은 쓰지 않는다(반송·범인 판정에 안 쓰인다)
+func specWriteBusy(r specRow, waited string) int {
+	msg := specMsg(r.parent, r.group, machine(), r.at, "busy") + "\n\n"
+	if note, again := specRecheckOf(&r); again {
+		msg += note + "\n"
 	}
+	msg += waited
+	bc, ok := commitTree("", r.tree, r.commit+"^", msg)
+	if !ok {
+		return 1
+	}
+	ref := specRefs + r.id
+	if runO("push", "-q", "--force-with-lease="+ref+":"+r.commit, "origin", bc+":"+ref) != 0 {
+		fmt.Println("hc-lane merger: 바쁨을 남기지 못했다(병합기가 이 추측을 그새 바꿨거나 원격 실패) — 병합기는 시간 넘김으로 안다")
+		return 1
+	}
+	fmt.Printf("hc-lane merger: 추측 검증 바쁨 — %s\n", waited)
+	return 0
 }
 
 // load1: 1분 부하(리눅스 /proc/loadavg, macOS sysctl vm.loadavg). 못 읽으면 ok=false

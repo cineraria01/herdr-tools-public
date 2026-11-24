@@ -51,8 +51,14 @@ func specFx(t *testing.T) *sfx {
 	os.WriteFile(gSelf, []byte(strings.Replace(string(old), "#!/bin/sh\n", "#!/bin/sh\n"+fakeSpecLand, 1)), 0o777)
 	bin := f.dir + "/bin"
 	os.MkdirAll(bin, 0o777)
-	os.WriteFile(bin+"/hc", []byte("#!/bin/sh\n[ \"$1\" = run ] && echo \"$*\" >>"+s.hclog+"\nexit ${HC_RC:-0}\n"), 0o777)
+	os.WriteFile(bin+"/hc", []byte("#!/bin/sh\n"+fakeHcIdle+"[ \"$1\" = run ] && echo \"$*\" >>"+s.hclog+"\nexit ${HC_RC:-0}\n"), 0o777)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("IDLEDIR", f.dir+"/idle")
+	os.MkdirAll(f.dir+"/idle", 0o777)
+	// 일꾼의 검증 자리 확인은 이 기계(시험 기계 — 다른 검증이 돌 수 있다)를 재지 않고 한가함으로(바쁨 시험이 바꾼다)
+	oldProbe := idleProbe
+	idleProbe = func() (idleInfo, bool) { return idleInfo{load: 0, cpus: 8}, true }
+	t.Cleanup(func() { idleProbe = oldProbe })
 	var vs []verified.Verifier
 	for _, v := range []string{"v1", "v2"} {
 		f.git(f.dir, "clone", "-q", f.origin, f.dir+"/"+v)

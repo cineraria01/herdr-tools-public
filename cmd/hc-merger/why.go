@@ -1,8 +1,8 @@
 package main
 
 // 병합기 일지의 검증 길(merger-journal-why, 2026-11-24): 착지·반송 줄의 까닭 칸 끝에 「, 검증 건너뜀(추측 <아이디 8> · <기계>)」 또는
-// 「, 직접 검증(<까닭>)」을 붙인다(칸 수는 그대로). 까닭은 spec()이 맨 앞 무리를 보고 정하고(추측 없음 · 맡길 기계 없음 · 묶음 · 기준
-// 움직임 · 추측 실패 · 맨 앞 기다림 상한 · 모름 — 묶음·기준 움직임은 맨 앞을 맡기지 않을 때만), 맨 앞을 맡겨 기다린 바퀴는 「추측 기다림」 줄에 「검증 맡김(<기계>)」
+// 「, 직접 검증(<까닭>)」을 붙인다(칸 수는 그대로). 까닭은 spec()이 맨 앞 무리를 보고 정하고(추측 없음 · 맡길 한가한 기계 없음 · 묶음 · 기준
+// 움직임 · 추측 실패 · 맨 앞 기다림 상한 · 모름 — 묶음·기준 움직임은 맨 앞을 맡기지 않을 때만), 맨 앞을 맡겨 기다린 바퀴는 「추측 기다림」 줄에 「검증 맡김(<기계>) <초>초」·「바쁨으로 다시 고름(<기계>→<기계>)」
 // (jround.go specWaitLine), 맨 앞 추측이 통과했으면 착지 로그로 마저 가른다(검증 스크립트의 「건너뜀 검증」 줄 → 건너뜀, 착지의 「rebase한
 // 트리가 다르다」 → 기준 움직임, 그 밖 → 모름). 요약은 hc-lane merger --why [N].
 
@@ -29,8 +29,8 @@ func frontWhy(st []specStep, rows []specRow, over, disp bool) string {
 		return "모름"
 	}
 	f := st[0]
-	if f.row == nil && disp {
-		return "맡길 기계 없음"
+	if f.row == nil && disp || f.row != nil && f.row.state == specBusyX {
+		return "맡길 한가한 기계 없음" // 한가한 검증 기계가 없었거나, 맡긴 기계들이 바빠 다시 고를 기계가 없음(verifierpick.go)
 	}
 	if r := f.row; r != nil && r.machine != "-" { // 검증 기계에 띄운 추측
 		if r.state == specFail {
@@ -109,8 +109,18 @@ func whySummary(lines []string, n int) string {
 	}
 	var ls []land
 	seen := map[string]bool{}
+	type wait struct{ t0, why string }
+	var waits []wait // 검증 맡김이 적힌 추측 기다림(한 번의 기다림 = 구성원마다 같은 줄 — 시작·까닭으로 하나)
+	wseen := map[wait]bool{}
 	for _, l := range lines {
 		f := strings.Split(l, "\t")
+		if len(f) >= 12 && f[9] == jSpecWait && strings.Contains(f[11], ", 검증 맡김(") {
+			if w := (wait{f[7], f[11]}); !wseen[w] {
+				wseen[w] = true
+				waits = append(waits, w)
+			}
+			continue
+		}
 		if len(f) < 12 || f[9] != "착지" || seen[f[10]] || strings.Contains(f[11], "이미 ") && strings.Contains(f[11], " 에 있음") {
 			continue
 		}
@@ -164,6 +174,19 @@ func whySummary(lines []string, n int) string {
 		out += "(" + strings.Join(parts, " · ") + ")"
 	}
 	out += fmt.Sprintf(" · 까닭 없음 %d · 착지 시간 중앙 — 건너뜀 %s · 직접 %s", none, med(ts), med(td))
+	// 검증 맡김·바쁨으로 다시 고름(merger-verifier-pick) — 최근 N번의 맡긴 기다림, 있을 때만 붙인다
+	if len(waits) > n {
+		waits = waits[len(waits)-n:]
+	}
+	rn := 0
+	for _, w := range waits {
+		if strings.Contains(w.why, ", 바쁨으로 다시 고름(") {
+			rn++
+		}
+	}
+	if len(waits) > 0 {
+		out += fmt.Sprintf(" · 검증 맡김 %d번(바쁨으로 다시 고름 %d)", len(waits), rn)
+	}
 	return out
 }
 

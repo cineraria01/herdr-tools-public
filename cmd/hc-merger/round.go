@@ -41,6 +41,7 @@ type M struct {
 	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
 	vw                              vwhy   // 이번 착지의 검증 길(일지 까닭 칸 — why.go)
 	wmach                           string // 맨 앞을 기다리는 바퀴의 검증 기계(손잡이 0으로 맡기지 못해 기다리면 -) — 추측 기다림 일지 줄
+	wre                             string // 이 바퀴에 맨 앞을 바쁨으로 다시 고름 「<바쁨 기계>→<새 기계>」(verifierpick.go) — 추측 기다림 일지 줄
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
 }
 

@@ -156,8 +156,9 @@ func TestFrontWhyTable(t *testing.T) {
 		{"묶음", []specStep{{g: g2, parent: "B"}}, nil, false, false, "묶음"},
 		{"옛 기준의 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, false, "기준 움직임"},
 		{"다른 레인의 옛 추측", []specStep{{g: g, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s9")}, false, false, "추측 없음"},
-		{"맡김 · 줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, true, "맡길 기계 없음"},
-		{"맡김 · 묶음 줄 없음", []specStep{{g: g2, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, true, "맡길 기계 없음"},
+		{"맡김 · 줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, true, "맡길 한가한 기계 없음"},
+		{"맡김 · 묶음 줄 없음", []specStep{{g: g2, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, true, "맡길 한가한 기계 없음"},
+		{"맡김 · 바쁨(다시 고를 기계 없음)", []specStep{{g: g, parent: "B", row: row(specBusyX, "v2", "B", "s1")}}, nil, false, true, "맡길 한가한 기계 없음"},
 		{"맡김 · 못 띄움(기계 -)", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, true, "모름"},
 		{"맡김 · 실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, true, "추측 실패"},
 	} {

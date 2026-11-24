@@ -110,18 +110,30 @@ func scanFail(path string, off int64, test bool) string {
 // specWaitNote: 이 바퀴가 맨 앞 추측을 기다렸다 — 모아 둔 기다림과 맨 앞이 같으면 횟수만 늘리고, 다르면 앞 기다림을 적고 새로 센다
 func (m *M) specWaitNote() {
 	now := time.Now().Unix()
-	first, n := now, 0
+	first, n, re := now, 0, ""
 	if f, l, k, b, mach, ok := m.specWaitRead(); ok {
 		if sameFront(b, m.b) {
 			first, n = f, k
+			_, re, _ = strings.Cut(mach, "/")
 		} else {
 			m.specWaitLine(f, l, k, b, mach)
+		}
+	}
+	if m.wre != "" { // 바쁨으로 다시 고름 — 사슬로 잇는다(v1→v2, 또 바쁨이면 v1→v2→v3)
+		if re == "" {
+			re = m.wre
+		} else {
+			_, to, _ := strings.Cut(m.wre, "→")
+			re += "→" + to
 		}
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d %d %d", first, now, n+1)
 	if m.wmach != "" {
 		sb.WriteString(" " + m.wmach)
+		if re != "" {
+			sb.WriteString("/" + re) // 「<기계>/<다시 고른 사슬>」 — 옛 판은 「/」가 없다
+		}
 	}
 	sb.WriteString("\n")
 	for _, e := range m.b {
@@ -151,16 +163,21 @@ func (m *M) specWaitEarly() {
 	}
 }
 
-// specWaitLine: 한 번의 기다림 = 한 줄. mach = 마지막 바퀴에 맨 앞을 맡긴 검증 기계(「검증 맡김(<기계>)」 — merger-verify-dispatch),
+// specWaitLine: 한 번의 기다림 = 한 줄. mach = 마지막 바퀴에 맨 앞을 맡긴 검증 기계(「검증 맡김(<기계>) <기다린 초>초」 —
+// merger-verify-dispatch), 뒤에 「/<사슬>」이 있으면 「바쁨으로 다시 고름(<사슬>)」(merger-verifier-pick),
 // -면 손잡이 0으로 맡기지 못해 기다림, 빈 값이면 옛 기록(덧붙이지 않음)
 func (m *M) specWaitLine(first, last int64, n int, b []entry, mach string) {
 	what := fmt.Sprintf("추측 검증 기다림 %d바퀴", n)
+	mach, re, _ := strings.Cut(mach, "/")
 	switch mach {
 	case "":
 	case "-":
 		what += ", 맡길 기계를 기다림(직접 검증 안 함)"
 	default:
-		what += ", 검증 맡김(" + mach + ")"
+		what += fmt.Sprintf(", 검증 맡김(%s) %d초", mach, last-first)
+	}
+	if re != "" {
+		what += ", 바쁨으로 다시 고름(" + re + ")"
 	}
 	m.jmembers(b, jSpecWait, what, "", first, last)
 }

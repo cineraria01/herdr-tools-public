@@ -30,7 +30,7 @@ package main
 //  3. 맨 앞 무리: 통과면 착지(착지가 기록을 보고 검증을 건너뜀) · 도는 중이면 착지하지 않고 이 바퀴를 끝냄(다음 바퀴에 다시 —
 //     띄운 지 HC_LANE_SPEC_FRONT_WAIT(기본 600초)를 넘기면 모름, specrun.go specFrontWait) ·
 //     그 밖(실패·충돌·모름·줄 없음)이면 specfront.go specFrontLand(혼자 시험 실패는 다른 기계에서 한 번 더 확인 뒤 반송, 묶음 시험 실패는
-//     줄여서 다시, 모름·맡길 기계 없음은 손잡이 front_local — 기본은 착지(병합기 기계 검증), 0이면 기다림·사건 한 번).
+//     줄여서 다시, 바쁨은 곧바로 다른 한가한 기계로(verifierpick.go), 모름·맡길 한가한 기계 없음은 손잡이 front_local — 기본은 착지(병합기 기계 검증), 0이면 기다림·사건 한 번).
 //  4. 따라간 길에 없는 추측(착지했거나 반송됐거나 main이 움직임)은 도는 중이 아니면 참조 셋을 지운다(본 값 lease). 도는 중이면 그 기계가
 //     끝낼 때까지 둔다(그 기계는 그동안 바쁨 — 검증 기계 일꾼은 결과를 쓰기 전에 spec 참조가 아직 있는지 본다).
 //  5. 미리 줄(specpre.go): 위를 다 챙긴 뒤 빈 검증 기계가 남으면, 완료 보고한 레인 표식(refs/merge-pre/*)마다 「기준 + 그 커밋」 추측을
@@ -57,10 +57,11 @@ const (
 	specFail                      // refs/hc-merger/spec-fail/<아이디> 있음
 	specConflict                  // 부모 위에 얹으면 충돌(지을 수 없음)
 	specLost                      // 시간 넘김·띄우기 실패 — 모름
+	specBusyX                     // 그 기계 일꾼이 검증 자리를 못 얻어 검증하지 않음(state=busy) — 통과도 실패도 아니다(verifierpick.go)
 )
 
 func (s specState) String() string {
-	return [...]string{"도는 중", "통과", "실패", "충돌", "모름"}[s]
+	return [...]string{"도는 중", "통과", "실패", "충돌", "모름", "바쁨"}[s]
 }
 
 // specRow: 원격 추측 하나
@@ -71,6 +72,7 @@ type specRow struct {
 	at                  int64  // 띄운 시각(유닉스 초)
 	state               specState
 	conflict, dispatchX bool // 제목의 state=conflict · state=lost(띄우기 실패)
+	busy                bool // 제목의 state=busy(그 기계 일꾼이 바빠 검증하지 않음)
 }
 
 // specGroup: 무리 하나
@@ -132,6 +134,8 @@ func parseSpec(subject string) (specRow, bool) {
 				r.conflict = true
 			case "lost", "local": // 띄우기 실패 · 맨 앞이라 병합기가 직접 검증(둘 다 모름 — 길은 그 트리로 앞으로, 착지는 지금처럼)
 				r.dispatchX = true
+			case "busy":
+				r.busy = true
 			default:
 				return specRow{}, false
 			}
@@ -153,6 +157,8 @@ func specResolve(rows []specRow, verified, failed map[string]bool, now, timeout 
 			r.state = specPass
 		case failed[r.id]:
 			r.state = specFail
+		case r.busy:
+			r.state = specBusyX
 		case r.dispatchX || timeout > 0 && now-r.at > timeout:
 			r.state = specLost
 		default:
@@ -183,7 +189,7 @@ func specWalk(base string, groups []specGroup, rows []specRow) []specStep {
 			break
 		}
 		switch r.state {
-		case specPass, specRun, specLost:
+		case specPass, specRun, specLost, specBusyX: // 바쁨은 모름과 같이 그 트리로 앞으로
 			cur = r.tree
 		}
 	}

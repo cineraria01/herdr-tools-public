@@ -50,6 +50,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--spec-verify" { // 추측 검증 일꾼(specverify.go)
 		os.Exit(specVerifyMain(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--spec-idle" { // 검증 기계 한가함 재기(verifierpick.go — 병합기가 hc exec --on으로)
+		os.Exit(specIdleMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--why" { // 일지의 검증 길 요약(why.go)
 		os.Exit(whyMain(os.Args[2:]))
 	}

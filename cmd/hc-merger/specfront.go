@@ -29,13 +29,7 @@ func (m *M) frontDispatch() bool { return m.knob("front_dispatch", "HC_LANE_FRON
 
 // knob: 켬·끔 손잡이 — <병합기 일지 폴더>/<파일>(바퀴마다 읽어 바로 먹는다)이 있으면 그 값, 없으면 환경 변수, 둘 다 없으면 켬.
 // 0이 아닌 정수는 켬, 정수가 아니면 경고와 함께 켬
-func (m *M) knob(file, env string) bool {
-	v := os.Getenv(env)
-	if b, err := os.ReadFile(m.mj + "/" + file); err == nil {
-		v = strings.TrimSpace(string(b))
-	}
-	return intSetting(env, v, 1, 0) != 0
-}
+func (m *M) knob(file, env string) bool { return m.knobInt(file, env, 1, 0) != 0 }
 
 // frontLocal: 맡길 수 없을 때 병합기 기계가 직접 검증하나. 손잡이 파일 <병합기 일지 폴더>/front_local(바퀴마다 읽어 바로 먹는다)이
 // 있으면 그 값, 없으면 HC_LANE_FRONT_LOCAL, 둘 다 없으면 1. 0이 아닌 값은 모두 1
@@ -64,7 +58,12 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 		return frontFail{}
 	}
 	r, g := st[0].row, st[0].g
-	if r.state != specFail && r.state != specLost {
+	if r.state == specBusyX { // 맡은 기계가 그새 바빠 검증하지 않음 — 기다림 상한 없이 곧바로 다른 한가한 기계로(verifierpick.go)
+		if m.specBusyRedo(c, r, busy, g.lanes, now) {
+			return frontFail{}
+		}
+		// 다시 고를 기계가 없음·바쁨 횟수 넘김 — 손잡이 front_local(0이면 아래 다시 띄움이 바쁨을 낸 기계까지 다시 본다)
+	} else if r.state != specFail && r.state != specLost {
 		return frontFail{} // 통과·도는 중·충돌
 	}
 	first, again := specRecheckOf(r)
@@ -80,7 +79,7 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 			return frontFail{kind: ffReject, kv: kv, test: test, first: first}
 		default:
 			note := fmt.Sprintf("recheck machine=%s exit=%s log=%s\n%s", kv["machine"], kv["exit"], kv["log"], test)
-			if m.specRedo(c, r, busy, kv["machine"], note, g.lanes, now) {
+			if m.specRedo(c, r, busy, nil, kv["machine"], note, g.lanes, now) {
 				fmt.Printf("hc-lane merger: 맨 앞 %s 가 %s 에서 시험 실패 — 반송 전에 %s 에서 한 번 더 확인\n", g.lanes, kv["machine"], r.machine)
 				return frontFail{}
 			}
@@ -89,7 +88,7 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 	}
 	// 손잡이 0의 다시 띄움은 앞 시도(at)에서 HC_LANE_SPEC_START(기본 300초) 뒤에 — 닿지 않는 기계에 바퀴마다 원격 쓰기 둘·hc run을
 	// 되풀이하지 않게(감사 atozd0z-zklwye 낮음)
-	if !m.frontLocal() && now-r.at >= specStartMax() && m.specRedo(c, r, busy, "", first, g.lanes, now) {
+	if !m.frontLocal() && now-r.at >= specStartMax() && m.specRedo(c, r, busy, nil, "", first, g.lanes, now) {
 		return frontFail{}
 	}
 	return frontFail{kind: ffUnknown}
@@ -107,11 +106,11 @@ func specRecheckOf(r *specRow) (string, bool) {
 	return note, strings.HasPrefix(note, "recheck ")
 }
 
-// specRedo: 맨 앞 추측 r을 빈 검증 기계(avoid가 아닌 것 먼저, 없으면 avoid)에 다시 띄운다 — spec 참조를 같은 트리·부모로 그 기계·지금
-// 시각(본문 note)으로 고쳐 쓰고 실패 기록·떴다는 표식을 같은 push로 지운다(본 값 lease — 그 사이 일꾼이 쓴 결과는 지우지 않는다).
+// specRedo: 맨 앞 추측 r을 한가한 검증 기계(skip 뺌, avoid가 아닌 것 먼저, 없으면 avoid)에 다시 띄운다 — spec 참조를 같은 트리·부모로
+// 그 기계·지금 시각(본문 note)으로 고쳐 쓰고 실패 기록·떴다는 표식을 같은 push로 지운다(본 값 lease — 그 사이 일꾼이 쓴 결과는 지우지 않는다).
 // 띄웠으면 true(r·c·busy를 고친다)
-func (m *M) specRedo(c *specCtx, r *specRow, busy map[string]bool, avoid, note, lanes string, now int64) bool {
-	v := m.specFreeBut(c.vers, busy, avoid)
+func (m *M) specRedo(c *specCtx, r *specRow, busy, skip map[string]bool, avoid, note, lanes string, now int64) bool {
+	v := m.specPick(c, busy, skip, avoid)
 	if v.Machine == "" {
 		return false
 	}
@@ -139,25 +138,10 @@ func (m *M) specRedo(c *specCtx, r *specRow, busy map[string]bool, avoid, note, 
 		delete(c.refs, x)
 	}
 	c.refs[ref] = cm
-	r.commit, r.machine, r.at, r.dispatchX = cm, v.Machine, now, false
+	r.commit, r.machine, r.at, r.dispatchX, r.busy = cm, v.Machine, now, false, false
 	m.specLaunch(r, v, lanes, now)
 	busy[v.Machine] = true // 못 띄웠어도 이 바퀴에는 그 기계를 다시 고르지 않는다
 	return r.state == specRun
-}
-
-// specFreeBut: 빈 검증 기계 — avoid가 아닌 것을 목록 차례로 먼저, 없으면 avoid(비었으면). 병합기 기계 자신은 뺀다
-func (m *M) specFreeBut(vs []verified.Verifier, busy map[string]bool, avoid string) verified.Verifier {
-	var same verified.Verifier
-	for _, v := range vs {
-		switch {
-		case busy[v.Machine] || v.Machine == m.mme:
-		case v.Machine != avoid:
-			return v
-		default:
-			same = v
-		}
-	}
-	return same
 }
 
 // specFrontLand: 맨 앞 판정이 「지금처럼 착지」로 나왔을 때 — 반송·줄이기·직접 검증·기다림(손잡이 0) 가운데 하나
