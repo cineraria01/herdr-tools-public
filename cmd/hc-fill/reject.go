@@ -169,6 +169,7 @@ func rejWhy(lane, rid string) string {
 
 // retry <레인>: 띄우기 거절로 멈춘 줄을 다음 바퀴에 다시 띄운다
 func retryCmd(args []string) {
+	args, why := takeWhy(args)
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
 		usage()
 	}
@@ -185,5 +186,6 @@ func retryCmd(args []string) {
 		say("멈춘 줄이 아니다 %s — 그대로(다음 바퀴에 평소대로)", name)
 	default:
 		say("다시 시도 %s — 다음 바퀴에 띄운다(지난 거절: %s)", name, held)
+		jot("retry", name, why, "됨", "-", "지난 거절: "+held)
 	}
 }

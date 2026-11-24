@@ -19,6 +19,7 @@ func init() {
 
 func editCmd(args []string) {
 	DRC = 2 // 검사에 걸리면 거절(종료 2), 아무것도 바꾸지 않음
+	args, why := takeWhy(args)
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		usage()
 	}
@@ -78,12 +79,13 @@ func editCmd(args []string) {
 			die("지시문을 읽지 못함: %s", brief)
 		}
 	}
-	st, prj, note := "", "", ""
+	st, prj, note, undo := "", "", "", ""
 	rc := withRun(func() {
 		r := qrow(name)
 		if r == nil {
 			die("대기열에 없다: %s", name)
 		}
+		undo = editUndo(r, after != "", only != "", brief != "", prio != "")
 		st, prj = r.F(6), r.F(2)
 		if after != "" {
 			after = afterFix(name, prj, after, anyp)
@@ -136,6 +138,7 @@ func editCmd(args []string) {
 		exit(rc)
 	}
 	say("바꿈 %s (%s)", name, strings.TrimPrefix(note, ", "))
+	jot("edit", name, why, "됨", undo, "상태 "+st+" · "+strings.TrimPrefix(note, ", "))
 	if rejDrop(name) > 0 { // 띄우기 거절로 멈춘 줄은 고친 뒤 다시 시도(reject.go)
 		say("다시 시도 %s — 띄우기 거절 멈춤을 풀었다", name)
 	}
@@ -171,7 +174,8 @@ func withRun(fn func()) int {
 
 // rmCmd: rm <이름> [--force]. 주차 중인 줄은 --force 없이 지우지 않는다(종료 2)
 func rmCmd(args []string) {
-	name, force := "", false
+	args, why := takeWhy(args)
+	name, force, st, undo := "", false, "", "-"
 	for _, a := range args {
 		switch {
 		case a == "--force":
@@ -186,8 +190,12 @@ func rmCmd(args []string) {
 		usage()
 	}
 	rc := withQ(func() {
-		if r := qrow(name); r != nil && r.F(14) == "parked" && !force {
+		r := qrow(name)
+		if r != nil && r.F(14) == "parked" && !force {
 			refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
+		}
+		if r != nil {
+			st, undo = r.F(6), rmUndo(r)
 		}
 		qRm(name)
 	})
@@ -195,6 +203,43 @@ func rmCmd(args []string) {
 		exit(rc)
 	}
 	say("뺌 %s (떠 있는 터미널은 그대로)", name)
+	jot("rm", name, why, "됨", undo, "상태 "+st)
+}
+
+// editUndo: 바꾸기 전 줄 r에서, 바꾼 칸만 옛 값으로 되돌리는 edit 한 줄(지시문은 옛 사본 경로 — 같은 경로면 덮였으니 뺀다)
+func editUndo(r Row, a, o, b, p bool) string {
+	s := "hc-fill edit " + r.F(1)
+	if a {
+		s += " --after " + shq(dash(r.F(4)))
+	}
+	if o {
+		s += " --only " + shq(dash(r.F(5)))
+	}
+	if b && r.F(3) != DATA+"/briefs/added/"+r.F(1)+".md" {
+		s += " --brief " + shq(r.F(3))
+	}
+	if p {
+		s += " --priority " + plabel(r.F(13))
+	}
+	if s == "hc-fill edit "+r.F(1) {
+		return "-"
+	}
+	return s
+}
+
+// rmUndo: 뺀 줄을 다시 넣는 add 한 줄(새 줄 ID — 주차한 준비 커밋·시도 기록은 돌아오지 않는다)
+func rmUndo(r Row) string {
+	s := "hc-fill add --name " + r.F(1) + " --project " + shq(r.F(2)) + " --brief " + shq(r.F(3)) + " --priority " + plabel(r.F(13))
+	if a := dash(r.F(4)); a != "-" {
+		s += " --after " + shq(a)
+	}
+	if o := dash(r.F(5)); o != "-" {
+		s += " --only " + shq(o)
+	}
+	if c := dash(r.F(12)); c != "-" {
+		s += " --coord " + shq(c)
+	}
+	return s
 }
 
 // afterFix <레인> <프로젝트> <선행 목록> <다른 프로젝트 허용>: 선행 이름을 검사하고(잘못이면 die) 고친 목록. 다른 프로젝트 레인

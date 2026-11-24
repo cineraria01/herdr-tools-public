@@ -38,6 +38,7 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
   herdr-sync --status [<기계>…]   기계마다 깔린 판·origin/main과의 차이·병합 줄·도는 배포 (고치지 않음)
   herdr-sync --log [<n>]          배포 기록 마지막 n줄 (기본 20)
   herdr-sync --auto [on|off]      착지 뒤 스스로 배포 손잡이 (기본 끔) · --landed는 hc-fill 착지 뒤 명령이 부른다
+  --why <까닭>                    배포·되돌리기·--auto on|off에 붙이면 운영 일지(hc-fill journal)의 「왜」로 남는다 (권함)
 
 경로는 sync.list의 맥 경로(~ 아래, 나무 줄은 그 안 파일 하나)나 설정 키(.model, hook:PreToolUse:cotenant-guard 꼴), *는 그 기계의 충돌 전부, <폴더>/**는 그 나무의 충돌 전부다.
 저장소와의 충돌은 기계 자리에 repo를 쓴다: --take repo:<경로>는 맥 값을, --pull repo:<경로>는 저장소 값을 남긴다.
@@ -170,6 +171,8 @@ func main() {
 		case a[i] == "--at" && i+1 < len(a) && atRef == "":
 			atRef, deployKind = a[i+1], "되돌림"
 			i++
+		case a[i] == "--why" && i+1 < len(a): // 운영 일지의 왜(deploylog.go)
+			deployWhy, i = a[i+1], i+1
 		case strings.HasPrefix(a[i], "-"):
 			fmt.Fprint(os.Stderr, usage)
 			os.Exit(2)
@@ -181,7 +184,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "herdr-sync: --check는 --take·--pull과 함께 쓰지 않는다")
 		os.Exit(2)
 	}
-	if len(machines) == 0 {
+	if deployPicked = machines; len(machines) == 0 {
 		machines = all
 	}
 

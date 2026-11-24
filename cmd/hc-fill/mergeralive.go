@@ -214,11 +214,15 @@ func mergerAliveTick() {
 			msg := fmt.Sprintf("병합기 %s(%s) %d분째 돌지 않음 — %s. 다시 띄우기: hc-fill merger restart %s", p, m, mins, qtxt, p)
 			if exists(DATA+"/merger_restart") && !inlist("restart", x.Alerted) && !dry {
 				x.Alerted += ",restart"
-				if rc, why := mergerLaunch(p); rc == 0 {
+				rc, why := mergerLaunch(p)
+				res := "됨: " + why
+				if rc == 0 {
 					msg += " — 스스로 다시 띄움: " + why
 				} else {
 					msg += " — 스스로 다시 띄우기 실패: " + why
+					res = "실패: " + why
 				}
+				jotBy("hc-fill 스스로", "merger restart", p, fmt.Sprintf("%d분째 돌지 않음(merger_restart 켬)", mins), res, "-", qtxt)
 			}
 			if send("막힘", msg, "dead") {
 				x.Alerted += ",dead"
@@ -352,22 +356,28 @@ func mergerLaunch(p string) (int, string) {
 }
 
 // mergerRestart: hc-fill merger restart <프로젝트>의 몸통. 0 띄움 · 1 안 띄움
-func mergerRestart(p string) int {
+func mergerRestart(p string) int { return mergerRestartWhy(p, "") }
+
+func mergerRestartWhy(p, jwhy string) int {
 	rc, why := mergerLaunch(p)
+	res := "됨: " + why
 	if rc == 0 {
 		say("병합기 %s 다시 띄움: %s", p, why)
 	} else {
 		say("병합기 %s 다시 띄우지 않음: %s", p, why)
+		res = "안 띄움: " + why
 	}
+	jot("merger restart", p, jwhy, res, "-", "")
 	return rc
 }
 
 func init() { register("merger", mergerCmd) }
 
-// merger restart <프로젝트>
+// merger restart <프로젝트> [--why <까닭>]
 func mergerCmd(args []string) {
+	args, why := takeWhy(args)
 	if len(args) != 2 || args[0] != "restart" || args[1] == "" {
 		usage()
 	}
-	exit(mergerRestart(args[1]))
+	exit(mergerRestartWhy(args[1], why))
 }

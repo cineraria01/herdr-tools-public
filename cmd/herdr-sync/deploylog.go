@@ -30,6 +30,8 @@ var (
 	resultOrder    []string
 	wrote          = map[string]bool{} // 기계마다 이번에 쓴 것이 있나(say 줄로 안다)
 	writeWords     = map[string]bool{"씀": true, "받음": true, "지음": true, "지움": true, "깖": true, "가져옴": true}
+	deployWhy      string   // --why (운영 일지)
+	deployPicked   []string // 부를 때 고른 기계(없으면 모든 기계)
 	deployLogFile  = func() string { return STATE + "/deploy.tsv" }
 	deployMarkFile = func() string { return STATE + "/deploying" }
 )
@@ -136,6 +138,8 @@ func deployEndOnce(code int, sig bool) {
 			}
 		}
 	}
+	prev, _ := readLog() // 되돌리는 명령을 이번 줄을 붙이기 전에
+	defer deployJournal(code, sig, c12, strings.Join(rs, " "), prev)
 	line := strings.Join([]string{time.Now().Format(time.RFC3339), deployKind, strconv.Itoa(code), c12, deploySrc, conf,
 		deployBy(), strings.Join(rs, " ")}, "\t") + "\n"
 	f, err := os.OpenFile(deployLogFile(), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)

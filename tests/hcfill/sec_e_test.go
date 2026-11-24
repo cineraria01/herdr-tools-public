@@ -100,6 +100,9 @@ func secE(k *K) {
 	mkdirs(k.t, app("w1"), app("w2"))
 
 	k.afresh()
+	// 이 절은 수거 뒤 정리(aCleanup)의 닫기·「정리 필요」를 본다 — 판정을 넘긴 바퀴의 닫기(fill-audit-close)는 끄고
+	// cmd/hc-fill/auditclose_test.go가 따로 본다
+	k.confAppend("audit_close 0")
 	k.add("w1", "--only", "slow")
 	k.run("run")
 	rf := k.DATA + "/runs/w1-run.md"

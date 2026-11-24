@@ -97,6 +97,7 @@ README에는 아래 목차 줄만 둔다.
 - [omc-update: OMC 플러그인과 omc CLI를 기계마다 같은 판으로](docs/omc-update/usage.md)
 - [에이전트가 쓰는 관리 도구 — 설계안](docs/ops/agent-managed-design.md)
 - [운영 사건 목록 (받으면 할 수 있는 것)](docs/ops/events.md)
+- [운영 일지 (hc-fill journal)](docs/ops/journal.md)
 - [손잡이 (hc-fill knob)](docs/ops/knobs.md)
 - [파일 크기: 줄 수 톱니바퀴](docs/repo/line-budget.md)
 - [시험](docs/repo/tests.md)

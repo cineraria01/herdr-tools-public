@@ -11,6 +11,7 @@ import (
 func init() { register("prio", prioCmd) }
 
 func prioCmd(args []string) {
+	args, why := takeWhy(args)
 	if len(args) != 2 {
 		usage()
 	}
@@ -18,12 +19,12 @@ func prioCmd(args []string) {
 	if !ok {
 		die("우선순위는 긴급|높음|보통|낮음(urgent|high|normal|low): %s", args[1])
 	}
-	st, prj := "", ""
+	st, prj, op := "", "", ""
 	rc := withQ(func() {
 		rows := qRowsW() // 못 읽으면 「없다」가 아니라 종료 1(R-29)
 		for _, x := range rows {
 			if x.F(1) == args[0] {
-				st, prj = x.F(6), x.F(2)
+				st, prj, op = x.F(6), x.F(2), x.F(13)
 				break
 			}
 		}
@@ -48,6 +49,7 @@ func prioCmd(args []string) {
 		exit(1)
 	}
 	say("우선 %s → %s", args[0], plabel(p))
+	jot("prio", args[0], why, "됨", "hc-fill prio "+args[0]+" "+plabel(op), "상태 "+st+" · 우선 "+plabel(op)+" → "+plabel(p))
 	// 떠 있는 레인: 이미 병합기 큐에 냈으면 그 큐 메타도(2026-11-22 fill-prio-pass — 지휘가 메타 제목을 손으로 고쳤다)
 	if st != "wait" && prioMeta(args[0], prj, plabel(p)) == 1 {
 		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 prio 하면 큐 메타를 고친다", args[0])

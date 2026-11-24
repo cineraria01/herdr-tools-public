@@ -112,6 +112,9 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 제출 기록(%s)을 읽지 못했다 — 다음 바퀴에\n", n)
 		return 1
 	}
+	if strings.HasPrefix(mt.verdict, "mr-") { // 병합 쪽 풀이(resolve.go)가 감사받아 다시 넣은 제출
+		why += ", 풀이 착지(병합 쪽 풀이 판정 " + mt.verdict + ")"
+	}
 	dn := rec
 	if dn == "" {
 		dn = C

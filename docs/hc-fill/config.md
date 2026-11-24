@@ -3,7 +3,7 @@
 - **설정** `${HERDR_TOOLS_CONFIG:-~/.config/herdr-tools}/hc-fill.tsv`: 코드에는 기계·경로·실행기 같은 개인 값이 없고 모두 여기서 읽는다.
   저장소의 `config.example/hc-fill.tsv`(가짜 값)를 복사해 고친다.
   줄마다 첫 칸이 종류다.
-  한 값 키(`local`·`agent`·`coord`·`task`·`launch`·`gc`·`early`·`early_wait`·`idle`·`hold`·`audit`·`audit_max`·`audit_seat_rounds`·`audit_final`·`wake_every`·`ack_max`·`overlap`·`lows`·`lows_hour`·`lows_min`)는 키 혼자면 빈 값이고, 같은 키가 두 줄이면 멈춘다(종료 1).
+  한 값 키(`local`·`agent`·`coord`·`task`·`launch`·`gc`·`early`·`early_wait`·`idle`·`hold`·`audit`·`audit_max`·`audit_seat_rounds`·`audit_close`·`audit_final`·`wake_every`·`ack_max`·`overlap`·`lows`·`lows_hour`·`lows_min`)는 키 혼자면 빈 값이고, 같은 키가 두 줄이면 멈춘다(종료 1).
 
 | 줄 | 칸 | 뜻 |
 |---|---|---|
@@ -22,6 +22,7 @@
 | `audit` | 경로 | 자동 감사 지시문 틀(맥 경로, `~` 펼침. 예시 `config.example/hc-fill-audit.md`). 없거나 빈 값이면 끔. 위 「자동 감사」 |
 | `audit_max` | 횟수 | 감사 지적 뒤 고침 바퀴 상한(기본 2). 넘으면 주인 지휘에 막힘 |
 | `audit_seat_rounds` | 바퀴 | 자동 감사 줄이 그 기계 자리가 차 못 뜬 바퀴가 이만큼 넘으면 주인 지휘에 막힘 한 번(기본 5). 바퀴마다 다시 읽어 바로 먹는다. 「자동 감사」 감사 몫 |
+| `audit_close` | 바퀴 | 판정을 넘긴 뒤 끝난 감사 터미널을 닫으려 다시 보는 바퀴 상한(기본 5, `0`이면 끔 — 감사 화면을 남긴다). 바퀴마다 다시 읽어 바로 먹는다. 「자동 감사」 판정을 넘기면 바로 닫는다 |
 | `lows` | 프로젝트…·`*` | 낮음 후속(2026-11-22 go-lows-followup): 자동 감사가 통과(높음·중간 0)인데 [낮음]이 있으면 그 보고(감사 기계 `reports/audit-<차수>.md`)에서 낮음 원문을 뽑아 `<레인>-lows`를 넣는다 — 같은 프로젝트·주인, 선행 `<레인>`(착지 뒤에만 뜸), 우선 낮음, 먼저 띄움 끔, 자동 감사는 다른 레인과 같다. 지시문 = 낮음 원문 + 「지적마다 고치거나, 고칠 필요가 없으면 까닭 한 줄」 + 원 레인 지시문 자리. 주인 지휘에 「후속 넣음 …」(빼려면 `hc-fill rm`). 받은편지·자동 감사 끈 줄·이미 `-lows`인 레인은 안 넣고, 뽑은 수가 판정 줄 낮음 수와 다르면 안 넣고 주인에 한 줄. 기록 `~/.local/share/hc-fill/lows.tsv`, 차수 줄 16칸 `lows=<n>`·`lowsq`(넣음)·`lowsx`(안 넣음). 빼면 끔 |
 | `lows_hour`·`lows_min` | 개수 | 낮음 후속 시간당 상한(기본 3, `0`은 상한 없음 — 넘으면 다음 바퀴)·낮음 최소 개수(기본 1) |
 | `audit_final` | 안내 한 줄 | 자동 감사 뒤 최종 감사가 따로 있을 때(2026-11-20 — 레인이 hc-fill 「감사 통과」만 보고 착지했다). 있으면 run 지시문 감사 절 3번이 「`hc-lane verdict` 출력이 감사 통과여도 착지하지 않는다 — 최종 감사(<안내>) 통과 알림 뒤에만」, `ls` 비고가 「감사 통과 받음(최종 대기)」. 없으면 통과 = 착지 |

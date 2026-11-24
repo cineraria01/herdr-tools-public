@@ -207,7 +207,7 @@ func knobSet(args []string, now time.Time) error {
 		}
 		e.Until = t.Unix()
 	}
-	old, src, _ := knob.Effective(d, knobEntries(), confRaw(name), now)
+	old, src, oe := knob.Effective(d, knobEntries(), confRaw(name), now)
 	if err := knob.Set(knob.Path(HOME), e, force, now); err != nil {
 		return err
 	}
@@ -216,10 +216,19 @@ func knobSet(args []string, now time.Time) error {
 		u = stamp(e.Until) + "까지(지나면 설정 값으로)"
 	}
 	say("손잡이 %s = %s (전: %s, %s) — 다음 바퀴부터, %s", name, val, old, src, u)
+	undo := "hc-fill knob unset " + name
+	if src == knob.FromKnob && oe != nil {
+		undo = knobSetLine(*oe)
+	}
+	if pin {
+		undo += " --force"
+	}
+	jot("knob set", name, why, "됨", undo, fmt.Sprintf("전 %s(%s) → %s, %s", old, src, val, u))
 	return nil
 }
 
 func knobUnset(args []string, now time.Time) error {
+	args, why := takeWhy(args)
 	var pos []string
 	force := false
 	for _, a := range args {
@@ -239,6 +248,7 @@ func knobUnset(args []string, now time.Time) error {
 	if !ok {
 		return unknownKnob(pos[0])
 	}
+	ov, osrc, oe := knob.Effective(d, knobEntries(), confRaw(d.Name), now)
 	had, err := knob.Unset(knob.Path(HOME), d.Name, force, now)
 	if err != nil {
 		return err
@@ -249,7 +259,21 @@ func knobUnset(args []string, now time.Time) error {
 		return nil
 	}
 	say("손잡이 %s를 지웠다 — 다음 바퀴부터 %s(%s)", d.Name, v, src)
+	undo := "-" // 기한이 지나 이미 안 먹던 값이면 되돌릴 것이 없다
+	if oe != nil {
+		undo = knobSetLine(*oe)
+	}
+	jot("knob unset", d.Name, why, "됨", undo, fmt.Sprintf("전 %s(%s) → %s(%s)", ov, osrc, v, src))
 	return nil
+}
+
+// knobSetLine: 그 손잡이 값을 다시 두는 명령 한 줄(되돌리기 — 기한은 옮기지 않는다)
+func knobSetLine(e knob.Entry) string {
+	s := fmt.Sprintf("hc-fill knob set %s %s --why 되돌림", e.Name, e.Value)
+	if e.Pin {
+		s += " --pin"
+	}
+	return s
 }
 
 func unknownKnob(name string) error {

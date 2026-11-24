@@ -21,6 +21,7 @@ herdr-sync --landed                  # 착지 뒤 명령 — hc-fill land-every�
 - 도는 동안 `~/.local/state/herdr-sync/deploying`(pid·시작 초·종류)이 있다 — `--status`의 「지금 도는 배포」.
 - 소스 판 칸은 기계의 `bin.tsv` 셋째 칸과 같은 값이라 `--status`가 기계의 판을 커밋으로 풀어 읽는 짝이다(`bin.tsv` 꼴은 그대로).
 - 이 기록이 생기기 전에 깐 판은 `모름 (배포 기록 전 판)`이다 — 한 번 배포하면 풀린다.
+- 같은 배포는 [운영 일지](../ops/journal.md)에도 한 줄(누가·왜·되돌리는 `--at` 명령·이 기록의 요약)이고, `--why <까닭>`이 그 왜 칸이다(권함).
 
 ## 상태 (`--status`)
 

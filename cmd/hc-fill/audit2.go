@@ -288,8 +288,10 @@ func aDeliver() {
 				f = auAfl + ",noack"
 			}
 			aupd(auAid, "16", f)
+			auAfl = f
 		}
 	}
+	aCloseDelivered() // 판정 파일을 둔 뒤 — 끝난 감사 터미널이 레인 작업 트리를 쥐지 않게(auditclose.go)
 }
 
 // a_cleanup: 끝난 차수의 감사 줄을 대기열에서 뺀다 — 안 뜬 줄은 바로, 뜬 줄은 그 터미널이 쉬거나 없으면(정리 주소를 지휘에 한 번)

@@ -345,6 +345,10 @@ func (m *M) round() {
 			return
 		}
 	}
+	if m.resolveTick() { // 병합 쪽 풀이(resolve.go) — 반송·다시 넣기로 큐를 바꿨으면 새 목록으로 바로 다음 바퀴
+		m.mq = "x"
+		return
+	}
 	m.prescan() // 줄 전체를 지금 기준과 견줘 실제 rebase로도 충돌하는 것을 차례 전에 반송(prescan.go)
 	if !m.pickBatch() {
 		if m.mq == "" && !m.mer {

@@ -28,6 +28,11 @@ func autoOn() bool { _, err := os.Stat(autoFile()); return err == nil }
 
 // autoCmd: --auto [on|off]
 func autoCmd(args []string) int {
+	why := ""
+	if n := len(args); n == 3 && args[1] == "--why" {
+		args, why = args[:1], args[2]
+	}
+	was := autoOn()
 	switch {
 	case len(args) == 0:
 	case len(args) == 1 && args[0] == "on":
@@ -44,10 +49,14 @@ func autoCmd(args []string) int {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
-	if autoOn() {
+	now := autoOn()
+	if now {
 		fmt.Println("스스로 배포 켬 (" + autoFile() + ")")
 	} else {
 		fmt.Println("스스로 배포 끔")
+	}
+	if now != was {
+		autoJournal(now, why)
 	}
 	return 0
 }
@@ -89,7 +98,7 @@ func landed() int {
 	}
 	rc := 0
 	for {
-		c := exec.Command(self)
+		c := exec.Command(self, "--why", "착지 뒤 스스로 배포 — "+line)
 		c.Env = append(os.Environ(), "HERDR_SYNC_BY=스스로", "HERDR_SYNC_NO_PUBLISH=1")
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 		// 따로 무리로 기다린다 — 신호를 받으면 onSignals의 StopCurrent가 그 배포까지 거둔다
