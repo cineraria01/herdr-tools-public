@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
 )
@@ -27,17 +28,7 @@ func (e *ev) emit(lines []string) int {
 		}
 		var parts []string
 		for _, l := range lines {
-			f := strings.Split(l, tab)
-			s := fld(f, 4) + " " + fld(f, 5)
-			if fld(f, 6) != "-" {
-				s += " " + fld(f, 6)
-			}
-			// 끝 괄호는 터미널 주소, 터미널 밖 사건(주소 -)이면 기계 칸(disk-low-machine — 「(-)」로 와 어느 기계인지 몰랐다)
-			where := fld(f, 3)
-			if where == "-" {
-				where = fld(f, 2)
-			}
-			parts = append(parts, s+" "+fld(f, 7)+" ("+where+")")
+			parts = append(parts, wpart(l))
 		}
 		if !e.wsend(stripCtl("hc-lane: " + strings.Join(parts, " ‖ "))) {
 			return 1
@@ -64,6 +55,29 @@ func (e *ev) emit(lines []string) int {
 		fmt.Println(l)
 	}
 	return 0
+}
+
+// wpart: watch가 지휘에 보내는 사건 하나의 글 「<레인> <상태> [sha] <한 줄> (<어디>)」.
+// 운영 사건(events.KindOf)이면 머리 「운영: 」, 이름 표에 있으면 끝 「 → <다음 명령>」(ops-events — 받는 쪽이 레인 일과 가르고 바로 볼 명령)
+func wpart(l string) string {
+	f := strings.Split(l, tab)
+	s := fld(f, 4) + " " + fld(f, 5)
+	if fld(f, 6) != "-" {
+		s += " " + fld(f, 6)
+	}
+	// 끝 괄호는 터미널 주소, 터미널 밖 사건(주소 -)이면 기계 칸(disk-low-machine — 「(-)」로 와 어느 기계인지 몰랐다)
+	where := fld(f, 3)
+	if where == "-" {
+		where = fld(f, 2)
+	}
+	s += " " + fld(f, 7) + " (" + where + ")"
+	if events.KindOf(f) != events.KindOps {
+		return s
+	}
+	if o, ok := events.OpOf(fld(f, 4), fld(f, 12)); ok {
+		s += " → " + o.Next
+	}
+	return "운영: " + s
 }
 
 // stripCtl: 제어 문자(ESC·Ctrl-C 등)는 지휘 입력에 넣지 않는다(tr -d '\000-\037\177')

@@ -2,14 +2,16 @@ package main
 
 // evargs.go: events·wait·watch 인자 읽기(watch.go evCmd에서 옮김 — 동작 그대로) + 레인 이름 거름 --lane(2026-11-24 cli-usage-version:
 // 레인 하나가 20초마다 events --name <레인>을 되풀이해 운영 기록 116줄 가운데 81줄이 「알 수 없는 인자」였다).
-// 인자 오류는 dieArg(글·종료 코드는 die 그대로, 운영 기록은 usage)
+// 인자 오류는 dieArg(글·종료 코드는 die 그대로, 운영 기록은 usage). 사건 종류 거름 --kind ops|lane(2026-11-24 ops-events)
 
 import (
 	"strings"
+
+	"herdr-tools/internal/events"
 )
 
 // evKnown: events·wait·watch가 받는 인자(모르는 인자 권함용)
-var evKnown = []string{"--all", "--on", "--since", "--timeout", "--state", "--mine", "--to", "--lane"}
+var evKnown = []string{"--all", "--on", "--since", "--timeout", "--state", "--mine", "--to", "--lane", "--kind"}
 
 // args: 인자를 e에 읽고 wait의 --timeout(분) 글을 돌려준다
 func (e *ev) args(a []string) string {
@@ -61,6 +63,14 @@ func (e *ev) args(a []string) string {
 			}
 			e.lanes = append(e.lanes, v)
 			i++
+		case "--kind":
+			if ec == "watch" {
+				dieArg("--kind는 events·wait에서만 쓴다")
+			}
+			if e.kind = val(a, i); e.kind != events.KindOps && e.kind != events.KindLane {
+				dieArg("--kind는 ops·lane 가운데: %s", e.kind)
+			}
+			i++
 		default:
 			unknownArg(a[i], "", evKnown...)
 		}
@@ -80,7 +90,7 @@ func (e *ev) args(a []string) string {
 	return to
 }
 
-// laneOK: --lane이 없거나 그 사건(탭 칸)의 레인 칸(넷째)이 --lane 가운데 하나
+// laneOK: --lane이 없거나 그 사건(탭 칸)의 레인 칸(넷째)이 --lane 가운데 하나, 그리고 --kind가 없거나 그 사건의 종류(events.KindOf)
 func (e *ev) laneOK(f []string) bool {
-	return len(e.lanes) == 0 || has(e.lanes, fld(f, 4))
+	return (len(e.lanes) == 0 || has(e.lanes, fld(f, 4))) && (e.kind == "" || events.KindOf(f) == e.kind)
 }

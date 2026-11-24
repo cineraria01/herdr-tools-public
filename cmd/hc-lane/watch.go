@@ -36,6 +36,7 @@ type ev struct {
 	myp          string
 	ems, unk     []string
 	lanes        []string // --lane(events·wait): 이 레인들의 사건만(evargs.go laneOK)
+	kind         string   // --kind(events·wait): 이 종류(ops·lane)의 사건만(evargs.go laneOK)
 	pbad         bool
 	wgrace       int64
 	wbmax        int64

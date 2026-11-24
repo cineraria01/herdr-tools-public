@@ -88,7 +88,7 @@ func reportPending(lane, sha string) int {
 }
 
 func reportMain(a []string) int {
-	var rn, st, sha, msg, to, key string
+	var rn, st, sha, msg, to, key, kind string
 	k := 0
 	for i := 0; i < len(a); i++ {
 		switch a[i] {
@@ -102,6 +102,10 @@ func reportMain(a []string) int {
 			continue
 		case "--key":
 			key = val(a, i)
+			i++
+			continue
+		case "--kind":
+			kind = val(a, i)
 			i++
 			continue
 		}
@@ -127,6 +131,10 @@ func reportMain(a []string) int {
 	}
 	if !onlyChars(to, alnum+"_.,/-") {
 		fmt.Fprintf(os.Stderr, "hc-lane report: --to 지휘 주소 글자: %s\n", to)
+		return 2
+	}
+	if kind != "" && kind != events.KindOps && kind != events.KindLane {
+		fmt.Fprintf(os.Stderr, "hc-lane report: --kind 는 %s 또는 %s: %s\n", events.KindLane, events.KindOps, kind)
 		return 2
 	}
 	if !onlyChars(key, alnum+"_.:/-") {
@@ -230,7 +238,7 @@ func reportMain(a []string) int {
 		fmt.Fprintf(os.Stderr, "hc-lane report: %v\n", err)
 		return 2
 	}
-	line := withRepo(e, reportRepo(rn != ""))
+	line := withRepoKind(e, reportRepo(rn != ""), kind)
 	ed := evdir()
 	if err := os.MkdirAll(ed, 0o777); err != nil {
 		die("report: 폴더를 만들지 못했다: %s", ed)
@@ -258,21 +266,36 @@ func reportMain(a []string) int {
 }
 
 // withRepo: 사건 줄에 13칸 저장소(watch-project-route)를 — 모르면 지금 꼴 12칸 그대로. 1000바이트 안에 들게 한 줄 칸을 줄이고,
-// 그래도 안 들면 13칸을 뺀다(모름 — 모든 지휘에게 가는 쪽)
-func withRepo(e events.Event, rid string) string {
+// 그래도 안 들면 13칸을 뺀다(모름 — 모든 지휘에게 가는 쪽).
+// 14칸 종류(ops-events): --kind, 없으면 이름 표(events.KindOf)로. 레인 사건은 싣지 않아 줄이 지금 꼴 그대로다(열쇠 같음).
+// 종류 칸이 저장소 칸보다 먼저 자리를 받는다(운영을 레인으로 읽으면 글 머리·거름이 틀린다)
+func withRepo(e events.Event, rid string) string { return withRepoKind(e, rid, "") }
+
+func withRepoKind(e events.Event, rid, kind string) string {
 	line := e.Line()
-	if rid == "" {
-		return line
+	if kind == "" {
+		kind = events.KindOf(strings.Split(line, tab))
 	}
-	if over := len(line) + 1 + len(rid) - events.MaxLine; over > 0 {
+	kc := "" // 덧붙는 13·14칸
+	if events.WithKind(line, kind) != line {
+		kc = tab + kind
+	}
+	tail := ""
+	switch {
+	case rid != "":
+		tail = tab + rid + kc
+	case kc != "":
+		tail = tab + "-" + kc
+	}
+	if over := len(line) + len(tail) - events.MaxLine; over > 0 {
 		shown := fld(strings.Split(line, tab), 7)
 		e.Msg = bcut(len(shown)-over, shown)
 		line = e.Line()
 	}
-	if len(line)+1+len(rid) > events.MaxLine {
-		return line
+	if len(line)+len(tail) > events.MaxLine && rid != "" { // 저장소 칸을 빼고 다시(모름)
+		return withRepoKind(e, "", kind)
 	}
-	return line + tab + rid
+	return line + tail
 }
 
 // keyedAppend: 잠금(셸 판 lockf -k -t 30과 같은 flock) 안에서 12칸이 key인 줄이 없으면 더한다. have = 이미 있음
