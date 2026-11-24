@@ -1,0 +1,15 @@
+# 함수 길이 예산(tests/repo TestFuncBudget): 한도(200줄)를 이미 넘은 함수만 「<줄 수> <경로> <함수>」(메서드는 <형>.<이름>). 레인은 늘리지 못한다 — 줄이기·지우기만
+202 cmd/hc-fill/add.go addCmd
+255 cmd/hc-fill/launch2.go launch
+207 cmd/hc-fill/state.go stateCollectF
+441 cmd/hc-lane/clean.go cleanMain
+315 cmd/hc-lane/gc.go gcMain
+447 cmd/hc-lane/launch.go launchMain
+292 cmd/hc-lane/stats.go statsReport
+265 cmd/hc-lane/submit.go submitCmd
+203 cmd/hc-lane/watch.go ev.loop
+214 cmd/hc-sweep/selftest.go selfTest
+260 cmd/herdr-hooks/cgtok_git.go cgTok.git
+239 cmd/herdr-settings-merge/main.go main
+241 cmd/herdr-sync/machines.go syncMachines
+328 internal/opsstate/advise.go Advise

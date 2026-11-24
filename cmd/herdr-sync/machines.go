@@ -192,10 +192,9 @@ func settings(m string, conf *int) string {
 	return sdiff
 }
 
-func syncMachines(machines []string, mq *qres) {
-	MS, MRM := mq.C, mq.RM
-	deployReached = true // 배포 기록(deploylog.go)
-	// 1. 기계마다 조회(쓰기 전) — 릴리스가 리눅스 기계에 갈 도구를 알게(machOS)
+// queryLive: 1. 기계마다 조회(쓰기 전) — 릴리스가 리눅스 기계에 갈 도구를 알게(machOS).
+// 연결 실패·sh 없음·Darwin·Linux 아닌 기계는 줄만 남기고 빼며, 맞출 기계(live)와 그 조회(qs)를 돌려준다
+func queryLive(machines []string) (map[string]*qres, []string) {
 	qs := map[string]*qres{}
 	var live []string
 	for _, m := range machines {
@@ -220,6 +219,13 @@ func syncMachines(machines []string, mq *qres) {
 		qs[m] = q
 		live = append(live, m)
 	}
+	return qs, live
+}
+
+func syncMachines(machines []string, mq *qres) {
+	MS, MRM := mq.C, mq.RM
+	deployReached = true // 배포 기록(deploylog.go)
+	qs, live := queryLive(machines)
 	// 2. 릴리스(맥에서 짓고 올림 — 공개 내보내기는 pinCommit이 앞서 했다), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
 	rel := binsPrepare(func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) })
 	mbd, macBins := installBins("맥", "Darwin", rel, &rconf)
