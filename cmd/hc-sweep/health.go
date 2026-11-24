@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/resident"
 )
 
 // hItem: 점검 하나의 기록. State = 마지막으로 안 상태(good|bad, 빈 값 = 아직 모름), Since = 그 상태(또는 첫 기록)를 적은 때 — 사건 키에
@@ -180,8 +181,8 @@ func healthState() string { return filepath.Join(stateHome(), "hc-sweep", "healt
 
 func healthOn() bool { return runtime.GOOS == "darwin" && os.Getenv("HC_SWEEP_HEALTH") != "off" }
 
-// healthRun: 한 바퀴(macOS만)
-func healthRun(dry bool, r runner) {
+// healthRun: 한 바퀴(macOS만) — 잠자기 끔·키체인, 그리고 상주 판 점검(resident.go, grace = 손잡이 sweep_resident_grace)
+func healthRun(dry bool, r runner, grace time.Duration) {
 	if !healthOn() {
 		return
 	}
@@ -189,6 +190,10 @@ func healthRun(dry bool, r runner) {
 	lane := filepath.Join(binDir, "hc-lane")
 	report := func(msg, key string) bool { return laneReport(r, lane, "hc-health", msg, key) }
 	for _, l := range healthCheck(machine, healthState(), dry, r, report) {
+		fmt.Println(l)
+	}
+	stale := func(msg, key string) bool { return laneReport(r, lane, "hc-stale-resident", msg, key) }
+	for _, l := range residentCheck(machine, resident.DirFor(os.Getenv("XDG_STATE_HOME"), home), dry, r, stale, time.Now(), grace) {
 		fmt.Println(l)
 	}
 }

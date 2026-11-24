@@ -86,6 +86,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-sweep: 건강 점검 (잠자기 끔·키체인)](docs/hc-sweep/health.md)
 - [hc-sweep: 색인 쓸기](docs/hc-sweep/index-sweep.md)
 - [고아 프로세스 (레인이 남긴 배경 프로세스)](docs/hc-sweep/orphans.md)
+- [hc-sweep: 상주 판 점검 (옛 판으로 도는 상주 찾기)](docs/hc-sweep/resident.md)
 - [hc-sweep: Tailscale 점검](docs/hc-sweep/tailscale.md)
 - [herdr-hooks: 훅](docs/herdr-hooks/hooks.md)
 - [herdr-sync: 바이너리 줄](docs/herdr-sync/binary-lines.md)

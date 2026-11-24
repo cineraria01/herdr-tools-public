@@ -89,6 +89,7 @@ var Defs = []Def{
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},
 	{Name: "sweep_r3", Tool: "hc-sweep", Default: "360", Min: 1, Max: 43200, Unit: "분", Remote: true, Desc: "R3: 이만큼 쉬면 닫음"},
+	{Name: "sweep_resident_grace", Tool: "hc-sweep", Default: "5", Min: 1, Max: 1440, Unit: "분", Remote: true, Desc: "새 판이 깔리고(상주가 뜨고) 이만큼 지나도 옛 판·판 모름인 상주에 운영 사건 hc-stale-resident"},
 }
 
 // Find: 표에서 이름으로. 묶음 손잡이(「접두@값」)는 Name을 그 저장 이름으로 바꾼 사본을 돌려준다

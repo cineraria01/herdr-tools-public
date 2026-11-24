@@ -385,14 +385,15 @@ func sweepMain(args []string) int {
 		fmt.Println("디스크 쓸기 실패:", err)
 	}
 	tailscaleRun(*dry, run)
-	healthRun(*dry, run)
+	kv := knobVals(time.Now()) // 손잡이는 쓸기마다 한 번(닫는 문턱·상주 판 점검 유예)
+	healthRun(*dry, run, graceFrom(kv))
 	ls, err := hc("ls")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hc-sweep: hc ls 실패:", err)
 		return 1
 	}
 	terms := ls["terminals"]
-	lim = sweepKnobs(time.Now()) // 닫는 문턱 손잡이(knobs.go)
+	lim = limitsFrom(kv) // 닫는 문턱 손잡이(knobs.go)
 	failed := sweepTerminals(terms, *dry)
 	if _, err := sweepOrphans(terms, *dry, *minAge*60, *only); err != nil {
 		return 1 // 셸 판처럼 고아 판정 실패(ps 등)는 종료 코드에(B23). 줄은 sweepOrphans가 찍었다

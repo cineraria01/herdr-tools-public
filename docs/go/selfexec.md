@@ -22,4 +22,5 @@
   | `hc-lane merger`(병합기 상주) | 탐(그대로 둠) | 바퀴마다 일꾼 `hc-merger --round`를 새 경로로 찾아 띄운다 — 고리 자신은 얇은 쉼·띄우기뿐 |
   | `hc-sweep` | 해당 없음 | launchd 주기 실행(단발) |
   | `hc-core-relaunch`의 기다림 | 해당 없음 | 전체 상한 안의 한 번짜리 기다림 |
+- **판 표시**: `New`는 뜰 때(스스로 넘어간 새 판도 다시 `New`) 이 pid·실행 파일 판을 상태 폴더 `herdr-tools/resident/pids/<pid>.json`에 남긴다. 넘어가기에 실패하거나 이 기능 전에 뜬 상주는 hc-sweep의 [상주 판 점검](../hc-sweep/resident.md)이 옛 판·판 모름으로 알린다. 새 상주가 `New`를 부르면 `internal/resident`의 상주 표에도 한 줄.
 - 시험 `internal/selfexec/selfexec_test.go`(가짜 바이너리 둘로 실제 exec — 바뀜·안 바뀜·자식 도는 동안 미룸·exec 실패 뒤 계속·인자·환경·작업 폴더 유지).

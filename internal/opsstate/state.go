@@ -125,6 +125,8 @@ type Lane struct {
 	Stage     string `json:"stage"`
 	StageAgeS *int   `json:"stage_age_s"`
 	LastEvent string `json:"last_event"`
+	Done      bool   `json:"done"` // 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(모으는 쪽이 정한다 — 단계 글과 무관)
+	Open      bool   `json:"open"` // 터미널이 살아 있다(또는 살아 있는지 모른다) — 단계 글이 착지·끝남이어도 끝난 레인이 아니다
 }
 
 type MergeLine struct {

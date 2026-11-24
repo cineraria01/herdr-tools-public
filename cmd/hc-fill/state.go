@@ -14,6 +14,7 @@ import (
 
 	"herdr-tools/internal/journal"
 	"herdr-tools/internal/opsstate"
+	"herdr-tools/internal/resident"
 )
 
 func init() { register("state", stateCmd) }
@@ -35,10 +36,10 @@ func stateCmd(args []string) {
 	s := stateCollect(time.Now())
 	th := stateThresholds()
 	tr := opsstate.Trim(s, knobInt("state_done"))
-	tr.Notable = opsstate.Notable(tr, th)
+	tr.Notable = stateNotable(tr, th)
 	tr.Fingerprint = opsstate.Fingerprint(tr)
 	if all {
-		s.Notable, s.Fingerprint = opsstate.Notable(s, th), tr.Fingerprint
+		s.Notable, s.Fingerprint = stateNotable(s, th), tr.Fingerprint
 	} else {
 		s = tr
 	}
@@ -52,6 +53,11 @@ func stateCmd(args []string) {
 		die("%v", err)
 	}
 	exit(0)
+}
+
+// stateNotable: 눈에 띄는 것 + 이 기계 상주 판 점검 결과(hc-sweep이 쓴 한 장, 있을 때만 — docs/hc-sweep/resident.md)
+func stateNotable(s opsstate.State, th opsstate.Thresholds) []string {
+	return append(opsstate.Notable(s, th), resident.Show(resident.DirFor(os.Getenv("XDG_STATE_HOME"), HOME), time.Now())...)
 }
 
 func stateThresholds() opsstate.Thresholds {
@@ -139,12 +145,14 @@ func stateCollect(now time.Time) opsstate.State {
 		if in.Live != "" && !strings.HasPrefix(in.Live, "?") {
 			laneOn[r.F(7)]++
 		}
-		ln := opsstate.Lane{Name: name, Machine: r.F(7), Stage: stStage(in)}
+		ln := opsstate.Lane{Name: name, Machine: r.F(7), Stage: stStage(in), Open: in.Live != ""}
 		if x := last[name]; x != nil && x.F(2) != "-" {
 			ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(2)+" "+x.F(3)+" "+x.F(5), " -", "")), " ")
 			if a, ok := stateClockAge(x.F(4), now); ok {
 				ln.StageAgeS = ptrI(a)
 			}
+			// 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(「?」 모름은 살아 있을 수 있어 끝남이 아니다)
+			ln.Done = (x.F(2) == "정리됨" || x.F(2) == "착지") && in.Live == ""
 		}
 		s.Lanes = append(s.Lanes, ln)
 	}

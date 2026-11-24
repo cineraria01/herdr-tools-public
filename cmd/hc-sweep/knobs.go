@@ -21,7 +21,21 @@ type limits struct{ r1, r2, r3 int }
 var lim = limits{30, 30, 360}
 
 // sweepKnobs: 이번 쓸기의 문턱을 정한다(쓸기마다 새로 — 바꾼 값은 다음 쓸기에 먹는다)
-func sweepKnobs(now time.Time) limits {
+func sweepKnobs(now time.Time) limits { return limitsFrom(knobVals(now)) }
+
+// graceFrom: 상주 판 점검 유예(sweep_resident_grace, 분 — 없거나 범위 밖이면 기본 5)
+func graceFrom(vals map[string]string) time.Duration {
+	d, _ := knob.Find("sweep_resident_grace")
+	v, ok := vals[d.Name]
+	if !ok || d.Check(v) != nil {
+		v = d.Default
+	}
+	n, _ := strconv.Atoi(v)
+	return time.Duration(n) * time.Minute
+}
+
+// knobVals: 이번 쓸기에 살아 있는 손잡이 값(이름 → 값) — 한 번 읽어 닫는 문턱과 상주 판 점검이 함께 쓴다
+func knobVals(now time.Time) map[string]string {
 	vals := map[string]string{}
 	if _, err := os.Stat(knob.Path(home)); err == nil {
 		es, err := knob.Load(knob.Path(home))
@@ -40,7 +54,7 @@ func sweepKnobs(now time.Time) limits {
 		}
 		vals = r
 	}
-	return limitsFrom(vals)
+	return vals
 }
 
 // r3Text: 남기는 까닭의 R3 문턱(시간으로 나뉘면 「6시간」, 아니면 「90분」)

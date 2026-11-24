@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/resident"
 	"herdr-tools/internal/version"
 )
 
@@ -30,7 +31,13 @@ func New(who string, log func(line string)) *Self {
 	if err != nil {
 		return nil
 	}
-	return at(who, p, log)
+	s := at(who, p, log)
+	if s != nil { // 판 표시(stale-resident-check): 이 판으로 떴다는 것을 상태 폴더에 — 스스로 넘어간 새 판도 New에서 다시 쓴다
+		if err := resident.Save(who, p, s.st); err != nil {
+			s.log("판 표시를 못 남김(" + err.Error() + ") — 상주 판 점검이 이 프로세스를 판 모름으로 본다")
+		}
+	}
+	return s
 }
 
 func at(who, p string, log func(string)) *Self {

@@ -33,6 +33,7 @@
 - `hc-sweep-tmp-skip`: 그 기계에서 `hc-sweep --dry-run`으로 건너뜀이 이어지는지, lsof가 왜 느린지 본다.
 - `hc-tailscale`: 그 기계 `tailscale status`, 이 기계 `hc machine ls`.
 - `hc-health`: 그 기계 `hc-sweep --health`. 키체인 막힘이면 코어를 다시 띄우고, 키체인이 필요한 레인은 다른 기계로.
+- `hc-stale-resident`: 옛 판·판 모름으로 도는 상주(건강 점검 길의 상주 판 점검). 글의 「다시 띄우기:」 명령을 그 기계에서 부른다(도구는 끄지 않는다). docs/hc-sweep/resident.md
 - 사건마다 뜻·흔한 까닭: docs/ops/events.md
 
 ## 사람에게 물을 것

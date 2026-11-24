@@ -13,9 +13,21 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"herdr-tools/internal/gitx"
+	"herdr-tools/internal/resident"
 )
+
+// statusResident: 이 기계(맥) 상주 판 점검 결과 줄 — hc-sweep이 쓴 한 장, 있을 때만(stale-resident-check, docs/hc-sweep/resident.md).
+// 배포했는데 옛 판으로 도는 상주는 배포가 닿지 않은 것이라 배포 상태 곁에 둔다. 다른 기계는 그 기계 사건(hc-stale-resident)으로 온다
+func statusResident(dir string, now time.Time) []string {
+	var o []string
+	for _, l := range resident.Show(dir, now) {
+		o = append(o, "맥 "+l)
+	}
+	return o
+}
 
 // binStateSh: 그 기계의 bin.tsv 줄마다 「T 도구 소스판 같음|없음|따로바뀜」, 기록이 없으면 N, 끝에 END(출력이 온전한지)
 const binStateSh = `st=$HOME/.local/state/herdr-sync/bin.tsv
@@ -258,6 +270,9 @@ func showStatus(machines []string) int {
 	p, _ := pendingLine(from)
 	fmt.Println(p + " (맥 기준)")
 	fmt.Println(strings.Join(lines, "\n"))
+	for _, l := range statusResident(resident.Dir(), time.Now()) {
+		fmt.Println(l)
+	}
 	if len(log) > 0 {
 		l := log[len(log)-1]
 		fmt.Printf("마지막 배포 %s %s 종료 %s · %s · 부른 곳 %s\n", l.when, l.kind, l.rc, l.c12, l.by)

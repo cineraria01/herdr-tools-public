@@ -18,9 +18,11 @@ type Hidden struct {
 // DeployNotTarget: 배포 기록에 건너뜀만 있는 기계의 까닭(대상 아님)
 const DeployNotTarget = "대상 아님(배포에서 건너뜀만)"
 
-// Finished: 끝난 레인(착지·끝남 — 뒤에 「· 대기열이 제출함」이 붙어도)
+// Finished: 끝난 레인 — 더 할 일이 없다고 모으는 쪽이 정했거나(Done: 단계 글이 「감사 통과 받음」으로 남아도, stale-resident-check
+// 지휘 지시 — 착지·정리까지 끝난 레인 179줄이 기본 출력에 남았다), 단계 글이 착지·끝남(뒤에 「· 대기열이 제출함」이 붙어도).
+// 터미널이 살아 있으면(Open) 끝난 레인이 아니다
 func Finished(l Lane) bool {
-	return strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남")
+	return !l.Open && (l.Done || strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남"))
 }
 
 // Trim: 기본 출력. 끝난 레인은 마지막 사건이 doneMin분 안이면 남기고(나이 모름도 남김 — 오래됐다고 말할 수 없다), 안 도는 감시와
