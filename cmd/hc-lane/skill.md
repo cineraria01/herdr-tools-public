@@ -58,4 +58,5 @@
 
 - docs/ops/agents.md · docs/hc-lane/ 아래(events·watch·land·launch·lease·gc·park·merger·stats·logs) · docs/ops/events.md
 - 병합기: `hc-lane merger --repo <병합기 전용 클론>`(병합기 기계에서 하나만) — 안내는 `hc-merger --skill`
+- 저장소 착지 스크립트(`.claude/herdr-land.sh`) 안에서 PR 머리 push 인자: `hc-lane land-prheads [<착지 후보>]` — 계약은 docs/hc-fill/pr.md 「착지 스크립트 계약」
 - 사용법 전부: `hc-lane --help`

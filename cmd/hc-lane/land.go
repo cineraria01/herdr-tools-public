@@ -190,6 +190,9 @@ func landCmd() int {
 		if px != "" {
 			argv = append(argv, "HERDR_LAND_PUSH_EXTRA="+px)
 		}
+		if len(prh) > 0 { // PR 머리 가지는 스크립트가 올린다(landprhead.go — 계약 docs/hc-fill/pr.md)
+			argv = append(argv, "HERDR_LAND_PR_HEADS="+prEnv(prh))
+		}
 		verifiedEnv("") // 저장소 착지 스크립트가 rebase 뒤 검증 스크립트에 그대로 물려준다(트리 대조는 검증 스크립트가)
 		rc = lrun(append(argv, "bash", mls, base)...)
 		if rc != 0 {
