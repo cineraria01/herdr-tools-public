@@ -2,8 +2,8 @@ package main
 
 // 운영 에이전트의 관문과 명령(2026-11-24 ops-agent, docs/ops/agent.md).
 // agentGate: 모든 하위 명령 앞(main) — 운영 에이전트 실행(환경 HC_FILL_AGENT_RUN, 또는 도는 실행의 터미널)이 부른 것이면
-// 읽는 명령은 그대로, 넘길 것 종류(레인 지우기·ops_agent* 손잡이·agent run·바퀴·속 명령)는 거절하고 「사람이 정한다」 사건,
-// 끝난 실행·꺼짐이면 거절, 「판단만」이면 일지에 「하려던 것」만 적고 안 한다. 사람이 부른 명령은 건드리지 않는다
+// 읽는 꼴(허용 목록 oaReads)은 그대로, 넘길 것 종류(레인 지우기·ops_agent* 손잡이·--force·machine --rename·agent run·바퀴·속 명령)는
+// 거절하고 「사람이 정한다」 사건, 끝난 실행·실행 상한 지남·꺼짐이면 거절, 「판단만」이면 일지에 「하려던 것」만 적고 안 한다. 사람이 부른 명령은 건드리지 않는다
 // agent 명령: status [--json] · run [--why <까닭>]
 
 import (
@@ -42,6 +42,9 @@ func agentGate(cmd string, args []string) {
 		die("%v — 조치 명령을 받지 않는다", err)
 	case st.Run == nil || st.Run.ID != id:
 		die("이 운영 에이전트 실행(%s)은 끝났다(시간 넘김·끝 처리) — 조치 명령을 받지 않는다", id)
+	case time.Now().Unix() >= st.Run.Deadline:
+		// 바퀴가 아직 끝 처리를 안 했어도(바퀴가 멈췄어도) 상한이 지났으면 끝난 실행이다(ops-gate-tighten)
+		die("이 운영 에이전트 실행(%s)은 실행 상한 지남(%s) — 조치 명령을 받지 않는다", id, time.Unix(st.Run.Deadline, 0).Format("15:04"))
 	}
 	switch oaMode() {
 	case "조치":
@@ -62,33 +65,52 @@ func oaTerm(a string) string { return a[strings.LastIndexByte(a, '/')+1:] }
 // 값으로 읽어 본 동작을 하니(감사 atozu10 중간 — nudge <레인> --dry-run이 글을 보냄) 읽기로 보지 않는다
 var oaDry = map[string]bool{"prio": true, "rm": true, "knob": true, "machine": true, "machines": true, "run": true}
 
-// oaReadOnly: 아무것도 바꾸지 않는 부름 — 읽는 명령과 미리 보기(아무것도 안 쓴다)
+// oaRead: 읽는 꼴 — 하위 명령(sub, 있으면 첫 인자)과 받는 인자(flags 값 없음 · vals 값 하나). 여기 없는 인자가 하나라도 있으면
+// 쓰기로 본다(허용 목록 — 쓰기 인자 목록을 두면 새 쓰기 인자 machine --rename이 읽기로 샜다, ops-gate-tighten)
+type oaRead struct {
+	sub         string
+	flags, vals []string
+}
+
+var oaReads = map[string]oaRead{
+	"ls":       {flags: []string{"--json"}},
+	"status":   {flags: []string{"--mine"}, vals: []string{"--owner"}},
+	"state":    {flags: []string{"--json", "--all"}},
+	"advise":   {flags: []string{"--json"}},
+	"journal":  {flags: []string{"--json"}, vals: []string{"--by", "--since"}},
+	"knob":     {sub: "ls", flags: []string{"--json"}},
+	"agent":    {sub: "status", flags: []string{"--json"}},
+	"machine":  {flags: []string{"--json"}},
+	"machines": {flags: []string{"--json"}},
+}
+
+// oaReadOnly: 아무것도 바꾸지 않는 부름 — 읽는 꼴(oaReads)과 미리 보기(아무것도 안 쓴다)
 func oaReadOnly(cmd string, args []string) bool {
 	for _, a := range args {
 		if a == "--dry-run" && oaDry[cmd] {
 			return true
 		}
 	}
-	first := ""
-	if len(args) > 0 {
-		first = args[0]
+	f, ok := oaReads[cmd]
+	if !ok {
+		return false
 	}
-	switch cmd {
-	case "ls", "status", "state", "advise", "journal":
-		return true
-	case "knob":
-		return first == "ls"
-	case "agent":
-		return first == "status"
-	case "machine", "machines":
-		for _, a := range args {
-			if a == "--seats" || a == "--pause" || a == "--resume" {
-				return false
-			}
+	if f.sub != "" {
+		if len(args) == 0 || args[0] != f.sub {
+			return false
 		}
-		return true
+		args = args[1:]
 	}
-	return false
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case has(f.flags, a):
+		case has(f.vals, a) && i+1 < len(args):
+			i++
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // oaHandoff: 운영 에이전트가 스스로 하지 않을 것(되돌릴 수 없음·남의 것·자기 권한)의 까닭, 아니면 빈 값
@@ -100,12 +122,16 @@ func oaHandoff(cmd string, args []string) string {
 		return "운영 에이전트 안에서 운영 에이전트를 띄우지 않는다"
 	case cmd == "run" || cmd == "watch" || strings.HasPrefix(cmd, "_"):
 		return "바퀴·속 명령은 hc-fill이 돈다"
-	case cmd == "knob":
-		for i := 1; i < len(args); i++ { // 위치 인자(손잡이 이름)만 — --why 글은 건너뛴다
+	case (cmd == "machine" || cmd == "machines") && has(args, "--rename"):
+		return "기계 이름 바꾸기는 사람이 정한다(설정·상태·병합기 표식을 한 번에 바꿔 되돌리기 어렵다)"
+	case cmd == "knob" || cmd == "machine" || cmd == "machines":
+		for i := 1; i < len(args); i++ { // 값을 받는 인자의 값(--why 글 등)은 건너뛴다
 			switch a := args[i]; {
-			case a == "--why" || a == "--for" || a == "--until":
+			case a == "--why" || a == "--for" || a == "--until" || a == "--seats":
 				i++
-			case strings.HasPrefix(a, "ops_agent"):
+			case a == "--force":
+				return "--force(고정한 손잡이 덮기)는 사람이 정한다"
+			case cmd == "knob" && strings.HasPrefix(a, "ops_agent"):
 				return "자기 손잡이(ops_agent*)는 사람이 바꾼다"
 			}
 		}

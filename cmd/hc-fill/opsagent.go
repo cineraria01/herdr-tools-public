@@ -207,8 +207,16 @@ func oaStart(st *oaState, now time.Time, manual bool, why string) error {
 			}
 		}
 	}
+	var unk []string
+	for _, it := range all {
+		if it.Kind == "unknown" {
+			unk = append(unk, strings.TrimPrefix(it.Key, "unknown:"))
+		}
+	}
 	for key := range st.Keys {
-		if !seen[key] { // 사라진 항목은 잊는다 — 다시 생기면 새 항목(advise와 같은 뜻)
+		// 사라진 항목은 잊는다 — 다시 생기면 새 항목(advise와 같은 뜻). 다만 목록을 읽었고 없을 때만: 그 항목을 가리는 「판정 못 함」이
+		// 있으면 모름이라 그대로 둔다(지웠더니 회복 뒤 처음인 것처럼 다시 띄워 ops_agent_tries가 안 먹었다, ops-gate-tighten)
+		if !seen[key] && !oaHidden(unk, key) {
 			delete(st.Keys, key)
 		}
 	}
@@ -281,6 +289,41 @@ func oaStart(st *oaState, now time.Time, manual bool, why string) error {
 	say("운영 에이전트 띄움 %s → %s (방식 %s, 손댈 것 %d개, 상한 %d분)", id, addr, mode, len(hand), timeout)
 	jotBy(run.By, "agent 띄우기", target, why, "띄움 "+addr, "-", "실행 "+id+" · 방식 "+mode)
 	return nil
+}
+
+// oaHidden: 이번 목록의 「판정 못 함」(unknown:<u>, 머리 뗀 u들)이 항목 key를 가릴 수 있나 — opsstate.Advise의 unknown() 자리와 짝:
+// 재료 deploy는 배포 항목만(이 기계에서 배포한 적 없으면 늘 모름이라 전부를 붙들면 아무것도 못 잊는다), 다른 재료(hc 등)는 전부,
+// 병합기 P는 merger·merge-*:P, 상주는 resident:*, 기계 M은 machine:M과 skew, 배포·감시는 같은 열쇠. 모르는 종류는 전부(모름은 지킨다)
+func oaHidden(unk []string, key string) bool {
+	kind, name, _ := strings.Cut(key, ":")
+	for _, u := range unk {
+		uk, un, _ := strings.Cut(u, ":")
+		switch uk {
+		case "source":
+			if un != "deploy" || kind == "deploy" {
+				return true
+			}
+		case "merger":
+			if strings.HasPrefix(kind, "merge") && name == un {
+				return true
+			}
+		case "resident":
+			if kind == "resident" {
+				return true
+			}
+		case "machine":
+			if key == u || key == "skew" {
+				return true
+			}
+		case "deploy", "watch":
+			if key == u {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // oaLaunch: 띄울 명령(sh -c, 상한 60초) — 표준 출력과 표준 오류를 따로(Cmd.Run은 둘을 합치거나 버린다). 못 띄움은 127, 상한 넘김은 proc.TimeoutCode
