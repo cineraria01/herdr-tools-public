@@ -338,6 +338,7 @@ func sweepMain(args []string) int {
 	self := fs.Bool("self-test", false, "가짜 기록으로 규칙 판정 확인")
 	minAge := fs.Float64("min-age", 10, "고아·색인 최소 나이(분, 기본 10)")
 	only := fs.String("only-under", "", "이 폴더 아래 작업 트리만(시험용)")
+	health := fs.Bool("health", false, "이 기계의 마지막 건강 점검 결과(잠자기 끔·키체인)만 찍고 끝(재지 않음, 0 좋음·1 나쁨·3 모름)")
 	for _, a := range args { // 위치 인자를 받지 않으니 끝표시 「--」도 사용 오류(셸 판 argparse와 같게, R-39 — flag가 삼켜 0으로 돌았다)
 		if a == "--" {
 			fmt.Fprintln(os.Stderr, "hc-sweep: 모르는 인자: --")
@@ -350,6 +351,9 @@ func sweepMain(args []string) int {
 		fmt.Fprintf(os.Stderr, "hc-sweep: 모르는 인자: %s\n", strings.Join(fs.Args(), " "))
 		fs.Usage()
 		return 2
+	}
+	if *health {
+		return healthPrint(healthState(), time.Now())
 	}
 	if *self {
 		if err := selfTest(); err != nil {
@@ -371,12 +375,13 @@ func sweepMain(args []string) int {
 		}
 		defer lk.Close()
 	}
-	// 색인·디스크 쓸기·Tailscale 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
+	// 색인·디스크 쓸기·Tailscale·건강 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
 	sweepIndex(*dry, *minAge*60)
 	if err := diskRun(*dry, run); err != nil {
 		fmt.Println("디스크 쓸기 실패:", err)
 	}
 	tailscaleRun(*dry, run)
+	healthRun(*dry, run)
 	ls, err := hc("ls")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hc-sweep: hc ls 실패:", err)

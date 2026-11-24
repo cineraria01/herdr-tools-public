@@ -195,15 +195,21 @@ func tailscaleRun(dry bool, r runner) {
 		fmt.Printf("Tailscale 점검: sweep.tailscale_up_per_hour 값이 정수가 아님(%s) — 건너뜀\n", v)
 		return
 	}
-	machine := os.Getenv("HC_LANE_MACHINE")
-	if machine == "" {
-		machine, _ = os.Hostname()
-		machine, _, _ = strings.Cut(machine, ".")
-	}
+	machine := sweepMachine()
 	state := filepath.Join(stateHome(), "hc-sweep", "tailscale-up")
 	lane := filepath.Join(binDir, "hc-lane")
 	report := func(msg, key string) bool { return laneReport(r, lane, "hc-tailscale", msg, key) }
 	for _, l := range tailscaleCheck(ts, machine, perHour, state, dry, r, report) {
 		fmt.Println(l)
 	}
+}
+
+// sweepMachine: 사건 글에 넣을 이 기계 이름(HC_LANE_MACHINE, 없으면 호스트 이름 첫 마디)
+func sweepMachine() string {
+	if m := os.Getenv("HC_LANE_MACHINE"); m != "" {
+		return m
+	}
+	m, _ := os.Hostname()
+	m, _, _ = strings.Cut(m, ".")
+	return m
 }

@@ -453,13 +453,14 @@ func machineLines(withEmpty bool) []string {
 		return nil
 	}
 	var o []string
+	rn := reachNotes() // 끊김(unreach.go)
 	for _, mc := range machines() {
 		x, ok := recs[mc.Name]
 		used := x.used
 		if !ok {
 			used = -1
 		}
-		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), machAdj(mc.Name), x.why))
+		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), machAdj(mc.Name), x.why)+rn[mc.Name])
 	}
 	return o
 }

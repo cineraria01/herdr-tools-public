@@ -48,6 +48,7 @@ var Defs = []Def{
 	{Name: "load_starve", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "모두 바쁨이어도 이만큼 기다린 줄은 가장 덜 바쁜 기계에"},
 	{Name: "skew_min", Tool: "hc-fill", Default: "10", Min: 1, Max: 1440, Unit: "분", Desc: "한 기계가 load_busy를 넘은 채 한가한 기계가 있으면 이만큼 뒤 치우침 사건"},
 	{Name: "skew_every", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "치우침 사건 되풀이 간격(0이면 끔)"},
+	{Name: "unreach", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "레인이 있는 기계가 이만큼 연결 안 됨이면 주인 지휘에 한 번(0이면 끔, docs/hc-fill/unreach.md)"},
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
 }
