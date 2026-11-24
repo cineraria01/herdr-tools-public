@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/selfexec"
 )
 
 func init() {
@@ -47,9 +48,7 @@ type ev struct {
 	whLogged     bool
 	wu0          int64 // 지휘 확인 모름이 이어진 첫 시각(wcheck)
 	wuLogged     bool
-	self         string // watch가 뜰 때의 실행 파일과 그 stat(reexecIfNew)
-	selfSt       os.FileInfo
-	selfNew      os.FileInfo // 지난 바퀴에 본 바뀐 stat(두 바퀴 같아야 exec)
+	self         *selfexec.Self // watch가 뜰 때의 실행 파일 — 새 판이 깔리면 바퀴 사이에 그 판으로 이어 돈다
 	wpar         bool
 	tl           string
 	tls          hcjson.List // tl을 hcjson.ParseList로 읽은 것(lsok일 때만)
@@ -273,11 +272,10 @@ func (e *ev) loop(to int64) int {
 	}
 	if e.ec == "watch" {
 		e.watchLock()
-		if p, err := os.Executable(); err == nil {
-			if st, err := os.Stat(p); err == nil {
-				e.self, e.selfSt = p, st
-			}
-		}
+		// 커서·보냄 표시는 파일이고 바퀴 사이(보내기 밖)에서만 넘어가니 같은 사건을 두 번 보내거나 건너뛰지 않는다. 메모리 상태(쉼·질문 창
+		// 보류 시각, 「연결 안 됨」 알린 기계)는 새 판에서 처음부터 — 「연결 안 됨」이 한 번 더 갈 수 있다. 넘겨줌은 정상 동작이라
+		// watch.log에만(운영 기록에는 안 남김 — 감사 낮음 1)
+		e.self = selfexec.New("hc-lane watch", func(l string) { e.wlog(l) })
 	}
 	if tid := os.Getenv("HC_TERMINAL_ID"); tid != "" {
 		if e.ec == "wait" {
@@ -351,7 +349,7 @@ func (e *ev) loop(to int64) int {
 	wsleep := func() { time.Sleep(tk) }
 	for {
 		if e.ec == "watch" {
-			e.reexecIfNew()
+			e.self.Check()
 			// 확인된 없음·끝남만 센다 — 잘린 not_found·state 없는 응답은 모름이라 세지 않는다(재감사 R-13, hcjson.ParseGet)
 			if st := getState(hcGet(10, e.wto)); st == 0 {
 				gone = 0

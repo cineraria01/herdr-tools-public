@@ -6,6 +6,7 @@ herdr-sync                      # 맞춘다
 herdr-sync box-1 box-2          # 고른 기계만
 herdr-sync --take <기계>:<경로>  # 충돌을 맥 값으로 덮는다 (그 기계에 백업)
 herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
+herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합 줄 (배포 기록·되돌리기·스스로 배포는 deploy.md)
 ```
 
 - `--check` 표의 첫 줄은 맥 ↔ 두 저장소다: `맥: 저장소가 새로움 n개 (<저장소 경로> …) — herdr-sync로 깐다`(레인이 착지했는데 맥에 아직 안 깔림), `맥: 저장소보다 새로움 n개 (…) — 커밋 안 됨?`(맥에서 고쳤는데 아직 안 모음), 다 맞으면 `맥: 저장소와 같음`. 기계 줄은 **맥 실제 파일**과 견준 것이라, 맥이 저장소보다 뒤면 기계 줄 끝에 `(맥 판 기준 — 저장소 새 판은 아직)`이 붙는다 — 그때 `같음`은 「맥 옛 판과 같음」이지 「저장소 새 판이 퍼졌음」이 아니다.
@@ -26,6 +27,7 @@ herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 �
 - 모름은 멈춤이다(2026-11-22 gofix-ops): git 조회(`status`·`rev-list` 등)가 실패하거나 시간을 넘기면, 맥·저장소·기계의 파일을 못 읽으면(권한 등), 기계 조회가 끝 줄(OS)까지 오지 않으면 그것을 깨끗함·없음·성공으로 읽지 않고 멈추거나 그 기계를 연결 실패로 친다.
   모음 중(스테이징과 커밋 사이)에 죽으면 다음 실행이 `~/.local/state/herdr-sync/repo-journal.tsv`로 자기 스테이징만 되돌리고 다시 모은다(그 뒤 남이 손댔으면 멈춤 — 확인한 뒤 일지를 지운다).
   앞 실행이 남긴 git 자식 무리는 거두고, 거두지 못하면 75. `sync.list`의 끝 줄바꿈 없음·줄 끝 CR·뿌리 밖 경로(절대 경로·`..`)는 종료 2. 기계마다 도는 조각은 sh다(`cmd/herdr-sync/agent.sh`를 임베드 — 원격 기계에 Go가 없어도 된다).
+- 첫 `git pull --ff-only`가 같은 체크아웃의 다른 git(대기열 바퀴의 fetch 등)과 잠금(`.lock`·`cannot lock ref`)으로 부딪히면 짧게 몇 번(최대 5번) 다시 하고, 그래도 안 되거나 진짜 갈라짐이면 git이 낸 까닭 한 줄을 붙여 멈춘다(2026-11-24 deploy-log-rollback).
 - 다른 herdr-sync가 돌고 있으면 바로 끝난다(종료 75).
   맥이 아닌 곳(`~/Applications/Herdr.app`·`/Applications/Herdr.app`이 없거나 `hc machine ls`에 기계가 없는 곳)에서는 종료 2.
 - 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다.

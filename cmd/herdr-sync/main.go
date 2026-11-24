@@ -34,6 +34,10 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
   herdr-sync --check [<기계>…]    고치지 않고 비교만 한다 (다름·충돌이 있으면 종료 1, 첫 줄 「맥:」은 맥 ↔ 저장소 방향)
   herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다)
   herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
+  herdr-sync --at <커밋> [--check] [<기계>…]  올려 둔 그 커밋의 릴리스 바이너리만 깐다(되돌리기, 짓지 않음)
+  herdr-sync --status [<기계>…]   기계마다 깔린 판·origin/main과의 차이·병합 줄·도는 배포 (고치지 않음)
+  herdr-sync --log [<n>]          배포 기록 마지막 n줄 (기본 20)
+  herdr-sync --auto [on|off]      착지 뒤 스스로 배포 손잡이 (기본 끔) · --landed는 hc-fill 착지 뒤 명령이 부른다
 
 경로는 sync.list의 맥 경로(~ 아래, 나무 줄은 그 안 파일 하나)나 설정 키(.model, hook:PreToolUse:cotenant-guard 꼴), *는 그 기계의 충돌 전부, <폴더>/**는 그 나무의 충돌 전부다.
 저장소와의 충돌은 기계 자리에 repo를 쓴다: --take repo:<경로>는 맥 값을, --pull repo:<경로>는 저장소 값을 남긴다.
@@ -78,6 +82,7 @@ func cleanup() {
 }
 
 func exit(code int) {
+	deployEnd(code)
 	cleanup()
 	os.Exit(code)
 }
@@ -88,7 +93,7 @@ func die(f string, a ...any) {
 	exit(1)
 }
 
-func say(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+func say(f string, a ...any) { s := fmt.Sprintf(f, a...); track(s); fmt.Println(s) }
 
 func warn(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "herdr-sync: "+f+"\n", a...)
@@ -131,6 +136,9 @@ func main() {
 	if err := os.MkdirAll(STATE, 0o755); err != nil {
 		os.Exit(1)
 	}
+	if code, ok := modes(os.Args[1:], all); ok {
+		os.Exit(code)
+	}
 	if os.Getenv("HERDR_SYNC_LOCKED") == "" {
 		lockf = takeLock(STATE + "/lock")
 		os.Setenv("HERDR_SYNC_LOCKED", "1")
@@ -159,6 +167,9 @@ func main() {
 				pulls = append(pulls, a[i+1])
 			}
 			i++
+		case a[i] == "--at" && i+1 < len(a) && atRef == "":
+			atRef, deployKind = a[i+1], "되돌림"
+			i++
 		case strings.HasPrefix(a[i], "-"):
 			fmt.Fprint(os.Stderr, usage)
 			os.Exit(2)
@@ -180,15 +191,20 @@ func main() {
 		os.Exit(2)
 	}
 	onSignals()
+	if !check {
+		deployStart() // 배포 기록·도는 배포 표식(deploylog.go) — 이 뒤 끝은 모두 exit·신호를 지난다
+	}
 	var err error
 	if TMP, err = os.MkdirTemp(os.Getenv("TMPDIR"), "herdr-sync."); err != nil {
-		os.Exit(1)
+		exit(1)
 	}
 	if !check {
 		recoverJournal() // 앞 실행이 모으다 죽어 남긴 스테이징(gofix-ops B05)
 	}
-	ready(REPO)
-	ready(CONF)
+	if atRef == "" { // 되돌리기는 저장소를 당기지 않는다(바이너리만)
+		ready(REPO)
+		ready(CONF)
+	}
 	// 걷힌 셸 판 줄·틀린 바이너리 줄·딸린 줄(Go 소스·곁 도구) 빠짐이면 맞추기 전에 멈춘다(--check도)
 	if toolcfg.SyncLint(REPO, CONF+"/sync.list", os.Stdout, os.Stderr) != 0 {
 		exit(2)
@@ -200,6 +216,10 @@ func main() {
 		if !known(after(s)) {
 			die("sync.list에 없는 경로: %s", s)
 		}
+	}
+	if atRef != "" {
+		rollback(machines)
+		exit(rc)
 	}
 	doPulls()
 	build()

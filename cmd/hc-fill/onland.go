@@ -152,6 +152,7 @@ func onlandTick() {
 			onlandSpawn(name)
 		}
 	}()
+	onlandEvery(fire) // 설정 land-every — 레인마다 --on-land 없이 그 프로젝트 착지마다(onland_every.go)
 	f := DATA + "/onland.tsv"
 	rows := readRows(f)
 	if len(rows) == 0 {
@@ -376,12 +377,18 @@ func onlandOnce(name string, rs []Row) {
 			why = fmt.Sprintf("상한 %s 넘김", onlandMax)
 		}
 	}
-	st, msg := "중간", fmt.Sprintf("착지 뒤 %s 성공 — %s 착지(%s) · 로그 %s", name, strings.Join(lanes, ","), head(sha, 8), lg)
+	tail := "" // 명령의 끝 줄을 사건 글에(예: herdr-sync --landed의 「배포할 것 …」)
+	if b, err := os.ReadFile(lg); err == nil {
+		if t := onlandTail(b); t != "" {
+			tail = ": " + t
+		}
+	}
+	st, msg := "중간", fmt.Sprintf("착지 뒤 %s 성공%s — %s 착지(%s) · 로그 %s", name, tail, strings.Join(lanes, ","), head(sha, 8), lg)
 	if rc != 0 {
 		if why == "" {
 			why = "종료 " + strconv.Itoa(rc)
 		}
-		st, msg = "막힘", fmt.Sprintf("착지 뒤 %s 실패(%s) — %s 착지(%s) · 로그 %s", name, why, strings.Join(lanes, ","), head(sha, 8), lg)
+		st, msg = "막힘", fmt.Sprintf("착지 뒤 %s 실패(%s)%s — %s 착지(%s) · 로그 %s", name, why, tail, strings.Join(lanes, ","), head(sha, 8), lg)
 	}
 	fmt.Println(msg)
 	for _, o := range owners {

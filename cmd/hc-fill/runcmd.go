@@ -16,6 +16,7 @@ import (
 
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/selfexec"
 )
 
 func init() {
@@ -62,7 +63,9 @@ func watchCmd(args []string) {
 	if v := os.Getenv("HC_FILL_ROUND_TIMEOUT"); isDigits(v) {
 		roundMax = time.Duration(atoi10(v)) * time.Second
 	}
+	self := selfexec.New("hc-fill watch", func(l string) { say("%s %s", stampLog(), l) })
 	for {
+		self.Check() // 바퀴 사이(run 자식이 끝난 뒤) — 바퀴 run은 늘 새로 띄우니 새 판이지만, 이 고리(쉼·상한) 자신도 새 판으로
 		say("--- %s", stampLog())
 		t0 := time.Now()
 		c := exec.Command(SELF, "run")

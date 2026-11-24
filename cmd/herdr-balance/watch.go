@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/pyjson"
+	"herdr-tools/internal/selfexec"
 )
 
 func sameSet(a, b []string) bool {
@@ -105,7 +106,9 @@ func watch(ctx context.Context) {
 	remote := remotePrefixes(ctx)
 	seen := map[string]seenAt{}
 	lastErr, hadErr := "", false
+	self := selfexec.New("herdr-balance", func(l string) { fmt.Println(stamp(), l) })
 	for {
+		self.Check() // 회차 사이 — 새 판이 깔렸으면 그 판으로 이어 돈다(잠금은 exec 때 풀리고 새 판이 다시 쥔다)
 		select {
 		case <-ctx.Done():
 			return

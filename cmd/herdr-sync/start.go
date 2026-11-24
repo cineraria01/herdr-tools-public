@@ -35,6 +35,7 @@ func onSignals() {
 		case syscall.SIGHUP:
 			code = 129
 		}
+		deployEndSig(code) // 신호로 멈춘 배포도 기록에 — 자식을 띄우지 않고 아는 판만(deploylog.go)
 		os.Exit(code)
 	}()
 }

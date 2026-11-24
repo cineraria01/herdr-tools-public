@@ -194,6 +194,7 @@ func settings(m string, conf *int) string {
 
 func syncMachines(machines []string, mq *qres) {
 	MS, MRM := mq.C, mq.RM
+	deployReached = true // 배포 기록(deploylog.go)
 	// 1. 기계마다 조회(쓰기 전) — 릴리스가 리눅스 기계에 갈 도구를 알게(machOS)
 	qs := map[string]*qres{}
 	var live []string
@@ -202,6 +203,7 @@ func syncMachines(machines []string, mq *qres) {
 		if !ok {
 			if q.nosh { // 종료 코드에 넣지 않는다
 				rows += m + ": 건너뜀 (sh 없음 — Windows 등)\n"
+				result(m, "건너뜀")
 				continue
 			}
 			warn("%s 연결 실패", m)
@@ -211,6 +213,7 @@ func syncMachines(machines []string, mq *qres) {
 		// Darwin·Linux가 아니면 쓰기·지움·링크·base·설정을 하나도 하지 않는다 (--take로 집어도)
 		if q.O != "Darwin" && q.O != "Linux" {
 			rows += m + ": 건너뜀 (OS " + orUnknown(q.O) + ")\n"
+			result(m, "건너뜀")
 			continue
 		}
 		machOS[m] = q.O

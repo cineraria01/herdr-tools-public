@@ -114,7 +114,7 @@ var splits = []split{
 		{run: "^TestRecovery[O-R]", est: 53},
 	}, 31},
 	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 67}, {run: "^TestContractB$", est: 79}, {run: "^TestContractC$", est: 45},
-		{run: "^TestContractD$", est: 55}, {run: "^TestContractE$", est: 41}}, 31},
+		{run: "^TestContractD$", est: 55}, {run: "^TestContractE$", est: 41}, {run: "^TestContractF$", est: 40}}, 31},
 	{mod + "cmd/hc-merger", []part{{run: "^Test(Spec|Journal)", est: 84}}, 135},
 	{mod + "tests/util", nil, 114},
 	{mod + "cmd/herdr-tools-publish", nil, 53},

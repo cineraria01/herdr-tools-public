@@ -515,6 +515,9 @@ func row(name string, diffs []string, conf int) {
 	} else {
 		s = "같음"
 	}
+	if !check {
+		rowResult(name, len(d) > 0, conf) // 배포 기록(deploylog.go)
+	}
 	rows += name + ": " + s + RSUF + "\n"
 }
 
@@ -564,8 +567,8 @@ func ready(r string) {
 	if msg := readyState(r); msg != "" {
 		die("%s", msg)
 	}
-	if _, rc := git("-C", r, "pull", "-q", "--ff-only"); rc != 0 {
-		die("git pull --ff-only 실패: %s (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main)", r)
+	if why := pullFF(r); why != "" { // 잠금 경합은 몇 번 다시(gitpull.go)
+		die("git pull --ff-only 실패: %s (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main) — git: %s", r, why)
 	}
 }
 

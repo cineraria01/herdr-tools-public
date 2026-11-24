@@ -387,7 +387,7 @@ func (e *ev) watchLock() {
 	}
 	watchLockFile = lf
 	if os.Mkdir(e.lk, 0o777) != nil {
-		// 자기 pid의 잠금 폴더는 새 판으로 exec한 이 watch 자신의 것(reexecIfNew) — 넘겨받는다
+		// 자기 pid의 잠금 폴더는 새 판으로 exec한 이 watch 자신의 것(selfexec) — 넘겨받는다
 		if op, ok := watchAlive(e.lk); ok && op != strconv.Itoa(os.Getpid()) {
 			fmt.Fprintf(os.Stderr, "hc-lane watch: %s 감시가 이미 돈다(pid %s)\n", e.wto, op)
 			exit(75)
@@ -416,36 +416,6 @@ func (e *ev) watchLock() {
 		proc.StopCurrent(proc.Grace) // 상한으로 따로 무리가 된 자식(hc ls 등)도 함께 거둔다
 		exit(code)
 	}()
-}
-
-// reexecIfNew: watch가 뜰 때의 실행 파일(e.self·e.selfSt)이 바뀌었으면(새 판이 깔림) 같은 인자·환경으로 다시 exec — 오래 떠 있는
-// watch가 옛 코드로 돌지 않게(watch-agent-guard, 2026-11-23 11시간짜리 옛 판). 커서·보냄 표시는 파일이고 바퀴 사이(보내기 밖)에서만
-// 부르니 같은 사건을 두 번 보내거나 건너뛰지 않는다. 커널 잠금 파일은 CLOEXEC라 exec 때 풀리고 새 판이 다시 쥔다(잠금 폴더는 같은 pid).
-// 메모리 상태(쉼·질문 창 보류 시각, 「연결 안 됨」 알린 기계)는 처음부터 — 「연결 안 됨」 알림이 한 번 더 갈 수 있다.
-// 바뀐 stat이 두 바퀴 연속 같을 때만 exec한다 — 손 cp·제자리 쓰기로 반쯤 쓴 바이너리를 exec하지 않게
-func (e *ev) reexecIfNew() {
-	if e.self == "" || e.selfSt == nil {
-		return
-	}
-	st, err := os.Stat(e.self)
-	if err != nil || sameStat(st, e.selfSt) {
-		e.selfNew = nil // 못 읽음(까는 중)은 다음 바퀴에
-		return
-	}
-	if e.selfNew == nil || !sameStat(st, e.selfNew) {
-		e.selfNew = st // 처음 본 바뀜 — 다음 바퀴에도 같으면 다 쓰인 것
-		return
-	}
-	e.wlog(fmt.Sprintf("넘겨줌 %s 새 판이 깔렸다 — 새 판으로 이어 돈다", e.self)) // 정상 동작이라 운영 기록에는 안 남긴다(감사 낮음 1)
-	err = reexec(e.self, os.Args, os.Environ())
-	e.wlog(fmt.Sprintf("새 판으로 exec 실패(%v) — 이 판으로 계속", err))
-	e.selfSt, e.selfNew = st, nil
-}
-
-var reexec = execve // 시험이 바꾼다
-
-func sameStat(a, b os.FileInfo) bool {
-	return os.SameFile(a, b) && a.ModTime().Equal(b.ModTime()) && a.Size() == b.Size()
 }
 
 // watchAlive: 그 잠금의 pid가 살아 있는 hc-lane watch면 참(그 pid)

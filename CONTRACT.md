@@ -7,7 +7,7 @@
    - 범용 저장소(이 저장소, `HERDR_TOOLS_REPO`): 도구(`cmd/<도구>` — Go 바이너리 하나씩, 훅도 `herdr-hooks`)·시험·`config.example/`. 개인 값이 0줄이다.
    - 개인 저장소(`HERDR_TOOLS_CONFIG`, 기본 `~/.config/herdr-tools`, 비공개): `sync.list`·`settings/keys.json`·`config`·`hc-fill.tsv`·`private-patterns.txt`·지침 본문·개인 도구.
    - 어느 저장소든 레인이 고쳐 착지하면, 다음 `herdr-sync`가 그것을 맥에 깔고 기계에 맞춘다.
-   - 공개 저장소(설정 `publish.repo`)는 범용 저장소 `origin/main` 트리만 기록 없이 받는다(`herdr-tools-publish`, herdr-sync가 맞춘 뒤 부름). 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나 블롭 내용(이진 포함, 블롭마다)·경로·링크 대상·공개 커밋 작성자에 개인 값·비밀 꼴이 걸리거나 검사를 못 하면 내보내지 않는다. 공개 트리 sha는 비공개 트리 sha와 같다(attributes를 거치지 않음).
+   - 공개 저장소(설정 `publish.repo`)는 범용 저장소 `origin/main` 트리만 기록 없이 받는다(`herdr-tools-publish`, herdr-sync가 맞춘 뒤 부름). 겹치는 경로(대소문자·정규화)나 글이 아닌 블롭(NUL·UTF-8 아님)이 있거나 블롭 내용(이진 포함, 블롭마다)·경로·링크 대상·공개 커밋 작성자에 개인 값·비밀 꼴이 걸리거나 검사를 못 하면 내보내지 않는다. 공개 트리 sha는 비공개 트리 sha와 같다(attributes를 거치지 않음). 착지 뒤 스스로 배포(`herdr-sync --landed`, `--auto on`)는 내보내기·릴리스 올림을 부르지 않는다(`docs/herdr-sync/deploy.md`).
 3. **충돌 없음**: 어느 쪽 변경도 말없이 덮지 않는다(아래 「3-way 규칙」).
 4. **개인 값이 새지 않음**: 범용 저장소의 모든 파일과 범용 저장소로 모을 맥 값은 `herdr-tools-config lint`(개인 저장소 `private-patterns.txt`)에 걸리지 않아야 한다. 검증(`.claude/herdr-verify.sh`)과 herdr-sync 모음이 이것을 본다.
 

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/selfexec"
 	"herdr-tools/internal/version"
 )
 
@@ -74,7 +75,9 @@ func run(args []string) int {
 		sid = "없음"
 	}
 	j.log("감독 시작(세션 %s)", sid)
+	self := selfexec.New(me, func(l string) { j.log("%s", l) })
 	for {
+		self.Check() // 틱 사이 — 새 판이 깔렸으면 그 판으로 이어 돈다(같은 pid라 launchd KeepAlive가 다시 띄우지 않는다)
 		j.step()
 		time.Sleep(time.Duration(j.tick) * time.Second)
 	}

@@ -10,7 +10,7 @@ package main
 //   - 깔기(installSh — 기계마다, 맥도): 받은 것의 sha256이 맥이 계산한 값과 같으면 그것을, 못 받으면(릴리스 없음·통신·해시·다른 CPU)
 //     그 기계 ~/.local/lib/herdr-go(Go 소스 나무 줄이 깐다)의 소스 판이 범용 저장소와 같을 때만 그 기계에서 짓는다.
 //     어느 쪽이든 같은 폴더 임시 파일 → mv 한 번(본체 하나가 한 세대 — 옛 「.bin/<도구> + .src 두 파일」을 따로 바꾸던 길은 없다, R-01·R-11).
-//     옛 판으로 되돌릴 일도 없다: mv가 안 되면 옛 본체 그대로다. 기록(~/.local/state/herdr-sync/bin.tsv: 도구·본체 sha256·소스 판)은
+//     mv가 안 되면 옛 본체 그대로다(되돌리기는 --at — 올린 판만, rollback.go). 기록(~/.local/state/herdr-sync/bin.tsv: 도구·본체 sha256·소스 판)은
 //     「이미 이 판인가」와 「그 기계에서 따로 바꿨나」를 알아보는 데만 쓴다 — 실행은 기록을 보지 않는다. 본체가 기록의 sha와 다르면
 //     (손 교체 — sync-bin-conflict) 덮지 않고 C 충돌, --take <기계>:.local/bin/<도구>면 덮고 옛 판을 bak/<시각>/에(bincfl.go).
 //     받기·짓기 모두 안 되면 그 기계는 「다름 (바이너리)」, 크게 경고하고 그 기계의 설정·지움은 미룬다(옛 포장으로 떨어지지 않는다)
@@ -102,6 +102,7 @@ while [ $# -ge 3 ]; do
   fi
   if [ -n "$why" ]; then
     rm -f "$n"; how=B
+    case $src in at:*) printf 'E\t%s\t%s · 되돌리기는 올린 판만 깐다(짓지 않음)\n' "$t" "$why"; continue ;; esac
     go=$(gob)
     if [ -z "$go" ]; then printf 'E\t%s\t%s · 그 기계에 go가 없다\n' "$t" "$why"; continue; fi
     if [ -z "$cur" ] || [ "$cur" != "$src" ]; then printf 'E\t%s\t%s · 그 기계 Go 소스 판이 범용 저장소와 다르다\n' "$t" "$why"; continue; fi
@@ -134,6 +135,7 @@ type relInfo struct {
 	base, tag string            // 받는 주소 앞부분 · 릴리스 태그 — 비면 받지 않고 기계마다 짓는다
 	sums      map[string]string // 자산 이름 → sha256
 	lx        map[string]bool   // linux/amd64 자산이 있는 도구
+	at        bool              // 되돌리기(--at, rollback.go) — 그 판 릴리스에 있는 도구만, 짓지 않음
 }
 
 // binTools: 그 기계에 갈 바이너리 도구(이름 순, 겹침 없이)
@@ -196,6 +198,9 @@ func unknownTargets(bins []binUnit, osOf map[string]string) []string {
 // 충돌(따로 바뀐 바이너리)은 conf에 더한다 — 그 바이너리만 그대로 두고 설정·지움은 계속한다
 func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 	tools := binTools(m, osname)
+	if rel != nil && rel.at {
+		tools = atTools(m, osname, rel, tools)
+	}
 	if len(tools) == 0 || rel == nil {
 		return nil, true
 	}
@@ -361,7 +366,10 @@ var hex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // 기계 맞추기보다 먼저(새 본체가 깔린 뒤에 설정·지움이 옛 포장을 걷게)
 func binsPrepare(pubwarn func(string)) *relInfo {
 	checked, pub := "", ""
-	if !check {
+	auto := os.Getenv("HERDR_SYNC_NO_PUBLISH") != "" && !check // 스스로 배포(landed.go) — 공개 단계 없음
+	if auto {
+		say("공개 건너뜀 — 스스로 배포는 공개 저장소 내보내기·릴리스 올리기를 하지 않는다(올려 둔 릴리스가 있으면 받는다)")
+	} else if !check {
 		checked, pub = publish(pubwarn)
 	}
 	if len(BINS) == 0 {
@@ -377,6 +385,10 @@ func binsPrepare(pubwarn func(string)) *relInfo {
 	if !check && pub != "" {
 		release(rel, pub, checked, pubwarn)
 	}
+	if auto {
+		rel = autoRelease(rel)
+	}
+	deployC12, deploySrc = rel.c12, rel.src
 	return rel
 }
 

@@ -130,37 +130,7 @@ func TestAgentState(t *testing.T) {
 	}
 }
 
-// 새 판 exec는 바뀐 stat이 두 바퀴 연속 같을 때만 — 쓰는 중(바퀴마다 또 바뀜)이면 exec하지 않는다
-func TestReexecSettled(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "hc-lane")
-	put := func(s string) {
-		if err := os.WriteFile(f, []byte(s), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	put("v1")
-	st, _ := os.Stat(f)
-	n := 0
-	defer func(o func(string, []string, []string) error) { reexec = o }(reexec)
-	reexec = func(string, []string, []string) error { n++; return os.ErrInvalid }
-	e := &ev{self: f, selfSt: st}
-	e.reexecIfNew()
-	put("v2-반쯤") // 첫 바퀴: 바뀜
-	e.reexecIfNew()
-	put("v2-다 쓴 판") // 둘째 바퀴: 또 바뀜
-	e.reexecIfNew()
-	if n != 0 {
-		t.Fatalf("쓰는 중인 판으로 exec했다(%d번)", n)
-	}
-	e.reexecIfNew() // 셋째 바퀴: 둘째와 같음
-	if n != 1 {
-		t.Fatalf("다 쓴 판으로 exec하지 않았다(%d번)", n)
-	}
-	e.reexecIfNew() // exec 실패 뒤에는 그 판을 지금 판으로 — 다시 시도하지 않는다
-	if n != 1 {
-		t.Fatalf("exec 실패 뒤 다시 시도했다(%d번)", n)
-	}
-}
+// 새 판 exec(쓰는 중이면 미룸·실패 뒤 다시 안 함)는 internal/selfexec 시험이 본다
 
 // watchRun: 가짜 hc(get은 견본, send는 파일에)로 watch --to <견본 주소>를 돌린다. 지휘 정보는 견본의 pid·이름으로 맞춰 둔다
 type watchRun struct {
