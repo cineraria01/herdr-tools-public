@@ -49,7 +49,7 @@ func TestFuncBudgetSelf(t *testing.T) {
 	}
 	clitest.Put(t, R+"/a.go", src(fn("big", 249), fn("small", 3), "type T struct{}\n\nfunc (t *T) "+strings.TrimPrefix(fn("M", 290), "func ")))
 	v := checkFuncBudget(lens(), b, nil, false)
-	if !has(v, "함수가 늘었다 a.go big 251줄") || has(v, "T.M") {
+	if !has(v, "함수가 천장을 넘었다 a.go big 251줄 (천장 250)") || has(v, "T.M") {
 		t.Errorf("예산보다 늘면 실패·줄면 통과여야: %v", v)
 	}
 	if !has(checkFuncBudget(lens(), map[string]int{"a.go big": 260, "a.go T.M": 302, "a.go gone": 300}, nil, false), "예산에 없는 함수 a.go gone") {
