@@ -11,8 +11,21 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/opsstate"
 )
+
+// adviseAgentTakes: 운영 에이전트가 조치 방식이고 띄울 준비(명령·틀)가 되었고 새 항목이 모두 그 범위 안인가 — 그러면 그 항목은
+// 운영 에이전트가 맡는다(opsagent.go). 판단만·끔·범위 밖이 하나라도 있으면 거짓(지휘에 지금처럼 바로)
+func adviseAgentTakes(fresh []opsstate.Item) bool {
+	if oaMode() != "조치" || confRaw(oaLaunchK) == "" {
+		return false
+	}
+	if _, ok := readFile(oaTmplPath()); !ok {
+		return false
+	}
+	return len(oaScoped(fresh)) == len(fresh)
+}
 
 func init() { register("advise", adviseCmd) }
 
@@ -132,7 +145,12 @@ func adviseTick(now time.Time) {
 		}
 		msg = strings.Join(strings.Fields(msg), " ") // 사건 줄은 탭 구분 — 글 안의 탭·줄바꿈을 없앤다
 		// 이름은 events.OpsAdvise — 이름 표 시험(internal/events ops_test)이 글자로 찾는다
-		if hcLaneReport("중간", msg, "hc-fill-advise", "", "") == 0 {
+		// 조치 방식 운영 에이전트가 다 맡을 항목이면 키를 달아 지휘에는 묶음으로(coord-digest — 지휘 watch의 digest.go가 이 키 머리로 가른다)
+		key := ""
+		if adviseAgentTakes(fresh) {
+			key = events.AdviseAgentKey + strconv.FormatInt(now.Unix(), 10)
+		}
+		if hcLaneReport("중간", msg, "hc-fill-advise", "", key) == 0 {
 			for _, it := range fresh {
 				keep = append(keep, it.Key)
 			}

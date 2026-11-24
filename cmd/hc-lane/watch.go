@@ -63,6 +63,7 @@ type ev struct {
 	seenc        map[string]seenCache
 	rgrace       time.Duration        // 남의 저장소 주인 없는 사건을 미루는 유예(repoSend)
 	rdefer       map[string]time.Time // 미룬 열쇠 → 이 watch가 처음 미룬 때(바퀴를 넘어 남음)
+	dg           digestState          // 지휘 알림 묶기(digest.go)
 }
 
 // orHyph: 빈 칸은 「-」(옛 jlist 칸 꼴)

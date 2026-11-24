@@ -106,6 +106,8 @@ var Defs = []Def{
 	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
 	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
 	{Name: "merger_resolve_stuck", Tool: "hc-merger", Default: "3", Min: 0, Max: 1440, Unit: "분", Remote: true, Desc: "풀이·풀이 감사 에이전트가 blocked·error로 이만큼 머물면 운영 사건 한 번(0이면 끔, HC_LANE_MERGER_RESOLVE_STUCK)"},
+	// 지휘 알림 묶기(2026-11-24 coord-digest, docs/hc-lane/watch.md) — 지휘 기계의 hc-lane watch가 보낼 때마다 읽는다
+	{Name: "coord_digest", Tool: "hc-lane", Default: "0", Min: 0, Max: 120, Unit: "분", Desc: "지휘에게 가는 묶음 사건(완료·판정·제출·착지…)을 이 주기마다 한 메시지로(0이면 하나씩 — 막힘 등 즉시 사건은 늘 바로)"},
 	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},

@@ -24,16 +24,30 @@ import (
 func (e *ev) emit(lines []string) int {
 	if e.ec == "watch" {
 		lines = e.wfilter(lines)
+		// 묶음(digest.go): 모아 두는 바퀴는 아무것도 안 보내고 커서에도 안 적는다 — 한가로 세지 않게 0
+		dig, imm, since, hold := e.digest(lines)
+		if hold {
+			return 0
+		}
+		lines = append(dig, imm...)
 		if len(lines) == 0 {
 			return 3
 		}
-		var parts []string
-		for _, l := range lines {
-			parts = append(parts, wpart(l))
+		var msg []string
+		if len(dig) > 0 {
+			msg = append(msg, digestText(dig, since))
 		}
-		if !e.wsend(stripCtl("hc-lane: " + strings.Join(parts, " ‖ "))) {
+		if len(imm) > 0 {
+			var parts []string
+			for _, l := range imm {
+				parts = append(parts, wpart(l))
+			}
+			msg = append(msg, "hc-lane: "+strings.Join(parts, " ‖ "))
+		}
+		if !e.wsend(stripCtl(strings.Join(msg, " ‖ "))) {
 			return 1
 		}
+		e.dg.sent(dig)
 	}
 	var ks []string
 	for _, l := range lines {
