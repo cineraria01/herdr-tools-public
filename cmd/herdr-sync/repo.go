@@ -515,6 +515,9 @@ func row(name string, diffs []string, conf int) {
 	} else {
 		s = "같음"
 	}
+	if l := binLost[name]; len(l) > 0 {
+		s += " — 못 받은 판: " + strings.Join(l, "; ")
+	}
 	if !check {
 		rowResult(name, len(d) > 0, conf) // 배포 기록(deploylog.go)
 	}

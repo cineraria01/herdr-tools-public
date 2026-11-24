@@ -220,7 +220,7 @@ func syncMachines(machines []string, mq *qres) {
 		qs[m] = q
 		live = append(live, m)
 	}
-	// 2. 공개 내보내기·릴리스(맥에서 짓고 올림), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
+	// 2. 릴리스(맥에서 짓고 올림 — 공개 내보내기는 pinCommit이 앞서 했다), 3. 맥 바이너리 — 기계 맞추기보다 먼저: 새 본체가 깔린 뒤에 설정(훅 명령)·지움(옛 포장)이 온다
 	rel := binsPrepare(func(s string) { fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", s) })
 	mbd, macBins := installBins("맥", "Darwin", rel, &rconf)
 	rdiff = append(rdiff, mbd...)

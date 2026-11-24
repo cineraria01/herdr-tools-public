@@ -251,6 +251,7 @@ func installBins(m, osname string, rel *relInfo, conf *int) ([]string, bool) {
 		case p.bad:
 			ok = false
 			fmt.Fprintf(os.Stderr, "!!! herdr-sync: %s !!!\n", p.s)
+			binLost[m] = append(binLost[m], strings.Join(strings.Fields(strings.TrimPrefix(p.s, m+" ")), " "))
 		case p.warn:
 			warn("%s", p.s)
 		default:
@@ -360,8 +361,6 @@ func buildMax() time.Duration {
 	return 600 * time.Second
 }
 
-var hex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
-
 // binsPrepare: 이번 실행의 바이너리 판(바이너리 줄이 없으면 nil). --check가 아니면 공개 내보내기(publish) 뒤 릴리스를 짓고 올린다 —
 // 기계 맞추기보다 먼저(새 본체가 깔린 뒤에 설정·지움이 옛 포장을 걷게)
 func binsPrepare(pubwarn func(string)) *relInfo {
@@ -370,7 +369,7 @@ func binsPrepare(pubwarn func(string)) *relInfo {
 	if auto {
 		say("공개 건너뜀 — 스스로 배포는 공개 저장소 내보내기·릴리스 올리기를 하지 않는다(올려 둔 릴리스가 있으면 받는다)")
 	} else if !check {
-		checked, pub = publish(pubwarn)
+		checked, pub = pubChecked, pubRepo // 게시는 pinCommit이 맥 값을 읽기 전에 했다(pin.go)
 	}
 	if len(BINS) == 0 {
 		return nil

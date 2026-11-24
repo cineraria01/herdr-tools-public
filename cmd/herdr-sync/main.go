@@ -231,11 +231,13 @@ func main() {
 	if len(RBH) > 0 {
 		RSUF = " (맥 판 기준 — 저장소 새 판은 아직)"
 	}
+	pinCommit() // 공개 내보내기와 이번 배포의 커밋 하나(pin.go) — 맥 값을 읽기 전에
 	mq, ok := query("")
 	if !ok {
 		die("맥 값을 읽지 못했다")
 	}
 	syncMachines(machines, mq)
+	movedNote()
 	exit(rc)
 }
 
