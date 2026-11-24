@@ -13,14 +13,34 @@ import "strings"
 
 const prHeadPat = "refs/heads/pr/*"
 
+// prOfPat: 원래 PR을 이어 쓰는 레인의 짝 참조 refs/herdr/pr-of/<레인>/<원래>(hc-fill PR 거울이 레인 기계에서 올린다 — 다시 맞춤 레인·
+// hc-fill add --pr-of, 2026-11-24 fill-polish-1124). 그 레인의 머리 가지는 pr/<원래>
+const prOfPat = "refs/herdr/pr-of/*"
+
 func prRef(lane string) string { return "refs/heads/pr/" + lane }
 
-// prHeads: 「<레인>=<제출 SHA>=<본 머리 값>」를 빈칸으로(머리 가지가 있는 구성원만)
+// prLane: 그 레인의 PR 머리 가지 이름 — 제 머리 가지 pr/<레인>이 있으면 레인, 없고 짝 참조가 있으면 원래 레인, 둘 다 없으면 레인.
+// list는 이 바퀴의 ls-remote(prHeadPat·prOfPat을 담은 것)
+func prLane(list, lane string) string {
+	if refsha(list, prRef(lane)) != "" {
+		return lane
+	}
+	pre := "refs/herdr/pr-of/" + lane + "/"
+	for _, line := range strings.Split(list, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && strings.HasPrefix(f[1], pre) && !strings.Contains(f[1][len(pre):], "/") && f[1] != pre {
+			return f[1][len(pre):]
+		}
+	}
+	return lane
+}
+
+// prHeads: 「<머리 레인>=<제출 SHA>=<본 머리 값>」를 빈칸으로(머리 가지가 있는 구성원만 — 머리 레인은 prLane)
 func (m *M) prHeads() string {
 	var o []string
 	for _, e := range m.b {
-		if h := refsha(m.qs, prRef(e.l)); h != "" {
-			o = append(o, e.l+"="+e.s+"="+h)
+		hl := prLane(m.qs, e.l)
+		if h := refsha(m.qs, prRef(hl)); h != "" {
+			o = append(o, hl+"="+e.s+"="+h)
 		}
 	}
 	return strings.Join(o, " ")

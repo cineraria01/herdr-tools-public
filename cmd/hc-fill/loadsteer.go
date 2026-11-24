@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/knob"
+	"herdr-tools/internal/opsstate"
 )
 
 func init() {
@@ -412,6 +413,8 @@ func loadEnd(now time.Time) {
 		}
 	}
 	var b strings.Builder
+	var mv []string // 바쁜 기계로만 갈 대기 줄 — 보낼 때 한 번만 센다
+	mvOK := false
 	for _, mc := range ms {
 		m := mc.Name
 		x := old[m]
@@ -425,9 +428,13 @@ func loadEnd(now time.Time) {
 				x.hotSince = now.Unix()
 			}
 			if x.hotSince != 0 && now.Unix()-x.hotSince >= smin && len(idle) > 0 && every > 0 && skewDue(x.sent, now, every) && !dry {
-				msg := fmt.Sprintf("%s 코어당 부하 %.2f %d분째 · 대기 레인 %d · 한가한 기계 %s — 조정은 지휘가(hc-fill machine)",
-					m, l.Per(), (now.Unix()-x.hotSince)/60, k, strings.Join(idle, ","))
-				if hcLaneReport("중간", msg, "hc-fill-skew", "", "") == 0 {
+				if !mvOK {
+					mv, mvOK = skewMovable(now, busy), true
+				}
+				// 옮길 일 없음(도는 레인뿐·대기 줄은 한가한 기계로 감)이면 사건 없이 load.tsv·상태 한 장에만(fill-polish-1124)
+				msg := fmt.Sprintf("%s 코어당 부하 %.2f %d분째 · 대기 레인 %d · 한가한 기계 %s · 바쁜 기계로만 갈 대기 줄 %d(%s) · %s 도는 레인 %d — 조정은 지휘가(hc-fill machine)",
+					m, l.Per(), (now.Unix()-x.hotSince)/60, k, strings.Join(idle, ","), len(mv), strings.Join(mv, ","), m, lanesOn(m))
+				if len(mv) > 0 && hcLaneReport("중간", msg, "hc-fill-skew", "", "") == 0 {
 					x.sent = now.Unix()
 				}
 			}
@@ -444,6 +451,33 @@ func loadEnd(now time.Time) {
 	if err := writeAtomic(DATA+"/load.tsv", b.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 	}
+}
+
+// skewMovable: 바퀴 끝 대기 줄 가운데 자리가 남는 후보(멈춤 아님·자리·레인상한)가 모두 바쁜(코어당 busy 넘음) 줄 —
+// 판정은 advise와 같은 opsstate.SkewMovable. 이번 바퀴에 띄운 줄·자동 감사 줄은 뺀다
+func skewMovable(now time.Time, busy float64) []string {
+	var ws []opsstate.Wait
+	for _, r := range ROWS {
+		if r.F(qState) == "wait" && !strings.HasPrefix(r.F(qAudit), "audit=") && !inlist(r.F(qName), UPNOW) {
+			ws = append(ws, adviseWait(r, now))
+		}
+	}
+	free, hot := map[string]int{}, map[string]bool{}
+	for _, mc := range machines() {
+		m := mc.Name
+		n := int(num(mc.Cap)) - agentsOn(m)
+		if lc, err := strconv.Atoi(mc.LCap); err == nil {
+			n = min(n, lc-lanesOn(m))
+		}
+		if machPaused(m) || n <= 0 {
+			continue
+		}
+		free[m] = n
+		if l := LOADS[m]; l.OK && l.Per() > busy {
+			hot[m] = true
+		}
+	}
+	return opsstate.SkewMovable(ws, free, hot)
 }
 
 // machineLines: 기계마다 한 줄(설정 machine 차례) — 부하·자리는 마지막 바퀴 것, 조정은 지금 것. withEmpty면 기록이 없어도 찍는다

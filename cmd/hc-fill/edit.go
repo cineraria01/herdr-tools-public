@@ -26,7 +26,8 @@ func editCmd(args []string) {
 		usage()
 	}
 	name, args := args[0], args[1:]
-	after, only, brief, prio, anyp := "", "", "", "", false
+	// prof: 원래 PR(--pr-of, -는 지움 — prof.go)
+	after, only, brief, prio, anyp, prof := "", "", "", "", false, ""
 	ovk, early := "", "" // 바꿀 겹침칸(overlap-ok·-)·먼저 띄움 칸(-·no-early), 빈 값은 그대로
 	for len(args) > 0 {
 		flag := func(cur *string, v string) {
@@ -63,6 +64,8 @@ func editCmd(args []string) {
 			only = v
 		case "--brief":
 			brief = v
+		case "--pr-of":
+			prof = v
 		case "--priority":
 			p, ok := pnorm(v)
 			if !ok {
@@ -74,9 +77,10 @@ func editCmd(args []string) {
 		}
 		args = args[2:]
 	}
-	if after == "" && only == "" && brief == "" && prio == "" && ovk == "" && early == "" {
+	if after == "" && only == "" && brief == "" && prio == "" && ovk == "" && early == "" && prof == "" {
 		usage()
 	}
+	prOfCheck(name, prof)
 	if anyp && after == "" {
 		die("--after-any-project는 --after와 함께 쓴다")
 	}
@@ -108,6 +112,13 @@ func editCmd(args []string) {
 			noLane(name)
 		}
 		undo = editUndo(r, after != "", only != "", brief != "", prio != "", ovk != "", early != "")
+		if prof != "" {
+			old := prOfGet(name)
+			if undo == "-" {
+				undo = "hc-fill edit " + name
+			}
+			undo += " --pr-of " + shq(dash(old))
+		}
 		st, prj = r.F(qState), r.F(qProj)
 		if ovk != "" || early != "" {
 			editNotUp(r, ovk != "", early != "")
@@ -174,6 +185,13 @@ func editCmd(args []string) {
 		if writeAtomic(Q, rowsText(out)) != nil {
 			DRC = 1
 			die("대기열을 쓰지 못했다: %s", Q)
+		}
+		if prof != "" {
+			if err := prOfPut(name, prof); err != nil {
+				DRC = 1
+				die("%v", err)
+			}
+			note += ", 원래 PR " + prof
 		}
 	})
 	if rc != 0 {
@@ -309,6 +327,9 @@ func rmUndo(r Row) string {
 	}
 	if c := dash(r.F(qOwner)); c != "-" {
 		s += " --coord " + shq(c)
+	}
+	if o := prOfGet(r.F(qName)); o != "" {
+		s += " --pr-of " + shq(o)
 	}
 	return s
 }

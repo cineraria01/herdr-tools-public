@@ -16,12 +16,12 @@ import (
 func init() { register("add", addCmd) }
 
 func addCmd(args []string) {
-	name, prj, brief, after, only, coord := "", "", "", "-", "-", ""
+	name, prj, brief, after, only, coord, prof := "", "", "", "-", "-", "", ""
 	cx, prio, early, aud, ovk, thn, xo, onl, anyp := false, "normal", "-", "-", "-", "", "", "", false
 	for len(args) > 0 {
 		a := args[0]
 		switch a {
-		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land", "--after-any-project":
+		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land", "--after-any-project", "--pr-of":
 			xo += " " + a // --then과 함께 못 씀
 		}
 		switch a {
@@ -68,6 +68,8 @@ func addCmd(args []string) {
 			thn = v
 		case "--on-land":
 			onl = v
+		case "--pr-of":
+			prof = v
 		case "--priority":
 			p, ok := pnorm(v)
 			if !ok {
@@ -97,6 +99,7 @@ func addCmd(args []string) {
 	if w, k := kindwhy(name); k {
 		die("%s", w)
 	}
+	prOfCheck(name, prof)
 	if !projectKnown(prj) {
 		die("설정에 repo 줄이 없는 프로젝트: %s", prj)
 	}
@@ -170,6 +173,7 @@ func addCmd(args []string) {
 		if onl != "" && !qHasNameW(name) { // 못 읽으면 남의 착지 뒤 명령을 바꾸기 전에 끝(R-21)
 			onlandPut(name, onl, prj, coord)
 		}
+		prOfAdd(name, prof) // 원래 PR 잇기(prof.go)
 		qAdd(tmp, name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk)
 	}) != 0 {
 		os.Remove(tmp)
@@ -196,6 +200,7 @@ func addCmd(args []string) {
 	if onl != "" {
 		note += ", 착지 뒤 " + onl
 	}
+	note += prOfNote(prof)
 	switch ovk {
 	case "overlap-ok":
 		note += ", 겹침 봄 끔"
@@ -204,18 +209,24 @@ func addCmd(args []string) {
 	}
 	say("더함 %s (%s%s)", name, prj, note)
 	dupWarn(name, prj, bf)
-	if after != "-" {
-		rows := qRows()
-		for _, a := range words(after) {
-			for _, r := range rows {
-				if r.F(qName) == a && r.F(qState) == "wait" && r.F(qProj) == prj && (r.F(qReply) == "" || r.F(qReply) == "-") && !strings.HasPrefix(r.F(qAudit), "audit=") {
-					say("알림: %s가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then %s로 한 레인에 이어 붙인다", a, a)
-					break
-				}
+	thenHint(after, prj)
+	exit(0)
+}
+
+// thenHint <선행 목록> <프로젝트>: 선행이 아직 대기 중인 같은 프로젝트 줄이면 --then을 알리는 한 줄(add의 마지막 단계)
+func thenHint(after, prj string) {
+	if after == "-" {
+		return
+	}
+	rows := qRows()
+	for _, a := range words(after) {
+		for _, r := range rows {
+			if r.F(qName) == a && r.F(qState) == "wait" && r.F(qProj) == prj && (r.F(qReply) == "" || r.F(qReply) == "-") && !strings.HasPrefix(r.F(qAudit), "audit=") {
+				say("알림: %s가 아직 대기 중 — 같은 일의 다음 단계면 --after 대신 --then %s로 한 레인에 이어 붙인다", a, a)
+				break
 			}
 		}
 	}
-	exit(0)
 }
 
 // thenAdd: run.lock(run 한 바퀴 내내 — 지시문을 잠금 밖에서 읽고 띄운 뒤에야 up으로 바꾼다)과 대기열 잠금을 쥐고 선행 지시문에 이어 붙인다

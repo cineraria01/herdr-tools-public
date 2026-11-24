@@ -223,7 +223,9 @@ func TestAdviseNoPlaceholders(t *testing.T) {
 	s.Merge = append(s.Merge, MergeLine{Project: "q", Length: ip(1), Merger: "gone"}, MergeLine{Project: "r", Length: ip(2), Merger: "alive", LastRoundAgeS: ip(3600)})
 	s.Watch = []Watch{{Owner: "t2", Alive: bp(false)}}
 	f := Facts{Addr: map[string]string{"aud": "a/t1", "blk": "a/t2", "dn": "a/t3", "lane-stuck": "a/t4"},
-		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음", Readd: readd("rj")}}}
+		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음", Readd: readd("rj")},
+			{Lane: "only-a", Project: "p", AgeS: ip(60), Can: []string{"a"}, Readd: readd("only-a")}}} // 바쁜 a로만 갈 줄 — 치우침
+	s.Machines[0].Live = ip(2)
 	it := Advise(s, f, ath)
 	seen := map[string]bool{}
 	for _, x := range it {

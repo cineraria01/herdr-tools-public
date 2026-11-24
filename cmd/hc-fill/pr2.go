@@ -15,12 +15,14 @@ import (
 	"herdr-tools/internal/proc"
 )
 
-// sPrSrc <작업 트리> <sha> <머리 레인>: 레인 기계에서 커밋을 숨은 참조 refs/herdr/pr-src/<머리 레인>로 올리고(그 기계의 git 로그인 —
-// 토큰을 워커 기계로 보내지 않는다) 원격 주소를 찍는다. 머리 가지 pr/<레인>은 대기열 기계가 gh로 만든다(PR 작성자 인증)
+// sPrSrc <작업 트리> <sha> <머리 레인> <레인>: 레인 기계에서 커밋을 숨은 참조 refs/herdr/pr-src/<머리 레인>로 올리고(그 기계의 git 로그인 —
+// 토큰을 워커 기계로 보내지 않는다) 원격 주소를 찍는다. 머리 가지 pr/<레인>은 대기열 기계가 gh로 만든다(PR 작성자 인증).
+// 머리 레인이 레인과 다르면(원래 PR을 이어 씀) 짝 참조 refs/herdr/pr-of/<레인>/<머리 레인>도 — 병합기가 그 레인의 머리 가지를 찾는 길
 const sPrSrc = `cd "$d" 2>/dev/null || { echo "PRX cd"; exit 0; }
 u=$(git remote get-url origin 2>/dev/null) || { echo "PRX noremote"; exit 0; }
 printf 'URL %s\n' "$u"
 git push -q origin "+$1:refs/herdr/pr-src/$2" >/dev/null 2>&1 || { echo "PRX push"; exit 0; }
+[ "$3" = "$2" ] || git push -q origin "+$1:refs/herdr/pr-of/$3/$2" >/dev/null 2>&1 || { echo "PRX push"; exit 0; }
 echo PUSHED`
 
 const prBodyCap = 60000 // 보고서 본문 상한(글자)
@@ -46,9 +48,13 @@ func (r *prRun) opens() {
 		if l == "" || len(ev.SHA) != 40 || r.sent[key] == "sent" {
 			continue
 		}
-		t := n // 다시 맞춤 레인은 원래 레인 이름으로 낸다 — 원래 PR을 이어 쓴다
-		if b := prRelandBase(n); b != n && r.ents[b] != nil && r.ents[b].State == "open" {
-			t = b
+		t := n // 다시 맞춤 레인·--pr-of 레인은 원래 레인 이름으로 낸다 — 원래 PR을 이어 쓴다(제 PR이 이미 있으면 그것)
+		if b := prBaseOf(n); b != n && r.ents[n] == nil {
+			if e := r.ents[b]; e != nil && e.State == "open" {
+				t = b
+			} else if prOfGet(n) != "" && r.sent[key] == "" {
+				say("PR 거울 %s: --pr-of %s 의 PR이 없거나 이미 닫힘·Merged — 새 PR로", n, b)
+			}
 		}
 		if prLandedSince(t, ev.Time) { // 거울이 늦어 이미 착지했다 — 빈 PR을 열려다 매 바퀴 실패하지 않게(감사 낮음 7)
 			r.sent[key] = "sent"
@@ -115,7 +121,7 @@ func (r *prRun) pushSrc(n, p, m string, ev events.Event, key, t string) (ghpr.Re
 		r.stop = true
 		return ghpr.Repo{}, false
 	}
-	out, rc := onm(nil, m, sPrSrc, strings.TrimSuffix(repoOf(p, m), "/")+".wt/"+n, ev.SHA, t)
+	out, rc := onm(nil, m, sPrSrc, strings.TrimSuffix(repoOf(p, m), "/")+".wt/"+n, ev.SHA, t, n)
 	if rc != 0 {
 		r.bad++
 		r.last = fmt.Sprintf("커밋 올리기 %s(%s, 종료 %d)", n, m, rc)
@@ -210,7 +216,7 @@ func (r *prRun) verdicts() {
 				hml = x
 			}
 		}
-		e := r.ents[a.F(atLane)]
+		e := r.entOf(a.F(atLane))
 		if a.NF() < atNF || (v != "pass" && v != "fix") || hml == "" || e == nil || e.State != "open" {
 			continue
 		}
@@ -303,7 +309,7 @@ func (r *prRun) mergerEvents() {
 				lane = x[1]
 			}
 		}
-		e := r.ents[lane]
+		e := r.entOf(lane)
 		if ev.N < 7 || e == nil || e.State != "open" || ev.Time < e.Opened {
 			continue
 		}

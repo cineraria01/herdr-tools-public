@@ -133,7 +133,7 @@ func TestLoadSkewEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
-	ROWS = []Row{{"w1", "p", "/b", "-", "-", "wait"}}
+	ROWS = []Row{{"w1", "p", "/b", "-", "a", "wait"}} // --only a: 바쁜 a로만 갈 줄(옮길 일 있음 — fill-polish-1124)
 	LOADS = map[string]mLoad{"a": {L1: 40, Cores: 12, OK: true}, "b": {L1: 1, Cores: 8, OK: true}}
 	t0 := time.Now()
 	evs := func() string { b, _ := os.ReadFile(ev); return string(b) }

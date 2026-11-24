@@ -123,7 +123,8 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 	if mt.id != "" {
 		sidref = "refs/hc-landed/" + mt.id
 	}
-	qa := []string{"origin", q, "refs/heads/lane/" + ln, "refs/merge-queue-meta/" + n, "refs/merge-done/" + ln, lanep + "*", prRef(ln)}
+	hl := prLane(m.qs, ln) // PR 머리 레인(원래 PR을 이어 쓰는 레인이면 원래 — prhead.go)
+	qa := []string{"origin", q, "refs/heads/lane/" + ln, "refs/merge-queue-meta/" + n, "refs/merge-done/" + ln, lanep + "*", prRef(hl)}
 	if sidref != "" {
 		qa = append(qa, sidref)
 	}
@@ -182,7 +183,7 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 	if !m.jonce(mt, n, ln, "착지", C, why) {
 		return 1
 	}
-	msg := fmt.Sprintf("%s — 제출 %s, %s%s", why, first8(s), mt.key(n), mt.infoTail()) + prNote(rr, ln, C)
+	msg := fmt.Sprintf("%s — 제출 %s, %s%s", why, first8(s), mt.key(n), mt.infoTail()) + prNote(rr, hl, C)
 	if !m.outbox(mt, n, "착지", C, msg, ln) {
 		return 1
 	}

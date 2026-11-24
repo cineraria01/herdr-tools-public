@@ -72,7 +72,7 @@ func TestHumanJSONSameFacts(t *testing.T) {
 	if err := json.Unmarshal(j.Bytes(), &back); err != nil {
 		t.Fatalf("json을 다시 못 읽음: %v", err)
 	}
-	for _, w := range []string{"a", "b", "u", "3.10", "lane-stuck", "lane-old", "선행 lane-x", "abc1234", "idle", "밤", s.Fingerprint} {
+	for _, w := range []string{"a", "b", "u", "3.1", "lane-stuck", "lane-old", "선행 lane-x", "abc1234", "idle", "밤", s.Fingerprint} {
 		if !strings.Contains(h.String(), w) {
 			t.Errorf("사람용에 %q 없음", w)
 		}
@@ -155,13 +155,13 @@ func TestFingerprint(t *testing.T) {
 	}
 }
 
-// ④ 눈에 띄는 것 — 본보기 셋(같은 단계에 오래 · 코어당 부하 치우침 · 배포 밀림)과 모름. 조치는 하지 않고 사실만
+// ④ 눈에 띄는 것 — 본보기(같은 단계에 오래 · 배포 밀림)와 모름. 조치는 하지 않고 사실만. 치우침은 옮길 대기 줄이 있을 때만
+// (Notable은 대기 줄 재료 없이 — advise_skew_test.go)
 func TestNotable(t *testing.T) {
 	n := Notable(fake(), th)
 	all := strings.Join(n, "\n")
 	for _, w := range []string{
 		"lane-stuck", "95분", // 같은 단계에 오래
-		"3.10", "0.10", // 치우침: 바쁜 a, 한가한 b
 		"4커밋", // 배포 밀림
 		"u",   // 모름 기계
 	} {

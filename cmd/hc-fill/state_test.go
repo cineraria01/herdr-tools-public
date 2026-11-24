@@ -87,10 +87,10 @@ func TestStateCollectUnknownMachine(t *testing.T) {
 	if len(s.Watch) != 1 || s.Watch[0].Alive == nil || !*s.Watch[0].Alive {
 		t.Errorf("감시: %+v", s.Watch)
 	}
-	// 눈에 띄는 것: 치우침(w 3.00 · x는 모름이라 빠지고 m 0.10)·같은 단계 2시간·배포 기록 없음은 재료 못 읽음으로
+	// 눈에 띄는 것: 같은 단계 2시간·배포 기록 없음은 재료 못 읽음으로(치우침 w 3.00·m 0.10은 옮길 대기 줄 없이는 안 낸다 — fill-polish-1124)
 	s.Notable = opsstate.Notable(s, opsstate.Thresholds{StageMin: 90, SkewHi: 2, SkewLo: 0.5})
 	all := strings.Join(s.Notable, "\n")
-	for _, w := range []string{"기계 x 모름", "바쁨 w 3.00", "한가 m 0.10", "레인 lane-a", "재료 deploy 못 읽음"} {
+	for _, w := range []string{"기계 x 모름", "레인 lane-a", "재료 deploy 못 읽음"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("눈에 띄는 것에 %q 없음:\n%s", w, all)
 		}

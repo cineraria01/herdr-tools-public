@@ -389,14 +389,28 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			Sure: SureHuman})
 	}
 
-	// 기계: 끊김·치우침
+	o = append(o, machineItems(s, f, free, th)...)
+
+	// 재료를 못 읽음 — 위 판정이 비었어도 「없음」이 아니다
+	for _, x := range s.Sources {
+		if x.Why != "" {
+			add(unknown("source:"+x.Name, "재료 "+x.Name+" 못 읽음", x.Why))
+		}
+	}
+	return o
+}
+
+// machineItems: 기계 끊김·치우침(Advise의 한 단계). free는 Advise가 센 빈 자리
+func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
+	var o []Item
 	var hot, cool []string
+	hotSet := map[string]bool{}
 	for _, m := range s.Machines {
 		if m.Reach != "ok" {
 			if strings.Contains(m.Why, "모름") {
-				add(unknown("machine:"+m.Name, "기계 "+m.Name, m.Why))
+				o = append(o, unknown("machine:"+m.Name, "기계 "+m.Name, m.Why))
 			} else {
-				add(Item{Key: "machine:" + m.Name, Kind: "machine", What: "기계 " + m.Name + " 모름: " + or(m.Why, "까닭 모름"),
+				o = append(o, Item{Key: "machine:" + m.Name, Kind: "machine", What: "기계 " + m.Name + " 모름: " + or(m.Why, "까닭 모름"),
 					Evidence: "그 기계 레인·자리를 잴 수 없다", Cost: "그 기계에 떠 있는 레인이 멈췄어도 모른다",
 					Next: []string{"hc machine ls"}, Sure: SureJudge})
 			}
@@ -407,21 +421,54 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		}
 		switch p := *m.LoadPerCore; {
 		case p >= th.SkewHi:
-			hot = append(hot, fmt.Sprintf("%s %.2f", m.Name, p))
+			hot = append(hot, fmt.Sprintf("%s %.2f(도는 레인 %s)", m.Name, p, ival(m.Lanes)))
+			hotSet[m.Name] = true
 		case p <= th.SkewLo:
 			cool = append(cool, fmt.Sprintf("%s %.2f", m.Name, p))
 		}
 	}
-	if len(hot) > 0 && len(cool) > 0 {
-		add(Item{Key: "skew", Kind: "skew", What: "코어당 부하 치우침",
-			Evidence: "바쁨 " + strings.Join(hot, ", ") + " · 한가 " + strings.Join(cool, ", "),
-			Cost:     "바쁜 기계의 레인·검증이 느려진다", Next: []string{"hc-fill machine"}, Sure: SureJudge})
+	// 옮길 일이 있을 때만 — 도는 레인은 옮길 수 없고, 새 줄은 이미 부하를 보고 한가한 기계로 간다(2026-11-24 fill-polish-1124)
+	if mv := SkewMovable(f.Waits, free, hotSet); len(hot) > 0 && len(cool) > 0 && len(mv) > 0 {
+		o = append(o, Item{Key: "skew", Kind: "skew", What: "코어당 부하 치우침",
+			Evidence: "바쁨 " + strings.Join(hot, ", ") + " · 한가 " + strings.Join(cool, ", ") +
+				fmt.Sprintf(" · 대기 줄 %d 가운데 바쁜 기계로만 갈 줄 %d(%s)", len(f.Waits), len(mv), strings.Join(mv, ",")),
+			Cost: "바쁜 기계의 레인·검증이 느려진다", Next: []string{"hc-fill machine"}, Sure: SureJudge})
 	}
+	return o
+}
 
-	// 재료를 못 읽음 — 위 판정이 비었어도 「없음」이 아니다
-	for _, x := range s.Sources {
-		if x.Why != "" {
-			add(unknown("source:"+x.Name, "재료 "+x.Name+" 못 읽음", x.Why))
+// SkewMovable: 치우침을 옮길 수 있는 대기 줄 — 띄울 차례인 줄(거절·겹침·단독·대기 줄 선행이 아님) 가운데 자리가 남는 후보
+// (Can ∩ free, Can nil이면 모든 기계)가 있고 그 후보가 모두 hot인 줄. 한가하거나 부하 모르는 후보가 하나라도 있으면 배정이
+// 코어당 부하 낮은 차례로 그쪽에 보내니 옮길 것이 없다. 자리 남는 후보가 없는 줄은 어디로 갈지 아직 모른다(항목 없음).
+// ponytail: 부하 모르는 후보를 한가함 쪽으로 본다 — 배정(loadOrder)은 모르는 기계를 설정 차례 자리에 두니 그 차례가 hot 앞이 아니면 hot에 갈 수 있다
+func SkewMovable(waits []Wait, free map[string]int, hot map[string]bool) []string {
+	inWait := map[string]bool{}
+	for _, w := range waits {
+		inWait[w.Lane] = true
+	}
+	var o []string
+next:
+	for _, w := range waits {
+		if w.Reject != "" || w.Front != "" || w.Solo {
+			continue
+		}
+		for _, a := range w.After {
+			if inWait[afterName(a)] {
+				continue next
+			}
+		}
+		n := 0
+		for m, k := range free {
+			if k <= 0 || w.Can != nil && !has(w.Can, m) {
+				continue
+			}
+			if !hot[m] {
+				continue next
+			}
+			n++
+		}
+		if n > 0 {
+			o = append(o, w.Lane)
 		}
 	}
 	return o

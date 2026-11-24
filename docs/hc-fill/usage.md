@@ -1,7 +1,7 @@
 # hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)
 
 ```sh
-hc-fill add --name <레인> --project <프로젝트> --brief <지시문> [--after <레인>,…] [--only <기계>,…] [--coord <지휘>] [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo] [--on-land <이름>]   # 대기열 끝에
+hc-fill add --name <레인> --project <프로젝트> --brief <지시문> [--after <레인>,…] [--only <기계>,…] [--coord <지휘>] [--priority <긴급|높음|보통|낮음>] [--no-early] [--no-audit] [--overlap-ok | --solo] [--on-land <이름>] [--pr-of <원래 레인>]   # 대기열 끝에(--pr-of: 원래 PR을 이어 씀, docs/hc-fill/pr.md)
 hc-fill add --name <이름> --project <프로젝트> --brief <지시문> --then <대기 중인 선행>   # 새 줄 없이 선행 레인에 이어 붙임
 hc-fill prio <레인> <긴급|높음|보통|낮음>   # 레인의 우선순위 바꾸기 — 이미 병합기 큐에 냈으면 큐 메타도(영어 urgent|high|normal|low도 받음)
 hc-fill ls                      # 대기 · 떠 있음(hc 상태) · 끝남 · 되돌려줌(받은편지 결과를 보냄) · 주인 지휘 · 우선 · 마지막 보고 · 먼저 띄움(선행 …) · 이어서 <이름>,… · 자동 감사(감사 중·감사 통과/지적 — 수거 기다림·감사 통과 받음·감사 지적 n번째·지휘로 넘김) · 겹침 대기(<앞 레인>: <키>) · 겹침 봄 끔 · 필요 <능력> — 가진 기계 없음
@@ -13,7 +13,7 @@ hc-fill run --dry-run           # 무엇을 어디에 띄울지만. --dry-run �
 hc-fill watch --every 60        # 계속(한 번에 하나만, 이미 돌면 종료 75). 바퀴 시작 간격이 60초 — 쉼은 60초 − 바퀴에 든 시간, 하한 설정 rest_min
 hc-fill rm <레인> [--force]     # 대기열에서만 뺀다(떠 있는 터미널은 그대로). 주차 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 거절(종료 2)
 hc-fill retry <레인>            # 띄우기 거절(hc-lane 종료 11)로 멈춘 줄을 다음 바퀴에 다시(edit도 풂, 대기열에 없으면 종료 2)
-hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>] [--overlap-ok | --overlap-check] [--early | --no-early]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로). 겹침 검사·먼저 띄움은 아직 안 뜬 줄만(docs/hc-fill/edit.md)
+hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>] [--overlap-ok | --overlap-check] [--early | --no-early] [--pr-of <원래 레인>|-]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로). 겹침 검사·먼저 띄움은 아직 안 뜬 줄만(docs/hc-fill/edit.md)
 hc-fill machine --rename <옛> <새> [--dry-run] [--json] [--why <까닭>]   # 기계 이름을 설정·상태 파일·손잡이·병합기 켬 표식에서 한 번에(잠금 안, 실패면 전부 되돌림). 차례 dry-run → 실행 → merger restart → 설정 커밋(docs/hc-fill/machine-rename.md)
 hc-fill nudge <레인> [<글>] [--why <까닭>]   # 일시 오류로 턴이 끊겨 멈춘 레인 터미널(hc 상태 error·done, 그 실행의 완료·막힘 등 보고 없음)에 이어 가라는 글 한 줄. 한 레인에 손잡이 nudge_every분(기본 10) 안에 한 번, 안 보내면 까닭과 종료 1(docs/hc-fill/edit.md)
 ```

@@ -51,7 +51,8 @@ type prRun struct {
 	ok    int // 이 바퀴 성공한 gh 일
 	bad   int // 이 바퀴 실패한 gh 일
 	stop  bool
-	last  string // 마지막 실패 글
+	last  string            // 마지막 실패 글
+	base  map[string]string // 레인 → 이어 쓰는 원래 레인(entOf가 바퀴 안에서 한 번만 읽는다, prof.go)
 }
 
 func prFile(n string) string { return DATA + "/" + n }
@@ -107,7 +108,7 @@ func prOf(lane string) (string, string) {
 	m, _ := prLoad()
 	e := m[lane]
 	if e == nil {
-		e = m[relandSuf.ReplaceAllString(lane, "")]
+		e = m[prBaseOf(lane)]
 	}
 	if e == nil || e.Num == "" {
 		return "", ""
