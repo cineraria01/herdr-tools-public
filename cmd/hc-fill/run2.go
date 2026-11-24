@@ -61,6 +61,10 @@ func launchRows() {
 	}
 	tickMark("ownfinish")
 	ownFinish()
+	tickMark("watchown")
+	if !dry {
+		watchOwners()
+	}
 	tickMark("after")
 	afterTick()
 	tickMark("idle")
@@ -400,6 +404,8 @@ func earlyRows() {
 		ew = "5"
 	}
 	EWAIT = atoi10(ew)
+	var echain []Row // 이번 바퀴에 선행 예약과 겹친 채 먼저 띄운 줄 「레인 줄ID 앞레인 키」(ls 비고)
+	defer func() { earlyChainSave(ROWS, echain) }()
 	if ELIST == "" || ECAP == "0" {
 		return
 	}
@@ -469,7 +475,10 @@ func earlyRows() {
 			say("실패 %s: 지시문을 읽지 못함(%s): %s", name, why, brief)
 			continue
 		}
-		if !snap(name, brief) || !ovlCheck(name, prj, SB, after, dash(ak), dash(ovk), only) {
+		OVEARLY, OVCHAIN = true, nil
+		ok := snap(name, brief) && ovlCheck(name, prj, SB, after, dash(ak), dash(ovk), only)
+		OVEARLY = false
+		if !ok {
 			continue
 		}
 		ESEC = earlySec(after, eb)
@@ -485,6 +494,9 @@ func earlyRows() {
 		}
 		if placed {
 			elive++
+			for _, c := range OVCHAIN {
+				echain = append(echain, Row{name, rid, c.F(1), c.F(3)})
+			}
 		}
 	}
 }

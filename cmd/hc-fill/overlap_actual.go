@@ -5,6 +5,7 @@ package main
 // 못 읽은 레인은 키 A 없이 지금처럼 예약·언급만으로 판정한다
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -21,15 +22,17 @@ var ACTPARK map[string]bool
 // actRefs: 주차·제출 가지를 받아 두는 지휘 기계 로컬 이름(바퀴마다 --prune으로 원격과 맞춤)
 const actNS = "refs/hc-fill/act/"
 
-// actScript: 인자 「프로젝트 레인 작업트리 기준」 넷씩. 읽은 레인마다 「p<TAB>n<TAB>+」, 파일마다 「p<TAB>n<TAB>=파일」(못 읽은 레인은 줄 없음).
+// actScript: 인자 「프로젝트 레인 작업트리 기준」 넷씩. 읽은 레인마다 「p<TAB>n<TAB>+」, 파일마다 「p<TAB>n<TAB>=파일」,
+// 못 읽은 레인은 「p<TAB>n<TAB>!까닭」(early-own-chain — 760번 난 「못 읽음」의 원인을 몰랐다).
 // 바꾼 파일 = 기준과의 merge-base부터 작업 트리까지(커밋·스테이지·안 올린 것) + 추적 안 하는 새 파일.
 // shx.Script로 감싼다 — 끝 표식이 성공을 정하므로 마지막 빈 줄 건너뛰기의 1이 조각 전체를 실패로 만들지 않고(fill/R-216:
 // 추적 파일만 고친 작업 트리가 「못 읽음」이 돼 겹침을 놓쳤다), 잘린 출력은 표식이 없어 못 읽음이 된다
 var actScript = shx.Script(`while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
 case $w in "~/"*) w=$HOME/${w#"~/"} ;; esac
-mb=$(git -C "$w" merge-base HEAD "$b" 2>/dev/null) || continue
-o=$(git -C "$w" -c core.quotepath=off diff --no-renames --name-only "$mb" 2>/dev/null) || continue
-u=$(git -C "$w" -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null) || continue
+[ -d "$w" ] || { printf '%s\t%s\t!작업 트리 없음 %s\n' "$p" "$n" "$w"; continue; }
+mb=$(git -C "$w" merge-base HEAD "$b" 2>/dev/null) || { printf '%s\t%s\t!merge-base HEAD %s 종료 %s\n' "$p" "$n" "$b" "$?"; continue; }
+o=$(git -C "$w" -c core.quotepath=off diff --no-renames --name-only "$mb" 2>/dev/null) || { printf '%s\t%s\t!diff 종료 %s\n' "$p" "$n" "$?"; continue; }
+u=$(git -C "$w" -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null) || { printf '%s\t%s\t!ls-files 종료 %s\n' "$p" "$n" "$?"; continue; }
 printf '%s\t%s\t+\n' "$p" "$n"
 printf '%s\n%s\n' "$o" "$u" | while IFS= read -r f; do [ -n "$f" ] && printf '%s\t%s\t=%s\n' "$p" "$n" "$f"; done
 done
@@ -58,13 +61,13 @@ func actParse(out string) map[string][]string {
 	return o
 }
 
-// actDiff <저장소> <기준> <참조>: 기준과의 merge-base부터 그 참조까지 바뀐 파일. ok=false면 못 읽음
-func actDiff(repo, base, ref string) ([]string, bool) {
+// actDiff <저장소> <기준> <참조>: 기준과의 merge-base부터 그 참조까지 바뀐 파일. 종료 0 아니면 못 읽음(그 종료 코드)
+func actDiff(repo, base, ref string) ([]string, int) {
 	out, rc := run("git", "-C", repo, "-c", "core.quotepath=off", "diff", "--no-renames", "--name-only", base+"..."+ref)
 	if rc != 0 {
-		return nil, false
+		return nil, rc
 	}
-	return lines(sub(out)), true
+	return lines(sub(out)), 0
 }
 
 // actTick <대기열 줄>: ACT를 채운다 — 쓰기 소유(OREC) 레인은 떠 있으면 그 기계 작업 트리(못 읽으면 원격 가지), 아니면 원격 제출 가지
@@ -102,29 +105,33 @@ func actTick(rows []Row) {
 	}
 	// 프로젝트마다: 기준 가지(lcFetch — 바퀴에 한 번 fetch)와 주차·제출 가지 한 번에 받기
 	base, repo, refs := map[string]string{}, map[string]string{}, map[string]map[string]bool{}
+	refWhy := map[string]string{} // 프로젝트 → 원격 가지 목록이 없는 까닭
 	var pl []string
 	for p := range ps {
 		pl = append(pl, p)
 	}
 	sort.Strings(pl)
 	for _, p := range pl {
-		if lcFetch(p, true) != 0 {
-			say("실제 변경 못 읽음 %s: 기준 가지 조회 실패 — 예약만으로 판정", p)
+		if rc := lcFetch(p, true); rc != 0 {
+			say("실제 변경 못 읽음 %s: 기준 가지 조회 실패(종료 %d) — 예약만으로 판정", p, rc)
 			continue
 		}
 		base[p], repo[p] = FB, FR
 		if !strings.HasPrefix(FB, "origin/") {
+			refWhy[p] = "원격 없는 저장소"
 			continue // 원격 없는 저장소: 주차·제출 가지 없음(작업 트리만)
 		}
 		if !dry {
 			if _, rc := run("git", "-C", FR, "fetch", "-q", "--prune", "origin",
 				"+refs/park/*:"+actNS+"park/*", "+refs/heads/lane/*:"+actNS+"lane/*"); rc != 0 {
-				say("실제 변경 못 읽음 %s: 주차·제출 가지 fetch 실패 — 그 가지는 예약만으로 판정", p)
+				say("실제 변경 못 읽음 %s: 주차·제출 가지 fetch 실패(종료 %d) — 그 가지는 예약만으로 판정", p, rc)
+				refWhy[p] = fmt.Sprintf("주차·제출 가지 fetch 종료 %d", rc)
 				continue
 			}
 		}
 		out, rc := run("git", "-C", FR, "for-each-ref", "--format=%(refname)", actNS)
 		if rc != 0 {
+			refWhy[p] = fmt.Sprintf("for-each-ref 종료 %d", rc)
 			continue
 		}
 		refs[p] = map[string]bool{}
@@ -132,14 +139,16 @@ func actTick(rows []Row) {
 			refs[p][l] = true
 		}
 	}
-	// 기계마다 작업 트리 한 번(동시)
+	// 기계마다 작업 트리 한 번(동시). why: 못 읽은 레인의 까닭 「p<TAB>n」 → 작업 트리 쪽(원격 가지 쪽은 뒤에 덧붙임)
 	byM := map[string][]string{}
+	why := map[string]string{}
 	for _, e := range own {
 		if e.m == "" || base[e.p] == "" {
 			continue
 		}
 		r := strings.TrimRight(repoOf(e.p, e.m), "/")
 		if r == "" {
+			why[e.p+"\t"+e.n] = "@" + e.m + " 저장소 경로 없음(설정 repo)"
 			continue
 		}
 		byM[e.m] = append(byM[e.m], e.p, e.n, r+".wt/"+e.n, base[e.p])
@@ -150,35 +159,58 @@ func actTick(rows []Row) {
 		wg.Add(1)
 		go func(m string, args []string) {
 			defer wg.Done()
-			out, rc := onm(nil, m, actScript, append([]string{"-"}, args...)...)
-			out, ok := shx.Cut(out, rc)
+			raw, rc := onm(nil, m, actScript, append([]string{"-"}, args...)...)
+			out, ok := shx.Cut(raw, rc)
 			mu.Lock()
 			defer mu.Unlock()
 			if !ok {
-				say("실제 변경 못 읽음 @%s: 작업 트리 조회 실패 — 원격 가지나 예약만으로 판정", m)
+				w := shFail(raw, rc)
+				say("실제 변경 못 읽음 @%s: 작업 트리 조회 실패(%s) — 원격 가지나 예약만으로 판정", m, w)
+				for i := 0; i+1 < len(args); i += 4 {
+					why[args[i]+"\t"+args[i+1]] = "@" + m + " 조회 " + w
+				}
 				return
 			}
 			for k, v := range actParse(out) {
 				ACT[k] = v
 			}
+			for _, l := range lines(out) {
+				if r := splitRow(l); r.NF() == 3 && strings.HasPrefix(r.F(3), "!") {
+					why[r.F(1)+"\t"+r.F(2)] = r.F(3)[1:]
+				}
+			}
 		}(m, args)
 	}
 	wg.Wait()
 	// 원격 가지: 작업 트리를 못 읽은 쓰기 소유는 제출 → 주차 순, 주차 대기 줄은 주차 → 옛 판 lane 순
+	addWhy := func(k, s string) {
+		if why[k] != "" {
+			s = why[k] + "; " + s
+		}
+		why[k] = s
+	}
 	fromRefs := func(e ent, kinds ...string) {
-		if _, ok := ACT[e.p+"\t"+e.n]; ok || refs[e.p] == nil {
+		k := e.p + "\t" + e.n
+		if _, ok := ACT[k]; ok {
 			return
 		}
-		for _, k := range kinds {
-			ref := actNS + k + "/" + e.n
+		if refs[e.p] == nil {
+			addWhy(k, refWhy[e.p])
+			return
+		}
+		for _, kd := range kinds {
+			ref := actNS + kd + "/" + e.n
 			if !refs[e.p][ref] {
 				continue
 			}
-			if fs, ok := actDiff(repo[e.p], base[e.p], ref); ok {
-				ACT[e.p+"\t"+e.n] = fs
+			if fs, rc := actDiff(repo[e.p], base[e.p], ref); rc == 0 {
+				ACT[k] = fs
+			} else {
+				addWhy(k, fmt.Sprintf("diff %s 종료 %d", kd, rc))
 			}
 			return
 		}
+		addWhy(k, "제출·주차 가지 없음")
 	}
 	for _, e := range own {
 		fromRefs(e, "lane", "park")
@@ -189,7 +221,11 @@ func actTick(rows []Row) {
 	var miss []string
 	for _, e := range own {
 		if _, ok := ACT[e.p+"\t"+e.n]; !ok && e.m != "" && base[e.p] != "" { // 기준 가지 실패는 위에서 프로젝트로 알림
-			miss = append(miss, e.n)
+			w := why[e.p+"\t"+e.n]
+			if w == "" {
+				w = "까닭 모름"
+			}
+			miss = append(miss, e.n+"("+w+")")
 		}
 	}
 	if len(miss) > 0 {

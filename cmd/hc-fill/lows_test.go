@@ -89,12 +89,13 @@ func TestLowsAdds(t *testing.T) {
 	}
 }
 
-// 판정 받을 때(aQueued): 통과 + 낮음 n이면 16칸에 lows=n, 낮음 0이나 지적(중간 있음)이면 안 적는다
+// 판정 받을 때(aQueued): 통과 + 낮음 n이면 16칸에 lows=n, 낮음 0이나 지적(중간 있음)이면 안 적는다.
+// 판정 수 hml=<높음>.<중간>.<낮음>은 늘 앞에(다음 차수 감사 틀의 {prev_verdict}, prevround.go)
 func TestLowsVerdictFlag(t *testing.T) {
 	for _, c := range []struct{ msg, want string }{
-		{"높음 0·중간 0·낮음 3", "lows=3"},
-		{"높음 0·중간 0·낮음 0", "-"},
-		{"높음 0·중간 1·낮음 2", "-"},
+		{"높음 0·중간 0·낮음 3", "hml=0.0.3,lows=3"},
+		{"높음 0·중간 0·낮음 0", "hml=0.0.0"},
+		{"높음 0·중간 1·낮음 2", "hml=0.1.2"},
 	} {
 		lowsSetup(t, "w1", "-", "auto", "-")
 		lowsW(t, AT, strings.Join([]string{"a1", "w1", "1", "w1@1700000000000", auTSha, "m", "m/w1", "queued", "0", "-", "0", "0", "-", "-", "0", "-", "-"}, "\t")+"\n")

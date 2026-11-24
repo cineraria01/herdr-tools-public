@@ -50,6 +50,8 @@ lane.wait_procs    shell-snapshots
 # hc-lane watch(레인을 띄울 때 저절로 뜨는 감시): 바퀴 초, 이 지휘의 레인·새 사건 없이 이만큼(분) 지나면 끝남
 lane.watch_tick    30
 lane.watch_idle    60
+# 그 지휘 레인의 마지막 report가 제출·주차(결과를 기다림)면 한가로 세지 않는 상한(시간, 0이면 늘 셈)
+lane.watch_open_max 12
 # 지휘가 질문·권한 창을 띄운 동안 보내지 않는 상한(분, 0이면 막지 않음)과 status 없는 지휘 화면에서 창으로 보는 글자(ERE)
 lane.watch_hold_max 30
 lane.watch_dialog  Tab/Arrow keys to navigate|Chat about this|Type something|Do you want to proceed\?|Would you like to proceed\?|tell Claude what to do differently

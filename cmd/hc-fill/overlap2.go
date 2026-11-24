@@ -232,45 +232,14 @@ func tmap(n string) string {
 // owners <후보> <프로젝트>: 같은 프로젝트의 쓰기 소유 레인 가운데 자기 아니고 이 후보를 (--after 사슬·--then을 건너서라도) 기다리지 않는 것
 // 「레인<TAB>겹침칸」
 func owners(c, p string) []Row {
-	A, T := map[string]string{}, map[string]string{}
-	for _, r := range QEDGES {
-		if r.NF() >= 2 {
-			A[r.F(1)] += r.F(2)
-		}
-	}
-	for _, r := range THENMAP {
-		if r.NF() >= 2 {
-			T[r.F(1)] = r.F(2)
-		}
-	}
+	A, T := qGraph()
 	var R []Row
 	for _, r := range OREC {
 		if r.NF() >= 7 {
-			A[r.F(1)] += r.F(7)
 			R = append(R, Row{r.F(1), r.F(2), r.F(8)})
 		}
 	}
-	waits := func(o string) bool {
-		q, seen := []string{o}, map[string]bool{o: true}
-		for h := 0; h < len(q); h++ {
-			for _, k := range strings.Split(A[q[h]], ",") {
-				if k == "" || k == "-" {
-					continue
-				}
-				if t, ok := T[k]; ok {
-					k = t
-				}
-				if k == c {
-					return true
-				}
-				if !seen[k] {
-					seen[k] = true
-					q = append(q, k)
-				}
-			}
-		}
-		return false
-	}
+	waits := func(o string) bool { return reach(A, T, o)[c] }
 	S := map[string]bool{}
 	var out []Row
 	for _, f := range R {
@@ -323,7 +292,7 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 		return true
 	}
 	OVKEYS = candKeys(p, name, brief)
-	ov := ovcmp(ow, OVKEYS)
+	ov := chainCut(name, ovcmp(ow, OVKEYS)) // 먼저 띄움이면 자기 선행 사슬의 예약은 세지 않는다(overlap_early.go)
 	if len(ov) == 0 {
 		return true
 	}

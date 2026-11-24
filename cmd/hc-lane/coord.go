@@ -352,6 +352,14 @@ func coordCmd(a []string) int {
 		}
 		return rc
 	}
+	if len(a) > 0 && a[0] == "--watch" {
+		if len(a) < 2 || a[1] == "" || strings.HasPrefix(a[1], "-") || !onlyChars(a[1], alnum+"_./-") {
+			fmt.Fprintln(os.Stderr, "hc-lane coord --watch: 지휘 주소를 준다")
+			return 2
+		}
+		startSetup()
+		return watchFor(a[1])
+	}
 	cad, why, rc := coordDefault()
 	if rc == 0 {
 		fmt.Println(cad)

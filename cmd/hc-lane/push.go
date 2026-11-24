@@ -364,9 +364,11 @@ func (e *ev) wcheck() bool {
 	}
 	e.wu0, e.wuLogged = 0, false
 	if c != 0 {
-		l := fmt.Sprintf("%s hc-lane watch: 지휘 없음 %s — %s. 보내지 않고 끝낸다(사건은 events에 남음, 지휘가 wait/watch를 걸면 받음)", utcNow(), e.wto, why)
-		fmt.Fprintln(os.Stderr, l)
-		_ = appendLines(e.ed+"/watch.log", l) // 알림 기록일 뿐
+		w := "지휘 없음"
+		if strings.Contains(why, "에이전트") {
+			w = "에이전트 없음"
+		}
+		e.wend(w, fmt.Sprintf("지휘 없음 %s — %s. 보내지 않고 끝낸다(사건은 events에 남음, 지휘가 wait/watch를 걸면 받음)", e.wto, why))
 		exit(0)
 	}
 	return true
@@ -434,9 +436,9 @@ func (e *ev) reexecIfNew() {
 		e.selfNew = st // 처음 본 바뀜 — 다음 바퀴에도 같으면 다 쓰인 것
 		return
 	}
-	fmt.Fprintf(os.Stderr, "hc-lane watch: %s 새 판이 깔렸다 — 새 판으로 이어 돈다\n", e.self)
+	e.wlog(fmt.Sprintf("넘겨줌 %s 새 판이 깔렸다 — 새 판으로 이어 돈다", e.self)) // 정상 동작이라 운영 기록에는 안 남긴다(감사 낮음 1)
 	err = reexec(e.self, os.Args, os.Environ())
-	fmt.Fprintf(os.Stderr, "hc-lane watch: 새 판으로 exec 실패(%v) — 이 판으로 계속\n", err)
+	e.wlog(fmt.Sprintf("새 판으로 exec 실패(%v) — 이 판으로 계속", err))
 	e.selfSt, e.selfNew = st, nil
 }
 

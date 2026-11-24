@@ -223,7 +223,7 @@ func lsCmd(args []string) {
 		}
 		switch early {
 		case "early":
-			note = "먼저 띄움(" + ew + ")" + strings.TrimPrefix(note, "선행 "+after)
+			note = "먼저 띄움(" + ew + ")" + earlyChainNote(name, f[16]) + strings.TrimPrefix(note, "선행 "+after)
 		case "no-early":
 			note += " 먼저 띄움 끔"
 		case "parked":

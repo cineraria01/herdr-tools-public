@@ -6,7 +6,7 @@
   쉼 = 주기 − 바퀴에 든 시간, 바퀴가 주기를 넘기면 설정 `rest_min`(기본 5초)만 쉰다.
 - 바퀴 계측: 바퀴 끝마다 로그 한 줄 `바퀴 계측: <걸린 초> · 가장 긴 단계 <이름> <초> · 바깥 명령 <n>번 · 단계 <이름>=<ms>/<명령 수>,… · 명령 <hc get 등>=<횟수>,…`을 찍고 `<DATA>/tick.tsv`(`<끝 초>\t<ms>\t<단계>\t<명령>`, 최근 50바퀴)에 남긴다.
   `hc-fill status` 표 끝에 마지막 바퀴와 최근 바퀴들 중앙값이 보인다 — 느려지면 가장 긴 단계와 명령 횟수부터 본다.
-  단계 이름: migrate inbox merger specverifiers onland conf tables prune events park reply audit lows stall reland order seats owners launch early ownfinish after idle gc.
+  단계 이름: migrate inbox merger specverifiers onland conf tables prune events park reply audit lows stall reland order seats owners launch early ownfinish watchown after idle gc.
 - 끝난 떠 있음 줄: 이번 바퀴 터미널 표(`hc ls`, 목록 앞뒤로 연결이던 기계)에 주소가 없는 레인은 띄우기 전까지 `hc get` 없이 끝남으로 읽는다(`alive`의 「없음」과 같은 근거).
   옛 판은 끝난 떠 있음 줄마다 사건·멈춤 단계가 `hc get`을 한 번씩 불러 줄 수에 비례해 느려졌다(줄 200개에 433번 → 43번, 살아 있는 터미널 5개 시험 틀).
 - 한 바퀴: 대기 레인을 우선순위 높은 것부터, 같으면 기다리는 줄이 많은 것(아래 「선행 사슬」), 그다음 넣은 차례대로 본다.

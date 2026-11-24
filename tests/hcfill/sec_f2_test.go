@@ -274,8 +274,14 @@ func secF2(k *K) {
 	k.lj("box-1/o1:claude-code:o1")
 	k.fOadd("a1", "파일: bin/tool", "--after", "o1", "--only", "slow")
 	k.fOadd("a2", "파일: bin/tool", "--after", "pz", "--only", "box-2")
+	k.fOadd("a3", "파일: bin/tool", "--after", "o1", "--no-early")
 	k.run("run")
-	k.check("겹침+먼저 띄움: 선행(--after)이 떠 있으면 그 선행 예약도 막음(선행이 먼저 — 아스트라 높음 1), 다른 소유 레인과도", k.fWait("a1") && k.fWait("a2") && strings.Contains(k.out, "겹침 대기 a1: o1") && strings.Contains(k.out, "겹침 대기 a2: o1"))
+	// early-own-chain(2026-11-24 지휘): 자기 선행 사슬의 예약은 먼저 띄움을 막지 않는다(착지 뒤 rebase) — 사슬 밖 소유 레인과는 그대로 겹침 대기
+	k.check("겹침+먼저 띄움: 자기 선행(--after) 예약과 겹쳐도 먼저 띄움, 사슬 밖 소유 레인과의 겹침은 대기, --no-early는 그대로 안 뜸",
+		k.up("a1") && k.col14("a1") == "early" && strings.Contains(k.out, "먼저 띄움 선행 겹침 a1: o1 (bin/tool)") &&
+			k.fWait("a2") && strings.Contains(k.out, "겹침 대기 a2: o1") && k.fWait("a3") && k.col14("a3") == "no-early", k.out)
+	k.run("ls")
+	k.check("겹침+먼저 띄움 ls: 비고에 「선행 예약과 겹침(<선행>: <키> — 착지 뒤 rebase)」", strings.Contains(k.fLrl("a1"), "선행 예약과 겹침(o1: bin/tool — 착지 뒤 rebase)"), k.fLrl("a1"))
 	k.fOfresh("block")
 	k.fOadd("e1", "파일: bin/tool", "--after", "p9", "--only", "slow")
 	k.run("run")

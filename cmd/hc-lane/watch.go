@@ -226,50 +226,6 @@ func has(list []string, w string) bool {
 	return false
 }
 
-// pick: --all이면 hc machine ls에서 연결된 기계를 ems에, 아닌 기계를 unk에. --on으로 준 기계는 늘 ems에
-func (e *ev) pick() {
-	e.ems, e.unk, e.pbad = append([]string(nil), e.ons...), nil, false
-	if !e.all {
-		return
-	}
-	js, rc := hcRun(0, errDrop, "machine", "ls", "--json")
-	ms, err := hcjson.ParseMachines([]byte(js))
-	if rc != 0 || err != nil {
-		fmt.Fprintf(os.Stderr, "hc-lane %s: hc machine ls 실패 — 이 기계만 본다\n", e.ec)
-		e.pbad = true
-		return
-	}
-	for _, m := range ms {
-		if has(e.ems, m.Name) {
-			continue
-		}
-		if m.State == "connected" {
-			e.ems = append(e.ems, m.Name)
-		} else {
-			e.unk = append(e.unk, m.Name)
-		}
-	}
-}
-
-// evrd: 원격에서 도는 사건 읽기(셸 판과 같은 글 — 원격 기계는 sh로 돈다)
-const evrd = `f=${XDG_STATE_HOME:-$HOME/.local/state}/hc-lane/events.tsv; [ -f "$f" ] || exit 0; if [ "$1" = 0 ]; then cat "$f"; else tail -n "$1" "$f"; fi`
-
-// nosh: 그 기계가 프로그램을 띄우지 못함(spawn_failed + 「cannot start」)
-func nosh(s string) bool {
-	return strings.Contains(s, `"spawn_failed"`) && strings.Contains(s, "cannot start ")
-}
-
-// rexec: hc exec --on(60초). 실패했는데 nosh면 종료 9
-func rexec(m string, args ...string) (string, int) {
-	var eb strings.Builder
-	a := append([]string{"exec", "--on", m, "--timeout", "60", "--"}, args...)
-	out, rc := captErr(90, &eb, "hc", a...) // --timeout 60은 원격 명령의 상한 — hc 자신이 멈춰도 끝나게(gofix M4)
-	if rc != 0 && nosh(eb.String()) {
-		rc = 9
-	}
-	return out, rc
-}
-
 func nf7(l string) bool { return l != "" && strings.Count(l, tab) >= 6 }
 
 // 바퀴 창: 새 사건 후보는 기계마다 끝 evWin줄, 그 앞 evCtx줄은 판정 문맥(마지막 report)으로만 — 착지가 창 밖으로 빠진
@@ -458,7 +414,7 @@ func (e *ev) loop(to int64) int {
 			} else if st == 1 {
 				gone++
 				if gone >= 3 {
-					fmt.Fprintf(os.Stderr, "hc-lane watch: 지휘 터미널 %s 사라짐(hc get %d바퀴 없음·끝남) — 끝낸다\n", e.wto, gone)
+					e.wend("지휘 사라짐", fmt.Sprintf("지휘 터미널 %s 사라짐(hc get %d바퀴 없음·끝남) — 끝낸다", e.wto, gone))
 					return 0
 				}
 				wsleep()
@@ -546,8 +502,11 @@ func (e *ev) loop(to int64) int {
 			fmt.Fprintf(os.Stderr, "hc-lane wait: %d분 동안 새 사건 없음\n", to)
 			return 75
 		}
+		if e.ec == "watch" && now()-idle0 >= atoi(widle) && e.openHold(append(append([]string(nil), ctx...), evl...), now()) {
+			idle0 = now()
+		}
 		if e.ec == "watch" && now()-idle0 >= atoi(widle) {
-			fmt.Fprintf(os.Stderr, "hc-lane watch: %s 의 살아 있는 레인·새 사건 없이 %d분 — 끝낸다\n", e.wto, atoi(widle)/60)
+			e.wend("한가", fmt.Sprintf("%s 의 살아 있는 레인·결과 기다리는 제출·주차·새 사건 없이 %d분 — 끝낸다", e.wto, atoi(widle)/60))
 			return 0
 		}
 		wsleep()
@@ -559,31 +518,6 @@ func orDefault(s, d string) string {
 		return d
 	}
 	return s
-}
-
-// myLaneLive: 이 지휘의 살아 있는 레인(parent가 --to, 모르면 이 지휘 것으로 침)이 있나
-func (e *ev) myLaneLive() bool {
-	for _, t := range e.tls.Terminals {
-		if t.State == "live" && (t.Parent == "" || t.Parent == e.wto || strings.HasSuffix(t.Parent, "/"+e.wto)) {
-			return true
-		}
-	}
-	return false
-}
-
-// fillq: hc-fill 대기열에 아직 안 띄운 요청(wait)이 있으면 참
-func fillq() bool {
-	d := os.Getenv("HC_FILL_DATA")
-	if d == "" {
-		d = os.Getenv("HOME") + "/.local/share/hc-fill"
-	}
-	ls, _ := readLines(d + "/queue.tsv")
-	for _, l := range ls {
-		if fld(strings.Split(l, tab), 6) == "wait" {
-			return true
-		}
-	}
-	return false
 }
 
 // lkinds: 레인 기록에서 (주소 끝의 t…, 레인) → 종류(넷째 칸 read·fill만)

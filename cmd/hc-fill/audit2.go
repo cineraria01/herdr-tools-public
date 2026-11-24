@@ -122,12 +122,14 @@ func aQueued() {
 		return
 	}
 	h, md, lw := mm[1], mm[2], mm[3]
+	hml := "hml=" + h + "." + md + "." + lw // 다음 차수 감사 틀의 {prev_verdict}(prevround.go)
 	switch {
 	case strings.Trim(h+md, "0") == "":
 		auAv = "pass"
 	case atoi10(auAfx) < AMAX:
 		auAv, auAfx = "fix", strconv.Itoa(atoi10(auAfx)+1)
 	default:
+		aupd(auAid, "16", addFlag(auAfl, hml))
 		aEsc(auAid, "limit", fmt.Sprintf("%s 감사 %s번째 높음 %s·중간 %s — 지휘 판단 (지적 %s번, 상한 audit_max %d, %s @%s %s)", auLn, auRnd, h, md, auAfx, AMAX, auAn, qm, rep))
 		return
 	}
@@ -135,6 +137,7 @@ func aQueued() {
 		fmt.Println(P + "넘길 판정 " + auAn + " → " + auLn + " " + auPa + " (" + auAv + ", 높음 " + h + "·중간 " + md + "·낮음 " + lw + ")")
 		return
 	}
+	auAfl = addFlag(auAfl, hml)
 	if auAv == "pass" && atoi10(lw) > 0 { // 낮음 후속(lows.go lowsTick)
 		auAfl = addFlag(auAfl, "lows="+strconv.Itoa(atoi10(lw)))
 	}

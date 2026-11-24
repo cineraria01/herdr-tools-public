@@ -109,29 +109,37 @@ func autoWatch() {
 	if co == "" {
 		return
 	}
+	watchFor(co)
+}
+
+// watchFor: 그 지휘(지휘 확인·에이전트 확인을 통과한 것만)의 watch가 돌고 있지 않으면 이 기계에 띄운다 — autoWatch와
+// hc-lane coord --watch(hc-fill 바퀴). 0 돈다·띄움, 1 지휘 없음(띄우지 않음), 2 지휘 모름, 3 띄우기 실패
+func watchFor(co string) int {
+	wk := ckey(co)
+	// 돌고 있으면 지휘 확인(hc get) 없이 — 돌고 있는 watch는 바퀴마다 스스로 지휘 확인을 한다(hc-fill이 바퀴마다 부른다, 감사 낮음 2)
+	if _, alive := watchAlive(evdir() + "/watch." + wk); alive {
+		return 0
+	}
 	if _, why, r := coordCheck(co); r != 0 {
 		errf("hc-lane: 지휘 없음 — %s. 감시(watch)를 띄우지 않음(사건은 events에 남는다)\n", why)
-		return
+		return r
 	}
-	wk := ckey(co)
 	wn := strings.ToLower(wk)
 	if len(wn) > 21 {
 		wn = wn[:21]
 	}
 	wn = "lane-watch-" + wn
-	if _, alive := watchAlive(evdir() + "/watch." + wk); alive {
-		return
-	}
 	home := os.Getenv("HOME")
 	if dry {
 		fmt.Printf("[dry-run] hc run --bg --no-notify --rm --name %s --label hc-lane-watch=1 --cwd %s %s watch --all --to %s\n", wn, q(home), q(selfPath), co)
-		return
+		return 0
 	}
 	if proc.Run(exec.Command("hc", "run", "--bg", "--json", "--no-notify", "--rm", "--name", wn, "--label", "hc-lane-watch=1", "--cwd", home, selfPath, "watch", "--all", "--to", co)) == nil {
 		fmt.Printf("hc-lane: 감시 %s 띄움(지휘 %s 에게 레인 사건을 hc send로 밀어 줌)\n", wn, co)
-	} else {
-		errf("hc-lane: 감시 %s 를 띄우지 못했다(이미 그 이름이 살아 있으면 괜찮다) — 지휘는 hc-lane wait --all로 볼 것\n", wn)
+		return 0
 	}
+	errf("hc-lane: 감시 %s 를 띄우지 못했다(이미 그 이름이 살아 있으면 괜찮다) — 지휘는 hc-lane wait --all로 볼 것\n", wn)
+	return 3
 }
 
 func sleepPoll() { sleepFor(poll) }

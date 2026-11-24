@@ -421,6 +421,10 @@ func abrief(aid, lane, m, sha40, p string) bool {
 	t = strings.ReplaceAll(t, "{base}", branch)
 	t = strings.ReplaceAll(t, "{brief}", "~/.local/share/hc-fill/runs/"+lane+"-run.md")
 	t = strings.ReplaceAll(t, "{report}", "~/.local/share/hc-fill/reports/audit-"+aid+".md")
+	if t, ok = aprevFill(t, aid, lane, m); !ok {
+		fmt.Println("자동 감사 미룸 " + lane + ": " + m + " 에서 지휘 지시 파일을 확인하지 못했다")
+		return false
+	}
 	if os.MkdirAll(filepath.Dir(bf), 0o755) != nil || writeAtomic(bf, t+"\n") != nil {
 		fmt.Println("자동 감사 못 함 " + lane + ": 감사 지시문을 쓰지 못함 " + bf)
 		return false

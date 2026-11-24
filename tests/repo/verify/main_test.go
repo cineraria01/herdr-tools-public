@@ -43,6 +43,13 @@ func TestMain(m *testing.M) {
 	}
 	// 시험의 verify()는 진짜 hdiutil·diskutil을 부르지 않는다 — 메모리 디스크 시험(ramtmp_test.go)은 가짜 명령을 PATH 앞에 두고 켠다
 	os.Setenv("HERDR_VERIFY_RAMTMP", "0")
+	// 범위 지문은 끄고, 통과 기록은 진짜 사용자 캐시가 아니라 임시 폴더에 — 범위 시험(scope_run_test.go)이 켠다
+	os.Setenv("HERDR_VERIFY_SCOPE", "off")
+	cache, err := os.MkdirTemp("", "verify-scope-cache.")
+	if err != nil {
+		os.Exit(1)
+	}
+	scopeCache = func() string { return cache }
 	os.Exit(m.Run())
 }
 
@@ -214,8 +221,8 @@ func TestPlan(t *testing.T) {
 		return rc, string(o), string(l)
 	}
 	rc, out, calls := run()
-	want := "vet ./...\ntest -count=1 ./tests/repo/\n" +
-		"test -race -count=1 -timeout 40m -run ^TestCotenantGuard$ ./claude/hooks/tests/\nlist ./...\n"
+	want := "vet ./...\ntest -count=1 ./tests/repo/\nlist ./...\n" + // go list는 범위 판정(scope.go)이 cotenant 단계 앞에서 쓴다
+		"test -race -count=1 -timeout 40m -run ^TestCotenantGuard$ ./claude/hooks/tests/\n"
 	p := strconv.Itoa(max(1, runtime.NumCPU()/3))
 	shardsWant := []string{ // 조각은 함께 돌아 차례가 없다
 		"test -race -count=1 -timeout 40m -p " + p + " -skip ^TestCotenantGuard$ herdr-tools/a herdr-tools/b",
@@ -264,7 +271,7 @@ func TestPlan(t *testing.T) {
 	}
 	t.Setenv("FAKE_LIST_RC", "1")
 	rc, out, calls = run()
-	if rc != 0 || !strings.HasSuffix(calls, "list ./...\ntest -race -count=1 -timeout 40m -skip ^TestCotenantGuard$ ./...\n") || !strings.Contains(out, "알림 go list 실패") {
+	if rc != 0 || !strings.HasSuffix(calls, "list ./...\n"+strings.Split(want, "\n")[3]+"\ntest -race -count=1 -timeout 40m -skip ^TestCotenantGuard$ ./...\n") || !strings.Contains(out, "알림 go list 실패") {
 		t.Errorf("go list 실패: 옛 꼴 한 번이어야 rc=%d\n%s\n%s", rc, calls, out)
 	}
 	t.Setenv("FAKE_LIST_RC", "0")

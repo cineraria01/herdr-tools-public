@@ -124,6 +124,10 @@ type shard struct {
 	env  []string
 	est  int
 	w    int
+	// 범위(scope.go): skip이면 띄우지 않고 「건너뜀」 한 줄, note는 띄우는 줄에 덧붙임, done은 끝난 뒤(고아 검사까지 본 종료 코드)
+	skip bool
+	note string
+	done func(label string, rc, secs int)
 }
 
 func main() {
@@ -312,7 +316,22 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		fmt.Fprintln(w, "실패 싼 검사 — 무거운 시험을 건너뛰고 끝 (끝까지 돌리려면 HERDR_VERIFY_ALL=1)")
 		return 1
 	}
-	if os.Getenv("HERDR_VERIFY_NO_LOCK") != "1" {
+	var sh []shard
+	if pkgs, err := goList(root); err != nil {
+		fmt.Fprintf(w, "알림 go list 실패(%v) — 조각 없이 한 번에 돈다\n", err)
+		sh = []shard{{argv: append(append(append([]string{}, base...), "-skip", cotenant), "./...")}}
+	} else {
+		sh = shards(root, pkgs, base, splits, n)
+	}
+	// 범위(scope.go): 0번은 홀로 도는 cotenant 단계, 그 뒤는 조각
+	sc := scopePlan(root, append([]shard{{argv: alone}}, sh...), w)
+	runAny := !sc.skip[0]
+	for i := range sh {
+		sh[i].skip, sh[i].note = sc.skip[i+1], sc.note(i+1)
+		sh[i].done = func(label string, rc, secs int) { sc.done(i+1, label, rc, secs, w) }
+		runAny = runAny || !sh[i].skip
+	}
+	if runAny && os.Getenv("HERDR_VERIFY_NO_LOCK") != "1" {
 		tw := time.Now()
 		release, rc := verifyLock(lockPath(), lockLimit, stop, w)
 		if rc >= 128 {
@@ -321,26 +340,32 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		defer release()
 		t0 = t0.Add(time.Since(tw)) // 검증 시간에서 잠금 기다림은 뺀다(기다림은 따로 한 줄)
 	}
-	rc := runStep(root, alone, stop, w)
-	if rc >= 128 {
-		return rc
-	}
-	fail = fail || rc != 0
-	ram := ramSetup(w) // 조각들의 TMPDIR(ramtmp.go). 못 만들면 nil — 보통 임시 폴더로 그대로
-	defer ram.teardown(w)
-	var sh []shard
-	if pkgs, err := goList(root); err != nil {
-		fmt.Fprintf(w, "알림 go list 실패(%v) — 조각 없이 한 번에 돈다\n", err)
-		sh = []shard{{argv: append(append(append([]string{}, base...), "-skip", cotenant), "./...")}}
+	if aloneLabel := "[홀로] " + strings.Join(alone, " "); sc.skip[0] {
+		fmt.Fprintf(w, "건너뜀 %s — 입력이 통과 기록과 같음\n", aloneLabel)
 	} else {
-		sh = shards(root, pkgs, base, splits, n)
+		if s := sc.note(0); s != "" {
+			fmt.Fprintf(w, "%s%s\n", aloneLabel, s)
+		}
+		ta := time.Now()
+		rc := runStep(root, alone, stop, w)
+		if rc >= 128 {
+			return rc
+		}
+		fail = fail || rc != 0
+		sc.done(0, aloneLabel, rc, int(time.Since(ta).Seconds()), w)
 	}
-	rc = runShards(root, sh, ram.env(), n, stop, w)
+	var ram *ramDisk
+	if runAny {
+		ram = ramSetup(w) // 조각들의 TMPDIR(ramtmp.go). 못 만들면 nil — 보통 임시 폴더로 그대로
+	}
+	defer ram.teardown(w)
+	rc := runShards(root, sh, ram.env(), n, stop, w)
 	if rc >= 128 {
 		return rc
 	}
 	fail = fail || rc != 0
 	ram.teardown(w)
+	sc.finish(w)
 	fmt.Fprintf(w, "검증 시간 %d초 — %s\n", int(time.Since(t0).Seconds()), map[bool]string{false: "통과", true: "실패"}[fail])
 	if !fail {
 		markPassed(root, tree0, w)
@@ -569,13 +594,17 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 				continue
 			}
 			wait = append(wait[:k], wait[k+1:]...)
+			if sh[i].skip {
+				fmt.Fprintf(w, "건너뜀 %s — 입력이 통과 기록과 같음\n", label(i))
+				continue
+			}
 			f, err := os.Create(filepath.Join(d, strconv.Itoa(i)))
 			if err != nil {
 				fmt.Fprintf(w, "실패 조각 출력 파일: %v\n", err)
 				fail = true
 				continue
 			}
-			fmt.Fprintf(w, "== %s\n", label(i))
+			fmt.Fprintf(w, "== %s%s\n", label(i), sh[i].note)
 			c, err := start(root, sh[i].argv, append(sh[i].env[:len(sh[i].env):len(sh[i].env)], common...), f)
 			if err != nil {
 				fmt.Fprintf(w, "실패 %s: %v\n", label(i), err)
@@ -596,11 +625,15 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 			delete(running, e.i)
 			used -= seat(e.i)
 			rc := exitCode(e.err, w, label(e.i))
-			fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d\n", label(e.i), int(time.Since(t0s[e.i]).Seconds()), rc)
+			secs := int(time.Since(t0s[e.i]).Seconds())
+			fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d\n", label(e.i), secs, rc)
 			dump(outs[e.i], w)
 			// 그 무리는 끝나자마자 본다 — 다 끝난 뒤면 pid가 한 바퀴 돌아 남의 새 무리를 끌 수 있다(검증 한 번에 프로세스 수만 개)
 			rc = checkOrphans(root, []int{pg}, nil, rc, label(e.i), w)
 			fail = fail || rc != 0
+			if sh[e.i].done != nil {
+				sh[e.i].done(label(e.i), rc, secs)
+			}
 		case s := <-stop:
 			var live []int
 			for _, pg := range running {

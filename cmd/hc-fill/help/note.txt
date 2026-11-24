@@ -1,0 +1,2 @@
+  note   지휘 지시를 레인 기계 ~/.local/share/hc-fill/verdicts/<레인>/coord-notes.md에 덧붙이고(시각 머리 줄과 함께) 그 레인에 hc send로도
+         보낸다. 다음 감사 지시문이 감사 틀 {coord_notes}로 그 경로를 받는다. 셋째 인자가 파일이면 그 내용. 떠 있지 않은 레인은 종료 1
