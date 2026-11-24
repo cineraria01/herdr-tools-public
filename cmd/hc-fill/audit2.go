@@ -245,6 +245,7 @@ func aDeliver() {
 		return
 	}
 	mark := F1(strings.Fields(vo), 1)
+	asNote = ""
 	switch mark {
 	case "taken", "landing":
 		aupd(auAid, "8", "taken")
@@ -254,6 +255,19 @@ func aDeliver() {
 	case "void":
 		aupd(auAid, "8", "superseded")
 		return
+	case "landing+fill": // 대기열이 시작한 제출이 끝나지 않았다(앞 바퀴가 도중에 죽음) — 에이전트에 넘기고 바로 깨운다(autosubmit.go)
+		if F1(strings.Fields(vo), 2) == "yes" { // 끝 표시(.done)가 있다 — 그 land는 끝났다(report 착지는 했는지 모름)
+			asDone("앞 바퀴의 대기열 제출이 끝 표시를 남겼다", "?")
+			return
+		}
+		if !asHand() {
+			return
+		}
+		asNote = "대기열이 시작한 제출이 끝나지 않았다(앞 바퀴) — 에이전트에 넘김"
+	case "none":
+		if aAutoSubmit(branch) {
+			return
+		}
 	}
 	now := nowUnix()
 	awt := int64(atoi10(auAwt))
@@ -270,10 +284,14 @@ func aDeliver() {
 	if isDigits(auAlw) {
 		alw = int64(atoi10(auAlw))
 	}
-	if now-alw >= int64(WAKE*60) {
+	if now-alw >= int64(WAKE*60) || asNote != "" {
+		wn := ""
+		if asNote != "" {
+			wn = " — " + asNote
+		}
 		if !lalive(auPa, auLn) {
 			fmt.Println("깨우기 미룸 " + auAn + ": 레인 터미널 " + auPa + " 이 이 바퀴 목록에 없다")
-		} else if auSend(auPa, "hc-fill: 감사 판정이 왔다 — 이 작업 트리에서 hc-lane verdict "+auAid+" 를 돌리고 그 출력대로 한다 (판정 "+auAid+")") {
+		} else if auSend(auPa, "hc-fill: 감사 판정이 왔다 — 이 작업 트리에서 hc-lane verdict "+auAid+" 를 돌리고 그 출력대로 한다 (판정 "+auAid+")"+wn) {
 			k := strconv.Itoa(atoi10(auAwk) + 1)
 			aupd(auAid, "11", k, "14", strconv.FormatInt(now, 10))
 			fmt.Println("깨움 " + auLn + " " + auPa + " — 판정 " + auAid + " (" + auAv + ", " + k + "번째)")

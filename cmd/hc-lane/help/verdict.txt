@@ -2,4 +2,5 @@
   verdict       그 판정 하나를 연다. 이 레인 실행(<터미널>@<created_ms>, $HC_LANE_JOB을 주면 그 값)의 판정이고 HEAD가 승인 커밋일 때:
                 통과는 착지 줄(hc-lane land <기본> --verdict <ID>)만 찍고(착지가 시작 표시를 남긴다), 지적은 <ID>.ack에 taken을 한 번
                 남기고 고칠 일을 찍는다. HEAD가 다르면 아무것도 안 쓰고 「지금 커밋으로 report 완료」. 다른 실행의 판정은 손대지 않는다(종료 1).
-                취소된(void) 판정은 아무것도 안 함. hc get·git 실패는 아무것도 안 쓰고 종료 75(다시 부른다)
+                취소된(void) 판정은 아무것도 안 함. hc get·git 실패는 아무것도 안 쓰고 종료 75(다시 부른다).
+                대기열(hc-fill)이 레인 대신 시작한 착지(시작 표시 다섯째 칸 fill — HC_LANE_LAND_BY=fill)면 아무것도 안 한다(land --verdict도 같다)

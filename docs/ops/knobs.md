@@ -31,6 +31,7 @@
   - hc-fill: 표의 이름이 설정 키와 같으면 `conf(<키>)`가 손잡이를 먼저 본다 — 읽는 코드는 그대로다.
   - 다른 기계의 도구: `knob.ReadRemote`(아래)로 읽고 `Remote.Get(<이름>)`.
 - 지금 표(본보기, 모두 hc-fill 설정 키): `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
+- 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
 
 ## 무엇이 손잡이가 아닌가
 

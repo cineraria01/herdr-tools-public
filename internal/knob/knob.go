@@ -25,6 +25,7 @@ type Def struct {
 	Default  string   // 설정에도 없을 때 도구가 쓰는 값(표시용 — 도구 코드의 기본과 같게)
 	Min, Max int64    // 정수 범위(닫힌 구간)
 	Enum     []string // 낱말 값
+	List     bool     // 쉼표로 나눈 이름 목록(글자 a-zA-Z0-9_.-), 「-」 = 비움
 	Unit     string   // 단위(분·시간 등, 표시용)
 	Remote   bool     // 다른 기계의 도구가 읽음 — 원격 참조 Ref에 싣는다
 	Desc     string
@@ -38,6 +39,8 @@ var Defs = []Def{
 	{Name: "wake_every", Tool: "hc-fill", Default: "10", Min: 1, Max: 240, Unit: "분", Desc: "감사 판정 수거 깨우기 간격"},
 	{Name: "ack_max", Tool: "hc-fill", Default: "30", Min: 1, Max: 1440, Unit: "분", Desc: "판정 수거 기다림 상한(넘으면 주인 지휘에 한 번)"},
 	{Name: "early_wait", Tool: "hc-fill", Default: "5", Min: 1, Max: 48, Unit: "시간", Desc: "먼저 띄운 레인이 선행을 기다리는 기한"},
+	{Name: "auto_submit", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "감사 통과 뒤 쉬는 레인 대신 대기열이 제출할 프로젝트(쉼표, - = 끔)"},
+	{Name: "auto_submit_max", Tool: "hc-fill", Default: "120", Min: 10, Max: 600, Unit: "초", Desc: "대기열 제출 한 번의 시간 상한(넘으면 에이전트에 넘김)"},
 }
 
 // Find: 표에서 이름으로
@@ -55,11 +58,25 @@ func (d Def) Range() string {
 	if len(d.Enum) > 0 {
 		return strings.Join(d.Enum, "|")
 	}
+	if d.List {
+		return "-|이름,이름…"
+	}
 	return fmt.Sprintf("%d~%d", d.Min, d.Max)
 }
 
 // Check: 값이 허용 범위인가
 func (d Def) Check(v string) error {
+	if d.List {
+		if v == "-" {
+			return nil
+		}
+		for _, n := range strings.Split(v, ",") {
+			if n == "" || n == "-" || strings.Trim(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
+				return fmt.Errorf("%s 값은 「-」 또는 쉼표로 나눈 이름(a-zA-Z0-9_.-)이다: %q", d.Name, v)
+			}
+		}
+		return nil
+	}
 	if len(d.Enum) > 0 {
 		for _, e := range d.Enum {
 			if v == e {

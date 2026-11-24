@@ -23,8 +23,8 @@ type stIn struct {
 	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
 }
 
-// stStage: 단계 한 마디
-func stStage(in stIn) string {
+// stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
+func stStage0(in stIn) string {
 	switch in.State {
 	case "wait":
 		if in.Early == "parked" {

@@ -305,13 +305,14 @@ func aSendEsc(aid string) {
 	}
 }
 
-// s_vput: VPUT <aid> <sha256> <크기>(표준 입력 = 지시). 찍는 것 「WROTE|ALREADY <표시> <끝>」 · CONFLICT · BADINPUT
+// s_vput: VPUT <aid> <sha256> <크기>(표준 입력 = 지시). 찍는 것 「WROTE|ALREADY <표시> <끝>」 · CONFLICT · BADINPUT.
+// 표시는 첫 칸, 대기열이 시작한 착지(다섯째 칸 fill — autosubmit.go)면 「landing+fill」
 const sVput = `mkdir -p "$d" || exit 1; v=$d/$1.md; x=$d/$1.ack; t=$(mktemp "$d/.put.XXXXXX") || exit 1
 cat >"$t" || { rm -f "$t"; exit 1; }
  hs() { shasum -a 256 "$1" | cut -d " " -f 1; }
 if [ "$(wc -c <"$t" | tr -d " ")" != "$3" ] || [ "$(hs "$t")" != "$2" ]; then rm -f "$t"; echo BADINPUT; exit 0; fi
 if ln "$t" "$v" 2>/dev/null; then r=WROTE; elif [ -f "$v" ] && [ "$(hs "$v")" = "$2" ]; then r=ALREADY; else rm -f "$t"; echo CONFLICT; exit 0; fi
-rm -f "$t"; a=none; [ ! -f "$x" ] || a=$(cut -f 1 "$x" | head -n 1); e=no; [ ! -f "$d/$1.done" ] || e=yes; echo "$r ${a:-none} $e"`
+rm -f "$t"; a=none; [ ! -f "$x" ] || { a=$(cut -f 1 "$x" | head -n 1); [ "$(head -n 1 "$x" | cut -s -f 5)" != fill ] || a=$a+fill; }; e=no; [ ! -f "$d/$1.done" ] || e=yes; echo "$r ${a:-none} $e"`
 
 // s_vvoid: VVOID <aid> <시각>: 표시 void를 배타 생성 — 이미 있으면 그대로. 찍는 것 = 지금 표시
 const sVvoid = `mkdir -p "$d" || exit 1; x=$d/$1.ack; t=$(mktemp "$d/.void.XXXXXX") || exit 1

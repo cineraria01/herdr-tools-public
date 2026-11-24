@@ -536,11 +536,11 @@ func anote(n string) string {
 	if _, ok := readFile(DATA + "/audit.tsv"); !ok {
 		return "" // 셸 판: awk가 파일을 못 열면 빈 글
 	}
-	var id, r, s, f, v string
+	var id, r, s, f, v, fl string
 	g := false
 	for _, x := range readRows(DATA + "/audit.tsv") {
 		if x.NF() >= 17 && x.F(2) == n {
-			id, r, s, f, v, g = x.F(1), x.F(3), x.F(8), x.F(9), x.F(10), true
+			id, r, s, f, v, fl, g = x.F(1), x.F(3), x.F(8), x.F(9), x.F(10), x.F(16), true
 		} else if x.NF() >= 5 && x.NF() < 17 && x.F(1) == n {
 			r, f, s, g = x.F(3), x.F(4), "old", true
 		}
@@ -562,6 +562,9 @@ func anote(n string) string {
 		}
 		return "감사 지적 " + f + "번째 — 수거 기다림"
 	case s == "taken":
+		if v == "pass" && inlist("asubok", fl) {
+			return asubAud
+		}
 		if v == "pass" {
 			if fin != "" {
 				return "감사 통과 받음(최종 대기)"

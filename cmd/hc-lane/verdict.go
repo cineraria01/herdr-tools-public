@@ -245,7 +245,7 @@ func lverdictStart() {
 		if lpid, ok = lpatch(mb, lvs); !ok {
 			die("land --verdict: 승인 변경의 patch-id를 못 구했다(git 실패) — 착지하지 않았다, 같은 줄을 다시")
 		}
-		if lvmark("landing\t"+utc()+"\t"+lvme+"\t"+lpid) == 2 {
+		if lvmark("landing\t"+utc()+"\t"+lvme+"\t"+lpid+lvByTag()) == 2 {
 			die("land --verdict: 시작 표시를 두지 못했다: %s", lvx)
 		}
 		st = lvstate()
@@ -256,6 +256,7 @@ func lverdictStart() {
 			eprintf("hc-lane land: 판정 %s 착지를 다른 실행이 시작했다 — 착지하지 않았다\n", lvd)
 			exit(2)
 		}
+		lvOwnerGate()
 		if lpid = cutFile(lvx, 4); lpid == "" {
 			die("land --verdict: 시작 표시에 patch-id가 없다: %s", lvx)
 		}

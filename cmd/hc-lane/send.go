@@ -382,6 +382,10 @@ func verdictCmd(a []string) int {
 			fmt.Printf("판정 %s: 이미 착지함(%s)\n", aid, s)
 			return 0
 		}
+		if lvOwner(ackFifth(vd.ack), lvByFill()) == 1 {
+			fmt.Printf("판정 %s: 대기열(hc-fill)이 레인 대신 제출하고 있다 — 아무것도 하지 않는다. 다음 지시를 기다린다\n", aid)
+			return 0
+		}
 		fmt.Printf("판정 %s: 착지를 시작했다 — 같은 착지 줄을 다시: hc-lane land %s --verdict %s\n", aid, vd.b, aid)
 		return 0
 	case "taken":
