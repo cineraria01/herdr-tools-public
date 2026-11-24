@@ -41,6 +41,7 @@
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).
   옛 표식 파일 `<hc-fill 상태 폴더>/merger_dead`·`merger_unknown`·`merger_restart`는 손잡이가 없을 때 그대로 먹고, `knob ls`에 출처 `설정`으로 보인다.
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
+- 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초) — [PR 거울](../hc-fill/pr.md).
 - 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.
 

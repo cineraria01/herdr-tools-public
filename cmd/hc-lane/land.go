@@ -90,6 +90,7 @@ func landCmd() int {
 	}
 	// 이 착지의 인자는 이 착지만 쓴다 — 검증 자식에 물려주지 않는다
 	px, mgx = os.Getenv("HERDR_LAND_PUSH_EXTRA"), os.Getenv("HERDR_MERGER")
+	prHeadsTake() // PR 머리 가지(landprhead.go) — 병합기 안 착지만
 	specTreeTake(mgx == "1")
 	os.Unsetenv("HERDR_LAND_PUSH_EXTRA")
 	os.Unsetenv("HERDR_MERGER")

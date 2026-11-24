@@ -37,6 +37,7 @@
 - 기계 이름 바꾸기: hc가 새 이름을 보인 뒤 `hc-fill machine --rename <옛> <새> --dry-run` → `--why <까닭>`으로 실행 → 출력 「다음:」대로 `hc-fill merger restart <프로젝트>` → 설정 파일 커밋(이 명령은 커밋 안 함). 되돌리기 `hc-fill machine --rename <새> <옛>`
 - 빼기: `hc-fill rm <레인> --why <까닭>` (주차 중이면 `--force`가 있어야 — 준비 커밋을 버린다). 되돌리는 add 한 줄이 일지에 남는다.
 - 병합기 다시 띄우기: `hc-fill merger restart <프로젝트>`
+- PR 거울(레인마다 PR 한 장 — 대기열이 원본, PR은 거울): `hc-fill knob set pr <프로젝트> --why <까닭>` · 끄기 `hc-fill knob unset pr`. PR에서 머지하지 않는다(병합기가 넣으면 Merged). docs/hc-fill/pr.md
 - 조치마다 일지에 「되돌리는 명령」이 남는다 — `hc-fill journal`에서 그대로 부른다.
 
 ## 사건을 받으면
@@ -46,6 +47,7 @@
 - `merger-<프로젝트>`(병합기 없음): `hc-fill status` → `hc-fill merger restart <프로젝트>`.
 - `hc-fill-unreach`(기계 끊김): `hc machine ls`로 보고, 오래면 그 레인을 다른 기계로 다시 띄울지 정한다.
 - `hc-fill-advise`(손댈 것이 생김): `hc-fill advise`로 보고 확신 `확실`은 다음 명령을 그대로, `판단 필요`는 근거를 읽고 정한다.
+- `hc-fill-pr`(PR 거울이 못 씀): `gh auth status`를 보고, 못 고치면 `hc-fill knob set pr - --why <까닭>`. 대기열·병합은 그대로 돈다.
 - 레인 `막힘`: 글의 까닭대로 — 띄우기 거절이면 고치고 `hc-fill retry <레인>`.
 - 사건마다 뜻·흔한 까닭·다음 명령: docs/ops/events.md
 

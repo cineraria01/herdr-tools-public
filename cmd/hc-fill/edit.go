@@ -250,6 +250,7 @@ func rmCmd(args []string) {
 		exit(rc)
 	}
 	say("뺌 %s (떠 있는 터미널은 그대로)", name)
+	prCloseReq(name, "hc-fill rm "+why) // 열린 PR이 있으면 다음 바퀴에 까닭 댓글 뒤 닫는다(pr.go)
 	jot("rm", name, why, "됨", undo, "상태 "+st)
 }
 

@@ -139,6 +139,9 @@ func (m *M) runCandidate() int {
 	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+strings.TrimSpace(ex),
 		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0, "HERDR_SPEC_TREE="+m.stree)
 	c.Env = append(c.Env, m.ownerEnv()...)
+	if h := m.prHeads(); h != "" { // PR 거울의 머리 가지가 있는 구성원만(prhead.go) — 없으면 환경이 전과 같다
+		c.Env = append(c.Env, "HERDR_LAND_PR_HEADS="+h)
+	}
 	// 착지에도 상한(재감사 3바퀴 merger/R-3M07 — 검증·착지 훅이 끝나지 않으면 일꾼·상주가 사건 없이 끝없이 기다렸다). 넘으면 무리째 거두고
 	// 124(모름 — 일시 실패, judge가 원격부터 본다). keep: 이 일꾼이 죽으면 상한을 걸 쪽이 없지만 그 착지는 끝까지 가게 둔다(다음 바퀴가
 	// 기다리다 상한을 넘기면 쉰 바퀴로 센다 — childWait)

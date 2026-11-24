@@ -316,7 +316,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*", knobRef}, specLsPatterns...)...)
+	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*", knobRef, prHeadPat}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true

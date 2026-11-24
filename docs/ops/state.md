@@ -124,6 +124,7 @@
 | `lanes[].last_event` | 마지막 사건 한 줄 |
 | `lanes[].done` | 더 할 일 없음(마지막 사건 정리됨·착지, 터미널 살아 있지 않음) |
 | `lanes[].open` | 터미널이 살아 있음(또는 살았는지 모름) — 끝난 레인으로 치지 않는다 |
+| `lanes[].pr` | PR 거울이 연 PR `PR #n <주소>`([PR 거울](../hc-fill/pr.md)) — PR이 없으면 칸이 없다 |
 | `merge` | 병합 줄(프로젝트마다) |
 | `merge[].project` | 프로젝트 |
 | `merge[].length` | 줄 길이 |

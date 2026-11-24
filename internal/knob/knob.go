@@ -42,6 +42,10 @@ var Defs = []Def{
 	{Name: "early_wait", Tool: "hc-fill", Default: "5", Min: 1, Max: 48, Unit: "시간", Desc: "먼저 띄운 레인이 선행을 기다리는 기한"},
 	{Name: "auto_submit", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "감사 통과 뒤 쉬는 레인 대신 대기열이 제출할 프로젝트(쉼표, - = 끔)"},
 	{Name: "auto_submit_max", Tool: "hc-fill", Default: "120", Min: 10, Max: 600, Unit: "초", Desc: "대기열 제출 한 번의 시간 상한(넘으면 에이전트에 넘김)"},
+	{Name: "pr", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "PR 거울을 켤 프로젝트(쉼표, - = 끔 — docs/hc-fill/pr.md)"},
+	{Name: "pr_max", Tool: "hc-fill", Default: "20", Min: 1, Max: 200, Unit: "번", Desc: "PR 거울의 바퀴당 gh 호출 상한(넘으면 다음 바퀴에)"},
+	{Name: "pr_fail", Tool: "hc-fill", Default: "3", Min: 1, Max: 100, Unit: "바퀴", Desc: "gh 실패가 이만큼 바퀴 이어지면 운영 사건 hc-fill-pr 한 번"},
+	{Name: "pr_timeout", Tool: "hc-fill", Default: "20", Min: 5, Max: 120, Unit: "초", Desc: "PR 거울 gh 호출 하나의 시간 상한"},
 	// 부하 보고 고르기(2026-11-24 fill-load-steer, docs/hc-fill/load-steer.md). 코어당 부하는 ×100 정수(%)
 	{Name: "load_band", Tool: "hc-fill", Default: "25", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 차이가 이 안이면 비슷함 — 설정 machine 차례"},
 	{Name: "load_busy", Tool: "hc-fill", Default: "300", Min: 0, Max: 10000, Unit: "%", Desc: "후보가 모두 코어당 부하 이 값을 넘으면 그 바퀴는 안 띄움(0이면 끔)"},

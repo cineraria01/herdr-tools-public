@@ -276,7 +276,11 @@ func statusCmd(args []string) {
 					break
 				}
 			}
-			fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stStage(in), stEstimate(in.Pos, x.landed)))
+			stage := stStage(in)
+			if pr, _ := prOf(name); pr != "" { // PR 거울(pr.go) — PR이 없으면 줄이 전과 같다
+				stage += " · " + pr
+			}
+			fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, stEstimate(in.Pos, x.landed)))
 			continue
 		}
 		stage := stStage(in)

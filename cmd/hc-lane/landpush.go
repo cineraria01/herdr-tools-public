@@ -34,6 +34,7 @@ func landPush(cand, pu string) int {
 			}
 		}
 	}
+	prHeadsPush(cand) // PR 머리 가지를 기본 가지보다 먼저(landprhead.go) — 실패해도 착지는 그대로
 	land := []string{"HERDR_LAND=1"}
 	push1 := []string{"push"}
 	if ex != "" {

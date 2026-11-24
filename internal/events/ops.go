@@ -27,6 +27,7 @@ const (
 	OpsUnreach   = "hc-fill-unreach"
 	OpsStaleRes  = "hc-stale-resident"
 	OpsAdvise    = "hc-fill-advise"
+	OpsFillPR    = "hc-fill-pr"
 	mergerKeyPre = "hf:merger:" // merger-<프로젝트> 사건의 키 머리 — 진짜 레인 merger-alive 같은 이름과 가르는 것은 이름이 아니라 이것
 )
 
@@ -48,6 +49,7 @@ var Ops = []Op{
 	{OpsUnreach, "hc machine ls"},
 	{OpsStaleRes, "hc-fill state"},
 	{OpsAdvise, "hc-fill advise"},
+	{OpsFillPR, "hc-fill knob ls"},
 }
 
 // OpOf: 레인 칸·키 칸으로 본 운영 사건(종류 칸 없는 옛 줄도). 아니면 false.

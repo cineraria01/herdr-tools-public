@@ -125,8 +125,9 @@ type Lane struct {
 	Stage     string `json:"stage"`
 	StageAgeS *int   `json:"stage_age_s"`
 	LastEvent string `json:"last_event"`
-	Done      bool   `json:"done"` // 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(모으는 쪽이 정한다 — 단계 글과 무관)
-	Open      bool   `json:"open"` // 터미널이 살아 있다(또는 살아 있는지 모른다) — 단계 글이 착지·끝남이어도 끝난 레인이 아니다
+	Done      bool   `json:"done"`         // 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(모으는 쪽이 정한다 — 단계 글과 무관)
+	Open      bool   `json:"open"`         // 터미널이 살아 있다(또는 살아 있는지 모른다) — 단계 글이 착지·끝남이어도 끝난 레인이 아니다
+	PR        string `json:"pr,omitempty"` // PR 거울이 연 PR 「PR #n <주소>」(없으면 칸 없음 — docs/hc-fill/pr.md)
 }
 
 type MergeLine struct {
@@ -390,7 +391,11 @@ func Human(w io.Writer, s State) error {
 	}
 	sec("레인", len(s.Lanes)+hid.Lanes)
 	for _, l := range s.Lanes {
-		p("  %s  %s  %s  %s째  마지막 %s", l.Name, or(l.Machine, "-"), l.Stage, age(l.StageAgeS), or(l.LastEvent, "없음"))
+		pr := ""
+		if l.PR != "" {
+			pr = "  " + l.PR
+		}
+		p("  %s  %s  %s  %s째  마지막 %s%s", l.Name, or(l.Machine, "-"), l.Stage, age(l.StageAgeS), or(l.LastEvent, "없음"), pr)
 	}
 	if hid.Lanes > 0 {
 		p("  끝난 레인 %d줄 숨김(--all)", hid.Lanes)

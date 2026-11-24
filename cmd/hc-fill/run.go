@@ -77,7 +77,7 @@ func runRound() {
 	if !nonEmpty(Q) && !hpend {
 		say("대기열 비었음")
 		// idle 0은 놀고 있음 알림만 끈다 — 자동 다시 맞춤이 켜졌으면 병합기 반송을 읽고 처리하러 바퀴를 끝까지 돈다(R-16)
-		if IDLE == 0 && !relandOn() {
+		if IDLE == 0 && !relandOn() && len(prProjects()) == 0 {
 			tickMark("gc")
 			gcTick()
 			exit(0)
@@ -149,6 +149,8 @@ func runRound() {
 	stallTick()
 	tickMark("reland")
 	relandTick() // 병합기 rebase 충돌 반송 → 다시 맞춤 줄(이 바퀴에 띄울 수 있게 orderRows 앞)
+	tickMark("pr")
+	prTick() // PR 거울(pr.go — 손잡이 pr, 꺼져 있으면 아무것도 안 함). 사건·감사·다시 맞춤 뒤
 	tickMark("order")
 	auditSeats()
 	orderRows()

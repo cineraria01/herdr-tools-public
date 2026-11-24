@@ -158,6 +158,9 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 			laneOn[r.F(qMach)]++
 		}
 		ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: in.Live != ""}
+		if pr, u := prOf(name); pr != "" { // PR 거울(pr.go)
+			ln.PR = strings.TrimSpace(pr + " " + u)
+		}
 		if x := last[name]; x != nil && x.F(lsState) != "-" {
 			ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(lsState)+" "+x.F(lsSHA)+" "+x.F(lsMsg), " -", "")), " ")
 			if a, ok := stateClockAge(x.F(lsWhen), now); ok {
