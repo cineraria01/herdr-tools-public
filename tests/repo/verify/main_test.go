@@ -426,9 +426,9 @@ func TestRunShards(t *testing.T) {
 	rc := runShards(R, sh, nil, 4, make(chan os.Signal), f)
 	out := read()
 	p := readPid(t, P+"/bg")
-	if rc != 1 || !strings.Contains(out, "--- FAIL: TestX (s1)") || !regexp.MustCompile(`끝 [0-9]+초 종료 3\n--- FAIL`).MatchString(out) ||
+	if rc != 1 || !strings.Contains(out, "--- FAIL: TestX (s1)") || !regexp.MustCompile(`끝 [0-9]+초 종료 3 · \+[0-9.]+~\+[0-9.]+초 자리 1\n--- FAIL`).MatchString(out) ||
 		!strings.Contains(out, "ok-c") || !strings.Contains(out, "고아 pid "+strconv.Itoa(p)) || !strings.Contains(out, "실패 고아를 남김") || !gone(p) ||
-		!regexp.MustCompile(`sleep 2; echo slow-ok 끝 [0-9]+초 종료 0\nslow-ok`).MatchString(out) {
+		!regexp.MustCompile(`sleep 2; echo slow-ok 끝 [0-9]+초 종료 0 · \+[0-9.]+~\+[0-9.]+초 자리 1\nslow-ok`).MatchString(out) {
 		t.Errorf("실패 조각·고아: 1·출력 그대로·고아 끔이어야 rc=%d alive=%v\n%s", rc, alive(p), out)
 	}
 	two := []shard{{argv: []string{"sleep", "2"}}, {argv: []string{"sleep", "2"}}}
@@ -444,6 +444,23 @@ func TestRunShards(t *testing.T) {
 		rc := runShards(R, c.sh, nil, c.n, make(chan os.Signal), f)
 		if ms := int(time.Since(t0).Milliseconds()); rc != 0 || ms < c.lo || ms > c.hi {
 			t.Errorf("n=%d: 통과·%d~%dms여야 rc=%d %dms\n%s", c.n, c.lo, c.hi, rc, ms, read())
+		}
+	}
+	// 빈 자리·초: 자리 4에 2초짜리 둘(자리 1씩)이면 절반이 빈다, 자리 3에 heavy(2+1)면 거의 안 빈다
+	idle := regexp.MustCompile(`(?m)^조각 단계 [0-9.]+초 · \+[0-9.]+~\+[0-9.]+초 — 자리 [0-9]+, 쥔 자리·초 [0-9]+, 빈 자리·초 [0-9]+ \(([0-9]+)%\)$`)
+	for _, c := range []struct {
+		sh     []shard
+		n      int
+		lo, hi int
+	}{{two, 4, 40, 60}, {heavy, 3, 0, 15}} {
+		f, read := outFile(t)
+		runShards(R, c.sh, nil, c.n, make(chan os.Signal), f)
+		p := -1
+		if m := idle.FindStringSubmatch(read()); m != nil {
+			p, _ = strconv.Atoi(m[1])
+		}
+		if p < c.lo || p > c.hi {
+			t.Errorf("n=%d: 빈 몫 %d~%d%%여야\n%s", c.n, c.lo, c.hi, read())
 		}
 	}
 }
@@ -669,5 +686,21 @@ func TestSplitsCoverRepo(t *testing.T) {
 				t.Errorf("%s %s: 조각 %d개에서 돈다 — 정확히 하나여야", s.pkg, strings.Join(p, "/"), n)
 			}
 		}
+	}
+}
+
+// 절 묶음 est: secEst는 첫 절로 맞추고(빠진 묶음이 있어도), 나머지 절 묶음은 est − 합, secEst가 없으면 est ÷ 묶음 수
+func TestGroupEst(t *testing.T) {
+	pt := part{est: 100, secs: [][]string{{"a", "b"}, {"c"}, {"d"}}, secEst: []int{30, 50, 15}}
+	for _, c := range []struct {
+		g    []string
+		want int
+	}{{[]string{"a", "b"}, 30}, {[]string{"c"}, 50}, {[]string{"d"}, 15}, {[]string{"x", "y"}, 5}, {[]string{"b"}, 5}} {
+		if got := groupEst(pt, c.g, 4); got != c.want {
+			t.Errorf("%v: %d여야 %d", c.g, c.want, got)
+		}
+	}
+	if got := groupEst(part{est: 100}, []string{"a"}, 4); got != 25 {
+		t.Errorf("secEst 없음: 25여야 %d", got)
 	}
 }

@@ -55,9 +55,10 @@ const (
 
 // part: 오래 걸리는 꾸러미에서 따로 떼는 시험. est는 실측 초(띄우는 차례에만 쓴다). secs가 있으면 HCFILL_SEC 절 묶음마다 조각 하나
 type part struct {
-	run  string
-	est  int
-	secs [][]string
+	run    string
+	est    int
+	secs   [][]string
+	secEst []int // secs 묶음마다 실측 초(묶음의 첫 절로 맞춘다, 나머지 절 묶음은 est − 합). 없으면 묶음마다 est ÷ 묶음 수
 }
 
 // split: 꾸러미와 part들. rest는 나머지 조각의 실측 초
@@ -89,36 +90,48 @@ type split struct {
 // ÷ 자리이고 차례 모의도 그와 맞는다 — 나머지 조각에서 가장 긴 cmd/hc-fill(약 70초)을 떼면 모의로 약 3초라 떼지 않았다.
 // 전체 검증 시간은 바깥 부하에 TestCotenantGuard(부하를 재는 시험, 홀로)가 17~244초로 흔들리는 쪽이 더 크다.
 // part가 없는 split은 그 꾸러미 통째 한 조각(나머지 조각에서 뺀다).
+// 자리의 빈 몫을 잰 뒤(2026-11-24 verify-pack-measure, 워커 맥 10코어·메모리 디스크, 「끝」 줄의 +시작~+끝초와 「조각 단계 … 빈 자리·초」):
+// 조각 단계 274~285초에 빈 자리·초 8~9%(210~252) — 끝 40초에 자리가 10→0으로 빠지는 꼬리였다. 나머지 조각(자리 3, -p 3)이 257~271초로
+// 단계 전체를 묶었다: 그 안의 tests/repo/verify(150초)가 이름순으로 늦게 시작했다(꾸러미 합 530초 ÷ 3 = 177초). 그래서 tests/repo/verify를
+// 통째 한 조각으로 떼고, est를 그 실측(3번 평균)으로 맞췄다. 그것만으로는 조각 단계 266초·빈 몫 9% 그대로였다 — 이번에는 hc-fill
+// k,k2,q,r 묶음(52초)이 고른 est(합 ÷ 묶음 수 32초) 탓에 215초째에 떠 꼬리가 됐다. 그래서 묶음마다 실측 est(secEst).
+// 뒤(5번): 조각 단계 251~257초, 빈 자리·초 101~116(4~5%), 검증 275~280초(한 번은 흔들림 다시 돌기로 306초) — 바닥(쥔 자리·초 ÷ 자리)
+// 241~246초에 10초 안팎. 앞 단계(vet·tests/repo·TestCotenantGuard 홀로·메모리 디스크)는 24초 안팎이라 그대로 둔다.
 var splits = []split{
 	{mod + "tests/hclane", []part{
 		{run: "^TestHcLane$/^s21b1$", est: 48},
-		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 131},
-		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 87},
-		{run: "^TestHcLane$/^(s13-14|s19)$", est: 66},
-		{run: "^TestHcLane$/^(s22-23|s08-11|s17-18|s24-keepoff)$", est: 62},
-		{run: "^TestHcLane$", est: 70},
-		{run: "^TestGofix", est: 92},
-	}, 54},
+		{run: "^TestHcLane$/^(s21a1|s21a2|s21a3|s21a4)$", est: 123},
+		{run: "^TestHcLane$/^(s15s-16|s15-15r)$", est: 67},
+		{run: "^TestHcLane$/^(s13-14|s19)$", est: 42},
+		{run: "^TestHcLane$/^(s22-23|s08-11|s17-18|s24-keepoff)$", est: 41},
+		{run: "^TestHcLane$", est: 71},
+		{run: "^TestGofix", est: 77},
+	}, 47},
 	{mod + "tests/hcfill", []part{
-		{run: "^TestHcFill$", est: 252, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}}},
+		{run: "^TestHcFill$", est: 224, secs: [][]string{{"a", "b", "c"}, {"c2", "d", "d2"}, {"e", "e2"}, {"f", "f2", "i"}, {"g", "h", "j"}, {"k", "k2", "q", "r"}},
+			secEst: []int{29, 28, 33, 42, 31, 52}},
 	}, 1},
 	{mod + "tests/merger", []part{
-		{run: "^TestMergerContractA$", est: 48},
-		{run: "^TestMergerContractB$", est: 47},
-		{run: "^TestMergerContractC$", est: 40},
-		{run: "^TestMergerContractD$", est: 61},
-		{run: "^TestMergerContractE$", est: 57},
+		{run: "^TestMergerContractA$", est: 32},
+		{run: "^TestMergerContractB$", est: 31},
+		{run: "^TestMergerContractC$", est: 41},
+		{run: "^TestMergerContractD$", est: 45},
+		{run: "^TestMergerContractE$", est: 41},
 		{run: "^TestR4PipeHeldExitZero$", est: 57},
-		{run: "^TestRecovery[A-C]", est: 61},
-		{run: "^TestRecovery[D-N]", est: 61},
-		{run: "^TestRecovery[O-R]", est: 53},
-	}, 31},
-	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 67}, {run: "^TestContractB$", est: 79}, {run: "^TestContractC$", est: 45},
-		{run: "^TestContractD$", est: 55}, {run: "^TestContractE$", est: 41}, {run: "^TestContractF$", est: 40}}, 31},
-	{mod + "cmd/hc-merger", []part{{run: "^Test(Spec|Journal)", est: 84}}, 135},
-	{mod + "tests/util", nil, 114},
-	{mod + "cmd/herdr-tools-publish", nil, 53},
+		{run: "^TestRecovery[A-C]", est: 43},
+		{run: "^TestRecovery[D-N]", est: 43},
+		{run: "^TestRecovery[O-R]", est: 46},
+	}, 24},
+	{mod + "cmd/herdr-sync", []part{{run: "^TestContractA$", est: 38}, {run: "^TestContractB$", est: 56}, {run: "^TestContractC$", est: 35},
+		{run: "^TestContractD$", est: 36}, {run: "^TestContractE$", est: 34}, {run: "^TestContractF$", est: 40}}, 26},
+	{mod + "cmd/hc-merger", []part{{run: "^Test(Spec|Journal)", est: 82}}, 175},
+	{mod + "tests/util", nil, 104},
+	{mod + "cmd/herdr-tools-publish", nil, 52},
+	{mod + "tests/repo/verify", nil, 150},
 }
+
+// restEst: 표에 없는 꾸러미를 모은 나머지 조각(-p n/3)의 실측 초
+const restEst = 131
 
 // shard: 함께 도는 go test 하나. w는 차지하는 자리(나머지 조각은 -p 수만큼 — 시험 바이너리를 그만큼 함께 띄운다)
 type shard struct {
@@ -131,6 +144,15 @@ type shard struct {
 	skip bool
 	note string
 	done func(label string, rc, secs int, out string) bool
+}
+
+// vt0: 검증 시작 시각 — 단계·조각의 「끝」 줄에 그 시작·끝을 이 시각부터의 초로 붙인다(2026-11-24 verify-pack-measure: 앞 단계와
+// 조각 단계의 초, 자리의 빈 몫을 로그로 재게). verify가 시작할 때 다시 정한다
+var vt0 = time.Now()
+
+// span: t부터 지금까지를 「 · +<시작>~+<끝>초」(vt0부터의 초)로
+func span(t time.Time) string {
+	return fmt.Sprintf(" · +%.1f~+%.1f초", t.Sub(vt0).Seconds(), time.Since(vt0).Seconds())
 }
 
 func main() {
@@ -176,7 +198,7 @@ func shards(root string, pkgs, base []string, sp []split, n int) []shard {
 	if len(rest) > 0 {
 		w := max(1, n/3)
 		a := append(append([]string{}, one...), "-p", strconv.Itoa(w), "-skip", cotenant)
-		out = append(out, shard{argv: append(a, rest...), est: 171, w: w})
+		out = append(out, shard{argv: append(a, rest...), est: restEst, w: w})
 	}
 	for _, p := range pkgs {
 		s, ok := byPkg[p]
@@ -195,7 +217,7 @@ func shards(root string, pkgs, base []string, sp []split, n int) []shard {
 				out = append(out, shard{argv: a, est: pt.est})
 			}
 			for _, g := range groups {
-				out = append(out, shard{argv: a, env: []string{"HCFILL_SEC=" + strings.Join(g, ",")}, est: pt.est / len(groups)})
+				out = append(out, shard{argv: a, env: []string{"HCFILL_SEC=" + strings.Join(g, ",")}, est: groupEst(pt, g, len(groups))})
 			}
 			prev = append(prev, pt.run)
 		}
@@ -207,6 +229,23 @@ func shards(root string, pkgs, base []string, sp []split, n int) []shard {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].est > out[j].est })
 	return out
+}
+
+// groupEst: 절 묶음 g의 est — secEst에서 첫 절이 같은 묶음의 값, 못 찾으면 나머지 절 묶음(est − secEst 합), secEst가 없으면 est ÷ n
+func groupEst(pt part, g []string, n int) int {
+	if len(pt.secEst) == 0 {
+		return pt.est / n
+	}
+	left := pt.est
+	for j, w := range pt.secs {
+		if j < len(pt.secEst) {
+			if len(w) > 0 && w[0] == g[0] {
+				return pt.secEst[j]
+			}
+			left -= pt.secEst[j]
+		}
+	}
+	return max(left, 1)
 }
 
 func indexOf(a []string, s string) int {
@@ -304,6 +343,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	}
 	cheap, alone, base := plan(jobs)
 	t0, fail := time.Now(), false
+	vt0 = t0
 	tree0 := ""
 	if !cheapOnly {
 		tree0 = cleanTree(root) // 통과 표식(mark.go)은 시작과 끝이 같은 깨끗한 트리일 때만
@@ -355,6 +395,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		}
 		defer release()
 		t0 = t0.Add(time.Since(tw)) // 검증 시간에서 잠금 기다림은 뺀다(기다림은 따로 한 줄)
+		vt0 = t0
 	}
 	if aloneLabel := "[홀로] " + strings.Join(alone, " "); sc.skip[0] {
 		fmt.Fprintf(w, "건너뜀 %s — 입력이 통과 기록과 같음\n", aloneLabel)
@@ -368,6 +409,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		if rc >= 128 {
 			return rc
 		}
+		fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d%s\n", aloneLabel, int(time.Since(ta).Seconds()), rc, span(ta))
 		w.WriteString(out) //nolint:errcheck // 화면·로그
 		sc.done(0, aloneLabel, rc, int(time.Since(ta).Seconds()), w)
 		if rc != 0 && limit > 0 {
@@ -549,7 +591,11 @@ func sigRC(s os.Signal) int {
 // runStep: 한 명령을 새 무리로 돌리고 고아 검사. 종료 코드(고아가 있으면 0이라도 1, 신호로 끊기면 128+신호)
 func runStep(root string, argv []string, stop <-chan os.Signal, w *os.File) int {
 	fmt.Fprintf(w, "== %s\n", strings.Join(argv, " "))
+	t := time.Now()
 	rc, _ := runOne(root, argv, nil, stop, w, false)
+	if rc < 128 {
+		fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d%s\n", strings.Join(argv, " "), int(time.Since(t).Seconds()), rc, span(t))
+	}
 	return rc
 }
 
@@ -649,6 +695,9 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 	running := map[int]int{} // 조각 → 무리
 	fail, used := false, 0
 	seat := func(i int) int { return max(sh[i].w, 1) }
+	// 자리·초: 쥔 자리(seat 합)를 시간으로 적분 — 끝에 「조각 단계 … 빈 자리·초」 한 줄(빈 몫 = 자리 n × 단계 초 − 쥔 자리·초)
+	ts, tl, held := time.Now(), time.Now(), 0.0
+	tick := func() { held += float64(used) * time.Since(tl).Seconds(); tl = time.Now() }
 	wait := make([]int, len(sh)) // 아직 안 띄운 조각(차례대로)
 	for i := range wait {
 		wait[i] = i
@@ -681,6 +730,7 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 				continue
 			}
 			outs[i], t0s[i], running[i] = f, time.Now(), c.Process.Pid
+			tick()
 			used += seat(i)
 			go func() { ends <- end{i, c.Wait()} }()
 		}
@@ -691,10 +741,11 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 		case e := <-ends:
 			pg := running[e.i]
 			delete(running, e.i)
+			tick()
 			used -= seat(e.i)
 			rc := exitCode(e.err, w, label(e.i))
 			secs := int(time.Since(t0s[e.i]).Seconds())
-			fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d\n", label(e.i), secs, rc)
+			fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d%s 자리 %d\n", label(e.i), secs, rc, span(t0s[e.i]), seat(e.i))
 			out := dump(outs[e.i], w)
 			// 그 무리는 끝나자마자 본다 — 다 끝난 뒤면 pid가 한 바퀴 돌아 남의 새 무리를 끌 수 있다(검증 한 번에 프로세스 수만 개)
 			rc, orph := checkOrphans(root, []int{pg}, nil, rc, label(e.i), w)
@@ -723,6 +774,9 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 			fmt.Fprintf(w, "끊김(%v) — 도는 시험 무리를 껐다\n", s)
 			return sigRC(s)
 		}
+	}
+	if d := time.Since(ts).Seconds(); d > 0 {
+		fmt.Fprintf(w, "조각 단계 %.1f초%s — 자리 %d, 쥔 자리·초 %.0f, 빈 자리·초 %.0f (%.0f%%)\n", d, span(ts), n, held, float64(n)*d-held, 100*(1-held/(float64(n)*d)))
 	}
 	rc, _ := checkOrphans(root, nil, before, b2i(fail), "무거운 시험 조각", w) // 떼어 띄워 부모가 1이 된 것은 다 끝난 뒤 한 번
 	return rc
