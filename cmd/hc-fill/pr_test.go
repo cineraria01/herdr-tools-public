@@ -39,6 +39,9 @@ const prTLane = `#!/bin/sh
 echo "hc-lane $*" >>"$HC_T_LOG"
 `
 
+// 가짜 hc: hc get은 늘 실패(모름) — 살아 있는 표(TERMS)의 레인도 joblast가 주소·이름으로 사건을 고른다(전과 같은 길)
+const prTHc = "#!/bin/sh\nexit 1\n"
+
 type prT struct {
 	t        *testing.T
 	dir, log string
@@ -64,7 +67,7 @@ func prSetup(t *testing.T, extra ...string) *prT {
 	}
 	wr(t, cfg+"/private-patterns.txt", "# 시험\nsecret-project\nbox-[0-9]+\n")
 	t.Setenv("HERDR_TOOLS_CONFIG", cfg)
-	for n, s := range map[string]string{"gh": prTGh, "git": prTGit, "hc-lane": prTLane} {
+	for n, s := range map[string]string{"gh": prTGh, "git": prTGit, "hc-lane": prTLane, "hc": prTHc} {
 		wr(t, k.dir+"/"+n, s)
 		if err := os.Chmod(k.dir+"/"+n, 0o755); err != nil {
 			t.Fatal(err)
@@ -77,7 +80,10 @@ func prSetup(t *testing.T, extra ...string) *prT {
 		t.Setenv(v, "")
 	}
 	Q, AT, LOCAL, TERMS, LSSNAP, EVBAD, EV, MGM = DATA+"/queue.tsv", DATA+"/audit.tsv", "here", nil, true, false, nil, "mg"
-	t.Cleanup(func() { LSSNAP, EV, MGM = false, nil, "" })
+	MQP, MQBAD, MQS = ",app", "", nil // 병합 줄은 읽었고 비어 있다(시험이 MQS에 더한다)
+	t.Cleanup(func() { LSSNAP, EV, MGM, MQP, MQBAD, MQS = false, nil, "", "", "", nil })
+	// 이 프로젝트의 거울은 옛날에 켰다(pr-inbox-no-retro — 켜기 전 보고로는 열지 않는다. 그 시험은 pr_noretro_test.go)
+	wr(t, DATA+"/pr-on.tsv", "app\tpr\t2000-01-01T00:00:00Z\napp\tinbox\t2000-01-01T00:00:00Z\n")
 	pcRef = map[string]pcRes{repo: {"origin/main", true}}
 	confLines = append([]string{"repo app here " + repo}, extra...)
 	wr(t, k.dir+"/brief.md", "# 기능 X 지시문\n본문\n")
@@ -87,6 +93,7 @@ func prSetup(t *testing.T, extra ...string) *prT {
 
 func (k *prT) row(name string) {
 	q := []string{name, "app", k.dir + "/brief.md", "-", "-", "up", "here", "here/" + name, "-", "t", "-", "c/coord", "normal", "-", "auto", "-", "r-" + name}
+	TERMS = append(TERMS, Term{M: "here", Addr: "here/" + name, Name: name, Status: "working"}) // 살아 있는 레인
 	f, err := os.OpenFile(Q, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		k.t.Fatal(err)

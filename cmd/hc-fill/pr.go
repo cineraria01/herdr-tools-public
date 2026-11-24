@@ -53,6 +53,7 @@ type prRun struct {
 	stop  bool
 	last  string            // 마지막 실패 글
 	base  map[string]string // 레인 → 이어 쓰는 원래 레인(entOf가 바퀴 안에서 한 번만 읽는다, prof.go)
+	on    map[string]string // 「프로젝트\t종류」 → 그 기능을 처음 본 때(prfresh.go — 그 전 보고로는 새 PR을 열지 않는다)
 }
 
 func prFile(n string) string { return DATA + "/" + n }
@@ -141,6 +142,7 @@ func prTick() {
 		return
 	}
 	r.bot = r.gh.As(prToken())
+	r.on = prOnSince(projs)
 	r.opens()
 	r.verdicts()
 	r.mergerEvents()

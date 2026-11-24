@@ -67,6 +67,9 @@ func (r *prRun) opens() {
 			}
 		}
 		e := r.ents[t]
+		if (e == nil || e.State != "open") && !r.fresh(q, self, ev, t) { // 새 PR은 살아 있는 레인의 켠 뒤 보고에만(prfresh.go) — 끝난 옛 레인은 로그도 없이
+			continue
+		}
 		if prLandedSince(t, ev.Time) || self && prLandedSince(n, ev.Time) { // 거울이 늦어 이미 착지했다 — 빈 PR을 열려다 매 바퀴 실패하지 않게(감사 낮음 7)
 			if self && (e == nil || e.State != "open") {
 				say("PR 없음 %s — 착지가 먼저", n)

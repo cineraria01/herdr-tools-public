@@ -17,6 +17,7 @@ const pinSID = "fx-20261124T010203-4242"
 // pinRow: 받은편지 레인 줄(감사 칸 aud, 회신 칸 받은편지 꼴)과 작업 트리
 func (k *prT) pinRow(name, aud string) {
 	q := []string{name, "app", k.dir + "/brief.md", "-", "-", "up", "here", "here/" + name, "-", "t", "lp:/inbox#r1-abcdef", "c/coord", "normal", "-", aud, "-", "r-" + name}
+	TERMS = append(TERMS, Term{M: "here", Addr: "here/" + name, Name: name, Status: "working"}) // 살아 있는 레인
 	f, err := os.OpenFile(Q, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		k.t.Fatal(err)
