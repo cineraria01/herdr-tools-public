@@ -71,16 +71,15 @@ func OpOf(lane, key string) (Op, bool) {
 
 // KindOf: 사건 줄 칸(탭으로 나눈 것)의 종류 — 14칸이 lane·ops면 그것, 없거나 다른 값이면 이름 표(OpOf)로
 func KindOf(f []string) string {
-	if len(f) >= 14 && (f[13] == KindOps || f[13] == KindLane) {
-		return f[13]
+	return Cols(strings.Join(f, "\t")).KindOf()
+}
+
+// KindOf: 읽은 사건의 종류 — 14칸이 lane·ops면 그것, 없거나 다른 값이면 이름 표(OpOf)로
+func (e Event) KindOf() string {
+	if e.N >= 14 && (e.Kind == KindOps || e.Kind == KindLane) {
+		return e.Kind
 	}
-	get := func(i int) string {
-		if len(f) > i {
-			return f[i]
-		}
-		return ""
-	}
-	if _, ok := OpOf(get(3), get(11)); ok {
+	if _, ok := OpOf(e.Lane, e.Key); ok {
 		return KindOps
 	}
 	return KindLane
@@ -88,11 +87,11 @@ func KindOf(f []string) string {
 
 // WithKind: 12·13칸 줄 뒤에 14칸 종류를(13칸이 없으면 「-」로 채움). 레인(KindLane)이고 이름 표로도 레인이면 줄 그대로
 func WithKind(line, kind string) string {
-	f := strings.Split(line, "\t")
-	if kind == "" || kind == KindOf(f) && kind == KindLane || len(f) < 12 || len(f) > 13 {
+	e := Cols(line)
+	if kind == "" || kind == e.KindOf() && kind == KindLane || e.N < 12 || e.N > 13 {
 		return line
 	}
-	if len(f) == 12 {
+	if e.N == 12 {
 		line += "\t-"
 	}
 	return line + "\t" + kind

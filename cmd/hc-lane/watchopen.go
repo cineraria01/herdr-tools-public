@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/oplog"
 )
 
@@ -29,7 +30,7 @@ func fillq() bool {
 	}
 	ls, _ := readLines(d + "/queue.tsv")
 	for _, l := range ls {
-		if fld(strings.Split(l, tab), 6) == "wait" {
+		if at(strings.Split(l, tab), 5) == "wait" {
 			return true
 		}
 	}
@@ -58,20 +59,20 @@ func (e *ev) openHold(ls []string, now int64) bool {
 	sortByTime(ls)
 	open := map[string]string{}
 	for _, l := range ls {
-		f := strings.Split(l, tab)
-		if len(f) < 7 {
+		x := events.Cols(l)
+		if x.N < 7 {
 			continue
 		}
-		switch f[4] {
+		switch x.State {
 		case "제출", "주차":
-			open[f[3]] = l
+			open[x.Lane] = l
 		case "착지", "막힘", "완료", "판정":
-			delete(open, f[3])
+			delete(open, x.Lane)
 		}
 	}
 	me := lastSeg(e.wto)
 	for _, l := range open {
-		if t, ok := stT(strings.SplitN(l, tab, 2)[0]); ok && now-t < omax && e.evowner(l) == me {
+		if t, ok := stT(events.Cols(l).Time); ok && now-t < omax && e.evowner(l) == me {
 			return true
 		}
 	}

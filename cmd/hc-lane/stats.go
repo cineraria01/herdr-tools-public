@@ -163,9 +163,10 @@ func stT(s string) (int64, bool) {
 	return t.Unix(), err == nil
 }
 
-func stCut(f []string, i int) string {
-	if i < len(f) && f[i] != "" {
-		return f[i]
+// stCut: 빈 칸·없는 칸은 -
+func stCut(s string) string {
+	if s != "" {
+		return s
 	}
 	return "-"
 }
@@ -234,13 +235,13 @@ func statsReport(evl, jrl []string, since, until string) string {
 	var evs []stEv
 	seen := map[string]bool{}
 	for _, l := range evl {
-		f := strings.Split(l, tab)
-		if len(f) < 7 || seen[l] {
+		x := events.Cols(l)
+		if x.N < 7 || seen[l] {
 			continue
 		}
 		seen[l] = true
-		term := f[2][strings.LastIndex(f[2], "/")+1:] // 원격 줄의 「<기계>/<t…>」도 터미널만
-		evs = append(evs, stEv{f[0], f[1] + "/" + term, f[3], f[4], f[5], f[6], stCut(f, 9), stCut(f, 11)})
+		term := x.Term[strings.LastIndex(x.Term, "/")+1:] // 원격 줄의 「<기계>/<t…>」도 터미널만
+		evs = append(evs, stEv{x.Time, x.Machine + "/" + term, x.Lane, x.State, x.SHA, x.Msg, stCut(x.Run), stCut(x.Key)})
 	}
 	sort.SliceStable(evs, func(i, j int) bool { return evs[i].t < evs[j].t })
 	subEv := map[string]stEv{}   // 제출 ID → 그 제출 사건

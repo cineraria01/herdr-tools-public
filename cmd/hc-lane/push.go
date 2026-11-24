@@ -60,21 +60,21 @@ func (e *ev) emit(lines []string) int {
 // wpart: watch가 지휘에 보내는 사건 하나의 글 「<레인> <상태> [sha] <한 줄> (<어디>)」.
 // 운영 사건(events.KindOf)이면 머리 「운영: 」, 이름 표에 있으면 끝 「 → <다음 명령>」(ops-events — 받는 쪽이 레인 일과 가르고 바로 볼 명령)
 func wpart(l string) string {
-	f := strings.Split(l, tab)
-	s := fld(f, 4) + " " + fld(f, 5)
-	if fld(f, 6) != "-" {
-		s += " " + fld(f, 6)
+	x := events.Cols(l)
+	s := x.Lane + " " + x.State
+	if x.SHA != "-" {
+		s += " " + x.SHA
 	}
 	// 끝 괄호는 터미널 주소, 터미널 밖 사건(주소 -)이면 기계 칸(disk-low-machine — 「(-)」로 와 어느 기계인지 몰랐다)
-	where := fld(f, 3)
+	where := x.Term
 	if where == "-" {
-		where = fld(f, 2)
+		where = x.Machine
 	}
-	s += " " + fld(f, 7) + " (" + where + ")"
-	if events.KindOf(f) != events.KindOps {
+	s += " " + x.Msg + " (" + where + ")"
+	if x.KindOf() != events.KindOps {
 		return s
 	}
-	if o, ok := events.OpOf(fld(f, 4), fld(f, 12)); ok {
+	if o, ok := events.OpOf(x.Lane, x.Key); ok {
 		s += " → " + o.Next
 	}
 	return "운영: " + s
@@ -103,17 +103,17 @@ func (e *ev) wfilter(lines []string) []string {
 		if l == "" {
 			continue
 		}
-		f := strings.Split(l, tab)
-		a := fld(f, 3)
-		if fld(f, 4) == "hc-lane-wait" {
+		x := events.Cols(l)
+		a := x.Term
+		if x.Lane == "hc-lane-wait" {
 			out = append(out, l)
 			continue
 		}
-		if t := fld(f, 9); t != "" && t != "-" {
+		if t := x.To; t != "" && t != "-" {
 			if !strings.Contains(","+t+",", ","+w0+",") && !strings.Contains(","+t+",", "/"+w0+",") {
 				continue
 			}
-			if intended := fld(f, 11); strings.HasPrefix(intended, t+"@") {
+			if intended := x.Owner; strings.HasPrefix(intended, t+"@") {
 				if recipientRun == "" {
 					if r, ok := terminalCreatedMs(e.wto); ok {
 						recipientRun = r
@@ -135,7 +135,7 @@ func (e *ev) wfilter(lines []string) []string {
 			}
 			continue
 		}
-		om := fld(f, 11)
+		om := x.Owner
 		if i := strings.LastIndex(om, "@"); i >= 0 {
 			om = om[i+1:]
 		} else {
@@ -195,7 +195,7 @@ func (e *ev) prevseen(a, l, o string) bool {
 	for _, x := range ls {
 		f := strings.Split(x, tab)
 		if f[0] == a {
-			set[lastSeg(fld(f, 3))] = true
+			set[lastSeg(at(f, 2))] = true
 		}
 	}
 	var ps []string
@@ -223,7 +223,7 @@ func (e *ev) owner(a string) string {
 	for _, x := range ls {
 		f := strings.Split(x, tab)
 		if f[0] == a {
-			o = fld(f, 3)
+			o = at(f, 2)
 		}
 	}
 	if o == "" || o == "-" {
@@ -243,8 +243,8 @@ func (e *ev) owner(a string) string {
 
 // evowner: 사건의 주인 지휘 — 11칸(* = 주인 없음 → -), 없으면 레인 기록(주인이 둘 이상이면 -)
 func (e *ev) evowner(l string) string {
-	f := strings.Split(l, tab)
-	switch e11 := fld(f, 11); e11 {
+	x := events.Cols(l)
+	switch e11 := x.Owner; e11 {
 	case "*":
 		return "-"
 	case "", "-":
@@ -254,12 +254,12 @@ func (e *ev) evowner(l string) string {
 		}
 		return lastSeg(e11)
 	}
-	a := fld(f, 3)
+	a := x.Term
 	own := map[string]bool{}
 	ls, _ := readLines(e.ed + "/lanes.tsv")
-	for _, x := range ls {
-		g := strings.Split(x, tab)
-		if g[0] == a && fld(g, 3) != "-" && fld(g, 3) != "" {
+	for _, r := range ls {
+		g := strings.Split(r, tab)
+		if g[0] == a && at(g, 2) != "-" && at(g, 2) != "" {
 			own[g[2]] = true
 		}
 	}

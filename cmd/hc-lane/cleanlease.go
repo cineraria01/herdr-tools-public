@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/verified"
 )
 
@@ -44,11 +45,11 @@ func legacyParkedK(lane, sha string) (parked, known bool) {
 func lastParkIs(ls []string, lane, sha string) bool {
 	ok := false
 	for _, l := range ls {
-		f := strings.Split(l, "\t")
-		if len(f) < 6 || f[3] != lane || (f[4] != "주차" && f[4] != "제출") {
+		x := events.Cols(l)
+		if x.N < 6 || x.Lane != lane || (x.State != "주차" && x.State != "제출") {
 			continue
 		}
-		ok = f[4] == "주차" && len(f[5]) >= 7 && strings.HasPrefix(sha, f[5])
+		ok = x.State == "주차" && len(x.SHA) >= 7 && strings.HasPrefix(sha, x.SHA)
 	}
 	return ok
 }

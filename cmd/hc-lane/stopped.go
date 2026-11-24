@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
 )
 
@@ -33,15 +34,15 @@ func lastIn(evl []string, a, nm string) (last, lt string, sw bool) {
 	r := newLastRep()
 	have := false
 	for _, l := range evl {
-		f := strings.Split(l, tab)
-		if fld(f, 3) != a || fld(f, 4) != nm {
+		x := events.Cols(l)
+		if x.Term != a || x.Lane != nm {
 			continue
 		}
-		if f[4] == "정리됨" {
+		if x.State == "정리됨" {
 			sw = true
 			continue
 		}
-		r.rep(f[4], f[5], turnOf(f), "x")
+		r.rep(x.State, x.SHA, turnOf(x), "x")
 		have, sw = true, false
 	}
 	if !have {

@@ -243,7 +243,7 @@ func reportMain(a []string) int {
 	if err := os.MkdirAll(ed, 0o777); err != nil {
 		die("report: 폴더를 만들지 못했다: %s", ed)
 	}
-	f := strings.Split(line, tab)
+	x := events.Cols(line)
 	evf := ed + "/events.tsv"
 	if key != "" {
 		// 같은 12칸 키 줄이 있으면 더하지 않는다. 확인과 더하기를 한 잠금 안에서. 읽기 실패는 「키 없음」이 아니다
@@ -252,50 +252,26 @@ func reportMain(a []string) int {
 			die("report: 키 확인·쓰기 실패(--key %s): %s", key, evf)
 		}
 		if have {
-			fmt.Printf("%s %s: 이미 있음(키 %s)\n", f[3], st, key)
+			fmt.Printf("%s %s: 이미 있음(키 %s)\n", x.Lane, st, key)
 			return 0
 		}
 	} else if err := appendLines(evf, line); err != nil {
 		die("report: 쓰지 못했다: %s", evf)
 	}
-	fmt.Printf("%s %s: %s %s\n", f[3], st, sha, f[6])
+	fmt.Printf("%s %s: %s %s\n", x.Lane, st, sha, x.Msg)
 	if st == "완료" && rn == "" && key == "" { // 자기 작업 트리의 완료만(도구가 --name으로 적는 사건은 아님) — reportpre.go
 		prePost(lane, sha)
 	}
 	return 0
 }
 
-// withRepo: 사건 줄에 13칸 저장소(watch-project-route)를 — 모르면 지금 꼴 12칸 그대로. 1000바이트 안에 들게 한 줄 칸을 줄이고,
-// 그래도 안 들면 13칸을 뺀다(모름 — 모든 지휘에게 가는 쪽).
-// 14칸 종류(ops-events): --kind, 없으면 이름 표(events.KindOf)로. 레인 사건은 싣지 않아 줄이 지금 꼴 그대로다(열쇠 같음).
-// 종류 칸이 저장소 칸보다 먼저 자리를 받는다(운영을 레인으로 읽으면 글 머리·거름이 틀린다)
+// withRepo: 사건 줄에 13칸 저장소(watch-project-route)를 — 모르면 지금 꼴 12칸 그대로(events.Record)
 func withRepo(e events.Event, rid string) string { return withRepoKind(e, rid, "") }
 
+// withRepoKind: 13칸 저장소·14칸 종류(--kind, 없으면 이름 표)를 실은 사건 줄 — 꼴·1000바이트 맞추기는 events.Record
 func withRepoKind(e events.Event, rid, kind string) string {
-	line := e.Line()
-	if kind == "" {
-		kind = events.KindOf(strings.Split(line, tab))
-	}
-	kc := "" // 덧붙는 13·14칸
-	if events.WithKind(line, kind) != line {
-		kc = tab + kind
-	}
-	tail := ""
-	switch {
-	case rid != "":
-		tail = tab + rid + kc
-	case kc != "":
-		tail = tab + "-" + kc
-	}
-	if over := len(line) + len(tail) - events.MaxLine; over > 0 {
-		shown := fld(strings.Split(line, tab), 7)
-		e.Msg = bcut(len(shown)-over, shown)
-		line = e.Line()
-	}
-	if len(line)+len(tail) > events.MaxLine && rid != "" { // 저장소 칸을 빼고 다시(모름)
-		return withRepoKind(e, "", kind)
-	}
-	return line + tail
+	e.Repo, e.Kind = rid, kind
+	return e.Record()
 }
 
 // keyedAppend: 잠금(셸 판 lockf -k -t 30과 같은 flock) 안에서 12칸이 key인 줄이 없으면 더한다. have = 이미 있음
@@ -320,8 +296,7 @@ func keyedAppend(lockPath, evf, key, line string) (have bool, err error) {
 		return false, err
 	}
 	for _, l := range lines {
-		f := strings.Split(l, tab)
-		if len(f) >= 12 && f[11] == key {
+		if x := events.Cols(l); x.N >= 12 && x.Key == key {
 			return true, nil
 		}
 	}

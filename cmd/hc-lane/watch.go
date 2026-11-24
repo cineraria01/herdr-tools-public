@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/selfexec"
 )
@@ -112,7 +113,7 @@ func evCmd(ec string, a []string) int {
 		for _, l := range e.evread(0) {
 			if strings.HasPrefix(l, "모름 ") {
 				mu = append(mu, l)
-			} else if f := strings.Split(l, tab); len(f) > 1 && f[0] >= e.since && e.laneOK(f) {
+			} else if x := events.Cols(l); x.N > 1 && x.Time >= e.since && e.laneOK(x) {
 				tl = append(tl, l)
 			}
 		}
@@ -223,12 +224,12 @@ func (e *ev) evreadCtx(n, c int) (ctx, win []string) {
 			continue
 		}
 		add(strings.Split(strings.TrimRight(o, "\n"), "\n"), func(l string) string {
-			f := strings.Split(l, tab)
-			f[1] = m
-			if f[2] != "-" && !strings.Contains(f[2], "/") {
-				f[2] = m + "/" + f[2]
+			x := events.Cols(l)
+			x.Machine = m
+			if x.Term != "-" && !strings.Contains(x.Term, "/") {
+				x.Term = m + "/" + x.Term
 			}
-			return strings.Join(f, tab)
+			return x.Raw()
 		})
 	}
 	return ctx, win

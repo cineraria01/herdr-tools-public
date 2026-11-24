@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/gitx"
 )
 
@@ -185,8 +186,8 @@ func fillState(name, address, path string) string {
 	return ""
 }
 
-// eventRows: hc-lane events.tsv 줄들(칸으로). 못 읽으면 err
-func eventRows(path string) ([][]string, error) {
+// eventRows: hc-lane events.tsv 줄들(이름 붙은 칸 — events.Cols, 칸 수 그대로). 못 읽으면 err
+func eventRows(path string) ([]events.Event, error) {
 	if path == "" {
 		path = filepath.Join(laneDir, "events.tsv")
 	}
@@ -195,14 +196,14 @@ func eventRows(path string) ([][]string, error) {
 		return nil, err
 	}
 	defer fh.Close()
-	var rows [][]string
+	var rows []events.Event
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		if !utf8Valid(sc.Bytes()) {
 			return nil, fmt.Errorf("UTF-8 아님")
 		}
-		rows = append(rows, strings.Split(sc.Text(), "\t"))
+		rows = append(rows, events.Cols(sc.Text()))
 	}
 	return rows, sc.Err()
 }
@@ -217,8 +218,8 @@ func submitted(t map[string]any, path string) bool {
 	name := dash(str(t, "name"))
 	last := ""
 	for _, r := range rows { // 옛 꼴(실행 키 없음) 줄도 thisRun으로 이 실행에 묶는다(R-01 — 2020년 제출 줄을 새 실행에 쓰지 않게)
-		if len(r) > 4 && r[2] == str(t, "address") && r[4] != "정리됨" && r[3] == name && thisRun(t, r) {
-			last = r[4]
+		if r.N > 4 && r.Term == str(t, "address") && r.State != "정리됨" && r.Lane == name && thisRun(t, r) {
+			last = r.State
 		}
 	}
 	return last == "제출" || last == "착지"
@@ -226,16 +227,16 @@ func submitted(t map[string]any, path string) bool {
 
 // thisRun: 사건 줄이 이 터미널의 이 실행 것인가(B03 — 이름은 다시 쓰인다). 실행 키 칸(10째)이 있으면 <주소>@<created_ms>와 같아야
 // 하고, 없거나 「-」인 옛 꼴이면 같은 주소이고 그 초가 이 터미널이 생긴 초보다 뒤여야 한다(같은 초는 앞뒤 모호 — R-01). 모르면 false(증거 아님)
-func thisRun(t map[string]any, row []string) bool {
+func thisRun(t map[string]any, row events.Event) bool {
 	created, ok := num(t, "created_ms")
 	if !ok || created <= 0 {
 		return false
 	}
-	if len(row) >= 10 && row[9] != "-" {
-		return row[9] == str(t, "address")+"@"+pyStr(t["created_ms"])
+	if row.N >= 10 && row.Run != "-" {
+		return row.Run == str(t, "address")+"@"+pyStr(t["created_ms"])
 	}
-	at, err := time.Parse("2006-01-02T15:04:05Z", row[0])
-	return err == nil && len(row) > 2 && row[2] == str(t, "address") && afterCreated(at.Unix(), created)
+	at, err := time.Parse("2006-01-02T15:04:05Z", row.Time)
+	return err == nil && row.N > 2 && row.Term == str(t, "address") && afterCreated(at.Unix(), created)
 }
 
 // afterCreated: 초 단위 시각 sec이 created_ms가 든 초보다 뒤인가(같은 초면 앞뒤를 모른다)
@@ -343,7 +344,7 @@ func landedClean(t map[string]any, r runner, events string) (string, string, str
 	}
 	said := false
 	for _, row := range rows {
-		if len(row) > 4 && row[3] == name && (row[4] == "착지" || row[4] == "제출" || row[4] == "완료" || row[4] == "판정") && thisRun(t, row) && !merged {
+		if row.N > 4 && row.Lane == name && (row.State == "착지" || row.State == "제출" || row.State == "완료" || row.State == "판정") && thisRun(t, row) && !merged {
 			said = true
 		}
 	}
@@ -492,7 +493,8 @@ func laneEvent(t map[string]any, why string) (done func(write bool) bool, ok boo
 	if str(obj(t, "labels"), "hc-lane") != "1" {
 		return func(bool) bool { return true }, true
 	}
-	if os.MkdirAll(laneDir, 0o755) != nil {
+	ev, err := laneEventOf(t, why) // 상한을 못 지키는 사건이면 닫지 않는다(kill 전에 안다)
+	if err != nil || os.MkdirAll(laneDir, 0o755) != nil {
 		return nil, false
 	}
 	fh, err := os.OpenFile(filepath.Join(laneDir, "events.tsv"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
@@ -508,27 +510,27 @@ func laneEvent(t map[string]any, why string) (done func(write bool) bool, ok boo
 		if !write {
 			return f.Close() == nil
 		}
-		_, err := f.WriteString(laneEventLine(t, why) + "\n")
+		ev.Time = events.UTC(time.Now()) // 시각 칸은 꼴이 같아 검사를 다시 할 까닭이 없다
+		_, err := f.WriteString(ev.LineN(8) + "\n")
 		return f.Close() == nil && err == nil
 	}, true
 }
 
-// laneEventLine: 「정리됨」 사건 한 줄(칸 안 탭·줄바꿈은 빈칸으로)
-func laneEventLine(t map[string]any, why string) string {
+// laneEventOf: 「정리됨」 사건(LineN(8)로 8칸 — 셸 판 꼴). report와 같은 길(events.Event)로 — 칸 안 탭·줄바꿈은 빈칸, 빈 칸은 「-」,
+// 기계·터미널·레인 64바이트, 줄 1000바이트(events-named-cols: 옛 판은 이 검사 없이 칸을 그대로 이었다). 지킬 수 없으면 오류
+func laneEventOf(t map[string]any, why string) (events.Event, error) {
 	machine := os.Getenv("HC_LANE_MACHINE")
 	if machine == "" {
 		h, _ := os.Hostname()
-		machine = dash(strings.SplitN(h, ".", 2)[0])
+		machine = strings.SplitN(h, ".", 2)[0]
 	}
-	turn := "-"
+	turn := ""
 	if t["turn"] != nil {
-		turn = pyStr(t["turn"])
+		turn = events.Flat(pyStr(t["turn"]))
 	}
-	f := []string{time.Now().UTC().Format("2006-01-02T15:04:05Z"), machine, str(t, "address"), dash(str(t, "name")), "정리됨", "-", "hc-sweep " + why, turn}
-	for i := range f {
-		f[i] = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(f[i])
-	}
-	return strings.Join(f, "\t")
+	e := events.Event{Time: events.UTC(time.Now()), Machine: machine, Term: str(t, "address"), Lane: str(t, "name"), State: "정리됨",
+		Msg: "hc-sweep " + why, Turn: turn}
+	return e, e.Check()
 }
 
 // sameOwner: g가 t와 같은 실행(이름·created_ms가 같음)의 행인가 — 주소는 다시 쓰인다(R-02). 칸이 없으면 모름(false)

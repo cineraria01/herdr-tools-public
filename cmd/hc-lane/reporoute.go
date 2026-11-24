@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/events"
 )
 
 // repoSend: 주인 없는·주인이 사라진 사건을 이 watch가 보내나. 사건의 저장소를 모름·이 지휘가 그 저장소를 다룸·이 지휘의 저장소를 모름
@@ -117,19 +119,19 @@ type seenCache struct {
 // evrepo: 사건 레인의 저장소 — 13칸, 없으면 이 바퀴에 읽은 사건에서 그 레인 이름의 13칸(병합기·hc-fill·멈춤처럼 --name으로 적은 줄).
 // 레인 이름에 저장소가 둘 이상 걸리거나 모르면 ""
 func (e *ev) evrepo(l string) string {
-	f := strings.Split(l, tab)
-	if r := fld(f, 13); repoIDok(r) {
-		return r
+	x := events.Cols(l)
+	if repoIDok(x.Repo) {
+		return x.Repo
 	}
-	return e.lrepo[fld(f, 4)]
+	return e.lrepo[x.Lane]
 }
 
 // laneRepos: 사건들에서 레인 이름 → 13칸 저장소(둘 이상이면 "" — 모름)
 func laneRepos(ls []string) map[string]string {
 	m := map[string]string{}
 	for _, l := range ls {
-		f := strings.Split(l, tab)
-		ln, r := fld(f, 4), fld(f, 13)
+		x := events.Cols(l)
+		ln, r := x.Lane, x.Repo
 		if ln == "" || ln == "-" || !repoIDok(r) {
 			continue
 		}

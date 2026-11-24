@@ -473,10 +473,11 @@ func appendLines(path string, lines ...string) error {
 	return err
 }
 
-// fld: awk $i(1부터, 없으면 빈 값)
-func fld(f []string, i int) string {
-	if i-1 < len(f) {
-		return f[i-1]
+// at: 탭 칸 f[i](0부터, 없으면 빈 값) — 사건 줄이 아닌 표(lanes.tsv·after.tsv·판정 파일·대기열)만. 사건 줄은 events.Cols의
+// 이름 칸으로 읽는다(1부터 세는 옛 fld와 0부터 세는 f[n]이 한 줄에 섞였다 — events-named-cols, evnamed_guard_test)
+func at(f []string, i int) string {
+	if i < len(f) {
+		return f[i]
 	}
 	return ""
 }

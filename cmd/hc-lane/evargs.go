@@ -90,7 +90,7 @@ func (e *ev) args(a []string) string {
 	return to
 }
 
-// laneOK: --lane이 없거나 그 사건(탭 칸)의 레인 칸(넷째)이 --lane 가운데 하나, 그리고 --kind가 없거나 그 사건의 종류(events.KindOf)
-func (e *ev) laneOK(f []string) bool {
-	return (len(e.lanes) == 0 || has(e.lanes, fld(f, 4))) && (e.kind == "" || events.KindOf(f) == e.kind)
+// laneOK: --lane이 없거나 그 사건의 레인 칸이 --lane 가운데 하나, 그리고 --kind가 없거나 그 사건의 종류(Event.KindOf)
+func (e *ev) laneOK(x events.Event) bool {
+	return (len(e.lanes) == 0 || has(e.lanes, x.Lane)) && (e.kind == "" || x.KindOf() == e.kind)
 }

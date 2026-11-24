@@ -1,37 +1,43 @@
 // evkeys.go: 사건 열쇠(셸 판 bin/hc-lane의 awk 조각 nkf·evkey·landed)
 package main
 
-import "strings"
+import (
+	"strings"
 
-// nk: 기계 이름을 뺀 열쇠 — 보통 줄은 기계 칸을 *로·주소 칸은 끝의 t…만, 멈춤 열쇠(4칸)는 주소 칸만. # 줄·7칸 못 된 줄은 그대로
+	"herdr-tools/internal/events"
+)
+
+// nk: 기계 이름을 뺀 열쇠 — 보통 줄은 기계 칸을 *로·주소 칸은 끝의 t…만, 멈춤 열쇠(「멈춤 터미널 레인 turn」 4칸)는 주소 칸만.
+// # 줄·7칸 못 된 줄은 그대로. 열쇠는 줄 그대로에서 두 칸만 바꾼 것(events.Raw — 한 글자도 다르지 않게)
 func nk(l string) string {
 	if l == "" {
 		return l
 	}
-	f := strings.Split(l, tab)
-	if f[0] == "멈춤" && len(f) == 4 {
-		return "멈춤" + tab + lastSeg(f[1]) + tab + f[2] + tab + f[3]
+	if rest, ok := strings.CutPrefix(l, "멈춤"+tab); ok && strings.Count(rest, tab) == 2 {
+		term, tail, _ := strings.Cut(rest, tab)
+		return "멈춤" + tab + lastSeg(term) + tab + tail
 	}
-	if len(f) < 7 || strings.HasPrefix(f[0], "#") {
+	x := events.Cols(l)
+	if x.N < 7 || strings.HasPrefix(x.Time, "#") {
 		return l
 	}
-	f[2] = lastSeg(f[2])
-	return f[0] + tab + "*" + tab + strings.Join(f[2:], tab)
+	x.Machine, x.Term = "*", lastSeg(x.Term)
+	return x.Raw()
 }
 
 // evKey: 사건의 열쇠 — 보통 줄은 줄 그대로, 멈춤은 「멈춤 터미널 레인 상태 turn」(done·idle은 「쉼」으로 묶음)
-func evKey(f []string) string {
-	if fld(f, 5) != "멈춤" {
-		return strings.Join(f, tab)
+func evKey(x events.Event) string {
+	if x.State != "멈춤" {
+		return x.Raw()
 	}
-	w := fld(f, 7)
+	w := x.Msg
 	if strings.HasPrefix(w, "done ") || strings.HasPrefix(w, "idle ") {
 		w = "쉼 " + w[5:]
 	}
-	return "멈춤" + tab + fld(f, 3) + tab + fld(f, 4) + tab + w
+	return "멈춤" + tab + x.Term + tab + x.Lane + tab + w
 }
 
-func lineKey(l string) string { return nk(evKey(strings.Split(l, tab))) }
+func lineKey(l string) string { return nk(evKey(events.Cols(l))) }
 
 func num(x string) bool { return digits(x) }
 
@@ -76,10 +82,10 @@ func (r *lastRep) rep(s, h, t, k string) {
 	}
 }
 
-// turnOf: 사건의 여덟째 칸(없으면 -)
-func turnOf(f []string) string {
-	if len(f) >= 8 {
-		return f[7]
+// turnOf: 사건의 turn 칸(그 칸이 없는 옛 줄이면 -)
+func turnOf(x events.Event) string {
+	if x.N >= 8 {
+		return x.Turn
 	}
 	return "-"
 }
@@ -111,8 +117,8 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 	W := "," + e.sts + ","
 	lr := newLastRep()
 	for _, l := range ctx { // 아래 cand 고리와 같은 열쇠·같은 규칙(정리됨·멈춤은 report가 아니다)
-		if f := strings.Split(l, tab); len(f) >= 7 && f[4] != "멈춤" && f[4] != "정리됨" {
-			lr.rep(f[4], f[5], turnOf(f), fld(f, 3)+"\x1c"+fld(f, 4))
+		if x := events.Cols(l); x.N >= 7 && x.State != "멈춤" && x.State != "정리됨" {
+			lr.rep(x.State, x.SHA, turnOf(x), x.Term+"\x1c"+x.Lane)
 		}
 	}
 	done := map[string]bool{}
@@ -121,29 +127,29 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 		if !strings.Contains(l, tab) {
 			continue
 		}
-		f := strings.Split(l, tab)
-		t2 := fld(f, 3) + "\x1c" + fld(f, 4)
-		if fld(f, 5) == "정리됨" {
+		x := events.Cols(l)
+		t2 := x.Term + "\x1c" + x.Lane
+		if x.State == "정리됨" {
 			ls, ln := lr.lst[t2], lr.ltn[t2]
 			if handedOff(ls) { // 제출·주차 뒤 정리는 turn과 상관없이 조용히(stopped.go handedOff)
 				continue
 			}
-			fin := ls == "착지" || ls == "판정" ||
-				ls == "완료" && (kind[[2]string{lastSeg(f[2]), f[3]}] == "read" || kind[[2]string{lastSeg(f[2]), f[3]}] == "fill")
-			if fin && num(fld(f, 8)) && num(ln) && atoi(fld(f, 8)) <= atoi(ln)+1 {
+			lk := kind[[2]string{lastSeg(x.Term), x.Lane}]
+			fin := ls == "착지" || ls == "판정" || ls == "완료" && (lk == "read" || lk == "fill")
+			if fin && num(x.Turn) && num(ln) && atoi(x.Turn) <= atoi(ln)+1 {
 				continue
 			}
-			if seen[nk("멈춤"+tab+f[2]+tab+f[3]+tab+"쉼 turn "+fld(f, 8))] {
+			if seen[nk("멈춤"+tab+x.Term+tab+x.Lane+tab+"쉼 turn "+x.Turn)] {
 				continue
 			}
-			f[4], f[5], f[6] = "멈춤", "-", "뜻밖의 종료(정리됨) "+f[6]
+			x.State, x.SHA, x.Msg = "멈춤", "-", "뜻밖의 종료(정리됨) "+x.Msg // 창(evreadCtx)은 7칸 이상 줄만이라 세 칸이 다 있다
 		}
-		if f[4] != "멈춤" {
-			lr.rep(f[4], f[5], turnOf(f), t2)
+		if x.State != "멈춤" {
+			lr.rep(x.State, x.SHA, turnOf(x), t2)
 		}
 		if my := e.myp; my != "" {
-			o := fld(f, 11)
-			if len(f) >= 11 && o != "-" && o != "*" {
+			o := x.Owner
+			if x.N >= 11 && o != "-" && o != "*" {
 				ow := strings.Split(o, "@")
 				addr := ow[0]
 				if addr != my && !strings.HasSuffix(addr, "/"+my) && !strings.HasSuffix(my, "/"+addr) {
@@ -153,17 +159,17 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 					continue
 				}
 			}
-			if len(f) < 11 || o == "-" {
-				if p, ok := par[f[2]]; ok && p != "-" && p != my && !strings.HasSuffix(p, "/"+my) {
+			if x.N < 11 || o == "-" {
+				if p, ok := par[x.Term]; ok && p != "-" && p != my && !strings.HasSuffix(p, "/"+my) {
 					continue
 				}
 			}
 		}
-		k := nk(evKey(f))
+		k := nk(evKey(x))
 		// --lane으로 거른 사건은 내보내지 않아 커서에도 안 적힌다(거름 없는 wait가 그대로 받는다)
-		if f[0] >= e.since && f[0] >= fl && (W == ",," || strings.Contains(W, ","+f[4]+",")) && e.laneOK(f) && !seen[k] && !done[k] {
+		if x.Time >= e.since && x.Time >= fl && (W == ",," || strings.Contains(W, ","+x.State+",")) && e.laneOK(x) && !seen[k] && !done[k] {
 			done[k] = true
-			out = append(out, strings.Join(f, tab))
+			out = append(out, x.Raw())
 		}
 	}
 	sortByTime(out)

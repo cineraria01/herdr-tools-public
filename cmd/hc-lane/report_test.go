@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"herdr-tools/internal/events"
 )
 
 func TestNk(t *testing.T) {
@@ -31,11 +33,11 @@ func TestNk(t *testing.T) {
 
 func TestEvKey(t *testing.T) {
 	f := strings.Split("T\tbox\tt1\tl\t멈춤\t-\tdone turn 4", tab)
-	if got := evKey(f); got != "멈춤\tt1\tl\t쉼 turn 4" {
+	if got := evKey(events.Cols(strings.Join(f, tab))); got != "멈춤\tt1\tl\t쉼 turn 4" {
 		t.Errorf("evKey 멈춤 = %q", got)
 	}
 	f = strings.Split("T\tbox\tt1\tl\t완료\tabc\tm", tab)
-	if got := evKey(f); got != strings.Join(f, tab) {
+	if got := evKey(events.Cols(strings.Join(f, tab))); got != strings.Join(f, tab) {
 		t.Errorf("evKey 보통 = %q", got)
 	}
 }

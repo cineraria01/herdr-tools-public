@@ -42,15 +42,15 @@ func TestJ2SubmittedOldRow(t *testing.T) {
 func TestJ2ThisRunOldRowTime(t *testing.T) {
 	x := time.Now().Truncate(time.Second).Add(-time.Hour)
 	whole := float64(x.UnixMilli())
-	if thisRun(j2Term("t1", "lane-a", whole), j2Row(x.Add(-time.Second), "t1", "lane-a", "착지")) {
+	if thisRun(j2Term("t1", "lane-a", whole), j2Ev(j2Row(x.Add(-time.Second), "t1", "lane-a", "착지"))) {
 		t.Error("생성 1초 전 옛 꼴 사건을 이 실행 것으로 봄")
 	}
 	half := whole + 500
-	if thisRun(j2Term("t1", "lane-a", half), j2Row(x, "t1", "lane-a", "착지")) {
+	if thisRun(j2Term("t1", "lane-a", half), j2Ev(j2Row(x, "t1", "lane-a", "착지"))) {
 		t.Error("생성과 같은 초(생성이 그 초 중간)의 옛 꼴 사건 — 모호한데 이 실행 것으로 봄")
 	}
 	key := append(j2Row(x.Add(time.Minute), "t1", "lane-a", "착지"), "-", "t1@"+pyStr(whole))
-	if !thisRun(j2Term("t1", "lane-a", whole), key) {
+	if !thisRun(j2Term("t1", "lane-a", whole), j2Ev(key)) {
 		t.Error("같은 실행 키 사건을 못 봄(대조)")
 	}
 }

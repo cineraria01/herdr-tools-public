@@ -141,10 +141,10 @@ func sendOwner(recs []string, t hcjson.Terminal, me string) (int, string) {
 	own := map[string]bool{}
 	for _, x := range recs {
 		f := strings.Split(x, tab)
-		if f[0] != t.Address || fld(f, 2) != t.Name {
+		if f[0] != t.Address || at(f, 1) != t.Name {
 			continue
 		}
-		if o := fld(f, 3); o != "" && o != "-" {
+		if o := at(f, 2); o != "" && o != "-" {
 			own[lastSeg(o)] = true
 		}
 	}
@@ -186,7 +186,7 @@ func earlyWaitCmd(a []string) int {
 		if len(f) > 4 {
 			f = append(f[:3], strings.Join(f[3:], tab))
 		}
-		s, w, t := fld(f, 2), fld(f, 3), fld(f, 4)
+		s, w, t := at(f, 1), at(f, 2), at(f, 3)
 		if !digits(t) {
 			t = ""
 		}
@@ -238,7 +238,7 @@ func vload(lane, aid string) (*verdict, int) {
 	get := func(k string) string {
 		for _, l := range ls {
 			if f := strings.Split(l, tab); f[0] == k {
-				return fld(f, 2)
+				return at(f, 1)
 			}
 		}
 		return ""
@@ -374,7 +374,7 @@ func verdictCmd(a []string) int {
 			d, _ := readLines(vd.done)
 			s := ""
 			if len(d) > 0 {
-				s = fld(strings.Split(d[0], tab), 2)
+				s = at(strings.Split(d[0], tab), 1)
 				if len(s) > 8 {
 					s = s[:8]
 				}
