@@ -142,7 +142,7 @@ func TestContract(t *testing.T) {
 		{"R-225 Main 뒤 herdr-test-bin.* 없음", "main", "60s",
 			func(t *testing.T, d string) []string {
 				Put(t, filepath.Join(d, "tmp", ".keep"), "")
-				return []string{"TMPDIR=" + filepath.Join(d, "tmp"), "PATH=" + fakeGo(t, `: >"$3"; : >"$CLITEST_S"`+"\n") + ":" + os.Getenv("PATH"),
+				return []string{"TMPDIR=" + filepath.Join(d, "tmp"), "PATH=" + fakeGo(t, `while [ "$1" != -o ]; do shift; done; : >"$2"; : >"$CLITEST_S"`+"\n") + ":" + os.Getenv("PATH"),
 					"CLITEST_S=" + S(d)}
 			},
 			func(t *testing.T, d string, rc int, out string, took time.Duration) {

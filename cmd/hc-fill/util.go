@@ -456,9 +456,9 @@ func refuse(format string, a ...any) {
 
 func say(format string, a ...any) { fmt.Printf(format+"\n", a...) }
 
-// crash <지점>: 시험의 중단 주입(HC_FILL_CRASH_AT). 잠금 안이면 그 잠금 일(셸 판의 자식)만 죽은 것처럼, 밖이면 이 프로세스를 SIGKILL
+// crash <지점>: 시험의 중단 주입(시험 빌드만 — testknobs.go). 잠금 안이면 그 잠금 일(셸 판의 자식)만 죽은 것처럼, 밖이면 이 프로세스를 SIGKILL
 func crash(at string) {
-	if os.Getenv("HC_FILL_CRASH_AT") != at {
+	if testCrashAt() != at {
 		return
 	}
 	if err := appendLine(DATA+"/crash.log", at); err != nil {

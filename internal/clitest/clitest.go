@@ -116,16 +116,40 @@ func Bin(t *testing.T, name string) string {
 	p := filepath.Join(binDir, name)
 	if !binDone[name] {
 		binDone[name] = true
-		r := Cmd{Dir: Root(t), Env: []string{"CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH="}, Combined: true, Max: 10 * time.Minute}.
-			Run("go", "build", "-o", p, "./cmd/"+name)
-		if r.RC != 0 {
-			binErr[name] = fmt.Errorf("go build ./cmd/%s: 종료 %d\n%s%s", name, r.RC, r.Out, r.Err)
-		}
+		binErr[name] = build(Root(t), p, name, TestTag)
 	}
 	if err := binErr[name]; err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestTag: 시험 손잡이(시험 전용 환경 변수)를 넣는 빌드 태그 — Bin은 늘 이것으로 짓고, 배포 빌드(herdr-sync)는 태그 없이 짓는다.
+// 손잡이 코드는 cmd/<도구>/*_herdrtest.go(//go:build herdrtest)에만 둔다(docs/repo/tests.md 「시험 손잡이」)
+const TestTag = "herdrtest"
+
+// BinPlain: 배포와 같은 꼴(태그 없이)로 dir에 지은 cmd/<name> — 시험 손잡이가 빠졌는지 보는 시험만 쓴다
+func BinPlain(t *testing.T, dir, name string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := build(Root(t), p, name, ""); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// build: root에서 cmd/<name>을 out으로(tags가 비면 태그 없이)
+func build(root, out, name, tags string) error {
+	args := []string{"build"}
+	if tags != "" {
+		args = append(args, "-tags", tags)
+	}
+	r := Cmd{Dir: root, Env: []string{"CGO_ENABLED=0", "GOFLAGS=", "GOOS=", "GOARCH="}, Combined: true, Max: 10 * time.Minute}.
+		Run("go", append(args, "-o", out, "./cmd/"+name)...)
+	if r.RC != 0 {
+		return fmt.Errorf("go build ./cmd/%s: 종료 %d\n%s%s", name, r.RC, r.Out, r.Err)
+	}
+	return nil
 }
 
 // sweepBinDirs: (binMu 안) 주인 시험 프로세스가 없는(ESRCH) herdr-test-bin.<pid>.* 폴더를 지운다. 이름에 pid가 없으면(옛 꼴) 모름 — 둔다

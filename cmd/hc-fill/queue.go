@@ -95,9 +95,9 @@ func qRowsW() []Row {
 // qset: 대기열 줄의 상태·기계·주소·남긴것(6~9칸)과 먼저(14)·감사(15) 칸. useID면 17칸이 qrid인 줄만. 0 바꿈 · 1 그 줄 없음 · 2 못 읽음
 func qset(useID bool, qrid, n, s, m, a, k, e, u string) int {
 	if !qHeld {
-		// 시험: 잠금을 잡기 직전에 끼어들기(셸 판 시험은 가짜 lockf로 같은 자리에 끼어든다) — HC_FILL_TEST_QSET="<이름> <상태>"
-		if os.Getenv("HC_FILL_TEST_QSET") == n+" "+s {
-			Cmd{Name: "sh", Args: []string{"-c", os.Getenv("HC_FILL_TEST_QSET_CMD")}, Err: errPass}.Run()
+		// 시험: 잠금을 잡기 직전에 끼어들기(시험 빌드만 — testknobs.go)
+		if c := testQsetCmd(n, s); c != "" {
+			Cmd{Name: "sh", Args: []string{"-c", c}, Err: errPass}.Run()
 		}
 		rc := 0
 		if w := withQ(func() { rc = qset(useID, qrid, n, s, m, a, k, e, u) }); w != 0 {

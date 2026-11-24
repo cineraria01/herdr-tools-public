@@ -127,3 +127,15 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - 검증 끝 요약에 「이 기계에서 최근 7일 흔들림: <시험> k번, …」 한 줄(기록이 없으면 안 찍는다). `go run ./tests/repo/verify --flaky`는 기록 전부를 시험별 횟수·마지막 시각으로 보인다.
 - **흔들림 기록이 쌓인 시험은 고친다.** 다시 돌기는 진짜 간헐 버그를 가릴 수 있다 — 그래서 줄·기록·요약에 남긴다. 시간 단언을 빼거나 기다림을 조건 폴링으로 바꾼다(위 「시험의 기다림」).
 - 시험: `TestRetryPhase`·`TestNoRetry`·`TestFailedTests`·`TestFlakyLog`(판정·기록), `TestRetry*`·`TestVerifyFlakyArg`(가짜 go로 verify 전체 — 흔들림 통과·두 번 실패·경합·상한·끔·혼자 다시·홀로 단계), `TestRetryFlakyNoPassRecord`(진짜 go — 흔들려 통과한 조각은 통과 기록 없음).
+
+## 시험 손잡이 — 배포 바이너리에는 없다
+
+2026-11-24 test-knobs-buildtag: 상주하는 hc-fill이 시험 전용 환경 변수 하나로 셸 명령을 돌리거나(`HC_FILL_TEST_QSET_CMD`) 스스로 죽는(`HC_FILL_CRASH_AT`) 길이 배포 바이너리에 있었다.
+그래서 시험만 쓰는 환경 변수(손잡이)를 읽는 코드는 빌드 태그 파일에만 두고, 시험 빌드만 넣는다.
+운영에서도 쓰는 조정(기다림·간격·경로·끄기 스위치 — 문서에 적힌 `HC_*`·`HERDR_*`)은 손잡이가 아니다 — 그대로 둔다.
+
+- 새 시험 손잡이는 `cmd/<도구>/testknobs_herdrtest.go`(첫 줄 `//go:build herdrtest`)에서만 환경 변수를 읽는다. 태그 없는 파일(`testknobs.go`)에는 아무것도 안 하는 기본(빈 값을 주는 함수 변수)을 두고, 태그 파일의 `init`이 그 변수를 채운다.
+- 계약 시험이 부르는 바이너리(`clitest.Bin`)는 `-tags herdrtest`(`clitest.TestTag`)로 짓는다. 배포 빌드(herdr-sync — 기계마다 짓는 줄과 릴리스 자산)는 태그 없이 짓는다.
+- 꾸러미 단위 시험(`go test ./cmd/<도구>`)은 태그 없이 도니, 손잡이가 필요하면 그 꾸러미의 `_test.go` `init`에서 같은 변수를 채운다(hc-fill `testknobs_unit_test.go`).
+- 이름은 `…_TEST_…` 또는 `…_CRASH_AT` 꼴로 짓고 `internal/clitest/testknobs_test.go`의 `testKnobs` 목록에 더한다. 그 시험이 본다: 제품 파일(`_test.go` 아님)에서 그 꼴 이름은 태그 파일에만 있고 목록에 있다(`TestTestKnobsListed`), 태그 없이 지은 바이너리에 목록의 이름 글자가 없고 태그를 주면 있다(`TestTestKnobsNotInPlainBuild`), 배포 빌드 줄에 태그가 없다(`TestDeployBuildNoTags`). 태그 없는 hc-fill에 손잡이를 줘도 아무 일 없는 장면은 `tests/hcfill` `TestTestKnobsOffInPlainBuild`.
+- herdr-hooks는 먼저 같은 꼴로 갈라 두었고 태그가 `hookstest`다(`claude/hooks/tests`가 그 태그로 짓는다).
