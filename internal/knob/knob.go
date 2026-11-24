@@ -45,6 +45,7 @@ var Defs = []Def{
 	{Name: "pr", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "PR 거울을 켤 프로젝트(쉼표, - = 끔 — docs/hc-fill/pr.md)"},
 	{Name: "pr_max", Tool: "hc-fill", Default: "20", Min: 1, Max: 200, Unit: "번", Desc: "PR 거울의 바퀴당 gh 호출 상한(넘으면 다음 바퀴에)"},
 	{Name: "pr_fail", Tool: "hc-fill", Default: "3", Min: 1, Max: 100, Unit: "바퀴", Desc: "gh 실패가 이만큼 바퀴 이어지면 운영 사건 hc-fill-pr 한 번"},
+	{Name: "pr_inbox", Tool: "hc-fill", Default: "1", Min: 0, Max: 1, Desc: "완료 없이 제출하는 레인(받은편지·--no-audit)도 SHA가 든 첫 보고(중간·제출)로 PR을 연다(0이면 그 레인은 완료만)"},
 	{Name: "pr_timeout", Tool: "hc-fill", Default: "20", Min: 5, Max: 120, Unit: "초", Desc: "PR 거울 gh 호출 하나의 시간 상한"},
 	// 부하 보고 고르기(2026-11-24 fill-load-steer, docs/hc-fill/load-steer.md). 코어당 부하는 ×100 정수(%)
 	{Name: "load_band", Tool: "hc-fill", Default: "25", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 차이가 이 안이면 비슷함 — 설정 machine 차례"},

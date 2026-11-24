@@ -17,12 +17,14 @@ import (
 
 // sPrSrc <작업 트리> <sha> <머리 레인> <레인>: 레인 기계에서 커밋을 숨은 참조 refs/herdr/pr-src/<머리 레인>로 올리고(그 기계의 git 로그인 —
 // 토큰을 워커 기계로 보내지 않는다) 원격 주소를 찍는다. 머리 가지 pr/<레인>은 대기열 기계가 gh로 만든다(PR 작성자 인증).
-// 머리 레인이 레인과 다르면(원래 PR을 이어 씀) 짝 참조 refs/herdr/pr-of/<레인>/<머리 레인>도 — 병합기가 그 레인의 머리 가지를 찾는 길
-const sPrSrc = `cd "$d" 2>/dev/null || { echo "PRX cd"; exit 0; }
+// 머리 레인이 레인과 다르면(원래 PR을 이어 씀) 짝 참조 refs/herdr/pr-of/<레인>/<머리 레인>도 — 병합기가 그 레인의 머리 가지를 찾는 길.
+// 제출 보고($4 sub — 커밋이 이미 제출 참조로 원격에 있다, pr-inbox-lanes)는 작업 트리가 정리됐으면 저장소 폴더($5)에서 원격만 읽고, 올리기 실패도 넘긴다
+const sPrSrc = `s=$4 r=$5; case $r in "~/"*) r=$HOME/${r#"~/"} ;; esac
+cd "$d" 2>/dev/null || { [ "$s" = sub ] && cd "$r" 2>/dev/null; } || { echo "PRX cd"; exit 0; }
 u=$(git remote get-url origin 2>/dev/null) || { echo "PRX noremote"; exit 0; }
 printf 'URL %s\n' "$u"
-git push -q origin "+$1:refs/herdr/pr-src/$2" >/dev/null 2>&1 || { echo "PRX push"; exit 0; }
-[ "$3" = "$2" ] || git push -q origin "+$1:refs/herdr/pr-of/$3/$2" >/dev/null 2>&1 || { echo "PRX push"; exit 0; }
+git push -q origin "+$1:refs/herdr/pr-src/$2" >/dev/null 2>&1 || [ "$s" = sub ] || { echo "PRX push"; exit 0; }
+[ "$3" = "$2" ] || git push -q origin "+$1:refs/herdr/pr-of/$3/$2" >/dev/null 2>&1 || [ "$s" = sub ] || { echo "PRX push"; exit 0; }
 echo PUSHED`
 
 const prBodyCap = 60000 // 보고서 본문 상한(글자)
@@ -32,8 +34,10 @@ var prSumRe = regexp.MustCompile(`\s*\(감사 hc-fill 자동\)\s*$`)
 // prSummary: 완료 보고 한 줄(꼬리 「(감사 hc-fill 자동)」 뺌)
 func prSummary(msg string) string { return strings.TrimSpace(prSumRe.ReplaceAllString(msg, "")) }
 
-// opens: 떠 있는 대기열 레인(감사 줄 빼고, pr 켠 프로젝트)의 그 실행 마지막 완료 — 아직 안 썼으면 열거나(첫 완료) 다시 완료 댓글
+// opens: 떠 있는 대기열 레인(감사 줄 빼고, pr 켠 프로젝트)의 그 실행 마지막 완료 — 아직 안 썼으면 열거나(첫 완료) 다시 완료 댓글.
+// 완료 없이 제출하는 레인(감사 칸이 auto가 아님 — 받은편지·--no-audit, 손잡이 pr_inbox)은 SHA가 든 마지막 보고(중간·완료·제출)로(prinbox.go)
 func (r *prRun) opens() {
+	inb := prInboxOn()
 	for _, q := range qRows() {
 		if r.stop {
 			return
@@ -42,7 +46,13 @@ func (r *prRun) opens() {
 		if q.F(qState) != "up" || strings.HasPrefix(q.F(qAudit), "audit=") || !prOn(p) {
 			continue
 		}
-		l := joblast(n, q.F(qAddr), "완료")
+		self := inb && q.F(qAudit) != "auto"
+		l := ""
+		if self {
+			l = prLastSHA(n, q.F(qAddr))
+		} else {
+			l = joblast(n, q.F(qAddr), "완료")
+		}
 		ev := events.Cols(l)
 		key := "done:" + evKey(l)
 		if l == "" || len(ev.SHA) != 40 || r.sent[key] == "sent" {
@@ -56,7 +66,17 @@ func (r *prRun) opens() {
 				say("PR 거울 %s: --pr-of %s 의 PR이 없거나 이미 닫힘·Merged — 새 PR로", n, b)
 			}
 		}
-		if prLandedSince(t, ev.Time) { // 거울이 늦어 이미 착지했다 — 빈 PR을 열려다 매 바퀴 실패하지 않게(감사 낮음 7)
+		e := r.ents[t]
+		if prLandedSince(t, ev.Time) || self && prLandedSince(n, ev.Time) { // 거울이 늦어 이미 착지했다 — 빈 PR을 열려다 매 바퀴 실패하지 않게(감사 낮음 7)
+			if self && (e == nil || e.State != "open") {
+				say("PR 없음 %s — 착지가 먼저", n)
+			}
+			r.sent[key] = "sent"
+			continue
+		}
+		// 같은 커밋의 뒤 보고(「중간 <sha> 감사 완료」)·열린 PR의 제출 — 머리·댓글 그대로. 제출이 커밋을 바꿨어도(rebase) 머리를 옮기지 않는다:
+		// 병합기는 바퀴 머리에 본 머리 값으로 lease하고 끝 커밋을 제출 SHA의 신원으로 찾는다 — 옮기면 lease가 깨져 Merged 대신 닫힌다(감사 1차 중간)
+		if self && e != nil && e.State == "open" && (e.Head == ev.SHA || ev.State == "제출") {
 			r.sent[key] = "sent"
 			continue
 		}
@@ -121,7 +141,12 @@ func (r *prRun) pushSrc(n, p, m string, ev events.Event, key, t string) (ghpr.Re
 		r.stop = true
 		return ghpr.Repo{}, false
 	}
-	out, rc := onm(nil, m, sPrSrc, strings.TrimSuffix(repoOf(p, m), "/")+".wt/"+n, ev.SHA, t, n)
+	sub := "-"
+	if ev.State == "제출" {
+		sub = "sub"
+	}
+	rp := strings.TrimSuffix(repoOf(p, m), "/")
+	out, rc := onm(nil, m, sPrSrc, rp+".wt/"+n, ev.SHA, t, n, sub, rp)
 	if rc != 0 {
 		r.bad++
 		r.last = fmt.Sprintf("커밋 올리기 %s(%s, 종료 %d)", n, m, rc)
@@ -175,6 +200,12 @@ func (r *prRun) opened(t, n, p, m, brief string, ev events.Event, key string, re
 	}
 	base := strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "origin/")
 	pr, err := r.bot.Create(repo, base, "pr/"+t, r.mask(runeCut(t+" — "+sum, 200)), r.mask(prBody(t, sum, brief)))
+	if err != nil && strings.Contains(err.Error(), "No commits between") { // 머리가 이미 기준에 들었다(착지가 거울보다 먼저) — 실패로 세지 않는다
+		r.ok++
+		r.sent[key] = "sent"
+		say("PR 없음 %s — 착지가 먼저(머리가 이미 기준에 들었다)", t)
+		return
+	}
 	if !r.do("PR 열기 "+t, err) {
 		return
 	}
@@ -320,7 +351,9 @@ func (r *prRun) mergerEvents() {
 				r.comment(e, key, "병합 쪽 풀이 — "+ev.Msg)
 			}
 		case ev.State == "제출" && ev.SubmitID() != "":
-			r.comment(e, key, "제출됨 — 병합기 줄에 넣음(제출 "+ev.SubmitID()+", "+head(ev.SHA, 8)+")")
+			if r.comment(e, key, "제출됨 — 병합기 줄에 넣음(제출 "+ev.SubmitID()+", "+head(ev.SHA, 8)+")") {
+				r.selfAudit(e, lane, ev, key)
+			}
 		case ev.State == "착지":
 			r.landed(e, ev, key, mg[ev.Machine])
 		case ev.State == "막힘" && mg[ev.Machine] && strings.Contains(ev.Msg, "제출 ID"):
@@ -352,8 +385,7 @@ func (r *prRun) landed(e *prEnt, ev events.Event, key string, byMerger bool) {
 		return
 	}
 	if byMerger && strings.Contains(ev.Msg, "PR 머리 ") && !strings.Contains(ev.Msg, "PR 머리 안 들어감") {
-		e.State = "merged"
-		say("PR #%s 착지 %s — Merged(병합기가 머리 가지를 착지 커밋에 둠)", e.Num, e.Lane)
+		r.landedState(e, ev, key)
 		return
 	}
 	why := "가지 갱신 실패로 Merged 표시 없음"

@@ -21,6 +21,7 @@ echo "gh TOKEN=$tok $*" >>"$HC_T_LOG"
 for a; do [ "$a" != --body-file ] || { printf '%s\n=====\n' "$(cat)" >>"$HC_T_DIR/body.log"; break; }; done
 case "$1 $2" in
 "pr create") echo "https://github.com/example-org/proj/pull/7" ;;
+"pr view") echo "${HC_T_PRSTATE:-MERGED}" ;;
 "pr review") [ -z "$HC_T_OWN" ] || { echo "failed: Can not approve your own pull request" >&2; exit 1; } ;;
 esac
 exit 0

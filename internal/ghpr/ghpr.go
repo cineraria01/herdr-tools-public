@@ -242,6 +242,20 @@ func (c *Client) hasIn(r Repo, path, marker string) (bool, error) {
 	return strings.Contains(out, marker), nil
 }
 
+// State: PR의 실제 상태(OPEN·CLOSED·MERGED). 다른 글이면 오류 — 모름을 어느 상태로도 읽지 않는다
+func (c *Client) State(r Repo, num int) (string, error) {
+	out, err := c.run("", "pr", "view", strconv.Itoa(num), "--repo", r.Arg(), "--json", "state", "-q", ".state")
+	if err != nil {
+		return "", err
+	}
+	switch s := strings.TrimSpace(out); s {
+	case "OPEN", "CLOSED", "MERGED":
+		return s, nil
+	default:
+		return "", fmt.Errorf("gh pr view: 상태를 못 읽음(%s)", cut(s, 80))
+	}
+}
+
 // Status: 커밋 상태(state = success·failure·pending·error). 설명은 140자 안으로 자른다(GitHub 상한)
 func (c *Client) Status(r Repo, sha, state, context, desc string) error {
 	a := []string{"api", "-X", "POST", r.api() + "/statuses/" + sha, "-f", "state=" + state, "-f", "context=" + context, "-f", "description=" + cut(desc, 139)}
