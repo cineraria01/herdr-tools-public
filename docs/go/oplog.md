@@ -30,6 +30,7 @@
 | `warn` | `internal/proc`의 나머지 알림(못 띄움·고아 처리·자식 기록 실패 등 — 모두 `note` 하나로), hc-lane `errf`, herdr-sync `warn` |
 | `exit` | hc-lane·hc-fill `exit()`의 0이 아닌 종료 — 같은 프로세스가 도구의 `die`·`refuse`(`oplog.Fatal`) 줄을 이미 남겼거나 사용법(`usage()`, 종료 2)으로 끝나면 남기지 않는다. proc의 계속 도는 알림(`refuse`·`timeout`·`warn`)은 이 줄을 끄지 않는다 |
 | `panic` | herdr-hooks `call`의 recover(훅 이름·종료 코드) |
+| `usage` | 인자 오류(모르는 인자·값 없음·꼴 틀림 — 사람·에이전트가 잘못 부름): hc-lane `dieArg`·`argFail`·`mustParse`, hc-merger 상주 `dieArg`(바퀴 일꾼 `--round`의 인자 틀림은 판이 갈린 이상이라 `die`), herdr-settings-merge·herdr-tools-config `usage2`. 종료 코드 칸은 도구가 낸 그대로(hc-lane·hc-merger 1, 나머지 2). 도구 이상이 아니니 모으는 쪽은 사용법 종료처럼 거른다(2026-11-24 cli-usage-version — 그날 기록 116줄 가운데 86줄이 인자 오류의 `die`였다) |
 
 ## 지키는 것
 
@@ -44,6 +45,7 @@
 ## 안 남는 것
 
 - 사용법(`-h`·`--help`·인자 오류의 사용법 글, 종료 2) — 이상이 아니다.
+- hc-fill `run`·`watch`·`gc`의 잠금 겹침 종료 75(다른 실행이 이미 돈다 — 정상 건너뜀, `oplog.Skip`). 잠금을 기다리다 그만둔 75(`add --then`·`edit`·대기열 잠금)는 모름이라 `exit`로 남는다.
 
 - launchd로 도는 도구의 표준 오류 전체 — 지킴이 `--log`가 이미 남긴다.
 - 잡지 않은 패닉(Go 기본 종료 2와 스택)과 신호로 죽은 경우 — 모든 main의 패닉 잡기는 범위 밖이다.
@@ -51,4 +53,4 @@
 - 같은 프로세스에서 잠금 안 `die` 뒤 계속 도는 hc-fill watch의 그 뒤 종료 줄(프로세스마다 `exit` 겹침 막기가 한 번이라).
 - 기록 모으기(`hc-lane logs`)·지킴이 `--log` 돌림은 따로 레인이다.
 
-시험: `internal/oplog`(꼴·1000바이트·4MB 돌림·쓰기 실패·동시 쓰기·refuse 뒤 exit·시험 자식 상속), `internal/proc` `TestTimeoutGoesToOpLog`, `cmd/herdr-hooks` `TestPanicGoesToOpLog`, `tests/util` `TestOpLog*`(hc-lane die·hc-fill 종료 1·사용법 안 남김).
+시험: `internal/oplog`(꼴·1000바이트·4MB 돌림·쓰기 실패·동시 쓰기·refuse 뒤 exit·시험 자식 상속), `internal/proc` `TestTimeoutGoesToOpLog`, `cmd/herdr-hooks` `TestPanicGoesToOpLog`, `tests/util` `TestOpLog*`(hc-lane die·hc-fill 종료 1·사용법 안 남김·다른 도구 인자 오류 usage), `cmd/hc-lane` `TestCli*`(인자 오류 usage·권함), `cmd/hc-fill` `TestRunBusyNotInOpLog`.

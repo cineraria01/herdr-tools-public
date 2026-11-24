@@ -160,7 +160,8 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 			}
 		}
 		k := nk(evKey(f))
-		if f[0] >= e.since && f[0] >= fl && (W == ",," || strings.Contains(W, ","+f[4]+",")) && !seen[k] && !done[k] {
+		// --lane으로 거른 사건은 내보내지 않아 커서에도 안 적힌다(거름 없는 wait가 그대로 받는다)
+		if f[0] >= e.since && f[0] >= fl && (W == ",," || strings.Contains(W, ","+f[4]+",")) && e.laneOK(f) && !seen[k] && !done[k] {
 			done[k] = true
 			out = append(out, strings.Join(f, tab))
 		}

@@ -8,7 +8,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+
+	"herdr-tools/internal/oplog"
 )
 
 type opts struct {
@@ -143,7 +146,12 @@ func parseArgs(cmd string, a []string) (o opts, pe *parseErr) {
 		case x == "--":
 			o.rest, a = a[1:], nil
 		case strings.HasPrefix(x, "-"):
-			return o, die1("알 수 없는 인자: %s", x)
+			known := append([]string(nil), startKnown...)
+			for f := range sp.flags {
+				known = append(known, f)
+			}
+			sort.Strings(known[len(startKnown):]) // 같은 거리면 늘 같은 것을 권하게
+			return o, die1("알 수 없는 인자: %s%s", x, argHint(x, known))
 		default:
 			if sp.bare {
 				o.rest, a = a, nil
@@ -197,6 +205,8 @@ func mustParse(cmd string, a []string) opts {
 			usage()
 		}
 		fmt.Fprintln(os.Stderr, pe.msg)
+		// 인자 오류는 운영 기록에 usage(글·종료 코드는 그대로 — cli-usage-version, 옛 판은 이 길에 기록이 없었다)
+		oplog.Fatal("hc-lane", "", oplog.BadArg, pe.rc, strings.TrimPrefix(pe.msg, "hc-lane: "))
 		os.Exit(pe.rc)
 	}
 	on, repo = o.on, o.repo

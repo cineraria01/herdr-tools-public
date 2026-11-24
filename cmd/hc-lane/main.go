@@ -15,6 +15,7 @@ import (
 	"herdr-tools/internal/helptext"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/version"
 )
 
 type sub struct {
@@ -57,7 +58,7 @@ func main() {
 	closeInherited()
 	a := os.Args[1:]
 	if len(a) > 0 && a[0] == "--version" {
-		fmt.Println("hc-lane 1")
+		fmt.Println(version.String("hc-lane")) // 다른 도구처럼 릴리스 커밋이 보이게(cli-usage-version)
 		return
 	}
 	s, rest, ok := pick(a)

@@ -82,11 +82,18 @@ func lsofPath() string {
 	return "lsof"
 }
 
-// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패면 nil. 출력이 온전한지 본다(E13·R-25): 요청한 -F n 꼴의 레코드만 —
+// lsofArgs: 열린 경로를 묻는 인자. -b: 멈출 수 있는 커널 호출(마운트 지점·파일의 stat·readlink)을 피한다 — 응답 없는 네트워크·
+// 디스크 이미지 볼륨에서 lsof가 상한까지 묶이지 않게(경로는 커널이 주는 vnode 경로라 그대로 나온다. 피했다는 경고는 -w로 끔).
+// -u <내 uid>: 내 프로세스만 — root가 아니면 lsof는 남의 프로세스 파일을 어차피 못 보고, 지울 후보도 내 폴더뿐이다
+func lsofArgs() []string {
+	return []string{"-n", "-P", "-w", "-b", "-u", strconv.Itoa(os.Getuid()), "-F", "n"}
+}
+
+// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패(상한 60초 넘김 포함)면 nil. 출력이 온전한지 본다(E13·R-25): 요청한 -F n 꼴의 레코드만 —
 // 「p<숫자>」로 시작하고 그 뒤 f·n 줄만, 레코드마다 f·n이 하나 이상. 그 밖의 줄(경고·진단·요청 안 한 필드), p 앞 줄, 빈·숫자 아닌 pid,
 // 잘린 레코드가 있거나 lsof를 부른 이 프로세스(적어도 cwd)가 없으면 잘렸거나 다른 출력이라 nil(삭제 보류)
 func openPaths(r runner) map[string]bool {
-	res := r(60*time.Second, nil, lsofPath(), "-n", "-P", "-w", "-F", "n")
+	res := r(60*time.Second, nil, lsofPath(), lsofArgs()...)
 	if res.err != nil || res.rc != 0 || res.out == "" {
 		return nil
 	}
@@ -124,8 +131,8 @@ func openPaths(r runner) map[string]bool {
 	return m
 }
 
-// sweepTmp: 임시 찌꺼기 한 바퀴
-func sweepTmp(base string, hours float64, dry bool, r runner) {
+// sweepTmp: 임시 찌꺼기 한 바퀴. lsofFailed = 지울 후보가 있었는데 lsof로 열린 경로를 몰라 건너뜀
+func sweepTmp(base string, hours float64, dry bool, r runner) (asked, lsofFailed bool) {
 	ents, err := os.ReadDir(base)
 	if err != nil {
 		return
@@ -157,8 +164,9 @@ func sweepTmp(base string, hours float64, dry bool, r runner) {
 	held := openPaths(r)
 	if held == nil {
 		fmt.Println("임시 찌꺼기: lsof 실패 — 건너뜀")
-		return
+		return true, true
 	}
+	asked = true
 	n, total := 0, int64(0)
 	for _, c := range old {
 		busy := false
@@ -193,6 +201,47 @@ func sweepTmp(base string, hours float64, dry bool, r runner) {
 			word = "지울 것"
 		}
 		fmt.Printf("임시 찌꺼기: %s %d개(%.1fGB)\n", word, n, float64(total)/gb)
+	}
+	return
+}
+
+// tmpSkipAlert: lsof 건너뜀이 n바퀴(sweep.tmp_skip_alert) 잇달면 사건 hc-sweep-tmp-skip 한 번 — 임시 폴더 정리가 사실상 꺼졌다는 것을
+// 지휘가 알게. 표식 <상태>/hc-sweep/tmp-skip「<횟수><탭><처음 시각><탭><보냄 0|1>」, lsof가 되면 지워 다음 연속을 새로 센다.
+// 키는 처음 시각 — 보낸 뒤 표식을 못 고쳐 다시 보내도 hc-lane이 같은 키를 거른다. dry-run·n<=0이면 아무것도 안 함
+func tmpSkipAlert(state string, failed bool, n int, dry bool, lane string, r runner) {
+	if dry || n <= 0 {
+		return
+	}
+	if !failed {
+		os.Remove(state)
+		return
+	}
+	count, first, sent := 0, "", false
+	if b, err := os.ReadFile(state); err == nil {
+		if f := strings.Split(strings.TrimSpace(string(b)), "\t"); len(f) == 3 {
+			if c, err := strconv.Atoi(f[0]); err == nil && f[1] != "" {
+				count, first, sent = c, f[1], f[2] == "1"
+			}
+		}
+	}
+	if first == "" { // 없거나 잘린 표식은 새 연속으로
+		count, first, sent = 0, time.Now().Format("2006-01-02T15:04:05"), false
+	}
+	count++
+	if count >= n && !sent {
+		msg := fmt.Sprintf("임시 찌꺼기 쓸기가 %d바퀴 잇달아 건너뜀(lsof 실패·상한 넘김, %s부터) — 이 기계의 임시 폴더 정리가 꺼진 셈", count, first)
+		if sent = laneReport(r, lane, "hc-sweep-tmp-skip", msg, "hc-sweep-tmp-skip:"+first); sent {
+			fmt.Println("임시 찌꺼기 건너뜀 알림:", msg)
+		} else {
+			fmt.Println("임시 찌꺼기 건너뜀 알림 실패(hc-lane report) — 다음 바퀴에 같은 키로 다시")
+		}
+	}
+	mark := "0"
+	if sent {
+		mark = "1"
+	}
+	if os.MkdirAll(filepath.Dir(state), 0o755) == nil {
+		atomic.WriteFile(state, []byte(fmt.Sprintf("%d\t%s\t%s\n", count, first, mark)), 0o644)
 	}
 }
 
@@ -418,7 +467,10 @@ func diskRun(dry bool, r runner) error {
 	}
 	base := tmpDir(r)
 	if hours := numConf("sweep.tmp_hours", "3"); hours > 0 {
-		sweepTmp(base, hours, dry, r)
+		if asked, failed := sweepTmp(base, hours, dry, r); asked {
+			tmpSkipAlert(filepath.Join(stateHome(), "hc-sweep", "tmp-skip"), failed, int(numConf("sweep.tmp_skip_alert", "3")), dry,
+				filepath.Join(binDir, "hc-lane"), r)
+		}
 	}
 	limit := numConf("sweep.disk_free_gb", "10")
 	if limit <= 0 {

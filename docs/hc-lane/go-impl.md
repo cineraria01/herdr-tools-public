@@ -14,3 +14,6 @@
     잘린 `hc ls`·`hc get` 출력(0으로 끝났어도)은 「없음·끝남」이 아니라 모름이다.
     그 밖에: 잘린 목록·gc reflog 실패·해석 못 하는 `gc.keep_branches` 무늬·`--min-age` 넘침은 멈춤, 실패한 `hc read` 화면으로는 키를 안 보냄, 막힘 줄의 비밀 꼴 값(주소·`키=값`·24자 넘는 토큰 꼴)은 가림, `hc run` 출력에 주소가 없으면 종료 5, 제출 전 사전 검사는 제출 커밋 속 판만, 옛 판 주차(`lane/<레인>` + 같은 SHA의 `주차` 사건)는 clean이 「주차됨」, `--resume --dry-run`도 원격 주차 가지를 읽음, watch 잠금 주인을 `ps`로 못 보면 넘겨받지 않음(75).
     시험 `tests/hclane/gofix_test.go`·`gofix2_test.go`.
+  - **판·인자 오류**(2026-11-24 cli-usage-version): `hc-lane --version`은 다른 도구처럼 `hc-lane (Go <커밋 12자>)`(기계에서 지은 것은 `hc-lane (Go)`) — 옛 고정 `hc-lane 1`로는 기계마다 판이 섞였는지 몰랐다.
+    인자 오류(모르는 인자·값 없음·꼴 틀림)는 표준 오류 글·종료 코드는 그대로이고 운영 기록만 `usage` 줄이다(`argerr.go`, [운영 기록](../go/oplog.md)).
+    모르는 인자가 아는 인자와 가까우면 둘째 줄에 권한다(`hc-lane: --name 대신 --lane?`). 시험 `cmd/hc-lane/cliusage_test.go`.

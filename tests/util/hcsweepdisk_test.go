@@ -24,6 +24,10 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	mkdirs(t, T+"/bin", T+"/badbin", T+"/home", T+"/cfg", T+"/tmp", T+"/outside/keep")
 	script(t, T+"/bin/hc", T, "#!/bin/sh\n[ \"$1\" = ls ] && { echo '{\"terminals\": []}'; exit 0; }\nexit 1\n")
 	script(t, T+"/badbin/lsof", T, "#!/bin/sh\nexit 1\n")
+	// 열린 경로는 가짜 lsof로 — 진짜 lsof는 기계마다 느리기가 달라(볼륨·프로세스가 많은 기계는 몇 분) 이 시험이 그 속도에 기대게 된다.
+	// 받은 인자를 @T@/lsof-args에 적고, 부른 프로세스(hc-sweep, $PPID) 기록과 @T@/lsof-held의 경로를 다른 pid가 연 것으로 찍는다
+	script(t, T+"/bin/lsof", T, "#!/bin/sh\necho \"$*\" >> @T@/lsof-args\nprintf 'p%s\\nfcwd\\nn/\\n' \"$PPID\"\n"+
+		"[ -f @T@/lsof-held ] && while read -r p; do printf 'p1\\nfcwd\\nn%s\\n' \"$p\"; done < @T@/lsof-held\nexit 0\n")
 	// 「go가 도는가」(ps -x -o comm=)는 가짜 목록 @T@/ps-comm으로 — 실제 ps면 검증이 함께 돌리는 다른 꾸러미의 go test가 보여 결과가 바뀐다.
 	// 다른 ps 부름(세션 찾기 등)은 진짜로
 	script(t, T+"/bin/ps", T, "#!/bin/sh\n[ \"$*\" = \"-x -o comm=\" ] && exec cat @T@/ps-comm\nexec /bin/ps \"$@\"\n")
@@ -63,15 +67,9 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 		os.Chmod(X+"/"+d, 0o555)
 	}
 	now := time.Now()
-	os.Chtimes(X+"/TestMixed555/001/f", now, now) // 안쪽 하나만 새로움
-	sl := exec.Command("sleep", "120")
-	sl.Dir = X + "/TestOpen444/001"
-	if err := sl.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { sl.Process.Kill(); sl.Wait() })
-	time.Sleep(300 * time.Millisecond)
-	age(X+"/TestOpen444", X+"/TestRO333") // 위 chmod·cd가 바꾼 시각을 다시 오래되게
+	os.Chtimes(X+"/TestMixed555/001/f", now, now)    // 안쪽 하나만 새로움
+	write(t, T+"/lsof-held", X+"/TestOpen444/001\n") // 다른 프로세스가 cwd로 쥔 폴더
+	age(X+"/TestOpen444", X+"/TestRO333")            // 위 chmod가 바꾼 시각을 다시 오래되게
 
 	// lsof 실패면 아무것도 안 지움
 	cfg("sweep.disk_free_gb 0")
@@ -117,6 +115,8 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	c.ok("남긴 열린 폴더의 권한은 그대로", err == nil && fi.Mode().Perm() == 0o555)
 	c.ok("closed.log에 한 줄(3개)", grep(read(LOG), `임시 찌꺼기 지움\(3.0시간 넘음\).*3개`))
 	c.ok("문턱 0이면 알림 없음", read(EV) == "")
+	// 진짜 lsof에 닿지 않고 가짜가 좁힌 인자를 그대로 받았다(-b: 멈출 수 있는 stat 피함, -u: 내 프로세스만)
+	c.ok("가짜 lsof가 -b·-u <uid>를 받음", grep(read(T+"/lsof-args"), fmt.Sprintf(`(^| )-b( .*)? -u %d( |$)`, os.Getuid())))
 
 	// 디스크 부족 알림: 문턱을 아주 크게 → 부족. 두 바퀴에도 한 번만, dry-run은 안 보냄
 	cfg("sweep.disk_free_gb 1000000000")
@@ -153,14 +153,7 @@ func testHcSweepDisk(t *testing.T, T string, e Env) {
 	sweep()
 	c.ok("회복 뒤 다시 부족이면 다시 알림", grepc(read(EV), "hc-disk-low") == 2)
 
-	// launchd 작업과 같은 PATH(/usr/sbin 없음)에서도 lsof를 찾는다(감사 중간 1): 오래된 폴더는 지우고 열린 폴더는 남긴다
-	cfg("sweep.disk_free_gb 0")
-	mkdirs(t, X+"/go-buildlaunchd/b001")
-	age(X + "/go-buildlaunchd")
-	sweepEnv(e.With("PATH=" + T + "/bin:/usr/bin:/bin"))
-	c.ok("launchd PATH에서도 lsof로 판정해 지움", !exists(X+"/go-buildlaunchd") && exists(X+"/TestOpen444"))
-	sl.Process.Kill()
-	sl.Wait()
+	// launchd PATH(/usr/sbin 없음)에서 lsof 찾기는 진짜 lsof를 띄워야 보이니 단위 시험(cmd/hc-sweep TestLsofPathFallback)이 찾기만 본다
 
 	// Go 빌드 캐시 상한(2026-11-21 mini-m4 ~/.cache/go-build 하루 13.4GB): 여유가 문턱 1.5배 아래면 GOCACHE를 sweep.gocache_gb 아래로
 	// 오래된 항목부터 줄이고, GOCACHE와 다른 옛 자리 ~/Library/Caches/go-build는 비운다. go가 돌면(가짜 ps 목록에 go) 건너뜀

@@ -29,6 +29,9 @@ const (
 	Refuse  = "refuse"  // 거절·띄우지 않음(모름)
 	Exit    = "exit"    // 0이 아닌 종료(die·refuse 줄이 없을 때)
 	Panic   = "panic"   // 잡은 패닉
+	// BadArg: 인자 오류(모르는 인자·값 없음·꼴 틀림 — 사람·에이전트가 잘못 부름). 도구 이상이 아니라 모으는 쪽이 사용법 종료처럼 거른다.
+	// 종료 코드 칸은 도구가 낸 그대로(2026-11-24 cli-usage-version)
+	BadArg = "usage"
 )
 
 const (
@@ -95,6 +98,9 @@ func Fatal(tool, subcmd, kind string, code int, msg string) {
 
 // Usage: 사용법(-h·--help·인자 오류의 사용법 글)으로 끝난다 — 이상이 아니라 Exited가 남기지 않는다(감사 L1)
 func Usage() { ended.Store(true) }
+
+// Skip: 정상 건너뜀(잠금 겹침 — 다른 실행이 이미 돈다)으로 끝난다 — 이상이 아니라 Exited가 남기지 않는다(cli-usage-version)
+func Skip() { ended.Store(true) }
 
 // Exited: 0이 아닌 종료 한 줄 — 이 프로세스가 이미 Fatal 줄을 남겼거나 Usage면 건너뛴다.
 // ponytail: 프로세스 하나에 한 번 — 늘 도는 watch가 잠금 안 die 뒤 같은 프로세스로 계속 돌면 그 뒤 종료 줄은 빠진다(launchd --log가 남긴다)

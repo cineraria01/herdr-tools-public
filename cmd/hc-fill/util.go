@@ -422,6 +422,12 @@ func exit(code int) {
 	os.Exit(code)
 }
 
+// busyExit: 잠금 겹침(다른 run·watch·gc가 이미 돈다)으로 종료 75 — 정상 건너뜀이라 운영 기록에 남기지 않는다(cli-usage-version)
+func busyExit() {
+	oplog.Skip()
+	exit(75)
+}
+
 var exitOnce sync.Once
 
 // runExitHooks: 끝내기 훅(나중에 단 것부터) — exit와 run의 신호 처리(셸 판 EXIT trap은 TERM에도 돈다, Fable L2).

@@ -30,7 +30,6 @@ var docsElsewhere = map[string]string{
 
 // versionOwn: --version이 version.String 꼴이 아닌 도구 → 까닭(출력은 바꾸지 않는다 — 바꾸는 레인이 여기서 지운다)
 var versionOwn = map[string]string{
-	"hc-lane":     "고정 「hc-lane 1」 — 판을 보는 곳이 있다",
 	"herdr-hooks": "고정 「herdr-hooks 1」(const version)",
 }
 
@@ -192,7 +191,7 @@ func TestNewCmdSelf(t *testing.T) {
 		t.Errorf("③ 예외 문서가 있음: 문제 %q", all)
 	}
 	// 예외 목록의 다른 도구가 cmd/에 없음(임시 트리라서) → 지우라는 글
-	if all := strings.Join(staleExceptions(R), "\n"); strings.Contains(all, "hc-merger") || !strings.Contains(all, "예외 목록의 ovis-split가 cmd/에 없다") || !strings.Contains(all, "예외 목록의 hc-lane가 cmd/에 없다") {
+	if all := strings.Join(staleExceptions(R), "\n"); strings.Contains(all, "hc-merger") || !strings.Contains(all, "예외 목록의 ovis-split가 cmd/에 없다") || !strings.Contains(all, "예외 목록의 herdr-hooks가 cmd/에 없다") {
 		t.Errorf("없는 예외: 문제 %q", all)
 	}
 }

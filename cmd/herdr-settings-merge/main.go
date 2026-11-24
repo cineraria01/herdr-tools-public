@@ -27,6 +27,13 @@ func die2(f string, a ...any) {
 	os.Exit(2)
 }
 
+// usage2: 인자 오류 — 글·종료 2는 die2 그대로, 운영 기록은 usage(사람·에이전트가 잘못 부름, cli-usage-version)
+func usage2(f string, a ...any) {
+	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.BadArg, 2, fmt.Sprintf(f, a...))
+	os.Exit(2)
+}
+
 func die1(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
 	oplog.Log(me, "", oplog.Die, 1, fmt.Sprintf(f, a...))
@@ -110,13 +117,13 @@ func main() {
 			check = true
 		case "--take":
 			if i+1 >= len(a) || a[i+1] == "" {
-				die2("--take 뒤에 키가 없음")
+				usage2("--take 뒤에 키가 없음")
 			}
 			i++
 			takes[a[i]] = true
 			takeAll = takeAll || a[i] == "*"
 		default:
-			die2("모르는 인자: %s", a[i])
+			usage2("모르는 인자: %s", a[i])
 		}
 	}
 	machine := os.Getenv("HERDR_MACHINE")

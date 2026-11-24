@@ -45,6 +45,7 @@ func TestScopeRun(t *testing.T) {
 	t.Setenv("HERDR_VERIFY_NO_LOCK", "1")
 	t.Setenv("HERDR_VERIFY_ALL", "")
 	t.Setenv("HERDR_VERIFY_JOBS", "4")
+	t.Setenv("HERDR_VERIFY_RETRY", "0") // 실패 조각 다시 돌기(retry.go)는 retry_scope_test.go가 본다 — 여기는 돈 조각을 한 번씩 센다
 	recs := func() int { e, _ := os.ReadDir(filepath.Join(C, "verify-pass")); return len(e) }
 	const all = "cot,rest,ta,tc,td,tl"
 	run := func(mode string) (int, string, string) { // 종료 코드, 돈 조각(이름순 ,), 출력

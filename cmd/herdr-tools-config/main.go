@@ -33,6 +33,13 @@ func die2(f string, a ...any) {
 	os.Exit(2)
 }
 
+// usage2: 인자 오류(개수·꼴) — 글·종료 2는 die2 그대로, 운영 기록은 usage(사람·에이전트가 잘못 부름, cli-usage-version)
+func usage2(f string, a ...any) {
+	fmt.Fprintf(os.Stderr, me+": "+f+"\n", a...)
+	oplog.Log(me, "", oplog.BadArg, 2, fmt.Sprintf(f, a...))
+	os.Exit(2)
+}
+
 func main() {
 	a := os.Args[1:]
 	if len(a) == 0 {
@@ -58,7 +65,7 @@ func main() {
 		os.Exit(toolcfg.Lint(dir, strict, files, os.Stdout, os.Stderr))
 	case "sync-lint":
 		if len(a) < 2 || len(a) > 3 {
-			die2("sync-lint <범용 저장소> [<sync.list>]")
+			usage2("sync-lint <범용 저장소> [<sync.list>]")
 		}
 		list := dir + "/sync.list"
 		if len(a) == 3 && a[2] != "" { // 빈 인자도 기본 경로(셸 판 ${2:-…})
@@ -99,10 +106,10 @@ func listForm(list string) bool {
 
 func get(dir string, a []string) {
 	if len(a) < 1 || len(a) > 2 {
-		die2("get <키> [<기본값>]")
+		usage2("get <키> [<기본값>]")
 	}
 	if !toolcfg.KeyRe.MatchString(a[0]) {
-		die2("키 이름 꼴이 틀림: %s (<영역>.<이름>, 소문자·숫자·_)", a[0])
+		usage2("키 이름 꼴이 틀림: %s (<영역>.<이름>, 소문자·숫자·_)", a[0])
 	}
 	v, ok, err := toolcfg.Get(dir, a[0])
 	if d, isDup := err.(*toolcfg.ErrDup); isDup {
@@ -124,11 +131,11 @@ func get(dir string, a []string) {
 
 func file(dir string, a []string) {
 	if len(a) != 1 || a[0] == "" {
-		die2("file <이름>")
+		usage2("file <이름>")
 	}
 	n := a[0]
 	if w := "/" + n + "/"; strings.HasPrefix(w, "//") || strings.Contains(w, "/../") || strings.Contains(w, "/./") {
-		die2("이름은 설정 폴더 안의 상대 경로: %s", n)
+		usage2("이름은 설정 폴더 안의 상대 경로: %s", n)
 	}
 	if st, err := os.Stat(dir + "/" + n); err == nil && st.Mode().IsRegular() {
 		abs, err := filepath.Abs(dir)

@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -25,13 +24,18 @@ var (
 
 func valS(args []string) string {
 	if len(args) < 2 {
-		die("%s 값이 없다", args[0])
+		dieArg("%s 값이 없다", args[0])
 	}
 	return args[1]
 }
 
+// startKnown: 띄우기·clean·gc·fetch가 받는 인자(모르는 인자 권함용)
+var startKnown = []string{"--on", "--branch", "--name", "--repo", "--brief", "--start-wait", "--min-age", "--verdict", "--read", "--direct",
+	"--resume", "--dry-run", "--print-steps", "--integ", "--remote-branches", "--archive"}
+
 // parseStart: 옵션을 전역에 읽고, 남은 것(-- 뒤 실행 명령, fetch의 참조)을 돌려준다
 func parseStart(cmd string, args []string) []string {
+	die := dieArg // 여기의 멈춤은 모두 인자 오류(운영 기록 usage — argerr.go)
 	cmdName = cmd
 	for len(args) > 0 {
 		a := args[0]
@@ -102,12 +106,12 @@ func parseStart(cmd string, args []string) []string {
 					die("--integ= 뒤에 접두가 없다")
 				}
 			} else if strings.HasPrefix(a, "-") {
-				die("알 수 없는 인자: %s", a)
+				unknownArg(a, "", startKnown...)
 			} else {
 				if cmd == "fetch" {
 					return args
 				}
-				die("알 수 없는 인자: %s (실행 명령 앞에는 -- 를 둔다)", a)
+				dieArg("알 수 없는 인자: %s (실행 명령 앞에는 -- 를 둔다)", a)
 			}
 		}
 		args = args[1:]
@@ -117,6 +121,7 @@ func parseStart(cmd string, args []string) []string {
 
 // checkArgs: 셸 판의 인자 검사(띄우기·clean·gc 몫)
 func checkArgs(cmd string, rest []string) {
+	die := dieArg // 여기의 멈춤은 모두 인자 오류(운영 기록 usage — argerr.go)
 	launch := cmd == "launch"
 	if !launch && brief+swarg != "" {
 		die("--brief·--start-wait는 레인을 띄울 때만 쓴다")
@@ -128,8 +133,7 @@ func checkArgs(cmd string, rest []string) {
 		die("--resume은 쓰기 레인을 띄울 때만 쓴다")
 	}
 	if read && direct {
-		errf("hc-lane: --read와 --direct는 함께 쓰지 않는다(--direct는 쓰기 레인만)\n")
-		os.Exit(2)
+		argFail(2, "--read와 --direct는 함께 쓰지 않는다(--direct는 쓰기 레인만)")
 	}
 	switch cmd {
 	case "clean":

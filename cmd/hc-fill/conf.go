@@ -250,6 +250,15 @@ func errText(err error) string {
 
 // project_ref <저장소>: 기본 가지의 실제 참조. 원격 부재(2)와 Git 오류를 구분한다. ok=false면 모름
 func projectRef(repo string) (string, bool) {
+	if r, hit := pcRef[repo]; hit { // 바퀴에 저장소마다 한 번(aftercost.go)
+		return r.out, r.ok
+	}
+	ref, ok := projectRefRead(repo)
+	pcRef[repo] = pcRes{ref, ok}
+	return ref, ok
+}
+
+func projectRefRead(repo string) (string, bool) {
 	var ref string
 	_, rc := run("git", "-C", repo, "remote", "get-url", "origin")
 	switch rc {
@@ -311,13 +320,13 @@ const projectRefSh = `project_ref() {
 
 // landed <레인>: FR 저장소 FB에서 제목 머리가 그 레인인 첫 커밋 줄(「%h %s」). ok=false면 git 실패(모름 — 반쪽 출력은 버림)
 func landed(lane string) (string, bool) {
-	o, rc := run("git", "-C", FR, "log", FB, "--format=%h %s")
-	if rc != 0 {
+	o, ok := pcSubjects(FR, FB) // 바퀴에 저장소·가지마다 한 번(aftercost.go)
+	if !ok {
 		return "", false
 	}
 	re := regexp.MustCompile(`^[0-9a-f]+ ([a-z]+(\([^)]*\))?!?: *)?` + regexp.QuoteMeta(lane) + `([^a-z0-9_-]|$)`)
 	for _, l := range lines(o) {
-		if re.MatchString(l) {
+		if strings.Contains(l, lane) && re.MatchString(l) {
 			return l, true
 		}
 	}

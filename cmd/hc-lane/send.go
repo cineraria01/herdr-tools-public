@@ -327,9 +327,9 @@ func verdictCmd(a []string) int {
 			vn = val(a, i)
 			i++
 		case strings.HasPrefix(a[i], "-"):
-			die("verdict: 알 수 없는 인자: %s", a[i])
+			dieArg("verdict: 알 수 없는 인자: %s", a[i])
 		case aid != "":
-			die("verdict: 판정 ID는 하나: %s", a[i])
+			dieArg("verdict: 판정 ID는 하나: %s", a[i])
 		default:
 			aid = a[i]
 		}

@@ -34,6 +34,7 @@ type ev struct {
 	wsf          string
 	myp          string
 	ems, unk     []string
+	lanes        []string // --lane(events·wait): 이 레인들의 사건만(evargs.go laneOK)
 	pbad         bool
 	wgrace       int64
 	wbmax        int64
@@ -100,60 +101,7 @@ func (e *ev) lsLanes() {
 
 func evCmd(ec string, a []string) int {
 	e := &ev{ec: ec, ed: evdir()}
-	to := "110"
-	for i := 0; i < len(a); i++ {
-		switch a[i] {
-		case "--all":
-			e.all = true
-		case "--on":
-			v := val(a, i)
-			if v == "" || strings.ContainsAny(v, "/ ") {
-				die("--on 기계 이름이 이상하다: %s", v)
-			}
-			e.ons = append(e.ons, v)
-			i++
-		case "--since":
-			e.since = val(a, i)
-			i++
-		case "--timeout":
-			if ec != "wait" {
-				die("--timeout은 wait에서만 쓴다")
-			}
-			to = val(a, i)
-			i++
-		case "--state":
-			if ec == "events" {
-				die("--state는 wait·watch에서만 쓴다")
-			}
-			e.sts = val(a, i)
-			i++
-		case "--mine":
-			if ec == "events" {
-				die("--mine은 wait·watch에서만 쓴다")
-			}
-			e.mine = true
-		case "--to":
-			if ec != "watch" {
-				die("--to는 watch에서만 쓴다")
-			}
-			e.wto = val(a, i)
-			i++
-		default:
-			die("알 수 없는 인자: %s", a[i])
-		}
-	}
-	if !digits(to) {
-		die("--timeout은 분(0 이상 정수): %s", to)
-	}
-	if ec == "watch" && (e.wto == "" || strings.HasPrefix(e.wto, "-") || !onlyChars(e.wto, alnum+"_./-")) {
-		die("watch: --to <지휘 터미널 주소>가 없거나 이상하다: %s", e.wto)
-	}
-	for _, x := range strings.Fields(strings.ReplaceAll(e.sts, ",", " ")) {
-		if !inWords(evstates+" 멈춤", x) {
-			die("--state는 %s 멈춤 가운데: %s", evstates, x)
-		}
-	}
-	e.since = sinceArg(e.since)
+	to := e.args(a) // evargs.go
 	if ec == "wait" && stdoutIsNull() {
 		fmt.Fprintln(os.Stderr, "hc-lane wait: 출력이 /dev/null이라 사건을 읽을 사람이 없습니다 — seen에 적지 않고 끝냅니다. 백그라운드로 기다리려면 출력을 파일로 받으세요")
 		return 2
@@ -164,7 +112,7 @@ func evCmd(ec string, a []string) int {
 		for _, l := range e.evread(0) {
 			if strings.HasPrefix(l, "모름 ") {
 				mu = append(mu, l)
-			} else if strings.Contains(l, tab) && strings.SplitN(l, tab, 2)[0] >= e.since {
+			} else if f := strings.Split(l, tab); len(f) > 1 && f[0] >= e.since && e.laneOK(f) {
 				tl = append(tl, l)
 			}
 		}
@@ -187,7 +135,7 @@ func sinceArg(s string) string {
 		k, u = s[:len(s)-1], s[len(s)-1:]
 	}
 	if !digits(k) {
-		die("--since는 시각(UTC 2026-11-16T02:00:00Z) 또는 숫자에 s·m·h·d: %s", s)
+		dieArg("--since는 시각(UTC 2026-11-16T02:00:00Z) 또는 숫자에 s·m·h·d: %s", s)
 	}
 	n := atoi(k)
 	switch u {

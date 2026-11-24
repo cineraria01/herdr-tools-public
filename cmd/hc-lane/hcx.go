@@ -43,7 +43,7 @@ func thenExit(run func([]string) int) func([]string) int {
 // val: 「--옵션 값」의 값이 있나(셸 판 val — 없으면 「<옵션> 값이 없다」로 끝냄)
 func val(a []string, i int) string {
 	if i+1 >= len(a) {
-		die("%s 값이 없다", a[i])
+		dieArg("%s 값이 없다", a[i])
 	}
 	return a[i+1]
 }

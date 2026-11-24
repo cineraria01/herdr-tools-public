@@ -47,8 +47,12 @@ func lcFetch(p string, quiet bool) int {
 			if !quiet {
 				say("%sfetch 건너뜀: 지금 있는 origin 참조로 판정 (%s)", P, FR)
 			}
-		} else if _, rc := (Cmd{Name: "git", Args: []string{"-C", FR, "fetch", "-q", "origin"}, Err: errPass}).Run(); rc != 0 {
-			FETCHBAD += "," + p
+		} else {
+			_, rc := (Cmd{Name: "git", Args: []string{"-C", FR, "fetch", "-q", "origin"}, Err: errPass}).Run()
+			pcDrop(FR) // 새로 받은 원격 — 이 저장소의 이력·표식 읽기를 다시
+			if rc != 0 {
+				FETCHBAD += "," + p
+			}
 		}
 	}
 	if inlist(p, FETCHBAD) {
@@ -90,8 +94,8 @@ func lmark(lane, sinceS string) int {
 	if !strings.HasPrefix(FB, "origin/") {
 		return 1
 	}
-	refs, rc := run("git", "-C", FR, "ls-remote", "origin", "refs/hc-landed/"+lane+"/*")
-	if rc != 0 {
+	refs, ok := pcLanded(FR) // 표식 목록은 바퀴에 저장소마다 한 번(aftercost.go)
+	if !ok {
 		return 2
 	}
 	pre := "refs/hc-landed/" + lane + "/"
@@ -106,8 +110,7 @@ func lmark(lane, sinceS string) int {
 		if !isDigits(s) || num(s) < t {
 			continue
 		}
-		_, rc := run("git", "-C", FR, "merge-base", "--is-ancestor", f[0], FB)
-		switch rc {
+		switch pcAncestor(FR, f[0], FB) {
 		case 0:
 			LMS = f[0]
 			return 0
@@ -139,8 +142,7 @@ func cachedMark(p, lane string) bool {
 	if sha == "" {
 		return false
 	}
-	_, rc := run("git", "-C", FR, "merge-base", "--is-ancestor", sha, FB)
-	return rc == 0
+	return pcAncestor(FR, sha, FB) == 0
 }
 
 // landing_hit <선행>: 선행의 제목이나 표식에서 확인한 착지(hit). 0 들어감 · 1 아직 · 2 조회 오류

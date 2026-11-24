@@ -3,7 +3,7 @@
 // Command verify: herdr-tools 저장소 검증 본문 — .claude/herdr-verify.sh가 저장소 뿌리에서 짓고 exec 한다(2026-11-22 go-shell-remove:
 // 옛 셸 검증의 병렬 실행기·단계·셸 시험 목록을 걷고 go 명령 몇 개로). 표준 라이브러리만 쓴다(레인이 internal을 깨도 검증은 지어지게).
 //
-//	verify [--cheap-only]
+//	verify [--cheap-only | --flaky]
 //
 // 싼 단계: go vet ./... · go test ./tests/repo/(gofmt·셸 문법·줄 수 예산·개인 값·비밀 꼴·싼 검사 빠짐). --cheap-only면 여기까지
 // (.claude/herdr-precheck.sh — 병합기 제출 직전). 싼 단계가 실패하면 무거운 단계를 건너뛰고 1(HERDR_VERIFY_ALL=1이면 끝까지).
@@ -19,6 +19,8 @@
 // 조각 출력은 끝날 때 한 덩이로(「-- [i/n] … 끝」 다음) 찍는다. 함께 도는 자리 수는 HERDR_VERIFY_JOBS=<수>(없으면 코어 수)다:
 // 조각은 한 자리, 나머지 조각은 go test -p <그 1/3>로 그만큼 자리를 쓴다(그 값을 주면 cotenant 단계의 -p에도).
 // go list가 실패하면 옛 꼴 한 번(-skip ^TestCotenantGuard$ ./...).
+// 홀로 단계·조각이 실패하면 조각이 다 끝난 뒤 혼자 한 번 다시 돌린다(retry.go — HERDR_VERIFY_RETRY=0 끔·=<수> 상한, 기본 3).
+// --flaky는 이 기계의 흔들림 기록을 시험별로 보이고 끝난다.
 // macOS면 조각 단계 앞에 메모리 디스크를 만들어 조각의 TMPDIR로 주고 끝에 뗀다(ramtmp.go — HERDR_VERIFY_RAMTMP=0 끔·=<MB> 크기,
 // 못 만들면 한 줄 알림 뒤 보통 임시 폴더로).
 //
@@ -124,10 +126,11 @@ type shard struct {
 	env  []string
 	est  int
 	w    int
-	// 범위(scope.go): skip이면 띄우지 않고 「건너뜀」 한 줄, note는 띄우는 줄에 덧붙임, done은 끝난 뒤(고아 검사까지 본 종료 코드)
+	// 범위(scope.go): skip이면 띄우지 않고 「건너뜀」 한 줄, note는 띄우는 줄에 덧붙임, done은 끝난 뒤(고아 검사까지 본 종료 코드·출력).
+	// done이 참이면 그 실패는 부르는 쪽이 맡는다(retry.go — 다 끝난 뒤 다시 돌려 정한다) — runShards의 종료 코드에 안 센다
 	skip bool
 	note string
-	done func(label string, rc, secs int)
+	done func(label string, rc, secs int, out string) bool
 }
 
 func main() {
@@ -282,8 +285,11 @@ func secGroups(dir string, want [][]string) [][]string {
 // verify: 종료 코드. 0 통과 · 1 실패 · 2 틀린 인자 · 128+신호 끊김
 func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	cheapOnly := len(args) == 1 && args[0] == "--cheap-only"
+	if len(args) == 1 && args[0] == "--flaky" {
+		return flakyReport(w)
+	}
 	if len(args) > 0 && !cheapOnly {
-		fmt.Fprintf(w, "verify: 모르는 인자 %q (쓰는 법: verify [--cheap-only])\n", strings.Join(args, " "))
+		fmt.Fprintf(w, "verify: 모르는 인자 %q (쓰는 법: verify [--cheap-only | --flaky])\n", strings.Join(args, " "))
 		return 2
 	}
 	jobs := os.Getenv("HERDR_VERIFY_JOBS")
@@ -325,10 +331,20 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	}
 	// 범위(scope.go): 0번은 홀로 도는 cotenant 단계, 그 뒤는 조각
 	sc := scopePlan(root, append([]shard{{argv: alone}}, sh...), w)
+	limit := retryLimit(w)
+	var cs []retryCand // 다시 돌릴 후보(retry.go) — 홀로 단계(i -1)와 조각
+	var common []string
 	runAny := !sc.skip[0]
 	for i := range sh {
 		sh[i].skip, sh[i].note = sc.skip[i+1], sc.note(i+1)
-		sh[i].done = func(label string, rc, secs int) { sc.done(i+1, label, rc, secs, w) }
+		sh[i].done = func(label string, rc, secs int, out string) bool {
+			sc.done(i+1, label, rc, secs, w) // 흔들려 통과해도 통과 기록은 없다(실패로 적힌다 — 다음에 다시 돈다)
+			if rc == 0 || limit == 0 {
+				return false
+			}
+			cs = append(cs, retryCand{i: i, label: label, argv: sh[i].argv, env: append(append([]string{}, sh[i].env...), common...), out: out})
+			return true
+		}
 		runAny = runAny || !sh[i].skip
 	}
 	if runAny && os.Getenv("HERDR_VERIFY_NO_LOCK") != "1" {
@@ -347,25 +363,49 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 			fmt.Fprintf(w, "%s%s\n", aloneLabel, s)
 		}
 		ta := time.Now()
-		rc := runStep(root, alone, stop, w)
+		fmt.Fprintf(w, "== %s\n", strings.Join(alone, " "))
+		rc, out := runOne(root, alone, nil, stop, w, true)
 		if rc >= 128 {
 			return rc
 		}
-		fail = fail || rc != 0
+		w.WriteString(out) //nolint:errcheck // 화면·로그
 		sc.done(0, aloneLabel, rc, int(time.Since(ta).Seconds()), w)
+		if rc != 0 && limit > 0 {
+			cs = append(cs, retryCand{i: -1, label: aloneLabel, argv: alone, out: out})
+		} else {
+			fail = fail || rc != 0
+		}
 	}
 	var ram *ramDisk
 	if runAny {
 		ram = ramSetup(w) // 조각들의 TMPDIR(ramtmp.go). 못 만들면 nil — 보통 임시 폴더로 그대로
 	}
 	defer ram.teardown(w)
-	rc := runShards(root, sh, ram.env(), n, stop, w)
+	common = ram.env()
+	rc := runShards(root, sh, common, n, stop, w)
 	if rc >= 128 {
 		return rc
 	}
 	fail = fail || rc != 0
+	if len(cs) > 0 && fail {
+		fmt.Fprintln(w, "다시 안 돎: 다시 돌 수 없는 실패가 함께 있다 — 다시 돌려도 결과가 못 바뀐다")
+	} else if len(cs) > 0 { // 다른 조각이 다 끝났다 — 실패한 것을 하나씩 혼자
+		retryFail, _, rrc := retryPhase(root, cs, limit, func(c retryCand) (int, string) {
+			t := time.Now()
+			rc, out := runOne(root, c.argv, c.env, stop, w, true)
+			if rc < 128 {
+				fmt.Fprintf(w, "-- 다시 %s 끝 %d초 종료 %d\n%s", c.label, int(time.Since(t).Seconds()), rc, out)
+			}
+			return rc, out
+		}, w)
+		if rrc >= 128 {
+			return rrc
+		}
+		fail = retryFail
+	}
 	ram.teardown(w)
 	sc.finish(w)
+	flakySummary(w)
 	fmt.Fprintf(w, "검증 시간 %d초 — %s\n", int(time.Since(t0).Seconds()), map[bool]string{false: "통과", true: "실패"}[fail])
 	if !fail {
 		markPassed(root, tree0, w)
@@ -509,15 +549,37 @@ func sigRC(s os.Signal) int {
 // runStep: 한 명령을 새 무리로 돌리고 고아 검사. 종료 코드(고아가 있으면 0이라도 1, 신호로 끊기면 128+신호)
 func runStep(root string, argv []string, stop <-chan os.Signal, w *os.File) int {
 	fmt.Fprintf(w, "== %s\n", strings.Join(argv, " "))
+	rc, _ := runOne(root, argv, nil, stop, w, false)
+	return rc
+}
+
+// runOne: runStep의 몸. capture면 출력을 임시 파일에 받아 돌려준다(w에는 안 쓴다 — 부르는 쪽이 옮긴다, 끊기면 여기서 옮긴다).
+// 고아가 있으면 돌려주는 출력 끝에 「실패 고아를 남김」(다시 돌리기 판정 — retry.go)
+func runOne(root string, argv, env []string, stop <-chan os.Signal, w *os.File, capture bool) (int, string) {
 	before, err := procs()
 	if err != nil {
 		fmt.Fprintf(w, "실패 고아 검사 준비: %v\n", err)
-		return 1
+		return 1, ""
 	}
-	c, err := start(root, argv, nil, w)
+	out := w
+	if capture {
+		if out, err = os.CreateTemp("", "herdr-verify-step."); err != nil {
+			fmt.Fprintf(w, "실패 단계 출력 파일: %v\n", err)
+			return 1, ""
+		}
+		defer os.Remove(out.Name()) //nolint:errcheck // 내용은 읽어 돌려준다
+	}
+	text := func() string {
+		if !capture {
+			return ""
+		}
+		return dump(out, nil)
+	}
+	c, err := start(root, argv, env, out)
 	if err != nil {
+		text()
 		fmt.Fprintf(w, "실패 %s: %v\n", argv[0], err)
-		return 127
+		return 127, ""
 	}
 	pg := c.Process.Pid
 	done := make(chan error, 1)
@@ -528,19 +590,25 @@ func runStep(root string, argv []string, stop <-chan os.Signal, w *os.File) int 
 		ended := make(chan struct{}, 1)
 		go func() { <-done; ended <- struct{}{} }()
 		stopGroups([]int{pg}, ended)
+		w.WriteString(text()) //nolint:errcheck // 화면·로그
 		fmt.Fprintf(w, "끊김(%v) — 도는 시험 무리를 껐다\n", s)
-		return sigRC(s)
+		return sigRC(s), ""
 	}
 	rc := exitCode(err, w, argv[0])
-	return checkOrphans(root, []int{pg}, before, rc, strings.Join(argv, " "), w)
+	s := text()
+	rc, orph := checkOrphans(root, []int{pg}, before, rc, strings.Join(argv, " "), w)
+	if orph {
+		s += "실패 고아를 남김\n"
+	}
+	return rc, s
 }
 
-// checkOrphans: 고아를 찍고 끄고, 있으면 rc를 실패로
-func checkOrphans(root string, pgs []int, before map[int]pinfo, rc int, what string, w *os.File) int {
+// checkOrphans: 고아를 찍고 끄고, 있으면 rc를 실패로. 둘째 값은 고아가 있었나(검사를 못 했어도 참 — 모름을 깨끗함으로 읽지 않는다)
+func checkOrphans(root string, pgs []int, before map[int]pinfo, rc int, what string, w *os.File) (int, bool) {
 	lines, err := orphans(root, pgs, before)
 	if err != nil {
 		fmt.Fprintf(w, "실패 고아 검사 못 함: %v\n", err)
-		return max(rc, 1)
+		return max(rc, 1), true
 	}
 	if len(lines) > 0 {
 		fmt.Fprintln(w, strings.Join(lines, "\n"))
@@ -549,7 +617,7 @@ func checkOrphans(root string, pgs []int, before map[int]pinfo, rc int, what str
 			rc = 1
 		}
 	}
-	return rc
+	return rc, len(lines) > 0
 }
 
 // runShards: 조각들을 차례대로, 도는 조각의 자리(w, 없으면 1) 합이 n을 넘지 않게 함께 돌린다(아무것도 안 돌면 하나는 띄운다).
@@ -627,13 +695,17 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 			rc := exitCode(e.err, w, label(e.i))
 			secs := int(time.Since(t0s[e.i]).Seconds())
 			fmt.Fprintf(w, "-- %s 끝 %d초 종료 %d\n", label(e.i), secs, rc)
-			dump(outs[e.i], w)
+			out := dump(outs[e.i], w)
 			// 그 무리는 끝나자마자 본다 — 다 끝난 뒤면 pid가 한 바퀴 돌아 남의 새 무리를 끌 수 있다(검증 한 번에 프로세스 수만 개)
-			rc = checkOrphans(root, []int{pg}, nil, rc, label(e.i), w)
-			fail = fail || rc != 0
-			if sh[e.i].done != nil {
-				sh[e.i].done(label(e.i), rc, secs)
+			rc, orph := checkOrphans(root, []int{pg}, nil, rc, label(e.i), w)
+			if orph {
+				out += "실패 고아를 남김\n"
 			}
+			taken := false
+			if sh[e.i].done != nil {
+				taken = sh[e.i].done(label(e.i), rc, secs, out)
+			}
+			fail = fail || (rc != 0 && !taken)
 		case s := <-stop:
 			var live []int
 			for _, pg := range running {
@@ -652,15 +724,18 @@ func runShards(root string, sh []shard, common []string, n int, stop <-chan os.S
 			return sigRC(s)
 		}
 	}
-	return checkOrphans(root, nil, before, b2i(fail), "무거운 시험 조각", w) // 떼어 띄워 부모가 1이 된 것은 다 끝난 뒤 한 번
+	rc, _ := checkOrphans(root, nil, before, b2i(fail), "무거운 시험 조각", w) // 떼어 띄워 부모가 1이 된 것은 다 끝난 뒤 한 번
+	return rc
 }
 
-// dump: 조각 출력 파일을 w로 옮기고 닫는다
-func dump(f *os.File, w *os.File) {
-	if b, err := os.ReadFile(f.Name()); err == nil {
+// dump: 출력 파일을 w로 옮기고(w가 nil이면 안 옮김) 닫는다. 그 내용
+func dump(f *os.File, w *os.File) string {
+	b, err := os.ReadFile(f.Name())
+	if err == nil && w != nil {
 		w.Write(b) //nolint:errcheck // 화면·로그
 	}
 	f.Close()
+	return string(b)
 }
 
 type pinfo struct {

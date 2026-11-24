@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"herdr-tools/internal/proc"
 )
 
 func init() { register("gc", gcMain, nil) }
@@ -25,81 +23,6 @@ var (
 
 func gcKeepf(t, why string) { fmt.Printf("%s남김 %s %s\n", gcP, t, why); gcKn++ }
 func gcGone(t, what string) { fmt.Printf("%s지움 %s %s\n", gcP, t, what); gcDn++ }
-
-// ginScript: 비조상·병합 커밋 없는 가지의 고유 커밋(C)과 양쪽 패치 id(U 기준 쪽, B 가지 쪽). git 명령마다 종료값을 본다 — 파이프가
-// 앞 명령의 실패를 삼키지 않게 임시 파일을 거친다. 고유 커밋이 없으면(비조상과 모순) 확인 못 함 2(R-09)
-const ginScript = `cd "$1" || exit 2; c=$(git rev-list --no-merges "$2..$3") || exit 2; [ -n "$c" ] || exit 2
-    t=$(mktemp "${TMPDIR:-/tmp}/hc-lane-gin.XXXXXX") || exit 2
-    trap 'rm -f "$t" "$t.p"' EXIT
-    git log -p --no-merges --no-color --no-ext-diff "$3..$2" >"$t" || exit 2
-    git patch-id --verbatim <"$t" >"$t.p" || exit 2
-    sed "s/^/U /" "$t.p" || exit 2
-    git log -p --no-merges --no-color --no-ext-diff "$2..$3" >"$t" || exit 2
-    git patch-id --verbatim <"$t" >"$t.p" || exit 2
-    sed "s/^/B /" "$t.p" || exit 2
-    printf "%s\n" "$c" | sed "/^$/d; s/^/C /"`
-
-// gin: 그 커밋이 기준에 다 들어갔나. 0 들어감(조상, 또는 병합 커밋 없이 커밋마다 공백까지 같은 패치가 있음), 1 아님(안 들어간 수), 2 확인 못 함
-func gin(c string) (string, int) {
-	switch xrun(nil, os.Stderr, "git", "-C", repo, "merge-base", "--is-ancestor", c, bref) {
-	case 0:
-		return "0", 0
-	case 1:
-	default:
-		return "0", 2
-	}
-	gm, r := xout("git", "-C", repo, "rev-list", "--merges", bref+".."+c)
-	if r != 0 {
-		return "0", 2
-	}
-	if gm != "" {
-		n, r := xout("git", "-C", repo, "rev-list", "--count", bref+".."+c)
-		if r != 0 {
-			n = "?"
-		}
-		return n, 1
-	}
-	// sh -c 안의 git은 proc.Limit 표에 안 보인다(sh는 상한 없음) — 조각 전체에 로컬 git 상한을 건다. 넘으면 무리째(안쪽 git까지)
-	// 거두고 확인 못 함 2 — 후보는 남긴다(lane/R-217). hc exec로 가면 그 상한(proc.Limit)이 그대로 덮는다
-	argv := xargv([]string{"sh", "-c", ginScript, "hc-lane", repo, bref, c})
-	lim := proc.Limit(argv)
-	if lim == 0 {
-		lim = proc.Limit([]string{"git"})
-	}
-	sc := command(argv)
-	sc.Stderr = os.Stderr
-	ob, err := proc.OutputMax(sc, lim)
-	out := trim(string(ob))
-	if r := code(err); r != 0 {
-		return "0", 2
-	}
-	u, b := map[string]bool{}, map[string]string{}
-	var cs []string
-	for _, ln := range strings.Split(out, "\n") {
-		f := strings.Fields(ln)
-		switch {
-		case len(f) >= 2 && f[0] == "U":
-			u[f[1]] = true
-		case len(f) >= 3 && f[0] == "B":
-			b[f[2]] = f[1]
-		case len(f) >= 2 && f[0] == "C":
-			cs = append(cs, f[1])
-		}
-	}
-	if len(cs) == 0 { // 비조상인데 고유 커밋을 하나도 못 읽음 — 「모두 들어감」이 아니다(R-09)
-		return "0", 2
-	}
-	m := 0
-	for _, x := range cs {
-		if p, ok := b[x]; !ok || !u[p] {
-			m++
-		}
-	}
-	if m == 0 {
-		return "0", 0
-	}
-	return strconv.Itoa(m), 1
-}
 
 // jdg: 들어갔고 --min-age보다 오래됐으면 true. 아니면 「남김」을 찍는다
 func jdg(t, c string, ts int64) bool {
@@ -592,6 +515,7 @@ func gcMain(args []string) int {
 			rgc("refs/heads/")
 		}
 	}
+	gcPrune()
 	fmt.Printf("%s지움 %d · 남김 %d\n", gcP, gcDn, gcKn)
 	if gcErr {
 		return 1

@@ -135,6 +135,7 @@ func TestLandedUnknownOnGitFailure(t *testing.T) {
 	if err := os.WriteFile(git, []byte("#!/bin/sh\necho 'abc1234 feat(x): lane-x 끝'\necho 'def5678 lane-xy: 다른 것'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	tickReset() // 다음 바퀴 — 이력은 바퀴에 한 번 읽는다(fill-after-cost)
 	if hit, ok := landed("lane-x"); !ok || hit != "abc1234 feat(x): lane-x 끝" {
 		t.Fatalf("있음: %q %v", hit, ok)
 	}

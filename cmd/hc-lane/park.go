@@ -31,7 +31,7 @@ func parkMain(args []string) int {
 	} else {
 		for _, a := range args {
 			if len(a) > 1 && a[0] == '-' {
-				die("park: 알 수 없는 인자: %s — 주차하지 않았다(-로 시작하는 글은 hc-lane park -- <글>)", a)
+				dieArg("park: 알 수 없는 인자: %s — 주차하지 않았다(-로 시작하는 글은 hc-lane park -- <글>)", a)
 			}
 		}
 	}

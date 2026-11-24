@@ -25,7 +25,7 @@ func gcMain(args []string) {
 	f, busy, err := lockx.TryLock(gcLock)
 	if err != nil || busy {
 		fmt.Fprintf(os.Stderr, "lockf: %s: already locked\n", gcLock)
-		exit(75)
+		busyExit()
 	}
 	heldLocks = append(heldLocks, f)
 	dry = false

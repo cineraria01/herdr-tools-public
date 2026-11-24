@@ -41,7 +41,7 @@ func statsCmd(a []string) int {
 		case "--on":
 			v := val(a, i)
 			if v == "" || strings.ContainsAny(v, "/ ") {
-				die("--on 기계 이름이 이상하다: %s", v)
+				dieArg("--on 기계 이름이 이상하다: %s", v)
 			}
 			e.ons = append(e.ons, v)
 			i++
@@ -52,7 +52,7 @@ func statsCmd(a []string) int {
 			until = sinceArg(val(a, i))
 			i++
 		default:
-			die("알 수 없는 인자: %s", a[i])
+			unknownArg(a[i], "", "--all", "--on", "--since", "--until")
 		}
 	}
 	if until == "" {

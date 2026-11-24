@@ -89,6 +89,15 @@ func die(format string, a ...any) {
 	os.Exit(1)
 }
 
+// dieArg: 상주 인자 오류 — 글·종료 1은 die 그대로, 운영 기록은 usage(사람·에이전트가 잘못 부름, cli-usage-version).
+// 바퀴 일꾼(--round)의 인자 틀림은 판이 갈린 이상이라 die 그대로 둔다
+func dieArg(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
+	oplog.Log("hc-merger", "", oplog.BadArg, 1, msg)
+	os.Exit(1)
+}
+
 // reportBlocked: 막힘 사건(--name merger)을 상한 안에서 적는다(E05 — 사건 쓰기가 멈춰도 병합기가 서지 않게)
 func reportBlocked(msg string) {
 	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "막힘", "-", msg, "--name", "merger"); rc != 0 {
@@ -286,7 +295,7 @@ func residentMain(args []string) {
 		switch a := args[i]; {
 		case a == "--repo" || a == "--tick":
 			if i+1 >= len(args) {
-				die("%s 값이 없다", a)
+				dieArg("%s 값이 없다", a)
 			}
 			i++
 			if a == "--repo" {
@@ -297,17 +306,17 @@ func residentMain(args []string) {
 		case a == "--once":
 			once = true
 		case strings.HasPrefix(a, "-"):
-			die("merger: 알 수 없는 인자: %s", a)
+			dieArg("merger: 알 수 없는 인자: %s", a)
 		default:
 			if base != "" {
-				die("merger: 남는 인자: %s", a)
+				dieArg("merger: 남는 인자: %s", a)
 			}
 			base = a
 		}
 	}
 	// 「쉬지 않고 ls-remote」를 막는 값 — 명시한 값이 정수가 아니면 bash 판처럼 멈춘다(E10), 없으면 idleTick초
 	if tickSet && !digits.MatchString(tickArg) {
-		die("merger: --tick은 초(정수): %s", tickArg)
+		dieArg("merger: --tick은 초(정수): %s", tickArg)
 	}
 	tick := intSetting("--tick", tickArg, idleTick, 0)
 	batch := intSetting("HC_LANE_MERGER_BATCH", os.Getenv("HC_LANE_MERGER_BATCH"), 3, 1)

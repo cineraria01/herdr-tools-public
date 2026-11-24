@@ -119,19 +119,19 @@ func logsRun(w io.Writer, a []string) int {
 		case "--on":
 			v := val(a, i)
 			if v == "" || strings.ContainsAny(v, "/ ") {
-				die("--on 기계 이름이 이상하다: %s", v)
+				dieArg("--on 기계 이름이 이상하다: %s", v)
 			}
 			e.ons = append(e.ons, v)
 			i++
 		case "--max":
 			n, ok := logsMax(val(a, i))
 			if !ok {
-				die("--max는 1 이상 바이트 수: %s", a[i+1])
+				dieArg("--max는 1 이상 바이트 수: %s", a[i+1])
 			}
 			max = n
 			i++
 		default:
-			die("알 수 없는 인자: %s", a[i])
+			unknownArg(a[i], "", "--all", "--on", "--max")
 		}
 	}
 	e.pick()

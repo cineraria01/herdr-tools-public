@@ -44,7 +44,7 @@ func watchCmd(args []string) {
 	}
 	if busy {
 		fmt.Fprintf(os.Stderr, "hc-fill: watch가 이미 돌고 있다(%s/watch.lock)\n", DATA)
-		exit(75)
+		busyExit()
 	}
 	heldLocks = append(heldLocks, f)
 	proc.TakeSignals() // 이 처리기 하나만(재감사 R-H04 — proc 처리기가 짧은 유예로 먼저 끝내지 않게)
@@ -103,7 +103,7 @@ func runCmd(args []string) {
 	}
 	if busy {
 		fmt.Fprintln(os.Stderr, "hc-fill: 다른 run이 돌고 있다, 이번 바퀴는 건너뜀")
-		exit(75)
+		busyExit()
 	}
 	heldLocks = append(heldLocks, f)
 	runHooks()  // 신호 고루틴보다 먼저(R-20)

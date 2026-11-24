@@ -7,10 +7,13 @@
 ```sh
 bash .claude/herdr-verify.sh        # 저장소 검증(hc-lane land가 부른다): go vet ./... → go test ./tests/repo/(싼 검사) → TestCotenantGuard 홀로 → go test -race 조각 여럿 함께, 단계마다 고아 검사
 bash .claude/herdr-verify.sh --cheap-only   # 싼 검사까지(.claude/herdr-precheck.sh — 병합기 제출 직전)
+go run ./tests/repo/verify --flaky  # 이 기계의 흔들림 기록을 시험별 횟수로(아래 「검증의 흔들림」)
 go test -race ./...                 # 계약 시험 전부
 go test ./tests/repo/               # 싼 검사: 줄 수 예산·싼 검사 파일 빠짐·gofmt·셸 문법(남은 .sh)·셸 시험 없음·개인 값(lint --strict)·비밀 꼴
 go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/hooks/tests/ ./cmd/...   # 도구별(hc-lane·병합기·hc-fill·작은 도구·훅·운영 도구)
 ```
+
+싼 검사 파일 빠짐(`TestCheapKept`)은 이 가지가 기본 가지에서 갈라진 자리(merge-base)에 있던 `tests/repo` 파일을 본다 — 갈라진 뒤 다른 레인이 더한 파일은 받지 않은 것이라 막지 않고, 병합기는 rebase한 트리라 기본 가지 끝과 같다(갈라진 자리를 못 구하거나 얕은 클론이면 기본 가지 끝, 2026-11-24 cheapkept-base).
 
 전체 검증(`--cheap-only` 아님)이 통과로 끝나고 시작과 끝에 작업 트리가 깨끗한(추적 파일 변경·추적 안 된 파일 없음) 같은 트리면, 그 `HEAD^{tree}`를 이 작업 트리의 git 폴더 `herdr-verified-tree`에 「<트리> <유닉스 초>」로 남긴다(`tests/repo/verify/mark.go` — 원격으로 안 나감, 읽는 곳은 제출의 [사전 검사 건너뜀](../hc-lane/merger.md) 하나).
 
@@ -105,3 +108,20 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 - `TestCotenantGuard` 단계도 지문으로 건너뛴다: 부하를 재는 시험이지만 가짜 HOME으로 돌고 그 결과가 기대는 코드는 지문에 다 든다 — 같은 입력으로 통과한 기록이 있으면 다시 재지 않는다.
 - 시험: `TestScopeKeys`(입력 규칙 — 꾸러미 한 줄·도구·도구가 부르는 도구·주석·문장 속 이름·testdata·문서·config.example·`.claude/`·`cmd/` 새 폴더·뿌리 문서·argv·env), `TestScopeDirty`, `TestScopePass`, `TestScopeRun`(진짜 go로 ①~⑫ 실행), `TestScopeRepo`(이 저장소의 조각 모두 지문 — 시간은 단언하지 않고 기록만).
 - 실측(2026-11-24, 워커 맥 10코어): 이 저장소 지문 0.3초(조각 38개). 큰 조각은 꾸러미 43개 중 20~29개에 기댄다 — hc-lane이 허브라(hc-fill·병합기가 부르고 큰 계약 시험 넷이 돌린다) hc-lane·공용 `internal`을 고치면 거의 다 돈다.
+
+## 검증의 흔들림 — 실패한 것을 혼자 한 번 다시
+
+2026-11-24 flaky-retry: 병합기 반송의 검증 실패(종료 1) 가운데 여럿이 진짜 문제가 아니라 부하에 흔들린 시험이었다(홀로 도는 `TestCotenantGuard`의 시간 단언, 계약 시험의 띄우기 시간 넘김, `-race` 흔들림 — 한 레인은 흔들림만으로 두 번 반송돼 1시간 반 늦었다).
+- 홀로 단계(`TestCotenantGuard`)나 조각이 실패하면, 다른 조각이 모두 끝난 뒤 실패한 것을 하나씩 혼자 한 번 다시 돌린다(`tests/repo/verify/retry.go`).
+- 다시 통과하면 전체는 통과이고 「흔들림: [i/n] <조각> — <실패했던 시험> · 혼자 다시 돌려 통과」 한 줄을 찍는다.
+- 다시 실패하면 지금처럼 실패이고 「두 번 실패: …」 줄을 찍는다. 통과할 때까지 되풀이하지 않는다.
+- 다시 안 도는 것(「다시 안 돎: … — <까닭>」 한 줄): 출력에 `WARNING: DATA RACE`(진짜 경합) · `[build failed]` · `[setup failed]` · go 시간 넘김(`panic: test timed out`) · 실패한 시험 이름이 없음 · 고아를 남김 · 싼 단계 실패 등 다시 돌 수 없는 실패가 함께 있음.
+  하나라도 다시 돌 수 없으면 아무것도 다시 안 돈다(다시 돌려도 결과가 못 바뀐다).
+- 실패한 것이 상한을 넘으면 흔들림이 아니라 깨진 것으로 보고 다시 안 돈다.
+- 손잡이 `HERDR_VERIFY_RETRY`: 없으면 상한 3, `0`이면 끔(지금까지처럼 실패), `<수>`면 다시 돌 수 있는 실패 수의 상한.
+- 실패 없는 검증은 시간이 늘지 않는다(끝에 기록 파일 하나를 읽을 뿐).
+- 흔들려 통과한 조각은 통과 기록(위 「검증의 범위」)을 남기지 않는다 — 다음 검증에서 다시 돈다.
+- 흔들림 기록: 사용자 캐시 `herdr-tools/verify-flaky.log`(통과 기록 곁)에 「시각<탭>트리<탭>조각<탭>시험(쉼표)<탭>그때 부하(1·5·15분 평균 / 코어 수)」 한 줄.
+- 검증 끝 요약에 「이 기계에서 최근 7일 흔들림: <시험> k번, …」 한 줄(기록이 없으면 안 찍는다). `go run ./tests/repo/verify --flaky`는 기록 전부를 시험별 횟수·마지막 시각으로 보인다.
+- **흔들림 기록이 쌓인 시험은 고친다.** 다시 돌기는 진짜 간헐 버그를 가릴 수 있다 — 그래서 줄·기록·요약에 남긴다. 시간 단언을 빼거나 기다림을 조건 폴링으로 바꾼다(위 「시험의 기다림」).
+- 시험: `TestRetryPhase`·`TestNoRetry`·`TestFailedTests`·`TestFlakyLog`(판정·기록), `TestRetry*`·`TestVerifyFlakyArg`(가짜 go로 verify 전체 — 흔들림 통과·두 번 실패·경합·상한·끔·혼자 다시·홀로 단계), `TestRetryFlakyNoPassRecord`(진짜 go — 흔들려 통과한 조각은 통과 기록 없음).
