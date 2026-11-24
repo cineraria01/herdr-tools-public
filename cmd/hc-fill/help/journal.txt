@@ -1,4 +1,4 @@
         hc-fill journal [--json] [--since <기간 2h·90m | 시각>] [--by <주소|사람>]
-  journal 운영 일지(docs/ops/journal.md) — 조치마다 누가·무엇·대상·왜·결과·되돌리는 명령·그때 상태. knob set·unset, prio, edit, rm, retry,
+  journal 운영 일지(docs/ops/journal.md) — 조치마다 누가·무엇·대상·왜·결과·되돌리는 명령·그때 상태. knob set·unset, prio, edit, rm, retry, nudge,
          merger restart와 herdr-sync 배포·되돌림·--auto가 한 줄씩 남긴다. 조치 명령은 --why <까닭>을 받는다(knob set은 꼭, 나머지는 권함).
          최근 2시간에 같은 조치·같은 대상이면 조치 명령이 표준 오류에 한 줄 알린다(막지 않음). 일지를 못 써도 조치는 그대로

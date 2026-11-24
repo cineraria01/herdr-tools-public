@@ -14,8 +14,8 @@ func TestStateNotableResident(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "")
 	dir := resident.DirFor("", HOME)
 	th := stateThresholds()
-	s := stateCollect(time.Now())
-	for _, n := range stateNotable(s, th) {
+	s, fc := stateCollectF(time.Now())
+	for _, n := range stateNotable(s, fc, th) {
 		if strings.Contains(n, "상주") {
 			t.Fatalf("결과가 없는데 상주 줄: %s", n)
 		}
@@ -25,7 +25,8 @@ func TestStateNotableResident(t *testing.T) {
 	if err := resident.SaveReport(resident.ReportPath(dir), resident.Report{Checked: time.Now(), Findings: []resident.Finding{f}}); err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Join(stateNotable(s, th), "\n")
+	_, fc = stateCollectF(time.Now())
+	got := strings.Join(stateNotable(s, fc, th), "\n")
 	if !strings.Contains(got, "옛 판으로 도는 상주: hc-lane watch(t9zz pid 41") || !strings.Contains(got, "다시 띄우기: hc kill t9zz && hc-lane coord --watch t3yx") {
 		t.Fatalf("눈에 띄는 것에 상주 줄이 없다:\n%s", got)
 	}

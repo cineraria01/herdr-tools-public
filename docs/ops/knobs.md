@@ -33,7 +33,9 @@
 - 지금 표의 hc-fill 설정 키: `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
   부하 보고 고르기([부하](../hc-fill/load-steer.md)): `load_band`·`load_busy`(%), `load_starve`·`skew_min`·`skew_every`(분).
   기계 닿지 않음([끊김](../hc-fill/unreach.md)): `unreach`(분).
+  멈춘 레인 다시 굴리기([nudge](../hc-fill/edit.md)): `nudge_every`(분, 한 레인에 다시 보내기까지, 0 막지 않음).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%). 기본 출력이 끝난 레인을 남기는 시간: `state_done`(분).
+  지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다.
 - 옮긴 hc-fill 설정 키(knobs-migrate, 2026-11-24 — 기본은 지금 코드 값 그대로): `gc`·`idle_empty`·`reland_wait`(분), `reland_max`·`audit_max`(번),
   `audit_close`·`audit_seat_rounds`(바퀴), `lows_hour`·`lows_min`(개).
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).

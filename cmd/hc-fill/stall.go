@@ -143,7 +143,8 @@ func uniqOK(a []string) []string {
 func stallTick() {
 	// 병합기 살아 있음(mergeralive.go)을 먼저 — stallMerger가 「큐에 있음 = 병합기가 맡음」으로 보는 것은 병합기가 살아 있을 때만 맞다
 	mergerAliveTick()
-	unreachTick() // 레인 있는 기계가 오래 닿지 않음(unreach.go)
+	unreachTick()          // 레인 있는 기계가 오래 닿지 않음(unreach.go)
+	adviseTick(time.Now()) // 지금 손댈 것에 새 항목이면 사건 한 번(advise.go)
 	lim := auMinutes("done_stall", 60)
 	if lim == 0 || dry || EVBAD || !nonEmpty(Q) {
 		return

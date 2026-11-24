@@ -12,7 +12,7 @@
 
 - `hc-fill state` 사람용 표, `hc-fill state --json` 압축 json 한 줄, `--all`은 추리지 않은 전체(아래 「기본과 --all」). 인자는 이 셋뿐이고 함께 쓸 수 있다.
 - 지휘 에이전트는 `--json`의 `fingerprint`를 기억해 두고, 다음에 같으면 나머지를 다시 읽지 않는다.
-- `notable`이 비어 있지 않으면 그 줄부터 본다. 조치는 손잡이([손잡이](knobs.md))·`hc-fill machine`·`prio`·`retry`·`merger restart` 같은 기존 명령으로 한다.
+- `notable`이 비어 있지 않으면 `hc-fill advise`로 그 줄의 근거·다음 명령을 본다. 조치는 손잡이([손잡이](knobs.md))·`hc-fill machine`·`prio`·`retry`·`merger restart` 같은 기존 명령으로 한다.
 
 ## 기본과 --all
 
@@ -64,15 +64,10 @@
 
 ## 눈에 띄는 것
 
-규칙으로 조치하지 않고 사실만 적는다. 문턱은 손잡이다(`hc-fill knob set <이름> <값> --why …`).
-
-| 사실 | 문턱 손잡이 |
-|---|---|
-| 레인이 같은 단계에 오래(착지 단계는 빼고) | `state_stage`(분, 기본 90, 0이면 끔) |
-| 코어당 부하 치우침 — 바쁜 기계와 한가한 기계가 함께 | `state_hot`·`state_cool`(%, 기본 200·50, `state_hot 0`이면 끔) |
-| 배포가 origin/main에서 밀림 | — (1커밋부터) |
-| 기계·배포·재료를 모름, 병합기가 살아 있지 않음, 열린 레인이 있는 지휘의 감시가 안 돎·모름 | — |
-| 이 기계의 상주가 옛 판·판 모름(hc-sweep 상주 판 점검 결과 한 장, [상주 판 점검](../hc-sweep/resident.md)) | `sweep_resident_grace`(분, 기본 5) |
+- [지금 손댈 것](advise.md)(`hc-fill advise`)의 항목을 요약 한 줄씩(「무엇 — 근거」) 적는다 — 같은 판정을 두 군데 두지 않는다(2026-11-24 ops-advise).
+  항목 종류·문턱 손잡이·다음 명령·확신은 그 문서에 있다. 상태 한 장에는 다음 명령이 없으니, 줄이 있으면 `hc-fill advise`로 본다.
+- 규칙으로 조치하지 않는다. 문턱은 손잡이다(`hc-fill knob set <이름> <값> --why …`): `state_stage`·`state_hot`·`state_cool`·`idle`·`advise_wait`.
+- 이 기계의 상주가 옛 판·판 모름이면(hc-sweep 상주 판 점검 결과 한 장, [상주 판 점검](../hc-sweep/resident.md), 문턱 `sweep_resident_grace`) 그 줄도 여기에 나온다.
 
 ## 흔한 판단 예
 
@@ -156,7 +151,7 @@
 | `knobs[].until` | 언제까지 |
 | `journal` | 최근 조치(일지 꼬리) |
 | `events` | 최근 사건 요약 |
-| `notable` | 눈에 띄는 것 — 판단이 필요해 보이는 사실 |
+| `notable` | 눈에 띄는 것 — 지금 손댈 것(`hc-fill advise`)의 요약 한 줄씩 |
 | `hidden` | 기본 출력이 숨긴 개수, `--all`이면 `null` |
 | `hidden.lanes` | 숨긴 끝난 레인(더 할 일 없음, 끝난 지 `state_done`분 넘음) 수 |
 | `hidden.watch` | 숨긴 안 도는 지휘 감시 흔적 수 |

@@ -12,11 +12,14 @@
    - 같은 일의 다음 단계는 새 레인 대신 `hc-fill add --name <이름> --project <프로젝트> --brief <지시문> --then <선행>`.
 2. 지켜보기: `hc-lane watch`가 사건을 지휘에 보낸다. 상태는 아래 「상태 보기」.
 3. 막힘 풀기: 띄우기 거절은 까닭을 고친 뒤 `hc-fill retry <레인>`, 선행·기계·지시문 바꾸기는 `hc-fill edit <레인> --after <선행>|--only <기계>|--brief <지시문>`.
+   - 아직 안 뜬 줄의 겹침 검사·먼저 띄움: `hc-fill edit <레인> --overlap-ok|--overlap-check` · `--early|--no-early` (rm 뒤 add로 다시 넣지 않는다).
+   - 레인 터미널이 일시 오류로 멈춤(hc 상태 error, 보고 없음): `hc-fill nudge <레인> --why <까닭>` — 이어 가라는 글 한 줄(한 레인에 손잡이 `nudge_every`분 안에 한 번).
 4. 착지: 레인이 스스로 한다(`hc-lane land`). 자동 감사가 붙은 레인은 감사 통과 뒤에.
 5. 레인에 말 더하기: `hc-fill note <레인> <글|파일>`(다음 감사 지시문에도 붙는다).
 
 ## 상태 보기
 
+- `hc-fill advise --json` — 지금 손댈 것(놀고 있는 자리에 풀 수 있는 대기·한 줄 사슬·멈춘 레인·굶는 감사·밀린 배포 …)을 근거·다음 명령·확신과 함께. 먼저 이것부터. 칸: docs/ops/advise.md
 - `hc-fill state --json` — 한 장에 기계·대기열·레인·병합·배포·손잡이·사건. 지문(fingerprint)이 같으면 다시 볼 필요 없다. 기본은 움직이는 것만(숨긴 수 hidden), 전체는 `--all`. 칸: docs/ops/state.md
 - `hc-fill ls --json` — 대기열 줄마다(칸: docs/ops/agents.md). 사람용 표는 `hc-fill ls`.
 - `hc-fill status` — 레인마다 단계·기계·예상, 끝에 기계 줄과 병합기.
@@ -41,6 +44,7 @@
 - `hc-fill-skew`(한 기계에 몰림): `hc-fill machine`을 보고 `--seats`·`--pause`나 `hc-fill edit <레인> --only <기계>`.
 - `merger-<프로젝트>`(병합기 없음): `hc-fill status` → `hc-fill merger restart <프로젝트>`.
 - `hc-fill-unreach`(기계 끊김): `hc machine ls`로 보고, 오래면 그 레인을 다른 기계로 다시 띄울지 정한다.
+- `hc-fill-advise`(손댈 것이 생김): `hc-fill advise`로 보고 확신 `확실`은 다음 명령을 그대로, `판단 필요`는 근거를 읽고 정한다.
 - 레인 `막힘`: 글의 까닭대로 — 띄우기 거절이면 고치고 `hc-fill retry <레인>`.
 - 사건마다 뜻·흔한 까닭·다음 명령: docs/ops/events.md
 
@@ -59,6 +63,6 @@
 
 ## 더 읽을 곳
 
-- docs/ops/agents.md(사람·에이전트가 같은 명령 · `--json` 칸 · `--dry-run` 목록) · docs/ops/state.md · docs/ops/events.md · docs/ops/knobs.md · docs/ops/journal.md
+- docs/ops/agents.md(사람·에이전트가 같은 명령 · `--json` 칸 · `--dry-run` 목록) · docs/ops/advise.md · docs/ops/state.md · docs/ops/events.md · docs/ops/knobs.md · docs/ops/journal.md
 - docs/hc-fill/ 아래 기능별 문서(부하 고르기·놀고 있음·착지 뒤 명령·닿지 않음)
 - 사용법 전부: `hc-fill` (인자 없이 — 종료 2와 함께 사용법)

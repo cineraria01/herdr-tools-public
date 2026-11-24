@@ -290,6 +290,11 @@ const (
 	upAddr = 3
 	upRID  = 4
 
+	// 다시 굴림 기록 nudge.tsv(nudge.go) 「레인 주소 보낸 시각(초)」
+	nuLane = 1
+	nuAddr = 2
+	nuAt   = 3
+
 	// 첫 칸이 열쇠인 「열쇠 값」 줄(knobs-remote.tsv, 받은편지 요청 머리, spec-verifiers.tsv 등) — lsFirst는 어느 파일이든 첫 칸으로 찾는다
 	kvKey = 1
 	kvVal = 2

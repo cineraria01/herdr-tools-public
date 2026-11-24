@@ -33,13 +33,13 @@ func stateCmd(args []string) {
 			usage()
 		}
 	}
-	s := stateCollect(time.Now())
+	s, f := stateCollectF(time.Now())
 	th := stateThresholds()
 	tr := opsstate.Trim(s, knobInt("state_done"))
-	tr.Notable = stateNotable(tr, th)
+	tr.Notable = stateNotable(tr, f, th)
 	tr.Fingerprint = opsstate.Fingerprint(tr)
 	if all {
-		s.Notable, s.Fingerprint = stateNotable(s, th), tr.Fingerprint
+		s.Notable, s.Fingerprint = stateNotable(s, f, th), tr.Fingerprint
 	} else {
 		s = tr
 	}
@@ -55,14 +55,16 @@ func stateCmd(args []string) {
 	exit(0)
 }
 
-// stateNotable: 눈에 띄는 것 + 이 기계 상주 판 점검 결과(hc-sweep이 쓴 한 장, 있을 때만 — docs/hc-sweep/resident.md)
-func stateNotable(s opsstate.State, th opsstate.Thresholds) []string {
-	return append(opsstate.Notable(s, th), resident.Show(resident.DirFor(os.Getenv("XDG_STATE_HOME"), HOME), time.Now())...)
+// stateNotable: 눈에 띄는 것 = 지금 손댈 것(hc-fill advise, docs/ops/advise.md)의 요약 한 줄씩 — 같은 판정을 두 군데 두지 않는다.
+// 이 기계 상주 판 점검 결과(hc-sweep이 쓴 한 장 — docs/hc-sweep/resident.md)는 f.Resident로 들어간다
+func stateNotable(s opsstate.State, f opsstate.Facts, th opsstate.Thresholds) []string {
+	return opsstate.Summaries(opsstate.Advise(s, f, th))
 }
 
 func stateThresholds() opsstate.Thresholds {
 	return opsstate.Thresholds{StageMin: knobInt("state_stage"),
-		SkewHi: float64(knobInt("state_hot")) / 100, SkewLo: float64(knobInt("state_cool")) / 100}
+		SkewHi: float64(knobInt("state_hot")) / 100, SkewLo: float64(knobInt("state_cool")) / 100,
+		IdleMin: knobInt("idle"), WaitMin: knobInt("advise_wait")}
 }
 
 // stateLoadFresh: 기계 부하를 읽은 때가 마지막 바퀴 끝에서 이 초 안이면 그 바퀴 값
@@ -74,6 +76,14 @@ func ptrB(b bool) *bool       { return &b }
 
 // stateCollect: 모든 칸을 모은다. 재료마다 sources 한 줄(나이·호출 수·초·못 읽은 까닭)
 func stateCollect(now time.Time) opsstate.State {
+	s, _ := stateCollectF(now)
+	return s
+}
+
+// stateCollectF: stateCollect와 손댈 것 재료(대기 줄마다 까닭·레인 주소·멈춘 기계·상주 판 점검) — 같은 읽기에서
+func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
+	f := opsstate.Facts{Addr: map[string]string{}, Paused: map[string]bool{},
+		Resident: resident.Show(resident.DirFor(os.Getenv("XDG_STATE_HOME"), HOME), now)}
 	s := opsstate.State{Schema: opsstate.Schema, At: now, Queue: opsstate.Queue{Counts: map[string]int{}},
 		Machines: []opsstate.Machine{}, Lanes: []opsstate.Lane{}, Merge: []opsstate.MergeLine{}, Deploy: []opsstate.Deploy{},
 		Watch: []opsstate.Watch{}, Knobs: []opsstate.Knob{}, Journal: []string{}, Events: []string{}}
@@ -132,11 +142,13 @@ func stateCollect(now time.Time) opsstate.State {
 			if a, ok := stateAddedAge(r.F(qAdded), now); ok && (oldest == nil || a > oldest.AgeS) {
 				oldest = &opsstate.Waiting{Lane: name, AgeS: a, Why: stateWaitWhy(r)}
 			}
+			f.Waits = append(f.Waits, adviseWait(r, now))
 			continue
 		}
 		if st != "up" {
 			continue
 		}
+		f.Addr[name] = r.F(qAddr)
 		in := stIn{State: st, Early: r.F(qEarly), Last: last[name], Pos: -1}
 		in.Live = stLive(terms, termsOK, conn, connKnown, r.F(qAddr), name)
 		if r.F(qAudit) == "auto" {
@@ -163,6 +175,7 @@ func stateCollect(now time.Time) opsstate.State {
 	for _, mc := range machines() {
 		m := mc.Name
 		steer := machAdj(m)
+		f.Paused[m] = machPaused(m)
 		switch {
 		case m != LOCAL && !connKnown:
 			x := opsstate.MachineUnknown(m, "연결 모름(hc machine ls 못 읽음)")
@@ -270,7 +283,7 @@ func stateCollect(now time.Time) opsstate.State {
 
 	dep := stateDeploy(&s, now)
 	s.Sources = []opsstate.Source{tick, hc, dep, jr}
-	return s
+	return s, f
 }
 
 // watchName: hc-lane이 지휘 주소로 짓는 감시 터미널 이름(cmd/hc-lane/launchaux.go watchFor·hcx.go ckey와 같은 규칙)

@@ -12,5 +12,6 @@ hc-fill run --dry-run           # 무엇을 어디에 띄울지만. --dry-run �
 hc-fill watch --every 60        # 계속(한 번에 하나만, 이미 돌면 종료 75). 바퀴 시작 간격이 60초 — 쉼은 60초 − 바퀴에 든 시간, 하한 설정 rest_min
 hc-fill rm <레인> [--force]     # 대기열에서만 뺀다(떠 있는 터미널은 그대로). 주차 줄(refs/park/<레인>에 준비 커밋)은 --force 없이 거절(종료 2)
 hc-fill retry <레인>            # 띄우기 거절(hc-lane 종료 11)로 멈춘 줄을 다음 바퀴에 다시(edit도 풂, 대기열에 없으면 종료 2)
-hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로)
+hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>] [--overlap-ok | --overlap-check] [--early | --no-early]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로). 겹침 검사·먼저 띄움은 아직 안 뜬 줄만(docs/hc-fill/edit.md)
+hc-fill nudge <레인> [<글>] [--why <까닭>]   # 일시 오류로 턴이 끊겨 멈춘 레인 터미널(hc 상태 error·done, 그 실행의 완료·막힘 등 보고 없음)에 이어 가라는 글 한 줄. 한 레인에 손잡이 nudge_every분(기본 10) 안에 한 번, 안 보내면 까닭과 종료 1(docs/hc-fill/edit.md)
 ```

@@ -99,6 +99,7 @@ README에는 아래 목차 줄만 둔다.
 - [설정](docs/herdr-tools-config/config.md)
 - [공개 저장소로 내보내기 (herdr-tools-publish)](docs/herdr-tools-publish/publish.md)
 - [omc-update: OMC 플러그인과 omc CLI를 기계마다 같은 판으로](docs/omc-update/usage.md)
+- [지금 손댈 것 (hc-fill advise)](docs/ops/advise.md)
 - [에이전트가 쓰는 관리 도구 — 설계안](docs/ops/agent-managed-design.md)
 - [사람과 에이전트가 같은 명령으로 (--skill · --json · --dry-run)](docs/ops/agents.md)
 - [운영 사건 목록 (받으면 할 수 있는 것)](docs/ops/events.md)

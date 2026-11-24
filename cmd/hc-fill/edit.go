@@ -3,6 +3,8 @@ package main
 // edit·rm 주차 거절·다른 프로젝트 선행(2026-11-22 fill-edit-after): rm → add는 줄 ID와 주차 표식(14칸 parked — 선행이 들어가면
 // refs/park/<레인>에서 --resume으로 이어 띄움)을 버려 먼저 해 둔 준비 커밋 없이 새로 뜨게 했다. edit은 대기열 잠금 안에서 그 줄의
 // 선행(4)·기계(5)·지시문(3)·우선(13) 칸만 바꾼다(나머지 칸·줄 ID 그대로).
+// 겹침칸(16)·먼저 띄움(14)(2026-11-24 fill-edit-hands): 지휘가 겹침 검사를 끄려고 rm 뒤 add --overlap-ok로 다시 넣었다(줄 ID가 바뀌고,
+// 뜨기 직전이면 run과 경합). 아직 안 뜬 줄(대기·주차)만 — 뜬 줄에는 뜻이 없다(겹침은 띄울 때 한 번 보고, 먼저 띄움은 띄울지의 판단).
 
 import (
 	"fmt"
@@ -25,9 +27,29 @@ func editCmd(args []string) {
 	}
 	name, args := args[0], args[1:]
 	after, only, brief, prio, anyp := "", "", "", "", false
+	ovk, early := "", "" // 바꿀 겹침칸(overlap-ok·-)·먼저 띄움 칸(-·no-early), 빈 값은 그대로
 	for len(args) > 0 {
-		if args[0] == "--after-any-project" {
+		flag := func(cur *string, v string) {
+			if *cur != "" && *cur != v {
+				die("%s: 반대 인자와 함께 쓰지 않는다", args[0])
+			}
+			*cur, args = v, args[1:]
+		}
+		switch args[0] {
+		case "--after-any-project":
 			anyp, args = true, args[1:]
+			continue
+		case "--overlap-ok":
+			flag(&ovk, "overlap-ok")
+			continue
+		case "--overlap-check":
+			flag(&ovk, "-")
+			continue
+		case "--early":
+			flag(&early, "-")
+			continue
+		case "--no-early":
+			flag(&early, "no-early")
 			continue
 		}
 		if len(args) < 2 {
@@ -52,7 +74,7 @@ func editCmd(args []string) {
 		}
 		args = args[2:]
 	}
-	if after == "" && only == "" && brief == "" && prio == "" {
+	if after == "" && only == "" && brief == "" && prio == "" && ovk == "" && early == "" {
 		usage()
 	}
 	if anyp && after == "" {
@@ -85,8 +107,11 @@ func editCmd(args []string) {
 		if r == nil {
 			noLane(name)
 		}
-		undo = editUndo(r, after != "", only != "", brief != "", prio != "")
+		undo = editUndo(r, after != "", only != "", brief != "", prio != "", ovk != "", early != "")
 		st, prj = r.F(qState), r.F(qProj)
+		if ovk != "" || early != "" {
+			editNotUp(r, ovk != "", early != "")
+		}
 		if after != "" {
 			after = afterFix(name, prj, after, anyp)
 		}
@@ -125,6 +150,23 @@ func editCmd(args []string) {
 				if prio != "" {
 					x = x.Set(qPrio, prio)
 					note += ", 우선 " + plabel(prio)
+				}
+				if ovk != "" || early != "" {
+					for i := x.NF() + 1; i < qRID; i++ { // 16칸까지 채움(우선은 기본 보통) — 17칸 줄 ID는 있는 그대로
+						v := "-"
+						if i == qPrio {
+							v = "normal"
+						}
+						x = x.Set(i, v)
+					}
+				}
+				if ovk != "" {
+					x = x.Set(qOverlap, ovk)
+					note += ", 겹침 " + map[string]string{"-": "봄", "overlap-ok": "봄 끔"}[ovk]
+				}
+				if early != "" {
+					x = x.Set(qEarly, early)
+					note += ", 먼저 띄움 " + map[string]string{"-": "켬", "no-early": "끔"}[early]
 				}
 			}
 			out = append(out, x)
@@ -211,8 +253,25 @@ func rmCmd(args []string) {
 	jot("rm", name, why, "됨", undo, "상태 "+st)
 }
 
+// editNotUp: 겹침칸·먼저 띄움을 바꿀 수 있는 줄인가(아니면 거절 — DRC). 대기(wait)·주차만, 감사 줄·단독 줄·주차 줄의 먼저 띄움은 아님
+func editNotUp(r Row, ov, ea bool) {
+	n, st := r.F(qName), r.F(qState)
+	switch {
+	case st == "sent":
+		die("%s: 이미 끝났다(되돌려줌) — 바꿀 것이 없다", n)
+	case st != "wait":
+		die("%s: 이미 떴다(%s) — 떠 있는 레인의 겹침 검사·먼저 띄움은 띄울 때 한 번 본 것이라 바꾸지 않는다", n, st)
+	case strings.HasPrefix(r.F(qAudit), "audit="):
+		die("%s: 감사 줄이다 — 겹침 검사·먼저 띄움을 쓰지 않는다", n)
+	case ov && r.F(qOverlap) == "solo":
+		die("%s: 단독(--solo) 줄이다 — 겹침 검사를 따로 바꾸지 않는다. 바꾸려면 rm 뒤 다시 add", n)
+	case ea && r.F(qEarly) == "parked":
+		die("%s: 주차 중(refs/park/%s) — 이미 먼저 띄워 준비 커밋이 있다. 먼저 띄움 칸을 바꾸면 이어 띄우기를 잃는다", n, n)
+	}
+}
+
 // editUndo: 바꾸기 전 줄 r에서, 바꾼 칸만 옛 값으로 되돌리는 edit 한 줄(지시문은 옛 사본 경로 — 같은 경로면 덮였으니 뺀다)
-func editUndo(r Row, a, o, b, p bool) string {
+func editUndo(r Row, a, o, b, p, ov, ea bool) string {
 	s := "hc-fill edit " + r.F(qName)
 	if a {
 		s += " --after " + shq(dash(r.F(qAfter)))
@@ -225,6 +284,12 @@ func editUndo(r Row, a, o, b, p bool) string {
 	}
 	if p {
 		s += " --priority " + plabel(r.F(qPrio))
+	}
+	if ov {
+		s += map[bool]string{true: " --overlap-ok", false: " --overlap-check"}[r.F(qOverlap) == "overlap-ok"]
+	}
+	if ea {
+		s += map[bool]string{true: " --no-early", false: " --early"}[r.F(qEarly) == "no-early"]
 	}
 	if s == "hc-fill edit "+r.F(qName) {
 		return "-"

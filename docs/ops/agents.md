@@ -28,6 +28,7 @@ herdr-tools로 <할 일>을 해라. 먼저 쓸 도구의 `<도구> --skill`을 �
 
 | 명령 | 꼴 | 칸 |
 |---|---|---|
+| `hc-fill advise --json` | 한 줄 객체 | [지금 손댈 것](advise.md) |
 | `hc-fill state --json` | 한 줄 객체 | [상태 한 장](state.md) |
 | `hc-fill knob ls --json` | 배열 | [손잡이](knobs.md) |
 | `hc-fill journal --json` | 줄마다 객체 | [운영 일지](journal.md) |
@@ -80,6 +81,13 @@ herdr-tools로 <할 일>을 해라. 먼저 쓸 도구의 `<도구> --skill`을 �
 - `hc-fill edit --dry-run` — 지시문 사본·선행 검사가 쓰기와 엮여 있어 나눠야 한다. 그때까지 `hc-fill ls --json`으로 전 값을 보고 일지의 되돌리는 명령을 쓴다.
 - `hc-fill add --dry-run`·`hc-fill merger restart --dry-run`·`hc-fill note --dry-run`.
 - `herdr-sync --auto on|off --dry-run`(표식 파일 하나라 되돌리기가 바로 된다).
+
+## 막힌 줄·멈춘 레인을 그 자리에서 (2026-11-24 fill-edit-hands)
+
+- 지휘가 손으로 하던 둘을 명령으로 — 사람도 같은 명령이다. 둘 다 일지에 남는다.
+- `hc-fill edit <레인> --overlap-ok|--overlap-check · --early|--no-early` — 아직 안 뜬 줄의 겹침 검사·먼저 띄움 칸만(줄 ID 그대로). `rm` 뒤 `add`로 다시 넣지 않는다.
+- `hc-fill nudge <레인> [<글>] --why <까닭>` — 레인 터미널이 일시 오류로 멈췄을 때(hc 상태 `error`·`done`, 완료·막힘 보고 없음) 이어 가라는 글 한 줄. 안 보내면 까닭과 종료 1(일하는 중·터미널 없음·이름 다름·보고 있음·손잡이 `nudge_every`분 안).
+- 자세히: [줄 고치기](../hc-fill/edit.md).
 
 ## 「다음:」 줄이 붙는 실패
 

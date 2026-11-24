@@ -23,6 +23,7 @@
 | hc-fill | `edit` | 레인 | 바꾼 칸만 옛 값으로 `edit`(같은 경로에 덮인 지시문은 빠짐) |
 | hc-fill | `rm` | 레인 | 같은 칸으로 `add`(새 줄 ID — 주차 준비 커밋·시도 기록은 안 돌아옴) |
 | hc-fill | `retry` | 레인 | `-` |
+| hc-fill | `nudge`(결과 `보냄`·`실패` — 안 보낸 부름은 적지 않음) | 레인 | `-` |
 | hc-fill | `merger restart`(손으로, 그리고 `merger_restart` 표식으로 바퀴가 스스로) | 프로젝트 | `-` |
 | herdr-sync | `배포` · `되돌림`(`--at`) | `모든 기계` 또는 고른 기계 | 앞 성공 배포의 판으로 `herdr-sync --at <커밋>` |
 | herdr-sync | `auto on` · `auto off` | `스스로 배포` | 반대쪽 |
@@ -38,7 +39,7 @@
 ## 왜 (--why)
 
 - `knob set`은 `--why`를 꼭 받는다(전부터).
-- 나머지 조치 명령(`knob unset`·`prio`·`edit`·`rm`·`retry`·`merger restart`, `herdr-sync` 배포·`--at`·`--auto on|off`)은 `--why <까닭>`을 받고, 빈 값도 허용한다(권함).
+- 나머지 조치 명령(`knob unset`·`prio`·`edit`·`rm`·`retry`·`nudge`·`merger restart`, `herdr-sync` 배포·`--at`·`--auto on|off`)은 `--why <까닭>`을 받고, 빈 값도 허용한다(권함).
 - 배포에 꼭 받지 않는 까닭: 스스로 배포(`--landed`)와 손으로 치던 `herdr-sync` 부름이 그대로 돌아야 한다.
 - 스스로 배포는 `착지 뒤 스스로 배포 — <배포할 것 줄>`을 스스로 붙인다.
 

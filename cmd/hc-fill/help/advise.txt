@@ -1,0 +1,6 @@
+        hc-fill advise [--json]
+  advise  지금 손댈 것(docs/ops/advise.md) — 놀고 있는 자리에 풀 수 있는 대기(겹침·선행)·한 줄 사슬·멈춘 레인(터미널 error·blocked·
+         done인데 보고 없음·막힘·같은 단계에 오래)·굶는 감사·병합기 없음·병합 줄이 안 움직임·밀린 배포·감시 안 돎·옛 판 상주·기계 끊김·
+         부하 치우침·판정 못 함을 항목마다 무엇·근거·놓치면·다음 명령(그대로 칠 줄)·확신(확실|판단 필요|사람이 정한다)으로. 읽기만 한다.
+         재료는 state와 같다(지문도 같음). 없으면 「손댈 것 없음」. 문턱 손잡이 idle·advise_wait·state_stage·state_hot·state_cool,
+         run 바퀴가 advise_every분(0 끔)마다 다시 보고 새 항목이면 운영 사건 hc-fill-advise 한 번

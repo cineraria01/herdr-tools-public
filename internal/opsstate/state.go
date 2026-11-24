@@ -1,7 +1,7 @@
 // Package opsstate: 상태 한 장(2026-11-24 ops-state, docs/ops/state.md) — 기계·대기열·레인·병합 줄·배포·감시·손잡이를 한 꼴에 담고
 // 사람용 표·json·상태 지문·눈에 띄는 것을 만든다. 모으기(파일·원격 호출)는 hc-fill state가 하고, 여기는 순수 함수만.
 //
-// 모름은 nil(json null)과 까닭(why)이고 0·정상으로 적지 않는다. 판단은 하지 않는다 — 눈에 띄는 것은 사실의 목록일 뿐이다.
+// 모름은 nil(json null)과 까닭(why)이고 0·정상으로 적지 않는다. 판단은 하지 않는다 — 눈에 띄는 것은 지금 손댈 것(advise.go)의 요약이다.
 package opsstate
 
 import (
@@ -186,70 +186,20 @@ type Knob struct {
 	Until string `json:"until"`
 }
 
-// Thresholds: 눈에 띄는 것의 문턱(손잡이 state_stage·state_hot·state_cool). 0이면 그 본보기는 끈다
+// Thresholds: 손댈 것의 문턱(손잡이 state_stage·state_hot·state_cool·idle·advise_wait). 0이면 그 본보기는 끈다
 type Thresholds struct {
 	StageMin       int     // 같은 단계에 이만큼(분) 머문 레인
 	SkewHi, SkewLo float64 // 코어당 부하가 SkewHi 이상인 기계와 SkewLo 이하인 기계가 함께 있으면
-}
-
-// Notable: 판단이 필요해 보이는 사실(조치하지 않는다)
-func Notable(s State, th Thresholds) []string {
-	var o []string
-	for _, x := range s.Sources {
-		if x.Why != "" {
-			o = append(o, fmt.Sprintf("재료 %s 못 읽음: %s", x.Name, x.Why))
-		}
-	}
-	var hot, cool []string
-	for _, m := range s.Machines {
-		if m.Reach != "ok" {
-			o = append(o, fmt.Sprintf("기계 %s 모름: %s", m.Name, m.Why))
-			continue
-		}
-		if m.LoadPerCore == nil || th.SkewHi <= 0 {
-			continue
-		}
-		switch p := *m.LoadPerCore; {
-		case p >= th.SkewHi:
-			hot = append(hot, fmt.Sprintf("%s %.2f", m.Name, p))
-		case p <= th.SkewLo:
-			cool = append(cool, fmt.Sprintf("%s %.2f", m.Name, p))
-		}
-	}
-	if len(hot) > 0 && len(cool) > 0 {
-		o = append(o, "코어당 부하 치우침: 바쁨 "+strings.Join(hot, ", ")+" · 한가 "+strings.Join(cool, ", "))
-	}
-	for _, l := range s.Lanes {
-		if th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 && !Finished(l) {
-			o = append(o, fmt.Sprintf("레인 %s: 같은 단계에 %d분 — %s", l.Name, *l.StageAgeS/60, l.Stage))
-		}
-	}
-	for _, m := range s.Merge {
-		if m.Merger != "alive" {
-			o = append(o, fmt.Sprintf("병합기 %s: %s(줄 %s)", m.Project, m.Merger, ival(m.Length)))
-		}
-	}
-	for _, d := range s.Deploy {
-		switch {
-		case d.Version == "" || d.Behind == nil:
-			o = append(o, fmt.Sprintf("배포 %s 모름: %s", d.Machine, d.Why))
-		case *d.Behind > 0:
-			o = append(o, fmt.Sprintf("배포 %s: %d커밋 밀림(%s)", d.Machine, *d.Behind, d.Version))
-		}
-	}
-	for _, w := range s.Watch {
-		switch {
-		case w.Alive == nil:
-			o = append(o, fmt.Sprintf("지휘 %s 감시 모름", w.Owner))
-		case !*w.Alive:
-			o = append(o, fmt.Sprintf("지휘 %s 감시 안 돎(열린 레인 있음)", w.Owner))
-		}
-	}
-	return o
+	IdleMin        int     // 빈 자리가 있는데 대기 줄이 이만큼(분) 넘게 기다리면(손잡이 idle)
+	WaitMin        int     // 감사 자리 없음·병합 줄 바퀴 없음이 이만큼(분) 넘으면(손잡이 advise_wait)
 }
 
 // minutesRe: 단계 글의 경과 분(「감사 대기(자리 없음 N분)」) — 차수(「N번째」)·sha는 판단 칸이라 남긴다(감사 atozipa 중간 1)
 var minutesRe = regexp.MustCompile(`[0-9]+분`)
+
+// durRe: 나이 글(dur — 「45초」「12분」「2시간05분」). 눈에 띄는 것은 손댈 것의 근거를 담아, 숫자만 빼면 나이가 1분·1시간을 넘을 때
+// 단위 글이 바뀌어 지문이 바뀐다(감사 atozr8z 낮음 1) — 나이 글을 통째로 뺀다
+var durRe = regexp.MustCompile(`[0-9]+시간[0-9]+분|[0-9]+분|[0-9]+초`)
 
 // noDigits: 지문에 넣을 글에서 숫자를 뺀다(나이·부하 숫자가 바뀌어도 같은 사실이면 같게)
 func noDigits(s string) string {
@@ -319,7 +269,7 @@ func Fingerprint(s State) string {
 		w("e", e)
 	}
 	for _, n := range s.Notable {
-		w("n", noDigits(n))
+		w("n", noDigits(durRe.ReplaceAllString(n, "")))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }
