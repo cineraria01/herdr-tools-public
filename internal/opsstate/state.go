@@ -140,7 +140,14 @@ type MergeLine struct {
 	Lands         *int     `json:"lands"`
 	Skipped       *int     `json:"skipped"`
 	Delegated     *int     `json:"delegated"`
-	Why           string   `json:"why"`
+	// 줄에 선 가장 오래된 제출(병합기 살아 있음 기록 — 큐 참조 이름의 초)의 나이와 레인. 모르면 nil·빈 값
+	OldestAgeS *int   `json:"oldest_age_s"`
+	OldestLane string `json:"oldest_lane"`
+	// 이 기계 병합기가 지금 착지 중인 맨 앞 레인과 그 착지 나이(착지 자식 기록이 살아 있음 — hc-fill statemerge.go stateLanding). 착지 중이
+	// 아니거나 다른 기계 병합기면 빈 값·nil, 착지 중인데 레인을 못 찾으면 「모름」
+	Landing     string `json:"landing"`
+	LandingAgeS *int   `json:"landing_age_s"`
+	Why         string `json:"why"`
 }
 
 // Deploy: Version 빈 글 = 모름(json null)
@@ -194,7 +201,8 @@ type Thresholds struct {
 	StageMin       int
 	SkewHi, SkewLo float64 // 코어당 부하가 SkewHi 이상인 기계와 SkewLo 이하인 기계가 함께 있으면
 	IdleMin        int     // 빈 자리가 있는데 대기 줄이 이만큼(분) 넘게 기다리면(손잡이 idle)
-	WaitMin        int     // 감사 자리 없음·병합 줄 바퀴 없음이 이만큼(분) 넘으면(손잡이 advise_wait)
+	WaitMin        int     // 감사 자리 없음·병합 줄 안 움직임이 이만큼(분) 넘으면(손잡이 advise_wait)
+	SlowMin        int     // 병합기의 지금 착지가 이만큼(분) 넘으면 병합 줄이 느림(손잡이 advise_merge_slow)
 }
 
 // minutesRe: 단계 글의 경과 분(「감사 대기(자리 없음 N분)」) — 차수(「N번째」)·sha는 판단 칸이라 남긴다(감사 atozipa 중간 1)

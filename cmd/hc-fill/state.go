@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/journal"
 	"herdr-tools/internal/opsstate"
 	"herdr-tools/internal/resident"
@@ -64,7 +65,7 @@ func stateNotable(s opsstate.State, f opsstate.Facts, th opsstate.Thresholds) []
 func stateThresholds() opsstate.Thresholds {
 	return opsstate.Thresholds{StageMin: knobInt("state_stage"),
 		SkewHi: float64(knobInt("state_hot")) / 100, SkewLo: float64(knobInt("state_cool")) / 100,
-		IdleMin: knobInt("idle"), WaitMin: knobInt("advise_wait")}
+		IdleMin: knobInt("idle"), WaitMin: knobInt("advise_wait"), SlowMin: knobInt("advise_merge_slow")}
 }
 
 // stateLoadFresh: 기계 부하를 읽은 때가 마지막 바퀴 끝에서 이 초 안이면 그 바퀴 값
@@ -102,9 +103,15 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	t0 := time.Now()
 	var terms []lsTerm
 	termsOK := false
+	cwd := map[string]string{} // 살아 있는 터미널 주소 → 폴더(병합기 클론을 찾는다 — statemerge.go stateLanding)
 	hc.Calls++
 	if out, rc := run("hc", "ls", "--json"); rc == 0 && sub(out) != "" {
 		terms, termsOK = lsTerms(sub(out))
+		if l, err := hcjson.ParseList([]byte(out)); err == nil {
+			for _, t := range l.Terminals {
+				cwd[t.Address] = t.Cwd
+			}
+		}
 	}
 	var conn []string
 	connKnown := false
@@ -220,12 +227,15 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		ps = append(ps, p)
 	}
 	sort.Strings(ps)
-	mj := stateMergeJournal(mr, rows)
+	mj := stateMergeJournal(mr, rows, cwd)
 	for _, p := range ps {
 		x := mr[p]
 		g := opsstate.MergeLine{Project: p, Merger: x.St}
 		if n, err := strconv.Atoi(x.K); err == nil {
 			g.Length = ptrI(n)
+		}
+		if x.Oldest > 0 && g.Length != nil && *g.Length > 0 { // 큐 참조 이름의 초 — status의 「가장 오래」와 같은 값
+			g.OldestAgeS, g.OldestLane = ptrI(max(0, int(now.Unix()-x.Oldest))), x.OldLane
 		}
 		mj(&g, x, now)
 		if x.Why != "" && x.Why != "-" {

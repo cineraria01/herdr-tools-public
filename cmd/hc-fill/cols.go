@@ -216,6 +216,7 @@ const (
 	maChecked = 8
 	maAlerted = 9
 	maWhy     = 10
+	maOldLane = 11 // 가장 오래된 제출의 레인(advise-merge-stall-age — 옛 기록 10칸은 빈 값)
 )
 
 // 작은 상태 파일들

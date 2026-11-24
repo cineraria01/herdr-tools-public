@@ -61,7 +61,8 @@ var Defs = []Def{
 	{Name: "nudge_every", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "hc-fill nudge가 한 레인에 다시 보내기까지(0이면 막지 않음)"},
 	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	// 지금 손댈 것(2026-11-24 ops-advise, docs/ops/advise.md). 풀 수 있는 대기·사슬의 문턱은 놀고 있음 알림과 같은 idle
-	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 바퀴 없음이 이만큼 넘으면 손댈 것(0이면 끔)"},
+	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔)"},
+	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
 	{Name: "deploy_grace", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "마지막 착지 뒤 이만큼은 배포 밀림을 손댈 것으로 안 침(배포 도는 중·착지 뒤 명령 차례 남음도 안 침, 0이면 착지 시각은 안 봄)"},
 	// 운영 에이전트(2026-11-24 ops-agent, docs/ops/agent.md). 이름이 agent가 아닌 까닭: hc-fill 설정 agent(에이전트 CLI 종류)를 덮는다.

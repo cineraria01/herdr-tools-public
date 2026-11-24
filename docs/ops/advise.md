@@ -29,7 +29,8 @@
 | `audit-starve` | 굶는 감사 | 단계 「감사 대기(자리 없음 N분)」에서 N이 `advise_wait` 이상 | `hc-fill machine <기계> --seats <지금+1> --for 60 --why …` | 판단 필요 |
 | `lane-long` | 같은 단계에 오래 | 터미널이 살아 있는(또는 모르는) 레인이 같은 단계에 `state_stage`분 — 터미널이 끝난 줄(완료로 보고하고 스스로 착지·정리한 레인, 착지 없는 검토 레인)은 자리를 안 잡아 빼고, 완료 뒤 멈춤은 `done_stall` 사건이 본다 | `hc read <주소>` | 판단 필요 |
 | `merger` | 병합기 없음 | 병합기 살아 있음이 alive가 아님(gone) | `hc-fill merger restart <프로젝트> --why …` | 줄이 차 있으면 확실, 비었으면 판단 필요 |
-| `merge-stall` | 병합 줄이 안 움직임(맡긴 검증 대기 등) | 줄 길이 > 0인데 병합기 마지막 바퀴가 `advise_wait`분 넘게 전 | `hc-lane logs` · `hc-fill status` | 판단 필요 |
+| `merge-stall` | 병합 줄이 안 움직임(맡긴 검증 대기 등) | 줄에 선 가장 오래된 제출이 `advise_wait`분 넘게 서 있고, 그 제출이 들어온 뒤 병합기 일지에 그 프로젝트 줄이 `advise_wait`분 동안 없음(조용한 시간 = 가장 오래 나이와 일지 마지막 줄 나이 가운데 짧은 것 — 일지는 일이 있을 때만 줄이 생겨, 비었다가 방금 찬 줄을 「마지막 바퀴 40분 전」으로 울렸다). 일지를 못 읽는 다른 기계 병합기는 정하지 않는다 | `hc-lane logs` · `hc-fill status` | 판단 필요 |
+| `merge-slow` | 병합 줄이 느림 | 이 기계 병합기가 지금 착지 중(병합기 클론의 착지 자식 기록 `<git-path hc-merger>/child`의 pid가 그 시작 시각으로 살아 있음)이고 그 착지가 `advise_merge_slow`분 넘음 — 착지 중이면 `merge-stall`은 내지 않는다. 레인·시각은 그 병합기 pid로 끝나는 착지 로그 가운데 가장 늦은 것의 이름(바퀴 시작이라 후보 만들기 몇 초가 들어가 「n분째」가 조금 길다), 없으면 레인 「모름」·자식 기록 시각 | `hc-lane logs` · `hc-fill status` | 판단 필요 |
 | `deploy` | 밀린 배포 | 배포 기록상 판이 origin/main에서 1커밋 이상 뒤 — 단 배포가 지금 돌거나(herdr-sync `deploying` 표식의 pid가 살아 있음), 착지 뒤 배포 차례(herdr-sync를 부르는 on-land 이름의 pending·running)가 남았거나, 마지막 착지(그 이름의 착지마다 기준 `onland/<이름>.head`가 바뀐 때·범용 저장소 origin/main 커밋 시각 가운데 늦은 것) 뒤 `deploy_grace`분 안이면 **새** 밀림은 아직 치지 않는다(착지 뒤 배포가 도는 1~2분에 거짓 사건이 났다). 보류는 기계 구분 없이 첫 알림만 미룬다 — 이미 사건으로 알린 밀림(같은 열쇠)은 보류 동안에도 남아, 보류가 풀릴 때 같은 사건이 되풀이되지 않는다 | `herdr-sync --status <기계>` · `herdr-sync <기계>` | 병합 줄이 모두 비었으면 확실, 아니면 판단 필요 |
 | `watch` | 감시 안 돎 | 열린 레인이 있는 지휘의 감시 터미널이 없다 | `hc-lane coord --watch <지휘>` | 확실 |
 | `resident` | 옛 판 상주 | hc-sweep 상주 판 점검 결과 줄 | 없음 — 다시 띄우는 명령(`kill`·`hc kill`·`launchctl kickstart -k`)은 프로세스를 끄고, 결과 줄의 pid는 확인한 때의 것이라 근거에만 남긴다 | 사람이 정한다 |
@@ -50,6 +51,7 @@
 |---|---|
 | `idle`(분, 기본 10) | 풀 수 있는 대기·사슬 — 대기 줄이 이만큼 넘게 기다렸을 때(놀고 있음 알림과 같은 손잡이) |
 | `advise_wait`(분, 기본 15) | 굶는 감사·병합 줄이 안 움직임 |
+| `advise_merge_slow`(분, 기본 30) | 병합 줄이 느림 — 병합기의 지금 착지가 이만큼 넘으면 |
 | `state_stage`(분, 기본 90) | 같은 단계에 오래 |
 | `state_hot`·`state_cool`(%, 기본 200·50) | 부하 치우침 |
 | `advise_every`(분, 기본 5) | 아래 사건 — 바퀴가 손댈 것을 다시 보는 간격(0이면 사건 끔) |

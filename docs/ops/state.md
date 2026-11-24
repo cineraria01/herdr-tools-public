@@ -136,6 +136,10 @@
 | `merge[].lands` | 최근 착지 수(20번까지) |
 | `merge[].skipped` | 그중 검증 건너뜀 수 |
 | `merge[].delegated` | 최근 검증 맡김 수(20번까지) |
+| `merge[].oldest_age_s` | 줄에 선 가장 오래된 제출의 나이(초, 큐 참조 이름의 초 — `hc-fill status`의 「가장 오래」와 같은 출처) |
+| `merge[].oldest_lane` | 그 제출의 레인 |
+| `merge[].landing` | 이 기계 병합기가 지금 착지 중인 맨 앞 레인(착지 자식 기록 `child`가 살아 있음 — 레인은 그 병합기 pid의 착지 로그 이름, 못 찾으면 「모름」. 다른 기계 병합기·착지 중 아님은 빈 값) |
+| `merge[].landing_age_s` | 그 착지의 나이(초, 착지 로그 이름의 시각 = 바퀴 시작 — 없으면 자식 기록 시각) |
 | `merge[].why` | 모르는 칸의 까닭 |
 | `deploy` | 배포(기계마다) |
 | `deploy[].machine` | 기계 |

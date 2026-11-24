@@ -97,6 +97,45 @@ func light(k string) bool {
 
 var auditWaitRe = regexp.MustCompile(`^감사 대기\(자리 없음 ([0-9]+)분\)`)
 
+// mergeStall: 줄이 찬 병합 줄의 「안 움직임」·「느림」(2026-11-24 advise-merge-stall-age — 40분 비었던 줄에 4분 전 제출 1건이 「병합기
+// 마지막 바퀴 40분 전」으로 울렸다: 일지는 일이 있을 때만 줄이 생긴다). 시계는 가장 오래된 제출의 나이, 일지 마지막 줄은 그 제출 뒤에
+// 병합기가 한 일이 있나의 보조 — 조용한 시간 = min(가장 오래 나이, 일지 마지막 줄 나이). 일지를 못 읽었으면(다른 기계 병합기 — 마지막
+// 바퀴·착지 수 모두 nil) 정하지 않는다. 이 기계 병합기가 지금 착지 중이면 안 움직임이 아니라 그 착지 나이를 SlowMin과 견준다(merge-slow)
+func mergeStall(m MergeLine, th Thresholds) (Item, bool) {
+	ev := fmt.Sprintf("줄 %d · 가장 오래 %s", *m.Length, age(m.OldestAgeS))
+	if m.OldestLane != "" {
+		ev += "(" + m.OldestLane + ")"
+	}
+	next := []string{"hc-lane logs", "hc-fill status"}
+	if m.Landing != "" && m.LandingAgeS != nil {
+		if th.SlowMin <= 0 || *m.LandingAgeS < th.SlowMin*60 {
+			return Item{}, false
+		}
+		return Item{Key: "merge-slow:" + m.Project, Kind: "merge-slow",
+			What:     fmt.Sprintf("병합 줄이 느림: %s — 맨 앞 %s 착지 검증 %d분째", m.Project, m.Landing, *m.LandingAgeS/60),
+			Evidence: ev + " · 검증 맡김 " + ival(m.Delegated) + "번",
+			Cost:     "착지 검증이 끝날 때까지 뒤 제출이 모두 기다린다", Next: next, Sure: SureJudge}, true
+	}
+	q := m.OldestAgeS
+	if m.LastRoundAgeS != nil && (q == nil || *m.LastRoundAgeS < *q) {
+		q = m.LastRoundAgeS
+	}
+	if th.WaitMin <= 0 || q == nil || m.LastRoundAgeS == nil && m.Lands == nil || *q < th.WaitMin*60 {
+		return Item{}, false
+	}
+	switch {
+	case m.LastRoundAgeS == nil:
+		ev += " · 병합기 일지에 이 프로젝트 줄 없음"
+	case m.OldestAgeS != nil && *m.LastRoundAgeS > *m.OldestAgeS:
+		ev += " · 그 뒤 병합기 일지 줄 없음(마지막 바퀴 " + age(m.LastRoundAgeS) + " 전)"
+	default:
+		ev += " · 병합기 마지막 바퀴 " + age(m.LastRoundAgeS) + " 전"
+	}
+	return Item{Key: "merge-stall:" + m.Project, Kind: "merge-stall", What: "병합 줄이 안 움직임: " + m.Project,
+		Evidence: ev + " · 검증 맡김 " + ival(m.Delegated) + "번",
+		Cost:     "맡긴 검증 기계가 바쁘거나 맨 앞이 막히면 줄 전체가 기다린다", Next: next, Sure: SureJudge}, true
+}
+
 // Advise: 지금 손댈 것. s는 추린 상태(끝난 레인은 Finished로 건너뛴다), f는 그 밖 재료
 func Advise(s State, f Facts, th Thresholds) []Item {
 	var o []Item
@@ -332,11 +371,10 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 				it.Sure, it.Cost = SureJudge, "줄이 비어 지금 막힌 착지는 없다 — 다음 제출부터 선다"
 			}
 			add(it)
-		case th.WaitMin > 0 && m.Length != nil && *m.Length > 0 && m.LastRoundAgeS != nil && *m.LastRoundAgeS >= th.WaitMin*60:
-			add(Item{Key: "merge-stall:" + m.Project, Kind: "merge-stall", What: "병합 줄이 안 움직임: " + m.Project,
-				Evidence: fmt.Sprintf("줄 %d · 병합기 마지막 바퀴 %s 전 · 검증 맡김 %s번", *m.Length, age(m.LastRoundAgeS), ival(m.Delegated)),
-				Cost:     "맡긴 검증 기계가 바쁘거나 맨 앞이 막히면 줄 전체가 기다린다",
-				Next:     []string{"hc-lane logs", "hc-fill status"}, Sure: SureJudge})
+		case m.Length != nil && *m.Length > 0:
+			if it, ok := mergeStall(m, th); ok {
+				add(it)
+			}
 		}
 	}
 

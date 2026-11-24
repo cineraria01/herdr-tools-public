@@ -8,4 +8,4 @@
 275 cmd/herdr-hooks/cgtok_git.go cgTok.git
 250 cmd/herdr-settings-merge/main.go main
 275 cmd/herdr-sync/machines.go syncMachines
-350 internal/opsstate/advise.go Advise
+325 internal/opsstate/advise.go Advise
