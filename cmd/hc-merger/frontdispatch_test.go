@@ -108,11 +108,12 @@ func TestFrontOverCapNoLocalWaits(t *testing.T) {
 	if len(d) != 1 {
 		t.Fatalf("맨 앞 띄움: %v", d)
 	}
+	s.idle("v2", verifyBusy) // 한가한 다른 기계가 있으면 그 기계에 다시 맡긴다(spec-script-land 라 — specscript_test.go)
 	s.age(d[0][1], 700)
 	s.round(1)
 	s.round(1)
-	if len(s.lines(s.landlog)) != 0 || len(s.evs()) != 1 {
-		t.Fatalf("④ 손잡이 0: 기다림·사건 한 번 — 착지 %v 사건 %v", s.lines(s.landlog), s.evs())
+	if len(s.lines(s.landlog)) != 0 || len(s.evs()) != 1 || len(s.dispatched()) != 1 {
+		t.Fatalf("④ 손잡이 0: 기다림·사건 한 번 — 착지 %v 사건 %v 띄움 %v", s.lines(s.landlog), s.evs(), s.dispatched())
 	}
 }
 

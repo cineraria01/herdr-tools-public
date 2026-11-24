@@ -120,6 +120,9 @@ func (m *M) spec() (specDecision, string) {
 		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
 		fmt.Printf("hc-lane merger: 맨 앞 검증이 %d초 넘게 도는 중(%s)\n", w, st[0].row.machine)
 		d = specLand
+		if disp && m.overRedo(c, st[0], busy, now) { // 손잡이 front_local 0 — 서서 기다리지 않고 한가한 다른 기계에 다시(specfront.go)
+			d, over = specWaitFront, false
+		}
 	}
 	m.vw.why = frontWhy(st, c.rows, over, disp)
 	m.wmach = ""
@@ -181,6 +184,9 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64, disp bool) {
 // 채우고 true. 실패 기록에 시험 실패 근거(test=1)가 없거나(옛 판·환경 문제와 가를 수 없음) 그 기록을 못 읽으면 false(지금처럼 직접 검증)
 func (m *M) specCulpritWhy(c *specCtx, st []specStep) bool {
 	if m.capN() == 0 || len(st) == 0 || st[0].row == nil || st[0].row.state != specFail || len(st[0].g.shas) != 1 {
+		return false
+	}
+	if m.hb != "" { // 착지 스크립트 저장소 — 추측 실패만으로 반송하지 않는다(반송은 착지 스크립트의 실패로만, specfront.go)
 		return false
 	}
 	if b, err := os.ReadFile(m.mj + "/solo"); err != nil || strings.TrimSpace(string(b)) != st[0].row.id {

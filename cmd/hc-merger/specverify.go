@@ -111,6 +111,10 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specRes
 			return resLost
 		}
 	}
+	prepared, ok := specPrepare(wt, lf, base, env)
+	if !ok {
+		return resLost
+	}
 	if _, err := os.Stat(wt + "/" + verified.Script); err != nil {
 		fmt.Fprintf(lf, "hc-lane merger: 추측 트리에 %s 가 없다 — 모름\n", verified.Script)
 		return resLost
@@ -129,8 +133,8 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specRes
 		return resLost
 	}
 	t, trc := gitx.Out(wt, lf, "rev-parse", "HEAD^{tree}")
-	st, src := gitx.Out(wt, lf, "status", "--porcelain", "--untracked-files=no")
-	if trc != 0 || src != 0 || t != tree || st != "" {
+	st, sok := wtState(wt, lf) // 준비 훅이 고친 추적 파일은 그대로여야 한다(훅 없으면 깨끗해야 — 지금 그대로)
+	if trc != 0 || !sok || t != tree || st != prepared {
 		fmt.Fprintln(lf, "hc-lane merger: 검증이 트리·추적 파일을 바꿨다(또는 못 읽음) — 모름")
 		return resLost
 	}
@@ -144,6 +148,61 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specRes
 		return resFail
 	}
 	return resPass
+}
+
+// prepareHook: 추측 준비 훅(spec-script-land) — setup 뒤·검증 앞에 「얹은 뒤 다시 만들어야 하는 파생 파일」을 만든다
+const prepareHook = ".claude/herdr-spec-prepare.sh"
+
+// specPrepare: 준비 훅을 돌리고 그 뒤 작업 트리 상태(wtState)를 돌려준다 — 훅이 없거나 돌리지 않으면 ""(깨끗해야 한다, 지금 그대로).
+// 훅은 착지를 .claude/herdr-land.sh에 맡기는 저장소(기본 브랜치에 그 스크립트)에서만 돈다: 그 스크립트가 착지 중에 스스로 검증하니
+// 「검증한 트리 ≠ 넣을 트리」가 정확성을 깨지 않는다. 내장 착지는 추측 통과 기록으로 검증을 건너뛰므로 돌리지 않고 한 줄 알린다.
+// 훅 실패·시간 넘김·환경을 못 읽음은 모름(ok=false) — 시험 실패·반송 근거가 아니다
+func specPrepare(wt string, lf *os.File, base string, env []string) (string, bool) {
+	if _, err := os.Stat(wt + "/" + prepareHook); err != nil {
+		return "", true
+	}
+	hl, rc := gitx.Out(wt, lf, "ls-tree", "--name-only", "refs/remotes/origin/"+base, "--", ".claude/herdr-land.sh")
+	if rc != 0 {
+		fmt.Fprintf(lf, "hc-lane merger: 착지 스크립트가 있는지 못 읽었다 — 모름\n")
+		return "", false
+	}
+	if hl == "" {
+		fmt.Fprintf(lf, "hc-lane merger: %s 는 내장 착지 저장소에서 돌리지 않는다(추측 통과로 검증을 건너뛰니 검증한 트리와 넣을 트리가 같아야 한다)\n", prepareHook)
+		return "", true
+	}
+	bs, rc1 := gitx.Out(wt, lf, "merge-base", "HEAD", "refs/remotes/origin/"+base)
+	subs, rc2 := gitx.Out(wt, lf, "log", "--first-parent", "--reverse", "--format=%s", bs+"..HEAD")
+	if rc1 != 0 || rc2 != 0 {
+		fmt.Fprintf(lf, "hc-lane merger: 준비 훅의 기준·구성원을 못 읽었다 — 모름\n")
+		return "", false
+	}
+	var mem []string
+	for _, s := range strings.Split(subs, "\n") {
+		if r, ok := parseSpec(s); ok {
+			mem = append(mem, strings.Split(r.group, "+")...)
+		}
+	}
+	c := shellCmd(wt, "sh", "-c", noIndexSh, "hc-merger", "bash", prepareHook)
+	c.Stdout, c.Stderr = lf, lf
+	c.Env = append(env[:len(env):len(env)], "HERDR_SPEC_BASE="+base, "HERDR_SPEC_BASE_SHA="+bs, "HERDR_SPEC_MEMBERS="+strings.Join(mem, " "))
+	if rc := proc.WaitMax(c, "", setupMax()); rc != 0 {
+		fmt.Fprintf(lf, "hc-lane merger: 추측 준비 훅(%s) 실패(종료 %d) — 모름\n", prepareHook, rc)
+		return "", false
+	}
+	return wtState(wt, lf)
+}
+
+// wtState: 추적 파일의 작업 트리 상태 — 깨끗하면 "", 아니면 그 상태의 트리(git stash create — 아무것도 바꾸지 않고 객체만 쓴다)
+func wtState(wt string, lf *os.File) (string, bool) {
+	sc, rc := gitx.Out(wt, lf, "stash", "create")
+	if rc != 0 {
+		return "", false
+	}
+	if sc == "" {
+		return "", true
+	}
+	t, rc := gitx.Out(wt, lf, "rev-parse", sc+"^{tree}")
+	return t, rc == 0
 }
 
 // specEvidence: 추측 실패의 근거 — 검증 종료 코드와, 시험 실패로 가를 수 있으면 그 첫 실패 시험 줄(가를 수 없으면 test 빈 값)

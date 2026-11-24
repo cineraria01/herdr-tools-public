@@ -167,9 +167,15 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 	pct := m.idleLoad()
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	var notes []string
+	var notes, skipped []string
 	for _, v := range c.vers {
-		if busy[v.Machine] || v.Machine == m.mme {
+		// 재지 않는 기계도 까닭과 함께 찍는다 — 목록의 기계가 줄에서 빠져 보이지 않게(spec-script-land 다)
+		if v.Machine == m.mme {
+			skipped = append(skipped, v.Machine+" 병합기 기계")
+			continue
+		}
+		if busy[v.Machine] {
+			skipped = append(skipped, v.Machine+" 추측 도는 중")
 			continue
 		}
 		wg.Add(1)
@@ -192,7 +198,7 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 	}
 	wg.Wait()
 	if len(notes) > 0 {
-		fmt.Printf("hc-lane merger: 검증 기계 한가함 — %s\n", strings.Join(notes, " · "))
+		fmt.Printf("hc-lane merger: 검증 기계 한가함 — %s\n", strings.Join(append(notes, skipped...), " · "))
 	}
 }
 

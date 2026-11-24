@@ -14,6 +14,9 @@ package main
 //   - 묶음 맨 앞의 시험 실패는 묶음 착지 실패와 같은 길로 합친다(반송 없이 마지막을 빼고 다시 — cap). 그 뒤 「맨 앞 혼자 추측」·범인
 //     반송(specSolo·specCulpritWhy)은 지금 그대로다.
 //   - 환경 실패(시험 실패 근거 없음 — 준비 실패·시간 넘김·가를 수 없음)는 모름: 반송하지 않는다.
+//   - 착지 스크립트 저장소(m.hb — 기본 브랜치에 .claude/herdr-land.sh, spec-script-land): 그 스크립트가 착지 중에 스스로 검증하니 맨 앞
+//     추측의 실패·모름은 손잡이와 상관없이 착지 스크립트로 넘기고, 추측 실패를 반송·한 번 더 확인·줄이기·범인 반송 근거로 쓰지 않는다.
+//   - 손잡이 0에서 맨 앞이 기다림 상한을 넘기면 서서 기다리기 전에 한가한 다른 기계에 한 번 더 맡긴다(overRedo).
 
 import (
 	"fmt"
@@ -65,6 +68,12 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 		// 다시 고를 기계가 없음·바쁨 횟수 넘김 — 손잡이 front_local(0이면 아래 다시 띄움이 바쁨을 낸 기계까지 다시 본다)
 	} else if r.state != specFail && r.state != specLost {
 		return frontFail{} // 통과·도는 중·충돌
+	}
+	if m.hb != "" { // 착지 스크립트 저장소 — 추측 실패는 반송·한 번 더 확인의 근거가 아니다(착지 스크립트가 스스로 검증한다)
+		if r.state == specFail {
+			fmt.Printf("hc-lane merger: 맨 앞 %s 추측 실패 — 착지 스크립트 저장소라 반송 근거로 쓰지 않는다(착지 스크립트가 검증한다)\n", g.lanes)
+		}
+		return frontFail{kind: ffUnknown}
 	}
 	first, again := specRecheckOf(r)
 	switch r.state {
@@ -168,7 +177,10 @@ func (m *M) specFrontLand(c *specCtx, st []specStep, ff frontFail) specDecision 
 	if r := st[0].row; r != nil && r.state == specConflict {
 		return specLand // 부모 위에 못 얹음·병합 풀이 — 착지가 원본 그대로 판정(검증 전 rebase에서 멈춘다)
 	}
-	if m.frontLocal() || !m.hasVerifier(c.vers) {
+	if m.frontLocal() || !m.hasVerifier(c.vers) || m.hb != "" {
+		if !m.frontLocal() && m.hb != "" {
+			m.scriptNote()
+		}
 		fmt.Printf("hc-lane merger: 맨 앞 %s 를 병합기가 직접 검증한다(%s)\n", lanes, m.vw.why)
 		return specLand
 	}
@@ -200,6 +212,48 @@ func (m *M) hasVerifier(vs []verified.Verifier) bool {
 		}
 	}
 	return false
+}
+
+// scriptNote: 착지 스크립트 저장소에서 손잡이 front_local 0이 안 먹는다는 한 줄 — 맨 앞 제출마다 한 번(<일지 폴더>/frontscript에 그 SHA)
+func (m *M) scriptNote() {
+	p := m.mj + "/frontscript"
+	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == m.b[0].s {
+		return
+	}
+	fmt.Println("hc-lane merger: front_local 0은 착지 스크립트 저장소에서 안 먹는다 — 착지 스크립트가 검증한다")
+	if err := writeVia(p, m.b[0].s+"\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 알림 표식을 적지 못했다(다음 바퀴에 같은 줄이 또 나온다): %v\n", err)
+	}
+}
+
+// overRedo: 손잡이 front_local 0에서 맨 앞 추측이 기다림 상한을 넘겼다 — 서서 기다리기 전에 한가한 다른 검증 기계에 한 번 더 맡긴다.
+// spec 참조를 새 기계로 고쳐 쓰니 느린 기계의 뒤늦은 결과는 남지 않는다(일꾼이 참조가 바뀐 것을 보고 버린다 — 그새 쓴 통과 기록은 같은
+// 트리의 기록이라 뜻이 같다). 맨 앞 제출마다 한 번(<일지 폴더>/overredo에 그 SHA) — 새 기계에서도 상한을 넘기면 지금처럼 기다림·사건 한 번
+// (검증이 늘 상한보다 길 때 기계 사이를 끝없이 옮겨 다니며 결과를 버리지 않게, 감사 atp02sl-4fkdo9 중간). 맡길 한가한 기계가 없으면 false.
+// 맡겼으면 m.wre에 「<옛 기계>→<새 기계>」
+func (m *M) overRedo(c *specCtx, s specStep, busy map[string]bool, now int64) bool {
+	r := s.row
+	if m.frontLocal() || m.hb != "" || r == nil || r.state != specRun { // 착지 스크립트 저장소는 front_local과 상관없이 착지 스크립트로
+		return false
+	}
+	p := m.mj + "/overredo"
+	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == m.b[0].s {
+		return false // 이 맨 앞 제출은 이미 한 번 옮겼다
+	}
+	from := r.machine
+	note, again := specRecheckOf(r) // 한 번 더 확인 중이던 추측이면 첫 실패 메모를 이어 준다
+	if !again {
+		note = ""
+	}
+	if !m.specRedo(c, r, busy, map[string]bool{from: true}, "", note, s.g.lanes, now) {
+		return false
+	}
+	fmt.Printf("hc-lane merger: 맨 앞 %s 가 %s 에서 기다림 상한을 넘겼다 — 한가한 %s 에 다시 맡긴다\n", s.g.lanes, from, r.machine)
+	m.wre = from + "→" + r.machine
+	if err := writeVia(p, m.b[0].s+"\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 다시 맡김 표식을 적지 못했다(다음 상한에 또 옮길 수 있다): %v\n", err)
+	}
+	return true
 }
 
 // frontHold: 손잡이 0으로 맨 앞이 기다린다 — 주인 지휘에 막힘 사건을 맨 앞 제출마다 한 번(<일지 폴더>/fronthold에 그 SHA, 사건 열쇠도 같음)
