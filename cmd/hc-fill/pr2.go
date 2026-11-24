@@ -80,6 +80,13 @@ func (r *prRun) opens() {
 		// 같은 커밋의 뒤 보고(「중간 <sha> 감사 완료」)·열린 PR의 제출 — 머리·댓글 그대로. 제출이 커밋을 바꿨어도(rebase) 머리를 옮기지 않는다:
 		// 병합기는 바퀴 머리에 본 머리 값으로 lease하고 끝 커밋을 제출 SHA의 신원으로 찾는다 — 옮기면 lease가 깨져 Merged 대신 닫힌다(감사 1차 중간)
 		if self && e != nil && e.State == "open" && (e.Head == ev.SHA || ev.State == "제출") {
+			// 원래 PR을 이어 쓰는 레인의 첫 보고가 제출이어도 짝 참조는 올린다 — 병합기가 원래 머리 가지를 찾는 길(2026-11-24 pr-mirror-gaps)
+			if pk := "prof:" + n + ":" + t; t != n && r.sent[pk] != "sent" {
+				if _, ok := r.pushSrc(n, p, q.F(qMach), ev, key, t); !ok {
+					continue
+				}
+				r.sent[pk] = "sent"
+			}
 			r.sent[key] = "sent"
 			continue
 		}
@@ -87,15 +94,24 @@ func (r *prRun) opens() {
 	}
 }
 
-// prRelandBase <레인>: 다시 맞춤 레인이면 원래 레인 이름 — 다시 맞춤 기록(reland.tsv 「넣음」 줄)을 먼저, 없으면 꼬리 -reland… 를 뗀 이름
-// (원래 이름이 길어 줄인 다시 맞춤 이름은 꼬리를 떼도 원래 이름이 아니다 — 감사 낮음 6)
+// prRelandBase <레인>: 다시 맞춤 레인이면 맨 처음 레인 이름 — 다시 맞춤 기록(reland.tsv 「넣음」 줄)을 먼저, 없으면 꼬리 -reland… 를 뗀 이름
+// (원래 이름이 길어 줄인 다시 맞춤 이름은 꼬리를 떼도 원래 이름이 아니다 — 감사 낮음 6). 「넣음」 줄의 레인 칸은 반송된 레인 — 다시 맞춤 레인이
+// 또 반송되면 바로 앞 다시 맞춤 레인이라, 그 이름이 또 「넣음」 줄에 있으면 사슬을 끝까지 따라간다(둘째 …-reland2부터 새 PR이 열렸다, pr-mirror-gaps)
 func prRelandBase(n string) string {
+	up := map[string]string{}
 	for _, r := range readRows(DATA + "/reland.tsv") {
-		if r.F(rlWhat) == "넣음" && r.F(rlArg) == n && r.F(rlLane) != "" {
-			return r.F(rlLane)
+		if _, ok := up[r.F(rlArg)]; r.F(rlWhat) == "넣음" && r.F(rlArg) != "" && r.F(rlLane) != "" && !ok {
+			up[r.F(rlArg)] = r.F(rlLane)
 		}
 	}
-	return relandSuf.ReplaceAllString(n, "")
+	b, ok := up[n]
+	if !ok {
+		return relandSuf.ReplaceAllString(n, "")
+	}
+	for seen := map[string]bool{n: true}; !seen[b] && up[b] != ""; {
+		seen[b], b = true, up[b]
+	}
+	return b
 }
 
 // prLandedSince <레인> <시각>: 그 시각 뒤 그 레인 이름의 착지 사건이 있나
@@ -130,6 +146,9 @@ func (r *prRun) open(t, n, p, m, brief string, ev events.Event, key string) {
 			return
 		}
 		r.sent[sk] = repo.Host + "/" + repo.Owner + "/" + repo.Name
+		if t != n {
+			r.sent["prof:"+n+":"+t] = "sent"
+		}
 	}
 	if !r.do("머리 가지 "+t, r.bot.SetRef(repo, "pr/"+t, ev.SHA)) {
 		return
@@ -264,27 +283,49 @@ func (r *prRun) verdicts() {
 			word, st = "지적", "failure"
 		}
 		id := a.F(atID)
+		if r.sent["audit-st:"+id] == "sent" && r.sent["audit:"+id] == "sent" { // 이미 올렸다 — 레인 기계의 보고서를 다시 읽지 않는다(pr-mirror-gaps)
+			continue
+		}
 		if !r.status(e, "audit-st:"+id, a.F(atSHA), st, "audit", cnt) {
 			continue
 		}
-		body := "감사 " + a.F(atRound) + "차 " + word + " — 높음 " + c[0] + "·중간 " + c[1] + "·낮음 " + c[2] + " (" + head(a.F(atSHA), 8) + ")\n\n" + r.report(a.F(atMach), auRest(a, atNote))
+		// 보고서 읽기(레인 기계)도 바퀴당 상한에 한 번으로 센다 — 읽고 올릴 자리(앞 시도가 응답 없이 끝났으면 표식 확인까지)가 없으면 다음 바퀴에.
+		// 자리를 모르는 보고서(원격 읽기 없음)는 세지 않는다
+		need, path := 2, auRest(a, atNote)
+		if r.sent["audit:"+id] == "try" {
+			need = 3
+		}
+		if strings.HasPrefix(path, "~/") && (r.gh.Max > 0 && r.gh.Max-r.gh.Calls() < need || !r.gh.Take()) {
+			r.stop = true
+			return
+		}
+		rep, ok := r.report(a.F(atMach), path)
+		if !ok {
+			return
+		}
+		body := "감사 " + a.F(atRound) + "차 " + word + " — 높음 " + c[0] + "·중간 " + c[1] + "·낮음 " + c[2] + " (" + head(a.F(atSHA), 8) + ")\n\n" + rep
 		r.review(e, "audit:"+id, v == "pass", body)
 	}
 }
 
-// report <기계> <경로>: 감사 보고서 본문(길면 앞 prBodyCap자와 「나머지는 <기계>:<경로>」). 못 읽으면 그 자리만 알린다
-func (r *prRun) report(m, path string) string {
+// report <기계> <경로>: 감사 보고서 본문(길면 앞 prBodyCap자와 「나머지는 <기계>:<경로>」). 못 읽으면 그 자리만 알린다.
+// 시간 넘김이면 거짓 — 이 바퀴는 멈춘다(느린 기계가 바퀴를 묶지 않게, pushSrc와 같다)
+func (r *prRun) report(m, path string) (string, bool) {
 	if !strings.HasPrefix(path, "~/") {
-		return "(보고서 자리 모름)"
+		return "(보고서 자리 모름)", true
 	}
 	out, rc := onm(nil, m, `cat -- "$d"`, path)
+	if rc == proc.TimeoutCode {
+		r.stop = true
+		return "", false
+	}
 	if rc != 0 {
-		return "(보고서를 못 읽음 — " + m + ":" + path + ")"
+		return "(보고서를 못 읽음 — " + m + ":" + path + ")", true
 	}
 	if rs := []rune(out); len(rs) > prBodyCap {
-		return string(rs[:prBodyCap]) + "\n\n…나머지는 " + m + ":" + path
+		return string(rs[:prBodyCap]) + "\n\n…나머지는 " + m + ":" + path, true
 	}
-	return out
+	return out, true
 }
 
 // review: 작성자가 다른 계정이면 승인·변경 요청(자기 PR이라 거절되면 댓글로), 아니면 댓글. 리뷰도 숨은 표식으로 두 번 달지 않는다
@@ -363,8 +404,69 @@ func (r *prRun) mergerEvents() {
 			if r.status(e, key+":st", e.Head, "failure", "verify", ev.Msg) {
 				r.comment(e, key, "돌려보냄 — "+ev.Msg+prRelands(lane))
 			}
+		case ev.State == "정리됨":
+			r.swept(e, lane, key)
 		}
 	}
+}
+
+// swept: 「정리됨」(hc-sweep이 터미널을 닫음)으로 끝난 레인의 PR — 그 PR로 가는 레인(원래 레인·이 레인·대기열에서 이어 쓰는 줄) **모두가** 착지·제출
+// 없이 끝났을 때만(prSettled) 까닭 댓글 뒤 닫는다(rm 닫기와 같은 길). 이어 쓰는 줄이 아직 안 떴거나·돌고 있거나·제출한 뒤 정리됐으면(병합기가
+// 착지할 것) 닫지 않는다 — 하나라도 모르면 닫지 않는다(2026-11-24 pr-mirror-gaps — 열린 채 남아 판정 보고서를 바퀴마다 다시 읽었다. 감사 1차
+// 중간 1: 처음엔 이어 쓰는 줄의 터미널 생사만 봐, 제출하자마자 정리된 --pr-of 레인의 착지 전에 원래 PR을 닫았다)
+func (r *prRun) swept(e *prEnt, lane, key string) {
+	fam := []string{lane}
+	if e.Lane != lane {
+		fam = append(fam, e.Lane)
+	}
+	for _, q := range qRows() {
+		if n := q.F(qName); n == lane || n == e.Lane || r.entOf(n) == e {
+			if !lsGone(q.F(qAddr)) { // 터미널이 표에 있음(같은 이름으로 다시 뜸 포함)·안 떴음·표를 못 믿음
+				return
+			}
+			if !has(fam, n) {
+				fam = append(fam, n)
+			}
+		}
+	}
+	rep := ""
+	for _, n := range fam {
+		x, ok := prSettled(n, e.Opened)
+		if !ok {
+			return
+		}
+		if n == lane {
+			rep = x
+		}
+	}
+	r.close(e, key, "정리 — 착지 없이 끝났다(레인 "+lane+" 터미널이 「"+rep+"」 보고 뒤 닫힘)")
+}
+
+// prSettled <레인> <PR 연 때>: 그 레인이 착지·제출 없이 끝났나 — 그 이름의 마지막 사건이 「정리됨」이고(뒤에 다시 띄움·병합기 반송 없음), 그 터미널의
+// 마지막 보고가 제출·주차·착지가 아니고, PR 연 뒤 착지가 없음. 참이면 그 마지막 보고. 사건이 없거나 보고가 없으면 모름(거짓)
+func prSettled(lane, since string) (string, bool) {
+	last := -1
+	var lv events.Event
+	for i, l := range EV {
+		x := events.Cols(l)
+		if x.Lane != lane {
+			continue
+		}
+		if x.State == "착지" && x.Time >= since {
+			return "", false
+		}
+		last, lv = i, x
+	}
+	if last < 0 || lv.State != "정리됨" {
+		return "", false
+	}
+	rep := ""
+	for _, l := range EV[:last] {
+		if x := events.Cols(l); x.Lane == lane && x.Term == lv.Term && x.State != "정리됨" && x.State != "멈춤" {
+			rep = x.State
+		}
+	}
+	return rep, rep != "" && rep != "제출" && rep != "주차" && rep != "착지"
 }
 
 // prRelands: 대기열에 넣은 다시 맞춤 레인 이름(있으면 「 — 다시 맞춤 레인 x, y」)

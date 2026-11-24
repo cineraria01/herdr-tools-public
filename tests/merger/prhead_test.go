@@ -20,10 +20,11 @@ func prHook(f *F) {
 	os.Remove(f.home + "/recv.log")
 }
 
-// prMade <레인>: hc-fill이 완료 때 하는 것처럼 writer HEAD를 원격 머리 가지 pr/<레인>으로
+// prMade <레인>: hc-fill이 완료 때 하는 것처럼 writer HEAD를 거울 표식 refs/herdr/pr-src/<레인>과 원격 머리 가지 pr/<레인>으로
+// (병합기는 표식이 있는 머리 가지만 거울 것으로 본다 — pr-mirror-gaps, 사람이 만든 가지는 tests/merger/prmine_test.go)
 func prMade(f *F, lane string) {
 	f.t.Helper()
-	f.w(`git push -q origin "HEAD:refs/heads/pr/$1"`, lane)
+	f.w(`git push -q origin "HEAD:refs/herdr/pr-src/$1" && git push -q origin "HEAD:refs/heads/pr/$1"`, lane)
 }
 
 // advance: 제출 뒤 원격 main을 겹치지 않는 커밋 하나 앞당긴다 — 착지가 rebase해 새 커밋을 만들게(머리를 다시 올려야 Merged)
