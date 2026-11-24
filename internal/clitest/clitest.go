@@ -188,19 +188,45 @@ func BinDir(t *testing.T, names ...string) string {
 	return filepath.Dir(p)
 }
 
-// isolateVars: 시험이 지우는 바깥 git·XDG·레인 환경(옛 tests/isolate.sh와 같은 목록)
-var isolateVars = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
-	"XDG_DATA_HOME", "HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY"}
+// EnvAllow: 시험이 바깥에서 받는 값 — 허용 목록(2026-11-24 test-env-allowlist). 실행 경로·임시 폴더(검증 실행기의 메모리 디스크
+// TMPDIR과 부팅 볼륨 HERDR_VERIFY_BOOT_TMPDIR)·사용자·셸·터미널·언어·시간대만 받고 나머지는 버린다. 옛 지우기 목록 여섯 벌(18~39개)은
+// 레인 터미널·병합기의 HC_*·HERDR_*·LANE_*·XDG_*·도구 손잡이를 저마다 다르게 빠뜨려 바깥 값이 새어 들었다.
+// 꾸러미가 더 받아야 하는 값은 Env·Isolate의 keep으로 드러나게 넘긴다(docs/repo/tests.md 「시험의 환경」)
+var EnvAllow = []string{"PATH", "TMPDIR", "HERDR_VERIFY_BOOT_TMPDIR", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+	// 시험 바이너리가 스스로 넣는 값: internal/journal·internal/oplog의 init이 지정이 없으면 /dev/null로 넣어, 시험이 띄운 도구가 실제
+	// 일지·운영 기록에 쌓지 않게 자식에 물려준다(이름은 journal.Env·oplog.Env — 그 꾸러미를 가져오면 모든 시험 바이너리에서 init이 돈다)
+	"HERDR_TOOLS_JOURNAL", "HERDR_TOOLS_OPLOG"}
 
-// Isolate: 바깥 병합기·후보 잠금(fd 19·18)이 자식에 물리지 않게, 바깥 git·XDG·레인 환경을 지우고,
-// git이 T 위로 저장소를 찾아 올라가지 못하게 한다. 환경은 t.Setenv라 시험이 끝나면 되돌아간다
-func Isolate(t *testing.T, T string) {
+// Env: 시험 자식 환경의 바탕 — 허용 목록과 keep의 바깥 값, 임시 HOME(T), GIT_CEILING_DIRECTORIES(git이 T 위로 저장소를 찾아
+// 올라가지 못하게). 시험 틀이 이 위에 자기 값(가짜 명령 PATH·git 이름 등)을 덧씌운다
+func Env(T string, keep ...string) map[string]string {
+	e := map[string]string{}
+	for _, k := range append(append([]string(nil), EnvAllow...), keep...) {
+		if v, ok := os.LookupEnv(k); ok {
+			e[k] = v
+		}
+	}
+	e["HOME"] = T
+	e["GIT_CEILING_DIRECTORIES"] = T + ":" + filepath.Dir(T)
+	return e
+}
+
+// Isolate: 시험 프로세스 자신의 환경을 허용 목록으로 — os.Environ()을 물려주는 Cmd·Git의 자식도 같아진다. 허용 목록·keep·HOME·
+// PWD(go test가 꾸러미 폴더로 넣는다)와 go 도구 값(GO*·CGO_* — 이 프로세스가 Bin으로 짓고 go test를 부른다) 말고는 지우고, 바깥 병합기·후보 잠금(fd 19·18)이 자식에
+// 물리지 않게 하고, git이 T 위로 저장소를 찾아 올라가지 못하게 한다. 환경은 t.Setenv라 시험이 끝나면 되돌아간다
+func Isolate(t *testing.T, T string, keep ...string) {
 	t.Helper()
 	syscall.CloseOnExec(18)
 	syscall.CloseOnExec(19)
-	for _, k := range isolateVars {
-		Unsetenv(t, k)
+	allow := map[string]bool{"HOME": true, "PWD": true}
+	for _, k := range append(append([]string(nil), EnvAllow...), keep...) {
+		allow[k] = true
+	}
+	for _, kv := range os.Environ() {
+		k := key(kv)
+		if k != "" && !allow[k] && !strings.HasPrefix(k, "GO") && !strings.HasPrefix(k, "CGO_") {
+			Unsetenv(t, k)
+		}
 	}
 	t.Setenv("GIT_CEILING_DIRECTORIES", T+":"+filepath.Dir(T))
 }

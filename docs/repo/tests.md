@@ -17,6 +17,16 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
 
 전체 검증(`--cheap-only` 아님)이 통과로 끝나고 시작과 끝에 작업 트리가 깨끗한(추적 파일 변경·추적 안 된 파일 없음) 같은 트리면, 그 `HEAD^{tree}`를 이 작업 트리의 git 폴더 `herdr-verified-tree`에 「<트리> <유닉스 초>」로 남긴다(`tests/repo/verify/mark.go` — 원격으로 안 나감, 읽는 곳은 제출의 [사전 검사 건너뜀](../hc-lane/merger.md) 하나).
 
+## 시험의 환경 — 바깥 변수를 읽어야 할 때
+
+시험이 부르는 도구의 환경은 허용 목록에서 시작한다(2026-11-24 test-env-allowlist, `internal/clitest` `Env`·`Isolate`).
+전에는 바깥 환경을 통째로 받고 지우는 목록 여섯 벌(공용 도우미·util·hclane 틀 둘·merger·hcfill, 18~39개)으로 걸렀는데 목록마다 빠진 것이 달라, 레인 터미널·병합기 안에서 돌면 `LANE_*`·`HC_SCOPE`·`HERDR_TOOLS_CONFIG`·`HERDR_MERGER`·`HC_FILL_DATA` 같은 값이 새어 들었다.
+- `clitest.EnvAllow`만 바깥에서 받는다: 실행 경로 `PATH`, 임시 폴더 `TMPDIR`·`HERDR_VERIFY_BOOT_TMPDIR`(검증 실행기의 메모리 디스크와 부팅 볼륨 — 그대로 넘어간다), `USER`·`LOGNAME`·`SHELL`·`TERM`, 언어 `LANG`·`LC_ALL`·`LC_CTYPE`, `TZ`, 그리고 시험 바이너리가 스스로 넣는 일지·운영 기록 `HERDR_TOOLS_JOURNAL`·`HERDR_TOOLS_OPLOG`(`internal/journal`·`internal/oplog`의 init이 `/dev/null`로 — 시험이 띄운 도구가 실제 일지에 쌓지 않게).
+- `clitest.Env(T, keep…)`는 시험 틀의 자식 환경 바탕이다 — 허용 목록·keep의 바깥 값, `HOME=T`(임시), `GIT_CEILING_DIRECTORIES`(T 위 저장소를 못 찾게). 틀은 그 위에 자기 값(가짜 명령 PATH·git 이름·설정 폴더)을 덧씌운다.
+- `clitest.Isolate(t, T, keep…)`는 시험 프로세스 자신의 환경을 허용 목록으로 줄인다(`os.Environ()`을 물려주는 `clitest.Cmd`·`Git`의 자식도 같아진다). 이 프로세스가 `go build`·`go test`를 부르니 `HOME`·`PWD`(go test가 꾸러미 폴더로 넣는다)와 go 도구 값(`GO*`·`CGO_*`)은 남긴다.
+- 시험이 바깥 값을 꼭 읽어야 하면(시험 전용 덮어쓰기 `HC_FILL_EXAMPLE`·`HCFILL_SEC` 같은 것) 시험 프로세스에서 `os.Getenv`로 읽어 자식에 값을 넘기고(`Isolate`보다 먼저), 자식이 바깥 이름 그대로 받아야 하면 `Env`·`Isolate`의 keep에 이름을 적는다 — 허용 목록 자체는 늘리지 않는다.
+- `clitest.Poison`·`Leaked`: 레인 터미널·병합기 값(`clitest.LaneEnv`, 아직 없는 손잡이 자리 하나 포함)을 넣고 틀의 자식 환경에 남은 것을 본다. 틀마다 `TestKitEnvNoLeak`(`tests/{util,hclane,merger,hcfill}/envleak_test.go`)가 지킨다 — 새 시험 틀은 `clitest.Env`에서 시작하고 같은 시험을 하나 둔다.
+
 ## 시험의 기다림 — 새 장면을 쓸 때의 규칙
 
 검증 바닥은 조각 초의 합 ÷ 자리라, 일 없이 기다리는 초가 검증 시간이 된다(2026-11-24 tests-wait-trim: 병합기 상주 시험 122초·hc-fill gc 배경 32초를 걷었다).

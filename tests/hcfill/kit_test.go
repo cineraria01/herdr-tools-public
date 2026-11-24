@@ -82,12 +82,6 @@ type K struct {
 	V             map[string]string // 절을 넘어 이어 쓰는 값(셸 시험의 전역 변수 RA·rf·later 등)
 }
 
-var isolateDrop = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
-	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
-	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HC_FILL_INNER", "HC_FILL_SELF", "HC_TERMINAL_ID"}
-
 func newK(t *testing.T) *K {
 	T, err := os.MkdirTemp("", "hc-fill-test.")
 	if err != nil {
@@ -96,7 +90,7 @@ func newK(t *testing.T) *K {
 	if T, err = filepath.EvalSymlinks(T); err != nil {
 		t.Fatal(err)
 	}
-	k := &K{t: t, T: T, HOME: T + "/home", env: map[string]string{}, V: map[string]string{}}
+	k := &K{t: t, T: T, HOME: T + "/home", env: clitest.Env(T), V: map[string]string{}}
 	bd := clitest.BinDir(t, "hc-fill", "hc-lane", "hc-merger", "herdr-tools-config")
 	k.FILL, k.HL = bd+"/hc-fill", bd+"/hc-lane"
 	k.EX = envOr("HC_FILL_EXAMPLE", repo+"/config.example/hc-fill.tsv")
@@ -109,11 +103,6 @@ func newK(t *testing.T) *K {
 	k.LT = k.HOME + "/.local/state/hc-lane/lanes.tsv"
 	k.W = T + "/w"
 	t.Cleanup(k.cleanup)
-	for _, kv := range os.Environ() {
-		key, v, _ := strings.Cut(kv, "=")
-		k.env[key] = v
-	}
-	k.unset(isolateDrop...)
 	k.set("GIT_CEILING_DIRECTORIES="+T+":"+filepath.Dir(T), "HC_REAL_GIT="+k.REALGIT,
 		"PATH="+T+"/bin:"+os.Getenv("PATH"), "HOME="+k.HOME, "T_LOG="+T, "HERDR_TOOLS_CONFIG="+T+"/conf",
 		"HC_FILL_WAIT=0", "HC_FILL_POLL=0", "HC_FAKE_COORD=t8kk",

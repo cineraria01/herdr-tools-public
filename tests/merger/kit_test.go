@@ -43,22 +43,13 @@ type K struct {
 	defaultMaxDur time.Duration
 }
 
-// dropEnv: tests/isolate.sh(lib/hc-lane/test-isolate.sh)와 셸 시험 머리가 지우던 바깥 값
-var dropEnv = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
-	"XDG_DATA_HOME", "HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY",
-	"HC_LANE_MERGER_BIN", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE", "HC_LANE_MACHINE", "HC_LANE_JOB", "HERDR_MERGER",
-	"HERDR_TOOLS_CONFIG", "HERDR_LAND_PUSH_EXTRA", "HC_FILL_VERDICTS", "HC_LANE_MERGER_BATCH", "HERDR_LAND_PATCHID",
-	"HERDR_LAND_SHA", "HERDR_LAND_VERDICT", "HERDR_LAND_AFTER", "HC_LANE_COORD", "HC_LANE_FILL", "HC_LANE_BIN", "HC_LANE_SELF",
-	"GIT_CONFIG_COUNT", "GOFLAGS"}
-
 // newK: 시험 폴더 T(실제 경로)와 바깥 환경. PATH 앞은 T/bin(가짜 hc) → 지은 바이너리 폴더
 func newK(t *testing.T) *K {
 	t.Helper()
 	clitest.Repo(t)
 	T := clitest.TempDir(t)
 	clitest.Isolate(t, T)
-	k := &K{t: t, T: T, env: map[string]string{}, defaultMaxDur: 5 * time.Minute}
+	k := &K{t: t, T: T, env: clitest.Env(T), defaultMaxDur: 5 * time.Minute}
 	bd := clitest.BinDir(t, "hc-lane", "hc-merger", "herdr-tools-config")
 	k.LANE, k.MERGER = filepath.Join(bd, "hc-lane"), filepath.Join(bd, "hc-merger")
 	g, err := exec.LookPath("git")
@@ -66,13 +57,6 @@ func newK(t *testing.T) *K {
 		t.Fatal(err)
 	}
 	k.realGit = g
-	for _, kv := range os.Environ() {
-		key, v, _ := strings.Cut(kv, "=")
-		k.env[key] = v
-	}
-	for _, key := range dropEnv {
-		delete(k.env, key)
-	}
 	mkdirs(t, filepath.Join(T, "bin"))
 	k.set("PATH="+filepath.Join(T, "bin")+":"+bd+":"+k.env["PATH"], "HOME="+T, "T="+T, "LANE="+k.LANE, "real_git="+g,
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_NOSYSTEM=1",

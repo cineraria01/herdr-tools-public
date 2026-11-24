@@ -41,25 +41,11 @@ func tool(t *testing.T, name string) string {
 	return filepath.Join(clitest.BinDir(t, "hc-lane", "hc-merger", "herdr-tools-config", name), name)
 }
 
-// Env: 자식 환경. isolated가 바깥 환경을 복사해 시험 격리(tests/isolate.sh와 같은 것)를 한다.
+// Env: 자식 환경. isolated가 허용 목록(clitest.Env — 임시 HOME T)에서 시작한다.
 type Env map[string]string
 
-var isolateDrop = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
-	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
-	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HC_TERMINAL_ID"}
-
 func isolated(T string) Env {
-	e := Env{}
-	for _, kv := range os.Environ() {
-		k, v, _ := strings.Cut(kv, "=")
-		e[k] = v
-	}
-	for _, k := range isolateDrop {
-		delete(e, k)
-	}
-	e["GIT_CEILING_DIRECTORIES"] = T + ":" + filepath.Dir(T)
+	e := Env(clitest.Env(T))
 	e["HC_SWEEP_TAILSCALE"] = "off" // 이 기계의 진짜 Tailscale을 부르지 않게
 	e["HC_SWEEP_HEALTH"] = "off"    // 이 기계의 진짜 잠자기·키체인 점검과 그 사건을 내지 않게
 	return e

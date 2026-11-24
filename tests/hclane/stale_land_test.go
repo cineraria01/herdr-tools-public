@@ -1,13 +1,15 @@
 package hclane_test
 
 // tests/hc-lane-stale-land.test.sh를 옮긴 것: hc-lane land가 가지의 .claude/herdr-land.sh가 origin/<기본>보다 낡았으면 먼저 rebase해
-// 새 판으로 착지하는지. 셸 시험처럼 자기 머리(가짜 hc는 ls만, isolate.sh 격리)를 따로 둔다 — hc-lane.test.sh의 newK를 쓰지 않는다.
+// 새 판으로 착지하는지. 셸 시험처럼 자기 머리(가짜 hc는 ls만, clitest.Env 격리)를 따로 둔다 — hc-lane.test.sh의 newK를 쓰지 않는다.
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"herdr-tools/internal/clitest"
 )
 
 // 착지 스크립트 판: 이름을 찍고 rebase·push(이름이 「old」면 push 없이 0 — 옛 판이 무언가를 빠뜨린 꼴)
@@ -15,13 +17,6 @@ const (
 	stlLandNew = `git fetch -q origin && git rebase -q "origin/$1" && HERDR_LAND=1 git push -q origin "HEAD:$1" && echo land-new`
 	stlLandOld = `echo land-old`
 )
-
-// isolate.sh(lib/hc-lane/test-isolate.sh)와 이 셸 시험 머리가 지우는 바깥 값.
-var stlDropEnv = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
-	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
-	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HC_TERMINAL_ID", "HC_LANE_COORD", "HC_LANE_FILL"}
 
 func TestStaleLand(t *testing.T) {
 	k := stlNewK(t)
@@ -34,15 +29,8 @@ func stlNewK(t *testing.T) *K {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := &K{t: t, T: T, env: map[string]string{}}
+	k := &K{t: t, T: T, env: clitest.Env(T)}
 	k.LANE = laneBin(t)
-	for _, kv := range os.Environ() {
-		key, v, _ := strings.Cut(kv, "=")
-		k.env[key] = v
-	}
-	for _, key := range stlDropEnv {
-		delete(k.env, key)
-	}
 	bin := filepath.Join(T, "bin")
 	write(t, filepath.Join(bin, "hc"), "#!/bin/bash\n[ \"$1\" = ls ] && echo '{\"terminals\":[]}'\nexit 0\n")
 	if err := os.Chmod(filepath.Join(bin, "hc"), 0o755); err != nil {

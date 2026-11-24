@@ -52,13 +52,6 @@ type K struct {
 	wt    string // 셸 $wt: land·mklane이 정한 작업 트리
 }
 
-// 셸 시험 머리(tests/hc-lane.test.sh와 lib/hc-lane/test-isolate.sh)가 지우는 바깥 값.
-var dropEnv = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
-	"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
-	"HC_LANE", "HC_LANE_OWNER", "HC_LANE_OWNER_RUN", "HC_LANE_LEASE", "HERDR_LAND_PRIORITY", "HC_LANE_PRIORITY", "HC_LANE_MERGER_BIN",
-	"HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE", "HC_LANE_MACHINE", "HC_LANE_COORD", "HC_LANE_FILL", "HC_LANE_JOB"}
-
 // withK: 새 K로 f를 돈다.
 func withK(t *testing.T, f func(k *K)) {
 	k := newK(t)
@@ -71,15 +64,8 @@ func newK(t *testing.T) *K {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := &K{t: t, T: T, W: filepath.Join(T, "공백 있는 폴더"), HCLOG: filepath.Join(T, "hc.log"), env: map[string]string{}}
+	k := &K{t: t, T: T, W: filepath.Join(T, "공백 있는 폴더"), HCLOG: filepath.Join(T, "hc.log"), env: clitest.Env(T)}
 	k.LANE = laneBin(t)
-	for _, kv := range os.Environ() {
-		key, v, _ := strings.Cut(kv, "=")
-		k.env[key] = v
-	}
-	for _, key := range dropEnv {
-		delete(k.env, key)
-	}
 	bin := filepath.Join(T, "bin")
 	mkdirs(t, bin, k.W)
 	for _, f := range []string{"hc", "ps", "herdr-app"} {
