@@ -85,7 +85,7 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 		changed = v
 	}
 	turn, turnOK := num(t, "turn")
-	if !worker && turnOK && turn == 0 && changed-created < minute && now-created >= 30*minute {
+	if !worker && turnOK && turn == 0 && changed-created < minute && now-created >= float64(lim.r1)*minute {
 		return "R1", ""
 	}
 	if f.worktree != no { // 남은 워크트리이거나 모름
@@ -98,13 +98,13 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 	idle := int((now - changed) / minute)
 	why := "worker 아님"
 	if worker || f.detached {
-		wait := 30 * minute
+		wait := float64(lim.r2) * minute
 		if f.submitted {
 			wait = 0
 		}
 		switch {
 		case now-changed < wait:
-			why = fmt.Sprintf("쉰 지 %d분(R2 30분 전)", idle)
+			why = fmt.Sprintf("쉰 지 %d분(R2 %d분 전)", idle, lim.r2)
 		case f.unlanded != no:
 			why = "착지 전 커밋(git cherry +) 또는 모름"
 		case f.fill == "up":
@@ -115,10 +115,10 @@ func judge(t map[string]any, f facts, now float64, keep map[string]bool) (string
 			return "R2", ""
 		}
 	}
-	if now-changed >= 6*60*minute {
+	if now-changed >= float64(lim.r3)*minute {
 		return "R3", ""
 	}
-	return "", fmt.Sprintf("%s, 쉰 지 %d분(R3 6시간 전)", why, idle)
+	return "", fmt.Sprintf("%s, 쉰 지 %d분(R3 %s 전)", why, idle, lim.r3Text())
 }
 
 // keepShellIdle: 전경이 셸이고 터미널 자신인가(hc()가 남긴 foreground.self — 쉬는 keep 대체 셸)

@@ -110,13 +110,9 @@ func specIdleMain(a []string) int {
 	return 0
 }
 
-// knobInt: 정수 손잡이 — <병합기 일지 폴더>/<파일>(바퀴마다 읽어 바로 먹는다) > 환경 변수 > 기본
+// knobInt: 정수 손잡이 — 공통 손잡이 merger_<파일>(knobs.go) > <병합기 일지 폴더>/<파일>(옛 길, 바퀴마다 읽어 바로 먹는다) > 환경 변수 > 기본
 func (m *M) knobInt(file, env string, def, min int) int {
-	v := os.Getenv(env)
-	if b, err := os.ReadFile(m.mj + "/" + file); err == nil {
-		v = strings.TrimSpace(string(b))
-	}
-	return intSetting(env, v, def, min)
+	return intSetting(env, m.knobStr(file, env), def, min)
 }
 
 // idleLoad: 손잡이 idle_load(HC_LANE_SPEC_IDLE_LOAD, %, 기본 50) — 부하가 코어 수의 이만큼 밑이어야 한가함

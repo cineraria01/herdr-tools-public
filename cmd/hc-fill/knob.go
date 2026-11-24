@@ -117,7 +117,9 @@ func knobRows(now time.Time) []knobRow {
 		}
 		cv := ""
 		if d.Tool == "hc-fill" {
-			cv = confRaw(d.Name)
+			if cv = confRaw(d.Name); cv == "" {
+				cv = maLegacy(d.Name) // 옛 표식 파일(병합기 살아 있음)도 「설정」으로 보인다
+			}
 		}
 		v, src, e := knob.Effective(d, es, cv, now)
 		r := knobRow{Name: d.Name, Value: v, Source: string(src), Tool: d.Tool, Unit: d.Unit, Range: d.Range(), Remote: d.Remote, Desc: d.Desc}

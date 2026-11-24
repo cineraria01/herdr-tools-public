@@ -26,19 +26,19 @@ var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails +
 
 // specStartMax: HC_LANE_SPEC_START(초, 기본 300). 띄운 뒤 이만큼 지나도 일꾼의 떴다는 표식이 없으면 모름
 func specStartMax() int64 {
-	return int64(intSetting("HC_LANE_SPEC_START", os.Getenv("HC_LANE_SPEC_START"), 300, 0))
+	return int64(intSetting("HC_LANE_SPEC_START", kenv("merger_spec_start", "HC_LANE_SPEC_START"), 300, 0))
 }
 
 // specTimeout: HC_LANE_SPEC_TIMEOUT(초, 기본 3600, 60 이상). 넘긴 추측은 모름
 func specTimeout() int64 {
-	return int64(intSetting("HC_LANE_SPEC_TIMEOUT", os.Getenv("HC_LANE_SPEC_TIMEOUT"), 3600, 60))
+	return int64(intSetting("HC_LANE_SPEC_TIMEOUT", kenv("merger_spec_timeout", "HC_LANE_SPEC_TIMEOUT"), 3600, 60))
 }
 
 // specFrontWait: HC_LANE_SPEC_FRONT_WAIT(초, 기본 600, 60 이상). 맨 앞 무리의 추측이 띄운 때(at)부터 이만큼 넘게 「도는 중」이면
 // 맨 앞 판정은 모름 — 병합기 기계가 직접 검증한다(preverify-wait-cap). 미리 줄·큐 어느 쪽에서 온 추측이든 같다. 뒤쪽 무리와
 // 일꾼 쪽 상한(HC_LANE_SPEC_TIMEOUT)은 그대로
 func specFrontWait() int64 {
-	return int64(intSetting("HC_LANE_SPEC_FRONT_WAIT", os.Getenv("HC_LANE_SPEC_FRONT_WAIT"), 600, 60))
+	return int64(intSetting("HC_LANE_SPEC_FRONT_WAIT", kenv("merger_front_wait", "HC_LANE_SPEC_FRONT_WAIT"), 600, 60))
 }
 
 // specCtx: 이번 바퀴에 읽은 원격 추측 상태

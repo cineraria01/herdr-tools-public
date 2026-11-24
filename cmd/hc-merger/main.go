@@ -424,6 +424,7 @@ func residentMain(args []string) {
 			if once {
 				os.Exit(rc)
 			}
+			pause = tickKnob(mj, tick) // 공통 손잡이 merger_tick(일꾼이 이 바퀴에 읽은 것 — knobs.go)
 		case 1: // 일꾼이 멈추며 막힘 사건을 이미 냈다
 			os.Exit(rc)
 		default: // 못 떴거나(127 — 바이너리를 치움) 신호·패닉으로 사건 없이 끝났다(G2). 바퀴 도중이었으면 다음 바퀴가 일지로 잇는다

@@ -94,18 +94,27 @@ func ReadRemote(dir string, stderr io.Writer, now time.Time) (Remote, gitx.State
 
 // ReadCommit: 원격 참조가 가리키는 SHA의 메시지를 받아 읽는다
 func ReadCommit(dir, sha string, stderr io.Writer, now time.Time) (Remote, gitx.State) {
-	if !gitx.ObjID(sha) {
-		return Remote{}, gitx.Unknown
+	msg, st := ReadMsg(dir, sha, stderr)
+	if st != gitx.Yes {
+		return Remote{}, st
 	}
-	if _, rc := gitx.Out(dir, stderr, "cat-file", "-e", sha+"^{commit}"); rc != 0 {
+	return ParseRemote(msg, now), gitx.Yes
+}
+
+// ReadMsg: 그 SHA 커밋의 메시지(없으면 origin에서 Ref를 받는다). 기한을 나중에 다시 보려고 글 그대로 두는 쪽(병합기 바퀴 사이)이 쓴다
+func ReadMsg(dir, sha string, stderr io.Writer) (string, gitx.State) {
+	if !gitx.ObjID(sha) {
+		return "", gitx.Unknown
+	}
+	if _, rc := gitx.Out(dir, io.Discard, "cat-file", "-e", sha+"^{commit}"); rc != 0 { // 없음은 오류가 아니다(받으면 됨)
 		if gitx.Run(dir, io.Discard, stderr, "fetch", "-q", "origin", "+"+Ref+":"+Ref) != 0 {
-			return Remote{}, gitx.Unknown
+			return "", gitx.Unknown
 		}
 	}
 	body, rc := gitx.Out(dir, stderr, "cat-file", "commit", sha)
 	if rc != 0 {
-		return Remote{}, gitx.Unknown
+		return "", gitx.Unknown
 	}
 	_, msg, _ := strings.Cut(body, "\n\n")
-	return ParseRemote(msg, now), gitx.Yes
+	return msg, gitx.Yes
 }

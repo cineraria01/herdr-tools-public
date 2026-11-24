@@ -41,13 +41,13 @@ type preMark struct {
 // specPreMax: HC_LANE_PRE_MAX(초, 기본 2700, 60 이상). 넘긴 표식은 치운다 — 미리 검증이 값을 하는 것은 「완료 보고 → 감사 → 제출」
 // 사이뿐이라 감사가 끝날 만한 시간(45분)으로 둔다(preverify-wait-cap — 6시간이던 때는 제출하지 않을 표식이 기준이 움직일 때마다 전체 검증을 다시 돌렸다)
 func specPreMax() int64 {
-	return int64(intSetting("HC_LANE_PRE_MAX", os.Getenv("HC_LANE_PRE_MAX"), 2700, 60))
+	return int64(intSetting("HC_LANE_PRE_MAX", kenv("merger_pre_max", "HC_LANE_PRE_MAX"), 2700, 60))
 }
 
 // specPreRebuild: HC_LANE_PRE_REBUILD(번, 기본 1, 0 이상). 표식 하나의 추측을 기준이 움직여 다시 짓는 횟수 상한(처음 한 번은 빼고).
 // 넘기면 그 표식은 더 짓지 않는다 — 제출되면 지금처럼 병합기가 직접 검증한다
 func specPreRebuild() int {
-	return intSetting("HC_LANE_PRE_REBUILD", os.Getenv("HC_LANE_PRE_REBUILD"), 1, 0)
+	return intSetting("HC_LANE_PRE_REBUILD", kenv("merger_pre_rebuild", "HC_LANE_PRE_REBUILD"), 1, 0)
 }
 
 // preCounts: 표식 커밋마다 그 추측을 지은 횟수($mj/pre — 「<표식 커밋> <횟수>」 줄). 없거나 깨졌으면 빈 값(한 번 더 지을 뿐).

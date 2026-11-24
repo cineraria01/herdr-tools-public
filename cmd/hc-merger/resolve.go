@@ -47,8 +47,11 @@ func (m *M) conflictMode() string {
 	return "agent"
 }
 
-// knobStr: 글 손잡이 — <일지 폴더>/<파일>(바퀴마다 읽음)이 있으면 그 값, 없으면 환경 변수
+// knobStr: 글 손잡이 — 공통 손잡이 merger_<파일>(knobs.go)이 있으면 그 값, 다음은 <일지 폴더>/<파일>(옛 길, 바퀴마다 읽음), 없으면 환경 변수
 func (m *M) knobStr(file, env string) string {
+	if v, ok := rk["merger_"+file]; ok {
+		return v
+	}
 	if b, err := os.ReadFile(m.mj + "/" + file); err == nil {
 		return strings.TrimSpace(string(b))
 	}

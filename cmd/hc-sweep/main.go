@@ -388,6 +388,7 @@ func sweepMain(args []string) int {
 		return 1
 	}
 	terms := ls["terminals"]
+	lim = sweepKnobs(time.Now()) // 닫는 문턱 손잡이(knobs.go)
 	failed := sweepTerminals(terms, *dry)
 	if _, err := sweepOrphans(terms, *dry, *minAge*60, *only); err != nil {
 		return 1 // 셸 판처럼 고아 판정 실패(ps 등)는 종료 코드에(B23). 줄은 sweepOrphans가 찍었다

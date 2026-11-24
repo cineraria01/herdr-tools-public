@@ -30,10 +30,14 @@
 - 새 손잡이는 그 표에 한 줄 더하고 도구는 한 함수로 읽는다.
   - hc-fill: 표의 이름이 설정 키와 같으면 `conf(<키>)`가 손잡이를 먼저 본다 — 읽는 코드는 그대로다.
   - 다른 기계의 도구: `knob.ReadRemote`(아래)로 읽고 `Remote.Get(<이름>)`.
-- 지금 표(본보기, 모두 hc-fill 설정 키): `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
+- 지금 표의 hc-fill 설정 키: `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
   부하 보고 고르기([부하](../hc-fill/load-steer.md)): `load_band`·`load_busy`(%), `load_starve`·`skew_min`·`skew_every`(분).
   기계 닿지 않음([끊김](../hc-fill/unreach.md)): `unreach`(분).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%).
+- 옮긴 hc-fill 설정 키(knobs-migrate, 2026-11-24 — 기본은 지금 코드 값 그대로): `gc`·`idle_empty`·`reland_wait`(분), `reland_max`·`audit_max`(번),
+  `audit_close`·`audit_seat_rounds`(바퀴), `lows_hour`·`lows_min`(개).
+- 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).
+  옛 표식 파일 `<hc-fill 상태 폴더>/merger_dead`·`merger_unknown`·`merger_restart`는 손잡이가 없을 때 그대로 먹고, `knob ls`에 출처 `설정`으로 보인다.
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
 - 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.
@@ -52,4 +56,33 @@
 - 읽는 쪽 공용 함수: `knob.ReadRemote(<클론>, …)`(ls-remote → fetch → 읽기). 바퀴마다 이미 ls-remote를 하는 도구는 그 SHA로 `knob.ReadCommit`을 부른다.
   - 읽을 때도 기한·등록 표·범위를 다시 본다.
   - 참조가 없거나 못 읽으면 표의 기본값이다(모르는 값으로 돌지 않는다).
-- 지금 `Remote`인 손잡이는 없다. 병합기·정리 도구가 실제로 읽게 하는 것은 뒤 레인(knobs-migrate)이 한다.
+- 저장 파일·원격 참조 어디서 읽든 등록 표의 범위 밖 값과 기한 지난 값은 먹지 않는다(그 손잡이가 없는 것으로).
+
+## 병합기 (`merger_*`, 병합기 기계)
+
+- 바퀴 일꾼이 바퀴마다 하는 ls-remote 한 번에 `refs/herdr/knobs`를 함께 싣는다 — 조회 수는 그대로다.
+  SHA가 바뀐 바퀴에만 그 커밋을 읽고(클론에 없으면 fetch 한 번), 바뀌면 병합기 화면에 「손잡이 …」 한 줄.
+  바퀴 일꾼은 바퀴마다 새 프로세스라 바꾼 값은 **다음 바퀴**에 먹는다(병합기를 다시 띄우지 않는다).
+- 우선순위: 손잡이 > 병합기 일지 폴더의 옛 손잡이 파일(`front_dispatch`·`front_local`·`idle_load`·`busy_wait`·`busy_max`·`conflict`·`resolve_max`) > 환경 변수(·`--tick`) > 기본.
+  - 옛 파일을 손잡이 아래에 둔 까닭: 병합기 기계에서 손으로 둔 값은 그 기계 사람의 뜻이지만, 지휘가 공통 손잡이로 바꾼 값이 먹지 않으면 「한 화면에서 조정」이 깨진다. 옛 파일은 손잡이가 없을 때만 먹는다.
+  - 환경 변수와 `--tick`은 병합기를 띄울 때의 값이라 손잡이 아래다.
+- 손잡이: `merger_batch`(개 — 묶음 크기), `merger_tick`(초 — 빈 바퀴 쉼), `merger_spec_start`·`merger_spec_timeout`·`merger_front_wait`·`merger_pre_max`(초), `merger_pre_rebuild`(번),
+  `merger_front_dispatch`·`merger_front_local`(`0`|`1`), `merger_idle_load`(%), `merger_busy_wait`(초), `merger_busy_max`(번), `merger_conflict`(`agent`|`event`|`reject`), `merger_resolve_max`(초).
+  각 손잡이가 덮는 환경 변수는 `knob ls`의 설명 끝 괄호.
+- 빈 바퀴 쉼은 상주 부모가 정하므로, 일꾼이 읽은 참조를 `<일지 폴더>/knobs.remote`(SHA 한 줄 + 메시지)에 두고 부모가 쉬기 전마다 읽는다(기한은 그때 다시 본다).
+- 참조가 없거나 못 읽은 바퀴는 손잡이 없이(옛 파일·환경 변수·기본) 돈다.
+- 옮기지 않은 것: 충돌 풀이를 띄울 명령 `resolve_launch`(명령 글이라 범위로 거를 수 없다 — 옛 파일·환경 변수 그대로), 기술 상한(`HC_LANE_SPEC_IDLE_MAX`·`HERDR_TIMEOUT_*`·`HC_LANE_FETCH_WAITS`).
+  병합기 일지 폴더의 옛 파일은 병합기 기계에만 있어 지휘 기계의 `knob ls`에는 안 보인다.
+
+## 정리 도구 (`sweep_r1`·`sweep_r2`·`sweep_r3`, 모든 기계)
+
+- 닫는 문턱(분): R1 턴 0인 채 띄운 지(기본 30), R2 worker가 쉰 지(기본 30, 제출했으면 0), R3 쉰 지(기본 360). 보호 규칙은 손잡이가 아니다.
+- 읽는 곳은 쓸기마다 하나:
+  - 이 기계에 저장 파일이 있으면(지휘 기계) 그 파일.
+  - 없으면 개인 설정 `sweep.knobs_repo`(이 기계의 클론 경로)가 있을 때만 그 origin의 `refs/herdr/knobs`(ls-remote 한 번, 바뀐 때만 fetch).
+  - 둘 다 없거나 못 읽으면 기본이다 — 다른 기계에서 문턱을 바꾸려면 그 기계 설정에 `sweep.knobs_repo`를 둔다.
+
+## 옮기지 않은 앞 레인 스위치
+
+- `herdr-sync --auto on|off`(스스로 배포 표식 `~/.local/state/herdr-sync/auto-deploy`) — 이 레인의 파일 밖(herdr-sync는 다른 레인이 함께 고치는 중)이라 그대로 두었다. 뒤 레인이 `auto_deploy` 손잡이로 옮긴다.
+- `HC_LANE_PRECHECK_ALWAYS`(hc-lane) 같은 hc-lane 환경 변수도 같은 까닭으로 그대로다.

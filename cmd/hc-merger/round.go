@@ -320,12 +320,13 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*"}, specLsPatterns...)...)
+	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*", knobRef}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
 		return
 	}
+	m.loadKnobs() // 공통 손잡이 — 같은 ls-remote에 얹음(knobs.go)
 	// 켬 표식이 이 기계인지 바퀴마다 본다 — 길 안내일 뿐 정확성 조건이 아니다(main에 쓰는 모든 길이 main CAS)
 	if refsha(m.qs, "refs/herdr/merger/"+m.mme) == "" {
 		for _, line := range strings.Split(m.qs, "\n") {

@@ -33,8 +33,12 @@ type maRow struct {
 
 func maFile() string { return DATA + "/merger-alive.tsv" }
 
-// maKnob <이름> <기본>: 표식 파일 DATA/<이름>의 분(없으면 기본, 숫자가 아니면 알림 한 줄과 기본)
+// maKnob <이름> <기본>: 공통 손잡이(hc-fill knob, knobs-migrate)가 있으면 그 값, 없으면 옛 표식 파일 DATA/<이름>의 분(없으면 기본,
+// 숫자가 아니면 알림 한 줄과 기본)
 func maKnob(k string, def int) int {
+	if v, ok := knobConf(k); ok {
+		return atoi10(v)
+	}
 	b, ok := readFile(DATA + "/" + k)
 	if !ok {
 		return def
@@ -44,6 +48,29 @@ func maKnob(k string, def int) int {
 	}
 	say("알림: 손잡이 %s/%s 는 분(숫자)이다, %d으로", DATA, k, def)
 	return def
+}
+
+// maRestart: 스스로 다시 띄우기 — 공통 손잡이 merger_restart가 있으면 그 값(1 켬·0 끔), 없으면 옛 표식 파일 DATA/merger_restart가 있나
+func maRestart() bool {
+	if v, ok := knobConf("merger_restart"); ok {
+		return v == "1"
+	}
+	return exists(DATA + "/merger_restart")
+}
+
+// maLegacy <이름>: knob ls가 보이는 옛 표식 파일 값(merger_dead·merger_unknown = 내용, merger_restart = 있으면 1). 없으면 빈 값
+func maLegacy(k string) string {
+	switch k {
+	case "merger_restart":
+		if exists(DATA + "/merger_restart") {
+			return "1"
+		}
+	case "merger_dead", "merger_unknown":
+		if b, ok := readFile(DATA + "/" + k); ok {
+			return strings.TrimSpace(b)
+		}
+	}
+	return ""
 }
 
 func maLoad() map[string]maRow {
@@ -212,7 +239,7 @@ func mergerAliveTick() {
 			}
 		case x.St == "gone" && len(lanes) > 0 && mins >= limDead && limDead > 0 && !inlist("dead", x.Alerted):
 			msg := fmt.Sprintf("병합기 %s(%s) %d분째 돌지 않음 — %s. 다시 띄우기: hc-fill merger restart %s", p, m, mins, qtxt, p)
-			if exists(DATA+"/merger_restart") && !inlist("restart", x.Alerted) && !dry {
+			if maRestart() && !inlist("restart", x.Alerted) && !dry {
 				x.Alerted += ",restart"
 				rc, why := mergerLaunch(p)
 				res := "됨: " + why

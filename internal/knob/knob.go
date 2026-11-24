@@ -55,6 +55,39 @@ var Defs = []Def{
 	{Name: "state_cool", Tool: "hc-fill", Default: "50", Min: 0, Max: 10000, Unit: "%", Desc: "치우침의 한가한 쪽 코어당 부하"},
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
+	// knobs-migrate(2026-11-24): 고정으로 박혔던 hc-fill 설정 키(설정 줄보다 앞선다 — conf가 먼저 본다). 기본은 지금 코드의 값 그대로
+	{Name: "gc", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "끝난 레인 정리 간격(0이면 끔)"},
+	{Name: "idle_empty", Tool: "hc-fill", Default: "0", Min: 0, Max: 1440, Unit: "분", Desc: "띄울 것 없는 빈 자리 묶음 알림 간격(0이면 안 보냄)"},
+	{Name: "reland_max", Tool: "hc-fill", Default: "2", Min: 0, Max: 10, Unit: "번", Desc: "병합기 충돌 반송 뒤 자동 다시 맞춤 횟수(0이면 끔)"},
+	{Name: "reland_wait", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "다시 맞춤 전에 원래 레인을 기다리는 시간"},
+	{Name: "audit_max", Tool: "hc-fill", Default: "2", Min: 0, Max: 10, Unit: "번", Desc: "감사 지적 뒤 고침 바퀴(넘으면 주인 지휘에 막힘)"},
+	{Name: "audit_close", Tool: "hc-fill", Default: "5", Min: 0, Max: 100, Unit: "바퀴", Desc: "판정을 넘긴 감사 터미널 닫기 시도 상한(0이면 끔)"},
+	{Name: "audit_seat_rounds", Tool: "hc-fill", Default: "5", Min: 1, Max: 100, Unit: "바퀴", Desc: "감사 몫 자리가 이만큼 바퀴 넘게 안 나면 주인 지휘에 막힘"},
+	{Name: "lows_hour", Tool: "hc-fill", Default: "3", Min: 0, Max: 100, Unit: "개", Desc: "낮음 후속 레인 시간당 상한"},
+	{Name: "lows_min", Tool: "hc-fill", Default: "1", Min: 1, Max: 100, Unit: "개", Desc: "낮음 후속 레인을 넣을 최소 낮음 수"},
+	// 병합기 살아 있음(merger-alive — 옛 표식 파일 <hc-fill 상태 폴더>/<이름>은 손잡이가 없을 때 그대로 먹는다)
+	{Name: "merger_dead", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "제출이 기다리는데 병합기 터미널이 이만큼 없으면 주인 지휘에 막힘(0이면 끔)"},
+	{Name: "merger_unknown", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기 살아 있음 모름이 이만큼 이어지면 한 번(0이면 끔)"},
+	{Name: "merger_restart", Tool: "hc-fill", Default: "0", Enum: []string{"0", "1"}, Desc: "병합기 터미널이 없다고 알릴 때 스스로 한 번 다시 띄움(1 켬)"},
+	// 병합기(병합기 기계 — 바퀴의 ls-remote에 얹은 원격 참조로 바퀴마다 읽음). 우선순위: 손잡이 > 일지 폴더 파일(옛 길) > 환경 변수(·--tick) > 기본
+	{Name: "merger_batch", Tool: "hc-merger", Default: "3", Min: 1, Max: 20, Unit: "개", Remote: true, Desc: "착지 한 번에 묶는 제출 수 상한(HC_LANE_MERGER_BATCH)"},
+	{Name: "merger_tick", Tool: "hc-merger", Default: "10", Min: 1, Max: 3600, Unit: "초", Remote: true, Desc: "빈 바퀴 쉼(--tick)"},
+	{Name: "merger_spec_start", Tool: "hc-merger", Default: "300", Min: 0, Max: 86400, Unit: "초", Remote: true, Desc: "추측 일꾼이 떴다는 표식을 기다리는 상한(HC_LANE_SPEC_START)"},
+	{Name: "merger_spec_timeout", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "추측 검증 한 번의 상한(HC_LANE_SPEC_TIMEOUT)"},
+	{Name: "merger_front_wait", Tool: "hc-merger", Default: "600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "맨 앞 추측 기다림 상한(HC_LANE_SPEC_FRONT_WAIT)"},
+	{Name: "merger_pre_max", Tool: "hc-merger", Default: "2700", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "미리 줄 표식 수명(HC_LANE_PRE_MAX)"},
+	{Name: "merger_pre_rebuild", Tool: "hc-merger", Default: "1", Min: 0, Max: 10, Unit: "번", Remote: true, Desc: "미리 줄 다시 짓기 횟수(HC_LANE_PRE_REBUILD)"},
+	{Name: "merger_front_dispatch", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맨 앞 무리도 검증 기계에 맡김(0이면 병합기가 직접, HC_LANE_FRONT_DISPATCH)"},
+	{Name: "merger_front_local", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맡길 수 없을 때 병합기 기계가 직접 검증(0이면 기다림, HC_LANE_FRONT_LOCAL)"},
+	{Name: "merger_idle_load", Tool: "hc-merger", Default: "50", Min: 1, Max: 10000, Unit: "%", Remote: true, Desc: "검증 기계 한가함 = 1분 부하가 코어 수의 이만큼 밑(HC_LANE_SPEC_IDLE_LOAD)"},
+	{Name: "merger_busy_wait", Tool: "hc-merger", Default: "30", Min: 0, Max: 3600, Unit: "초", Remote: true, Desc: "검증 일꾼이 한가해지길 기다리는 상한, 넘으면 바쁨(HC_LANE_SPEC_BUSY_WAIT)"},
+	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음(HC_LANE_SPEC_BUSY_MAX)"},
+	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
+	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
+	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
+	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
+	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},
+	{Name: "sweep_r3", Tool: "hc-sweep", Default: "360", Min: 1, Max: 43200, Unit: "분", Remote: true, Desc: "R3: 이만큼 쉬면 닫음"},
 }
 
 // Find: 표에서 이름으로. 묶음 손잡이(「접두@값」)는 Name을 그 저장 이름으로 바꾼 사본을 돌려준다
