@@ -16,7 +16,8 @@ package main
 //   - 환경 실패(시험 실패 근거 없음 — 준비 실패·시간 넘김·가를 수 없음)는 모름: 반송하지 않는다.
 //   - 착지 스크립트 저장소(m.hb — 기본 브랜치에 .claude/herdr-land.sh, spec-script-land): 그 스크립트가 착지 중에 스스로 검증하니 맨 앞
 //     추측의 실패·모름은 손잡이와 상관없이 착지 스크립트로 넘기고, 추측 실패를 반송·한 번 더 확인·줄이기·범인 반송 근거로 쓰지 않는다.
-//   - 손잡이 0에서 맨 앞이 기다림 상한을 넘기면 서서 기다리기 전에 한가한 다른 기계에 한 번 더 맡긴다(overRedo).
+//   - 맨 앞이 기다림 상한을 넘기거나 실패·모름이면, 서서 기다리거나 병합기 기계에서 직접 검증하기(착지 스크립트 포함) 전에 한가한
+//     다른 기계에 맨 앞 제출마다 한 번 더 맡긴다(workerRedo — 통과한 조각은 이어 쓴다, specparts.go). 맡길 기계가 없을 때만 손잡이대로.
 
 import (
 	"fmt"
@@ -73,6 +74,9 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 		if r.state == specFail {
 			fmt.Printf("hc-lane merger: 맨 앞 %s 추측 실패 — 착지 스크립트 저장소라 반송 근거로 쓰지 않는다(착지 스크립트가 검증한다)\n", g.lanes)
 		}
+		if r.state != specBusyX && m.workerRedo(c, st[0], busy, now, r.state.String()) { // 착지 스크립트가 병합기 기계에서 검증하기 전에
+			return frontFail{}
+		}
 		return frontFail{kind: ffUnknown}
 	}
 	first, again := specRecheckOf(r)
@@ -98,6 +102,10 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 	// 손잡이 0의 다시 띄움은 앞 시도(at)에서 HC_LANE_SPEC_START(기본 300초) 뒤에 — 닿지 않는 기계에 바퀴마다 원격 쓰기 둘·hc run을
 	// 되풀이하지 않게(감사 atozd0z-zklwye 낮음)
 	if !m.frontLocal() && now-r.at >= specStartMax() && m.specRedo(c, r, busy, nil, "", first, g.lanes, now) {
+		return frontFail{}
+	}
+	// 손잡이 1 — 병합기 기계에서 직접 검증하기 전에 한가한 다른 검증 기계에 한 번(바쁨은 specBusyRedo가 이미 다시 골랐다)
+	if m.frontLocal() && r.state != specBusyX && m.workerRedo(c, st[0], busy, now, r.state.String()) {
 		return frontFail{}
 	}
 	return frontFail{kind: ffUnknown}
@@ -226,14 +234,21 @@ func (m *M) scriptNote() {
 	}
 }
 
-// overRedo: 손잡이 front_local 0에서 맨 앞 추측이 기다림 상한을 넘겼다 — 서서 기다리기 전에 한가한 다른 검증 기계에 한 번 더 맡긴다.
-// spec 참조를 새 기계로 고쳐 쓰니 느린 기계의 뒤늦은 결과는 남지 않는다(일꾼이 참조가 바뀐 것을 보고 버린다 — 그새 쓴 통과 기록은 같은
-// 트리의 기록이라 뜻이 같다). 맨 앞 제출마다 한 번(<일지 폴더>/overredo에 그 SHA) — 새 기계에서도 상한을 넘기면 지금처럼 기다림·사건 한 번
-// (검증이 늘 상한보다 길 때 기계 사이를 끝없이 옮겨 다니며 결과를 버리지 않게, 감사 atp02sl-4fkdo9 중간). 맡길 한가한 기계가 없으면 false.
-// 맡겼으면 m.wre에 「<옛 기계>→<새 기계>」
+// overRedo: 맨 앞 추측이 기다림 상한을 넘겼다 — 서서 기다리거나(손잡이 0) 병합기 기계에서 직접 검증하기(손잡이 1·착지 스크립트
+// 저장소) 전에 한가한 다른 검증 기계에 한 번 더 맡긴다(workerRedo)
 func (m *M) overRedo(c *specCtx, s specStep, busy map[string]bool, now int64) bool {
+	return s.row != nil && s.row.state == specRun && m.workerRedo(c, s, busy, now, "기다림 상한을 넘겼다")
+}
+
+// workerRedo: 맨 앞 추측(상한 넘김·실패·모름)을 병합기 기계에서 직접 검증하기 전에 한가한 다른 검증 기계에 한 번 더 맡긴다
+// (ht-merger-spec-reuse — 「직접 검증」은 맥이 아니라 한가한 워커가, 워커가 없을 때만 병합기 기계가). 같은 아이디라 새 일꾼은 앞 실행이
+// 남긴 통과 조각을 이어 쓴다(specparts.go). spec 참조를 새 기계로 고쳐 쓰니 느린 기계의 뒤늦은 결과는 남지 않는다(일꾼이 참조가 바뀐
+// 것을 보고 버린다 — 그새 쓴 통과 기록은 같은 트리의 기록이라 뜻이 같다). 맨 앞 제출마다 한 번(<일지 폴더>/overredo에 그 SHA) — 새
+// 기계에서도 안 되면 손잡이대로(검증이 늘 상한보다 길 때 기계 사이를 끝없이 옮겨 다니며 결과를 버리지 않게, 감사 atp02sl-4fkdo9 중간).
+// 맡길 한가한 기계가 없으면 false. 맡겼으면 m.wre에 「<옛 기계>→<새 기계>」
+func (m *M) workerRedo(c *specCtx, s specStep, busy map[string]bool, now int64, why string) bool {
 	r := s.row
-	if m.frontLocal() || m.hb != "" || r == nil || r.state != specRun { // 착지 스크립트 저장소는 front_local과 상관없이 착지 스크립트로
+	if r == nil || r.state == specConflict {
 		return false
 	}
 	p := m.mj + "/overredo"
@@ -248,7 +263,7 @@ func (m *M) overRedo(c *specCtx, s specStep, busy map[string]bool, now int64) bo
 	if !m.specRedo(c, r, busy, map[string]bool{from: true}, "", note, s.g.lanes, now) {
 		return false
 	}
-	fmt.Printf("hc-lane merger: 맨 앞 %s 가 %s 에서 기다림 상한을 넘겼다 — 한가한 %s 에 다시 맡긴다\n", s.g.lanes, from, r.machine)
+	fmt.Printf("hc-lane merger: 맨 앞 %s 가 %s 에서 %s — 한가한 %s 에 다시 맡긴다(통과한 조각은 이어 쓴다)\n", s.g.lanes, from, why, r.machine)
 	m.wre = from + "→" + r.machine
 	if err := writeVia(p, m.b[0].s+"\n"); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 다시 맡김 표식을 적지 못했다(다음 상한에 또 옮길 수 있다): %v\n", err)

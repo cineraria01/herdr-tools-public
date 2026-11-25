@@ -168,6 +168,7 @@ func TestPreSpecFailNoReject(t *testing.T) {
 	if !s.has(specFails+d[0][1]) || !s.has(verified.PreRefs+"p") {
 		t.Fatal("⑤ 실패 기록과 표식은 남는다")
 	}
+	s.idle("v2", verifyBusy) // 한가한 다른 기계가 없어야 직접 검증(있으면 먼저 그 기계에 — specreuse_test.go)
 	s.enqueue(1000000001, "p", sha)
 	s.round(1)
 	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|p" || !s.has("refs/merge-failed/1000000001-p") || s.onMain("bad.txt") {

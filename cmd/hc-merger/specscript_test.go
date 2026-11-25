@@ -46,6 +46,7 @@ func TestScriptRepoFrontLocalZeroLands(t *testing.T) {
 	if len(d) != 1 || s.verifyOn(d[0]) != 0 || !s.has(specFails+d[0][1]) {
 		t.Fatalf("맨 앞 추측 실패 기록: %v", d)
 	}
+	s.idle("v2", verifyBusy) // 한가한 다른 기계가 없을 때(있으면 먼저 그 기계에 — specreuse_test.go)
 	s.round(1)
 	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|a" || !s.onMain("a.txt") || strings.Contains(strings.Join(s.evs(), "\n"), "막힘") {
 		t.Fatalf("① 착지 스크립트에 넘겨 착지(기다림·막힘 사건 없음): 착지 %q 사건 %v", got, s.evs())
@@ -114,6 +115,8 @@ func TestSpecPrepareHookFailIsUnknown(t *testing.T) {
 	if b, _ := os.ReadFile(hl); strings.Contains(string(b), "verify") {
 		t.Fatalf("⑤ 훅이 실패하면 검증하지 않는다: %q", b)
 	}
+	s.idle("v1", verifyBusy) // 한가한 검증 기계가 없을 때 착지 스크립트로(모름 줄은 기계가 「-」라 v1도 후보다)
+	s.idle("v2", verifyBusy)
 	s.round(1)
 	if s.has("refs/merge-failed/1000000001-a") || !s.onMain("a.txt") {
 		t.Fatal("⑤ 반송 없이 착지 스크립트로 착지")

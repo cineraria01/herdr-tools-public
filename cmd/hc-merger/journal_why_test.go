@@ -116,6 +116,7 @@ func TestJournalWhySpecFailReject(t *testing.T) {
 		t.Fatalf("띄움: %v", d)
 	}
 	s.verifyOn(d[0])
+	s.idle("v2", verifyBusy) // 한가한 다른 기계가 없어야 직접 검증(있으면 먼저 그 기계에 — specreuse_test.go)
 	s.enqueue(1000000001, "p", sha)
 	s.round(1)
 	if w := s.jwhy("p", "돌려보냄"); w != "착지 실패(종료 1), 직접 검증(추측 실패)" {

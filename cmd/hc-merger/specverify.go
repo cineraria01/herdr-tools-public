@@ -95,12 +95,18 @@ const (
 )
 
 // specRunVerify: 준비 훅 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지. 실패면 ev에 근거
-func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specResult {
+func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) (res specResult) {
 	lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err != nil {
 		return resLost
 	}
 	defer lf.Close()
+	var pp *partPub // 통과 조각(specparts.go) — 통과가 아닌 끝에 마지막으로 올린다(다시 맡은 일꾼이 남은 조각만 돈다)
+	defer func() {
+		if pp != nil && res != resPass {
+			pp.push()
+		}
+	}()
 	env := append(os.Environ(), "LANE_REPO="+top, "LANE_BASE="+base)
 	if _, err := os.Stat(wt + "/.claude/herdr-setup.sh"); err == nil {
 		c := shellCmd(wt, "sh", "-c", noIndexSh, "hc-merger", "bash", ".claude/herdr-setup.sh")
@@ -123,11 +129,14 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) specRes
 	if fi, err := lf.Stat(); err == nil {
 		off = fi.Size()
 	}
+	pp = specPartsSeed(id, tree, wt+".parts", lf)
 	c := shellCmd(wt, "bash", verified.Script)
 	c.Stdout, c.Stderr = lf, lf
-	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=")
+	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=", "HERDR_VERIFY_PARTS="+pp.file)
 	max := time.Duration(specTimeout()) * time.Second
+	stopParts := pp.watch()
 	rc, ran := proc.WaitFor(c, "", max, max <= 0)
+	stopParts()
 	fmt.Fprintf(lf, "hc-lane merger: 추측 검증 종료 %d\n", rc)
 	if rc == proc.TimeoutCode || !ran { // 못 띄움(검증은 안 돎)·시간 넘김은 모름 — spec-fail이 아니다(재감사 3바퀴 merger/R-3M02)
 		return resLost

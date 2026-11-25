@@ -458,6 +458,8 @@ type scopeRun struct {
 	skip []bool    // 실제로 건너뜀
 	secs []int     // can이면 기록의 초
 	put  []passRec // 끝에 쓸 통과 기록
+	// 병합기 추측 일꾼이 준 통과 조각 파일(parts.go) — 없으면 nil
+	parts *partsFile
 }
 
 type passRec struct {
@@ -504,6 +506,8 @@ func scopePlan(root string, items []shard, w io.Writer) *scopeRun {
 	for i := range items {
 		r.skip[i] = os.Getenv("HERDR_VERIFY_ALL") != "1" && r.can[i] && (r.mode == "on" || all)
 	}
+	r.parts = partsLoad(x.tree)
+	r.partsSkip(w)
 	fmt.Fprintf(w, "범위 지문 %.1f초 (HERDR_VERIFY_SCOPE=%s)\n", time.Since(t0).Seconds(), r.mode)
 	return r
 }
@@ -523,6 +527,9 @@ func (r *scopeRun) done(i int, label string, rc, secs int, w io.Writer) {
 	}
 	if rc == 0 {
 		r.put = append(r.put, passRec{r.keys[i], label, secs})
+		if r.parts != nil {
+			r.parts.add(r.keys[i], w)
+		}
 		return
 	}
 	if r.can[i] {

@@ -22,7 +22,7 @@ const (
 )
 
 // specLsPatterns: 바퀴의 ls-remote에 함께 싣는 추측 참조(round.go)
-var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", verified.Prefix + "*", verified.PreRefs + "*"}
+var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", specParts + "*", verified.Prefix + "*", verified.PreRefs + "*"}
 
 // specStartMax: HC_LANE_SPEC_START(초, 기본 300). 띄운 뒤 이만큼 지나도 일꾼의 떴다는 표식이 없으면 모름
 func specStartMax() int64 {
@@ -120,7 +120,7 @@ func (m *M) spec() (specDecision, string) {
 		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
 		fmt.Printf("hc-lane merger: 맨 앞 검증이 %d초 넘게 도는 중(%s)\n", w, st[0].row.machine)
 		d = specLand
-		if disp && m.overRedo(c, st[0], busy, now) { // 손잡이 front_local 0 — 서서 기다리지 않고 한가한 다른 기계에 다시(specfront.go)
+		if disp && m.overRedo(c, st[0], busy, now) { // 기다리거나 직접 검증하기 전에 한가한 다른 기계에 한 번(통과 조각 이어 씀, specfront.go)
 			d, over = specWaitFront, false
 		}
 	}
@@ -248,7 +248,7 @@ func (m *M) specLoad() (*specCtx, bool) {
 		case f[1] == verified.VerifiersRef:
 			vsha = f[0]
 		case strings.HasPrefix(f[1], specRefs), strings.HasPrefix(f[1], specFails), strings.HasPrefix(f[1], specStarts),
-			strings.HasPrefix(f[1], verified.Prefix):
+			strings.HasPrefix(f[1], specParts), strings.HasPrefix(f[1], verified.Prefix):
 			c.refs[f[1]] = f[0]
 		case strings.HasPrefix(f[1], verified.PreRefs):
 			pre[f[1]] = f[0]
@@ -541,6 +541,8 @@ func (m *M) specClean(c *specCtx, st []specStep) {
 		if id, ok := strings.CutPrefix(ref, specFails); ok && !keepID[id] {
 			del(ref, sha)
 		} else if id, ok := strings.CutPrefix(ref, specStarts); ok && !keepID[id] {
+			del(ref, sha)
+		} else if id, ok := strings.CutPrefix(ref, specParts); ok && !keepID[id] {
 			del(ref, sha)
 		} else if t, ok := strings.CutPrefix(ref, verified.Prefix); ok && !keepTree[t] {
 			del(ref, sha)

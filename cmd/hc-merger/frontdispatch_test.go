@@ -83,7 +83,8 @@ func TestFrontNoLocalWaitsAndNotifiesOnce(t *testing.T) {
 	}
 }
 
-// ④ 맡긴 맨 앞이 기다림 상한을 넘김 → 기본(직접 검증) 길로 / 손잡이 0이면 기다림·사건 한 번
+// ④ 맡긴 맨 앞이 기다림 상한을 넘김 · 한가한 다른 기계 없음 → 기본(직접 검증) 길로 / 손잡이 0이면 기다림·사건 한 번
+// (한가한 다른 기계가 있으면 먼저 그 기계에 — specreuse_test.go)
 func TestFrontOverCapDefaultVerifiesLocally(t *testing.T) {
 	s := specFx(t)
 	s.sub(1000000001, "a", false)
@@ -92,6 +93,7 @@ func TestFrontOverCapDefaultVerifiesLocally(t *testing.T) {
 	if len(d) != 1 {
 		t.Fatalf("맨 앞 띄움: %v", d)
 	}
+	s.idle("v2", verifyBusy)
 	s.age(d[0][1], 700)
 	s.round(1)
 	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|a" || !s.onMain("a.txt") {

@@ -61,9 +61,11 @@ func TestFrontWaitUnderCapWaits(t *testing.T) {
 	}
 }
 
-// ② 도는 중 · 상한 넘김 → 「모름」: 병합기가 직접 검증(통과로 치지 않음 — HERDR_SPEC_TREE 빈 값)해 착지, 추측을 새로 띄우지 않는다
+// ② 도는 중 · 상한 넘김 · 한가한 다른 기계 없음 → 「모름」: 병합기가 직접 검증(통과로 치지 않음 — HERDR_SPEC_TREE 빈 값)해 착지,
+// 추측을 새로 띄우지 않는다(한가한 기계가 있으면 먼저 그 기계에 — specreuse_test.go)
 func overCap(t *testing.T) (*sfx, [2]string) {
 	s, d, _ := frontFx(t, 700)
+	s.idle("v2", verifyBusy)
 	s.round(1)
 	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|p" || !s.onMain("p.txt") || s.treeLog("p") != "" {
 		t.Fatalf("② 상한을 넘기면 병합기가 직접 검증: %q 트리 %q", got, s.treeLog("p"))
