@@ -377,7 +377,7 @@ func sweepMain(args []string) int {
 	}
 	tailscaleRun(*dry, run)
 	kv := knobVals(time.Now()) // 손잡이는 쓸기마다 한 번(닫는 문턱·상주 판 점검 유예)
-	healthRun(*dry, run, graceFrom(kv))
+	healthRun(*dry, run, graceFrom(kv), knobMinutes(kv, "sweep_test_orphan"))
 	ls, err := hc("ls")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hc-sweep: hc ls 실패:", err)

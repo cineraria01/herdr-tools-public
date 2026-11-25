@@ -344,6 +344,25 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 	}
 	defer ram.teardown(w)
 	common = ram.env()
+	// 조각의 임시 폴더는 이 검증만의 것(메모리 디스크 볼륨, 못 만들었으면 mktemp 폴더) — 끝에 그 아래 남은 프로세스를 거둔다(reapUnder)
+	own := ram.root()
+	if own == "" && runAny {
+		if d, err := os.MkdirTemp("", "herdr-verify-tmp."); err != nil {
+			fmt.Fprintf(w, "알림 검증 임시 폴더를 못 만들어 보통 임시 폴더로(그 아래 고아는 못 거둔다): %v\n", err)
+		} else {
+			own, common = d, []string{"TMPDIR=" + d + "/"}
+			defer os.RemoveAll(d) //nolint:errcheck // 시험 임시 파일
+		}
+	}
+	reaped := false
+	reap := func() bool { // 한 번만 — 끝 줄 앞과 끊김 길(defer, 떼기·지우기보다 먼저 돈다)
+		if reaped {
+			return false
+		}
+		reaped = true
+		return reapUnder(own, w) > 0
+	}
+	defer reap()
 	rc := runShards(root, sh, common, n, stop, w)
 	if rc >= 128 {
 		return rc
@@ -365,6 +384,7 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		}
 		fail = retryFail
 	}
+	fail = reap() || fail
 	ram.teardown(w)
 	sc.finish(w)
 	flakySummary(w)
@@ -847,6 +867,12 @@ func orphans(root string, pgs []int, before map[int]pinfo) ([]string, error) {
 		}
 		lines = append(lines, fmt.Sprintf("  고아 pid %d (cwd %s): %s", p, c, string(cmd)))
 	}
+	killPids(pids)
+	return lines, nil
+}
+
+// killPids: TERM, 3초 안에 안 끝난 것은 KILL
+func killPids(pids []int) {
 	for _, p := range pids {
 		_ = syscall.Kill(p, syscall.SIGTERM) // 이미 끝났으면 ESRCH
 	}
@@ -858,7 +884,50 @@ func orphans(root string, pgs []int, before map[int]pinfo) ([]string, error) {
 			_ = syscall.Kill(p, syscall.SIGKILL)
 		}
 	}
-	return lines, nil
+}
+
+// reapUnder: 이 검증만의 임시 폴더 dir(조각의 TMPDIR — 메모리 디스크 볼륨 또는 mktemp 폴더) 아래 경로가 명령 줄에 든 프로세스를
+// 찍고 끈다(부모·무리와 상관없이 — 그 폴더는 이 검증 것이라 남의 것이 아니다). 시험 바이너리가 끊겨 죽으면(마감 panic·TERM) 새 무리로
+// 띄운 자식이 부모 1로 남는데 그 경로는 저장소 밖이라 orphans가 못 본다 — 메모리 디스크를 그 위에서 도는 채로 떼면 실행 파일이 사라져
+// 프로세스가 CPU를 태운다(2026-11-26 ht-test-orphan-leak: 워커 맥의 herdr-sync --check 30시간 275%). 그래서 떼기 전에, 끊길 때도.
+// 찾은 수(검사를 못 하면 1 — 모름을 깨끗함으로 읽지 않는다)
+func reapUnder(dir string, w *os.File) int {
+	if dir == "" {
+		return 0
+	}
+	ps, err := procs()
+	if err != nil {
+		fmt.Fprintf(w, "실패 검증 임시 폴더 고아 검사 못 함: %v\n", err)
+		return 1
+	}
+	here := []string{strings.TrimSuffix(dir, "/") + "/"}
+	if r, err := filepath.EvalSymlinks(dir); err == nil && r+"/" != here[0] {
+		here = append(here, r+"/")
+	}
+	me := os.Getpid()
+	var pids []int
+	for p, i := range ps {
+		for _, h := range here {
+			if p != me && strings.Contains(i.cmd, h) {
+				pids = append(pids, p)
+				break
+			}
+		}
+	}
+	if len(pids) == 0 {
+		return 0
+	}
+	sort.Ints(pids)
+	for _, p := range pids {
+		cmd := []rune(ps[p].cmd)
+		if len(cmd) > 160 {
+			cmd = cmd[:160]
+		}
+		fmt.Fprintf(w, "  고아 pid %d (검증 임시 폴더): %s\n", p, string(cmd))
+	}
+	killPids(pids)
+	fmt.Fprintf(w, "실패 고아를 남김(위 목록, 껐음) — 검증 임시 폴더 %s\n", dir)
+	return len(pids)
 }
 
 func anyAlive(pids []int) bool {

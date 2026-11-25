@@ -182,6 +182,12 @@ func TestKindMerger(t *testing.T) {
 		{"/u/.local/bin/hc-merger --round 123 /u/m main", false},
 		{"/u/.local/bin/hc-merger --spec-verify --repo /u/m", false},
 		{"/u/.local/bin/hc-merger --version", false},
+		// 시험이 지은·만든 임시 경로의 실행 파일은 상주가 아니다(2026-11-26 ht-test-orphan-leak — 시험 고아가 「옛 판 상주」로 잡혔다)
+		{"/x/T/herdr-test-bin.8.1/hc-merger --repo /x/T/TestR1/001/m --tick 17", false},
+		{"/x/T/herdr-test-bin.8.1/hc-merger --repo /u/m main", false},
+		{"/vol/herdr-verify-ram-42/t/hc-merger --repo /u/m main", false},
+		{"/tmp/TestX123/001/hc-merger --repo /u/m main", false},
+		{"/u/.local/bin/hc-merger --repo /u/Tests/m main", true},
 	} {
 		k, ok := KindOf(strings.Fields(c.args))
 		if ok != c.want || ok && k.Who != "hc-lane merger" {

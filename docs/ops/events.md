@@ -103,6 +103,14 @@
 - 사람에게: 묻지 않는다(되돌릴 수 있는 다시 띄우기).
 - 다음: `hc-fill state`
 
+## hc-test-orphan
+
+- 뜻: 그 기계에 부모 없는(ppid 1) 시험 고아 — 인자에 시험 임시 경로(`herdr-test-bin.*`·`herdr-verify-ram-*`·임시 폴더 바로 아래 `Test*`)가 든 프로세스 — 가 `sweep_test_orphan`분(기본 30)을 넘겨 남아 있다(hc-sweep, [시험 고아 점검](../hc-sweep/test-orphans.md)). 같은 pid·시작 시각에 한 번. 글에 pid·시작 시각·경과·CPU·명령 줄이 있다.
+- 흔한 까닭: 시험 바이너리가 끊겨 죽어(마감 panic·TERM·KILL — 레인 명령 상한, 검증 끊김) 새 무리로 띄운 자식이 남았다. 메모리 디스크 위 실행 파일이면 그 디스크가 떼어져 CPU를 태울 수 있다.
+- 받으면: 글의 pid가 아직 그 명령 줄인지 `ps`로 본 뒤 그 pid만 끈다(`kill <pid>`, 안 끝나면 `kill -9 <pid>`). 같은 시험이 또 남기면 그 시험을 고치는 레인.
+- 사람에게: 묻지 않는다(시험 고아는 지워도 되는 것).
+- 다음: `ps -o pid,ppid,etime,%cpu,command -p <pid>`
+
 ## hc-fill-advise
 
 - 뜻: 지금 손댈 것([hc-fill advise](advise.md))에 새 항목이 생겼다 — 풀 수 있는 대기·한 줄 사슬·멈춘 레인·굶는 감사·병합기 없음·밀린 배포·옛 판 상주 등(hc-fill `run`이 `advise_every`분마다 본다). 글은 「손댈 것: <첫 새 항목 요약>(외 N)」. 같은 항목에는 되풀이하지 않는다.

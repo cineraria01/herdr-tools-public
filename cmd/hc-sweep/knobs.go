@@ -25,7 +25,12 @@ func sweepKnobs(now time.Time) limits { return limitsFrom(knobVals(now)) }
 
 // graceFrom: 상주 판 점검 유예(sweep_resident_grace, 분 — 없거나 범위 밖이면 기본 5)
 func graceFrom(vals map[string]string) time.Duration {
-	d, _ := knob.Find("sweep_resident_grace")
+	return knobMinutes(vals, "sweep_resident_grace")
+}
+
+// knobMinutes: 분 손잡이 name의 값(없거나 범위 밖이면 기본)
+func knobMinutes(vals map[string]string, name string) time.Duration {
+	d, _ := knob.Find(name)
 	v, ok := vals[d.Name]
 	if !ok || d.Check(v) != nil {
 		v = d.Default

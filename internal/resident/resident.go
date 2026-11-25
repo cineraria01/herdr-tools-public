@@ -110,9 +110,10 @@ var Kinds = []Kind{
 	}},
 }
 
-// KindOf: 인자(argv[0]의 이름 + 하위 명령)로 본 상주 종류
+// KindOf: 인자(argv[0]의 이름 + 하위 명령)로 본 상주 종류. 시험 경로(TestArgs)의 프로세스는 상주가 아니다 — 시험 고아는 hc-sweep
+// 시험 고아 점검(hc-test-orphan)이 따로 알린다
 func KindOf(args []string) (Kind, bool) {
-	if len(args) == 0 {
+	if len(args) == 0 || TestArgs(args) {
 		return Kind{}, false
 	}
 	b := filepath.Base(args[0])
@@ -122,6 +123,24 @@ func KindOf(args []string) (Kind, bool) {
 		}
 	}
 	return Kind{}, false
+}
+
+// TestArgs: 인자 가운데 시험이 지은·만든 임시 경로(TestPath)가 있다
+func TestArgs(args []string) bool {
+	return slices.ContainsFunc(args, TestPath)
+}
+
+// TestPath: 시험 임시 경로 — 길 조각이 herdr-test-bin.*(clitest가 지은 도구)·herdr-verify-ram-*(검증 메모리 디스크)이거나,
+// 임시 폴더(macOS …/T, /tmp) 바로 아래 Test*(go test의 t.TempDir) (2026-11-26 ht-test-orphan-leak)
+func TestPath(p string) bool {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		if strings.HasPrefix(s, "herdr-test-bin.") || strings.HasPrefix(s, "herdr-verify-ram-") ||
+			i > 0 && strings.HasPrefix(s, "Test") && (segs[i-1] == "T" || segs[i-1] == "tmp") {
+			return true
+		}
+	}
+	return false
 }
 
 // DirFor: <state>/herdr-tools/resident — state가 비면 <home>/.local/state

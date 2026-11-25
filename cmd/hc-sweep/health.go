@@ -181,8 +181,9 @@ func healthState() string { return filepath.Join(stateHome(), "hc-sweep", "healt
 
 func healthOn() bool { return runtime.GOOS == "darwin" && os.Getenv("HC_SWEEP_HEALTH") != "off" }
 
-// healthRun: 한 바퀴(macOS만) — 잠자기 끔·키체인, 그리고 상주 판 점검(resident.go, grace = 손잡이 sweep_resident_grace)
-func healthRun(dry bool, r runner, grace time.Duration) {
+// healthRun: 한 바퀴(macOS만) — 잠자기 끔·키체인, 상주 판 점검(resident.go, grace = 손잡이 sweep_resident_grace),
+// 시험 고아 점검(testorphan.go, orphanAge = 손잡이 sweep_test_orphan)
+func healthRun(dry bool, r runner, grace, orphanAge time.Duration) {
 	if !healthOn() {
 		return
 	}
@@ -194,6 +195,10 @@ func healthRun(dry bool, r runner, grace time.Duration) {
 	}
 	stale := func(msg, key string) bool { return laneReport(r, lane, "hc-stale-resident", msg, key) }
 	for _, l := range residentCheck(machine, resident.DirFor(os.Getenv("XDG_STATE_HOME"), home), dry, r, stale, time.Now(), grace) {
+		fmt.Println(l)
+	}
+	orphan := func(msg, key string) bool { return laneReport(r, lane, "hc-test-orphan", msg, key) }
+	for _, l := range testOrphanCheck(machine, filepath.Join(stateHome(), "hc-sweep", "test-orphans"), dry, r, orphan, time.Now(), orphanAge) {
 		fmt.Println(l)
 	}
 }

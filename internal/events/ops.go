@@ -26,6 +26,7 @@ const (
 	OpsHealth    = "hc-health"
 	OpsUnreach   = "hc-fill-unreach"
 	OpsStaleRes  = "hc-stale-resident"
+	OpsTestOrph  = "hc-test-orphan"
 	OpsAdvise    = "hc-fill-advise"
 	OpsFillPR    = "hc-fill-pr"
 	OpsAgent     = "hc-fill-agent"
@@ -51,6 +52,7 @@ var Ops = []Op{
 	{OpsHealth, "hc-sweep --health"},
 	{OpsUnreach, "hc machine ls"},
 	{OpsStaleRes, "hc-fill state"},
+	{OpsTestOrph, "ps -o pid,ppid,etime,%cpu,command -p <pid>"},
 	{OpsAdvise, "hc-fill advise"},
 	{OpsFillPR, "hc-fill knob ls"},
 	{OpsAgent, "hc-fill agent status"},

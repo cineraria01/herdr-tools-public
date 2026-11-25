@@ -92,6 +92,7 @@ go test ./tests/hclane/ ./tests/merger/ ./tests/hcfill/ ./tests/util/ ./claude/h
   이름표에는 조각마다 다른 환경만 찍고(지금 표에는 없다 — 조각은 `-run`·`-skip`으로만 고른다), 모든 조각에 같은 메모리 디스크 환경(`TMPDIR`·`HERDR_VERIFY_BOOT_TMPDIR`)은 띄울 때만 넘긴다(단계 앞 「메모리 디스크 …」 한 줄이 알린다).
   실패 줄(`--- FAIL:`·`FAIL <꾸러미>`)은 그대로다.
   고아 검사는 조각마다 끝나자마자 그 무리를 보고(늦게 보면 pid가 한 바퀴 돌아 남의 새 무리를 끌 수 있다), 떼어 띄워 부모가 1이 된 것은 조각이 다 끝난 뒤 한 번 본다(함께 도는 다른 조각의 것을 고아로 읽지 않게).
+  조각의 TMPDIR은 그 검증만의 폴더(메모리 디스크 볼륨, 없으면 mktemp `herdr-verify-tmp.*`)이고, 끝날 때와 끊길 때 메모리 디스크를 떼기 전에 그 아래 경로가 명령 줄에 든 프로세스를 찍고 끈다 — 시험 바이너리가 끊겨 죽으면 새 무리로 띄운 자식이 저장소 밖 경로로 남아, 떼어진 디스크 위에서 CPU를 태웠다(2026-11-26 ht-test-orphan-leak, [시험 고아 점검](../hc-sweep/test-orphans.md)).
 - 메모리 디스크(2026-11-24 verify-ramdisk, `tests/repo/verify/ramtmp.go`): 자리를 늘려도 검증이 안 줄었고(자리 10·20·30에 546·530·527초) 병목은 디스크의 작은 쓰기였다(시험들이 임시 폴더에 git 저장소를 만들고 커밋·push하기를 되풀이).
   그래서 macOS에서는 조각 단계 앞에 메모리 디스크(APFS, 대소문자 구분 없음, `.metadata_never_index`)를 만들어 조각의 `TMPDIR`로 주고, 원래 임시 폴더는 `HERDR_VERIFY_BOOT_TMPDIR`로 넘기고, 끝나면(신호로 끝날 때도) 뗀다.
   `TestCotenantGuard`와 싼 단계는 그대로다(메모리 디스크에서도 같은 시간이었다).

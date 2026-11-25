@@ -387,3 +387,11 @@ func (r *ramDisk) teardown(w *os.File) {
 		fmt.Fprintf(w, "알림 메모리 디스크를 못 뗐다(다음 검증이 시작할 때 치운다): %v\n", err)
 	}
 }
+
+// root: 볼륨 뿌리(조각의 TMPDIR은 그 아래) — 없으면 ""
+func (r *ramDisk) root() string {
+	if r == nil {
+		return ""
+	}
+	return r.vol
+}

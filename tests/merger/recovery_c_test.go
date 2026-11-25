@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"herdr-tools/internal/clitest"
-	"herdr-tools/internal/proc"
 )
 
 // cmust: 셸 set -e 아래 맨 부름 — 0이 아니면 그 사례가 멈춘다
@@ -229,17 +228,11 @@ fi
 exec /bin/sleep "$@"
 `)
 	cmd := k.mergerCmd(f.writer, []string{f.stubPath()}, f.home+"/log", "--repo", f.mclone, "--tick", "17")
-	proc.Group(cmd)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }() // 끝남은 done으로만 본다
-	t.Cleanup(func() {
-		touch(t, f.home+"/release")
-		proc.StopGroup(cmd.Process.Pid, 2*time.Second)
-		<-done
-	})
+	// 시험이 소유하는 무리(clitest.Spawn): Cleanup에서 무리째 끄고, 시험 마감 전에도 저절로 끈다 — 옛 판은 마감 panic에 Cleanup이 돌지
+	// 않아 상주 병합기가 부모 1로 며칠씩 남았다(2026-11-26 ht-test-orphan-leak, 워커 맥에 3일)
+	ch := clitest.Spawn(t, cmd)
+	t.Cleanup(func() { touch(t, f.home+"/release") }) // Cleanup은 거꾸로 — 끄기 전에 가짜 sleep을 풀어 준다
+	done := ch.Done()
 wait:
 	for i := 0; i < 1200 && !cnonempty(f.home+"/delay"); i++ {
 		select {

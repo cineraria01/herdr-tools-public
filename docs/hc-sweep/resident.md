@@ -11,6 +11,7 @@
   - 도구는 끄지도 다시 띄우지도 않는다 — 지휘가 부른다.
 - **보이는 곳**: 결과 한 장 `…/resident/report.json`을 `hc-fill state`의 「눈에 띄는 것」과 `herdr-sync --status`가 읽어 있을 때만 줄을 보인다(이 기계 것만 — 다른 기계는 그 기계의 사건으로 온다).
 - 이 기계만 본다. 다른 기계의 상주는 그 기계 hc-sweep이 본다(원격으로 들여다보지 않는다). 배포 때 모든 기계의 수를 한눈에 보는 것은 [herdr-sync 배포 뒤 상주 확인](../herdr-sync/deploy.md)이다.
+- 인자에 시험 임시 경로(`herdr-test-bin.*`·`herdr-verify-ram-*`·임시 폴더 바로 아래 `Test*`)가 든 프로세스는 상주로 세지 않는다 — 시험 고아는 [시험 고아 점검](test-orphans.md)이 따로 알린다(2026-11-26 ht-test-orphan-leak).
 - 병합기 바깥 고리 `hc-lane merger`(`hc-merger --repo …`, `--once`·`--round` 빼고)도 표에 있다(2026-11-25 ht-resident-reexec). 표에 없는 것: `hc-sweep`·`hc-core-relaunch`(단발).
 - 판 표시의 커밋이 새로 깔린 판과 같으면(실행 파일만 다시 쓰임) 상주가 다음 바퀴에 표시를 그 파일로 다시 쓴다([selfexec](../go/selfexec.md)) — 그때까지 유예 안이다. 새 상주가 `selfexec.New`를 부르면 표에도 한 줄(시험 `TestKindsCoverSelfexecCallers`가 본다).
 - 시험: `internal/resident/resident_test.go`(옛 판·유예·판 모름·스스로 넘어감·단발 무시·launchd·ps 풀기·결과 줄), `internal/selfexec/mark_test.go`(뜰 때 표시), `cmd/hc-sweep/resident_test.go`(한 번만·ps 실패는 모름), `cmd/hc-fill/state_resident_test.go`, `cmd/herdr-sync/status_resident_test.go`.
