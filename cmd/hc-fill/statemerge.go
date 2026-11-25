@@ -5,6 +5,7 @@ package main
 // 읽는다(읽기만, 원격 호출 없음). 다른 기계 병합기는 모름+까닭(원격으로 읽지 않는다).
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/opsstate"
 	"herdr-tools/internal/proc"
 )
@@ -22,7 +24,7 @@ const stateJournalN = 20
 // stateMergeJournal: 병합 줄 하나를 채우는 함수. 일지는 한 번만 읽는다. 이 기계 병합기 프로젝트가 둘 이상이면 일지 줄(프로젝트 칸 없음)을
 // 대기열 줄의 레인 → 프로젝트로 가른다
 // ponytail: 대기열에서 정리된 레인의 일지 줄은 프로젝트를 몰라 둘 이상일 때 빠진다(덜 셈) — 일지에 프로젝트 칸이 생기면 그것으로
-func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string) func(g *opsstate.MergeLine, x maRow, now time.Time) {
+func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string, terms []hcjson.Terminal) func(g *opsstate.MergeLine, x maRow, now time.Time) {
 	local := 0
 	for _, x := range mr {
 		if x.M == LOCAL {
@@ -77,6 +79,13 @@ func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string) f
 			if ln, at, ok := stateLanding(c, dir+"/hc-lane/merger-logs"); ok {
 				g.Landing, g.LandingAgeS = ln, ptrI(max(0, int(now.Sub(at).Seconds())))
 			}
+			if md, ok := mergerGitDir(c); ok && g.Length != nil && *g.Length > 0 {
+				var why string
+				g.SpecMachine, g.SpecTerm, g.SpecFresh, why = stateSpecWait(md, terms, knobInt("advise_spec_fresh"), now)
+				if why != "" {
+					g.Why = why
+				}
+			}
 		}
 		if f.LastAt.IsZero() {
 			g.Why = "이 기계 병합기 일지에 이 프로젝트 줄 없음"
@@ -99,13 +108,9 @@ var landLogRe = regexp.MustCompile(`^(.+)-([0-9]{8}-[0-9]{6})-([0-9]+)\.log$`)
 // 레인 「모름」·기록을 쓴 시각(착지 자식이 뜬 때)
 // ponytail: 병합기 기계에서만 잰다 — 다른 기계 병합기는 원격으로 읽지 않는다(일지와 같음)
 func stateLanding(clone, logs string) (lane string, at time.Time, ok bool) {
-	gp, rc := run("git", "-C", clone, "rev-parse", "--git-path", "hc-merger")
-	if rc != 0 || sub(gp) == "" {
+	rec, ok := mergerGitDir(clone)
+	if !ok {
 		return "", time.Time{}, false
-	}
-	rec := sub(gp)
-	if !filepath.IsAbs(rec) {
-		rec = filepath.Join(clone, rec)
 	}
 	rec += "/child"
 	b, err := os.ReadFile(rec)
@@ -144,4 +149,76 @@ func stateLanding(clone, logs string) (lane string, at time.Time, ok bool) {
 		at = best
 	}
 	return lane, at, !at.IsZero()
+}
+
+// mergerGitDir <병합기 클론>: 병합기 기록 폴더 <git-path hc-merger>(child·specwait가 있는 곳 — hc-merger m.mj)
+func mergerGitDir(clone string) (string, bool) {
+	gp, rc := run("git", "-C", clone, "rev-parse", "--git-path", "hc-merger")
+	if rc != 0 || sub(gp) == "" {
+		return "", false
+	}
+	d := sub(gp)
+	if !filepath.IsAbs(d) {
+		d = filepath.Join(clone, d)
+	}
+	return d, true
+}
+
+// specFreshSh: 추측 검증 터미널마다(인자 「주소 클론 아이디8」 셋씩, 첫 인자 = 분) 그 로그 <클론>.spec-wt/<아이디8>.log나 작업 트리
+// <클론>.spec-wt/<아이디8>(node_modules·.git 빼고)에 그 분 안에 쓴 파일이 있으면 그 주소 한 줄. 없는 경로의 find 오류는 「갱신 없음」 —
+// 끝까지 오면 종료 0이라, 종료가 0이 아니면 그 기계에서 못 돌았다(모름)
+// ponytail: 멈춘 검증이면 작업 트리 전체를 훑는다(갱신 중이면 첫 파일에서 -quit) — 너무 느려지면 검증 스크립트가 진행 표식을 한 곳에
+const specFreshSh = `n=$d; while [ $# -ge 3 ]; do w="$2.spec-wt/$3"; ` +
+	`if [ -n "$(find "$w.log" "$w" \( -name node_modules -o -name .git \) -prune -o -type f -mmin -"$n" -print -quit 2>/dev/null)" ]; then echo "$1"; exit 0; fi; ` +
+	`shift 3; done; exit 0`
+
+var specIDRe = regexp.MustCompile(`^spec-([0-9a-f]{8})$`)
+
+// stateSpecWait <병합기 기록 폴더> <살아 있는 터미널> <분>: 병합기가 맨 앞 추측 검증을 기다리는 중이면(specwait 첫 줄 「첫 마지막 횟수
+// [기계[/사슬]]」의 마지막 기다림 바퀴가 분 안 — 병합기는 기다리는 바퀴마다 고쳐 쓰고 기다림이 끝나면 지운다, hc-merger jround.go
+// specWaitNote) 그 검증 기계, 그 기계의 살아 있는 spec-<아이디8> 터미널 주소, 그 추측이 분 안에 갱신됐나. 기다림이 아니거나 맡길 기계를
+// 기다림(-)이면 빈 값(지금 그대로 안 움직임을 본다). 갱신을 못 읽으면 why에 까닭 — 갱신 없음과 같이 안 움직임 쪽(놓치지 않는 쪽)
+// ponytail: 한 기계에 추측 하나(hc-merger spec.go)라 그 기계의 spec 터미널을 다 본다 — 아이디를 specwait에 적으면 하나로
+func stateSpecWait(dir string, terms []hcjson.Terminal, min int, now time.Time) (mach, term string, fresh bool, why string) {
+	b, err := os.ReadFile(dir + "/specwait")
+	if err != nil || min <= 0 {
+		return
+	}
+	h := strings.Fields(strings.SplitN(string(b), "\n", 2)[0])
+	if len(h) != 4 {
+		return
+	}
+	last, err := strconv.ParseInt(h[1], 10, 64)
+	if err != nil || now.Unix()-last > int64(min)*60 {
+		return
+	}
+	mach, _, _ = strings.Cut(h[3], "/")
+	if mach == "-" {
+		return "", "", false, ""
+	}
+	args := []string{strconv.Itoa(min)}
+	for _, t := range terms {
+		m, id := LOCAL, specIDRe.FindStringSubmatch(t.Name)
+		if a, _, ok := strings.Cut(t.Address, "/"); ok {
+			m = a
+		}
+		if t.State != "live" || id == nil || m != mach || t.Cwd == "" {
+			continue
+		}
+		if term == "" {
+			term = t.Address
+		}
+		args = append(args, t.Address, t.Cwd, id[1])
+	}
+	if term == "" {
+		return
+	}
+	out, rc := onm(nil, mach, specFreshSh, args...)
+	if rc != 0 {
+		return mach, term, false, fmt.Sprintf("추측 검증 갱신 못 읽음(%s 종료 %d)", mach, rc)
+	}
+	if a := strings.TrimSpace(out); a != "" {
+		return mach, a, true, ""
+	}
+	return
 }

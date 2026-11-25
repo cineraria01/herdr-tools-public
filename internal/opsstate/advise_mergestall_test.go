@@ -84,3 +84,31 @@ func TestMergeStallAge(t *testing.T) {
 		t.Errorf("⑤ 병합기 죽음: %+v", it)
 	}
 }
+
+// ht-stall-spec-alive(2026-11-25): 병합기가 맨 앞 추측 검증을 기다리는 중이고 그 검증 터미널(spec-<아이디 8>)이 살아 있으며 그 로그·작업
+// 트리가 advise_spec_fresh분 안에 갱신됐으면 「안 움직임」이 아니다 — 병합기가 검증 기계의 spec-c9ea4788을 20분 넘게 기다리는 동안
+// 검증은 진행 중이었는데 merge-stall이 올라갔다. ①은 고치기 전 코드로 실패한다(항목이 나왔다).
+func TestMergeStallSpecAlive(t *testing.T) {
+	m := mline(ip(25*60), ip(40*60))
+	m.SpecMachine, m.SpecTerm, m.SpecFresh = "box-2", "box-2/t2h2", true
+	// ① 살아 있고 갱신 중 — 항목 없음
+	if it := mergeItems(m); len(it) != 0 {
+		t.Errorf("① 추측 검증 진행 중인데 항목: %+v", it)
+	}
+	// ② 살아 있으나 오래 멈춤 — 안 움직임, 근거에 그 터미널
+	m.SpecFresh = false
+	it := mergeItems(m)
+	if len(it) != 1 || it[0].Kind != "merge-stall" || !strings.Contains(it[0].Evidence, "box-2/t2h2") || !strings.Contains(it[0].Evidence, "갱신") {
+		t.Errorf("② 멈춘 추측 검증: %+v", it)
+	}
+	// ③ 터미널 없음 — 안 움직임, 근거에 검증 기계
+	m.SpecTerm = ""
+	it = mergeItems(m)
+	if len(it) != 1 || it[0].Kind != "merge-stall" || !strings.Contains(it[0].Evidence, "box-2") || !strings.Contains(it[0].Evidence, "터미널 없음") {
+		t.Errorf("③ 터미널 없음: %+v", it)
+	}
+	// 추측 기다림이 아님(빈 값) — 지금 그대로
+	if it := mergeItems(mline(ip(25*60), ip(40*60))); len(it) != 1 || strings.Contains(it[0].Evidence, "추측") {
+		t.Errorf("기다림 아님: %+v", it)
+	}
+}

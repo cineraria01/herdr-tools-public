@@ -121,6 +121,16 @@ func mergeStall(m MergeLine, th Thresholds) (Item, bool) {
 	if th.WaitMin <= 0 || q == nil || m.LastRoundAgeS == nil && m.Lands == nil || *q < th.WaitMin*60 {
 		return Item{}, false
 	}
+	// 맨 앞 추측 검증을 기다리는 중이고 그 검증이 살아서 진행 중이면 안 움직임이 아니다(ht-stall-spec-alive — 추측 기다림 바퀴는 일지에 줄을
+	// 남기지 않아, 진행 중인 검증을 20분 기다리는 동안 merge-stall이 올라갔다). 터미널이 없거나 갱신이 멈췄으면 그대로 안 움직임
+	switch {
+	case m.SpecMachine != "" && m.SpecTerm != "" && m.SpecFresh:
+		return Item{}, false
+	case m.SpecMachine != "" && m.SpecTerm == "":
+		ev += " · 추측 검증 기다림(" + m.SpecMachine + ") — 살아 있는 spec 터미널 없음"
+	case m.SpecMachine != "":
+		ev += " · 추측 검증 " + m.SpecTerm + " 로그·작업 트리 갱신 없음(advise_spec_fresh분 넘게, 또는 못 읽음)"
+	}
 	switch {
 	case m.LastRoundAgeS == nil:
 		ev += " · 병합기 일지에 이 프로젝트 줄 없음"

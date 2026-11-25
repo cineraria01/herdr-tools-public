@@ -140,6 +140,9 @@
 | `merge[].oldest_lane` | 그 제출의 레인 |
 | `merge[].landing` | 이 기계 병합기가 지금 착지 중인 맨 앞 레인(착지 자식 기록 `child`가 살아 있음 — 레인은 그 병합기 pid의 착지 로그 이름, 못 찾으면 「모름」. 다른 기계 병합기·착지 중 아님은 빈 값) |
 | `merge[].landing_age_s` | 그 착지의 나이(초, 착지 로그 이름의 시각 = 바퀴 시작 — 없으면 자식 기록 시각) |
+| `merge[].spec_machine` | 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중이면 맡긴 검증 기계(클론 `<git-path hc-merger>/specwait`의 마지막 기다림 바퀴가 `advise_spec_fresh`분 안). 기다림 아님·다른 기계 병합기·손잡이 0이면 빈 값 |
+| `merge[].spec_term` | 그 기계에 살아 있는 추측 검증 터미널 `spec-<아이디 8>`의 주소(`hc ls`), 없으면 빈 값 |
+| `merge[].spec_fresh` | 그 추측 로그 `<클론>.spec-wt/<아이디 8>.log`나 작업 트리(`node_modules`·`.git` 빼고)에 `advise_spec_fresh`분 안에 쓴 파일이 있다(그 기계에서 `find -mmin`) |
 | `merge[].why` | 모르는 칸의 까닭 |
 | `deploy` | 배포(기계마다) |
 | `deploy[].machine` | 기계 |

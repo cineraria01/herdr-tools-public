@@ -148,6 +148,12 @@ type MergeLine struct {
 	// 아니거나 다른 기계 병합기면 빈 값·nil, 착지 중인데 레인을 못 찾으면 「모름」
 	Landing     string `json:"landing"`
 	LandingAgeS *int   `json:"landing_age_s"`
+	// 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중(클론의 <git-path hc-merger>/specwait 마지막 기다림 바퀴가 advise_spec_fresh분 안 — hc-fill
+	// statemerge.go stateSpecWait)이면 맡긴 검증 기계, 그 기계에 살아 있는 spec-<아이디 8> 터미널 주소(없으면 빈 값), 그 추측 로그·작업 트리에
+	// advise_spec_fresh분 안에 쓴 파일이 있나. 기다림 아님·다른 기계 병합기·손잡이 0이면 빈 값
+	SpecMachine string `json:"spec_machine"`
+	SpecTerm    string `json:"spec_term"`
+	SpecFresh   bool   `json:"spec_fresh"`
 	Why         string `json:"why"`
 }
 
