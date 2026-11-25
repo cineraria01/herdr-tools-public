@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -19,7 +18,13 @@ import (
 
 const waitMsg = "hc-lane wait는 분리(&) 실행하지 말고 Bash run_in_background로 돌려 알림을 받으세요(또는 포그라운드로). 분리하면 대기 결과를 아무도 못 봅니다."
 
-func hcLaneWaitGuard(in []byte, _, stderr io.Writer) int {
+func hcLaneWaitGuard(in []byte, stdout, stderr io.Writer) int {
+	// hc send·keys 받는 쪽이 셸만 남은 터미널이면 막는다(sendguard.go) — 배경 실행이어도
+	if cmd, ok := jqCommand(in); ok {
+		if rc := hcSendGuard(cmd, stdout, stderr); rc != 0 {
+			return rc
+		}
+	}
 	// [ "$(jq -r '.tool_input.run_in_background // false')" = true ] && exit 0
 	vals, _ := jqValues(in)
 	var bg strings.Builder
@@ -385,11 +390,8 @@ func loopNoQuestion(_ []byte, _, stderr io.Writer) int {
 	if id == "" {
 		return 0
 	}
-	hc, err := exec.LookPath("hc")
-	if err != nil {
-		hc = os.Getenv("HOME") + "/.local/bin/hc"
-	}
-	if fi, err := os.Stat(hc); err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
+	hc := hcBin()
+	if hc == "" {
 		return 0
 	}
 	// 훅 제한 10초 안(hookexec.go). 시간 넘김은 「hc 터미널 아님」이 아니라 모름 — 무인 루프일 수 있으니 질문 창을 막는다

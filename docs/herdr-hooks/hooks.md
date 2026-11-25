@@ -14,4 +14,5 @@
   주인을 적기 전에 멈춘 첫 획득은 넘겨받을 때 첫 획득의 검사를 다시 하고, 막힌 첫 획득·여러 대상 Bash의 앞 임대는 거둔다.
   C·UTF-8 밖의 로캘에서 작업 트리에 닿는 쓰기 글롭은 고를 파일을 정하지 못해 막는다.
   loop-no-question은 `hc get` 시간 넘김·실패·판독할 수 없는 응답이면 질문 창을 막는다.
+  hc-lane-wait-guard는 Bash 명령의 `hc send|keys <대상>`마다 `hc get`으로 받는 쪽을 보고, 에이전트가 끝나 대화형 셸만 남았으면(`hcjson.AgentState` 없음 — hc-lane 지휘 확인과 같은 판정) 막는다(2026-11-25 ht-send-shell-guard — 지휘의 `hc send`가 셸 프롬프트에 쳐졌다). 서비스 터미널도 막는다 — 라벨 `hc-lane-watch`·`hc-merger-spec`, 또는 상태 보고가 한 번도 없고 전경 argv가 `… server`인 것(계정 풀 프록시 — `hc keys <프록시> ctrl+c`는 서버를 끊는다). 막 뜬 에이전트(상태 보고 전)는 전경이 서버 꼴이 아니라 통과다(신뢰 질문 `hc keys <주소> Down`). 판정 못 함(hc 없음·실패·4초 넘김·변수 대상)은 막지 않고 additionalContext 경고만, 없는 터미널은 통과다. 명령 찾기는 글자로라 따옴표·heredoc 안의 「… hc send <주소>」도 확인한다(그 주소가 막을 대상일 때만 막힘). 새 훅 항목이 아니라 갈래라 settings 변경 없이 착지 뒤 배포(herdr-sync)로 깔린다.
   뜻밖의 패닉은 편의 막 넷 0·cotenant 1. 시험 `claude/hooks/tests/*_test.go`: settings.json과 같은 명령 줄을 밖에서 불러 종료 코드·문구·임대 파일을 본다(HOME마다 `~/.local/bin/herdr-hooks`에 `-tags hookstest` 시험 빌드 — 시험 손잡이 `HERDR_HOOKS_TEST_*`는 그 빌드에만).

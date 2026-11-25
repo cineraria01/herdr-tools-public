@@ -332,7 +332,8 @@ func GetOut(stdout, stderr string, rc int) string {
 	return stdout
 }
 
-// ParseGet: hc get <want> --json 의 출력 b와 종료 코드 rc. rc 0(또는 11 끝남)이면 주소가 want와 같은 터미널 객체 하나,
+// ParseGet: hc get <want> --json 의 출력 b와 종료 코드 rc. rc 0(또는 11 끝남)이면 주소가 want와 같은 터미널 객체 하나(want가 빈 값이면
+// 주소를 견주지 않는다 — 이름으로 부른 hc get은 응답 주소가 tN이다),
 // rc 3이고 완전한 not_found 오류 객체 하나면 (_, false, nil) — 확인된 없음. 그 밖은 모두 오류(모름)
 func ParseGet(b []byte, rc int, want string) (Terminal, bool, error) {
 	if rc != 0 && rc != 3 && rc != 11 {
@@ -363,7 +364,7 @@ func ParseGet(b []byte, rc int, want string) (Terminal, bool, error) {
 	if err != nil {
 		return Terminal{}, false, fmt.Errorf("hc get %s: %w", want, err)
 	}
-	if t.Address != want {
+	if want != "" && t.Address != want {
 		return Terminal{}, false, fmt.Errorf("hc get %s: 응답 주소가 %s", want, t.Address)
 	}
 	if rc == 11 {
