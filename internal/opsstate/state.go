@@ -214,6 +214,7 @@ type Thresholds struct {
 	IdleMin        int     // 빈 자리가 있는데 대기 줄이 이만큼(분) 넘게 기다리면(손잡이 idle)
 	WaitMin        int     // 감사 자리 없음·병합 줄 안 움직임이 이만큼(분) 넘으면(손잡이 advise_wait)
 	SlowMin        int     // 병합기의 지금 착지가 이만큼(분) 넘으면 병합 줄이 느림(손잡이 advise_merge_slow)
+	PinMin         int     // --only로 묶인 기계가 모두 상한이라 이만큼(분) 못 뜬 대기 줄(손잡이 advise_pinned, 0이면 끔)
 }
 
 // minutesRe: 단계 글의 경과 분(「감사 대기(자리 없음 N분)」) — 차수(「N번째」)·sha는 판단 칸이라 남긴다(감사 atozipa 중간 1)

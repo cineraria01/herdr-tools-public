@@ -59,6 +59,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 겹침](docs/hc-fill/overlap.md)
 - [hc-fill: 주인 지휘](docs/hc-fill/owner.md)
 - [hc-fill: 주차](docs/hc-fill/park.md)
+- [hc-fill: 묶인 기계](docs/hc-fill/pinned.md)
 - [hc-fill: PR 거울](docs/hc-fill/pr.md)
 - [hc-fill: 우선순위](docs/hc-fill/priority.md)
 - [hc-fill: 대기열 파일](docs/hc-fill/queue.md)

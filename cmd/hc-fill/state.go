@@ -65,7 +65,8 @@ func stateNotable(s opsstate.State, f opsstate.Facts, th opsstate.Thresholds) []
 func stateThresholds() opsstate.Thresholds {
 	return opsstate.Thresholds{StageMin: knobInt("state_stage"),
 		SkewHi: float64(knobInt("state_hot")) / 100, SkewLo: float64(knobInt("state_cool")) / 100,
-		IdleMin: knobInt("idle"), WaitMin: knobInt("advise_wait"), SlowMin: knobInt("advise_merge_slow")}
+		IdleMin: knobInt("idle"), WaitMin: knobInt("advise_wait"), SlowMin: knobInt("advise_merge_slow"),
+		PinMin: knobInt("advise_pinned")}
 }
 
 // stateLoadFresh: 기계 부하를 읽은 때가 마지막 바퀴 끝에서 이 초 안이면 그 바퀴 값
@@ -379,6 +380,9 @@ func stateWaitWhy(r Row) string {
 	}
 	if x := lsFirst(DATA+"/need.tsv", name); x != nil {
 		return "필요 " + x.F(ndNeed)
+	}
+	if w, _ := pinOf(name, r.F(qRID)); w != "" {
+		return "묶인 기계 " + w
 	}
 	if a := r.F(qAfter); a != "" && a != "-" {
 		return "선행 " + a

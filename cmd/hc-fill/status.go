@@ -21,12 +21,16 @@ type stIn struct {
 	Last         Row    // last.tsv 줄(레인 상태 sha8 시각 한줄 …) — 없으면 nil
 	Aud          string // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
 	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
+	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
 }
 
 // stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
 func stStage0(in stIn) string {
 	switch in.State {
 	case "wait":
+		if in.Pin != "" { // 선행은 들어갔다 — 「선행 기다림」이 아니라 진짜 까닭(ht-advise-only-stuck)
+			return "대기(묶인 기계 " + in.Pin + ")"
+		}
 		if in.Early == "parked" {
 			return "대기(주차 — 선행 기다림)"
 		}
@@ -261,6 +265,9 @@ func statusCmd(args []string) {
 	for _, r := range rows {
 		name, m, addr := r.F(qName), r.F(qMach), r.F(qAddr)
 		in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: lsFirst(DATA+"/last.tsv", name)}
+		if in.State == "wait" {
+			in.Pin, _ = pinOf(name, r.F(qRID))
+		}
 		if in.State == "up" {
 			in.Live = stLive(terms, termsOK, conn, connKnown, addr, name)
 			if r.F(qAudit) == "auto" {

@@ -71,6 +71,7 @@ var Defs = []Def{
 	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔)"},
 	{Name: "advise_spec_fresh", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "병합기가 기다리는 추측 검증(spec-<아이디 8> 터미널)이 살아 있고 그 로그·작업 트리가 이만큼 안에 갱신됐으면 병합 줄 안 움직임이 아님(0이면 끔 — 추측 기다림을 따로 보지 않음)"},
 	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
+	{Name: "advise_pinned", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "--only로 묶인 기계가 모두 상한·멈춤이라 이만큼 못 뜬 대기 줄이 있고 다른 기계에 빈 자리가 있으면 주인 지휘에 손댈 것(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
 	{Name: "deploy_grace", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "마지막 착지 뒤 이만큼은 배포 밀림을 손댈 것으로 안 침(배포 도는 중·착지 뒤 명령 차례 남음도 안 침, 0이면 착지 시각은 안 봄)"},
 	{Name: "onland_retry_wait", Tool: "hc-fill", Default: "10", Min: 0, Max: 120, Unit: "분", Desc: "착지 뒤 명령이 종료 75(일시 실패 — 다른 herdr-sync가 돎 등)면 이만큼까지 30초마다 다시 돌림(0이면 안 다시, 바로 막힘)"},

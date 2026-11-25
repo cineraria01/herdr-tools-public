@@ -27,7 +27,7 @@ func launchRows() {
 	tickMark("load")
 	loadTick()
 	NDOLD, NDNOW = readLines(DATA+"/need.tsv"), nil
-	ELIST, UPNOW, ECAPHIT, ECAPM = "", "", false, ""
+	ELIST, UPNOW, ECAPHIT, ECAPM, PINNOW = "", "", false, "", nil
 	SEENOFF = nil
 	for _, r := range readRows(DATA + "/seen.tsv") {
 		if r.F(snMach) != "" && r.F(snMach) != LOCAL && !connHas(r.F(snMach)) {
@@ -62,6 +62,7 @@ func launchRows() {
 				fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 			}
 		}
+		pinSave(time.Now())
 	}
 	loadEnd(time.Now())
 	tickMark("ownfinish")
@@ -347,6 +348,9 @@ func waitRow(r Row) {
 	}
 	if !placed && !bad {
 		say("자리 없음 %s: 대기", name)
+		if ONLYFULL != "" && !GOTADDR {
+			PINNOW = append(PINNOW, Row{name, rid, "", ONLYFULL})
+		}
 	}
 }
 

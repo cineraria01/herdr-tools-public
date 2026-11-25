@@ -257,6 +257,8 @@ func mwhy(m, w string) {
 func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[string]string, full string) {
 	repos = map[string]string{}
 	nstatic := 0
+	var pin []string // 묶인 기계(--only)가 상한·멈춤으로 빠진 까닭 — 정적 후보가 모두 그렇면 ONLYFULL(pinned.go)
+	defer func() { pinFinish(only, isa, nstatic, pin, cands) }()
 	for _, mc := range machines() {
 		m := mc.Name
 		if only != "-" && !inlist(m, only) {
@@ -296,6 +298,7 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 		}
 		if !isa && machPaused(m) { // 실행 중 멈춤(hc-fill machine --pause) — 떠 있는 레인의 감사는 그대로 띄운다
 			mwhy(m, "멈춤(조정)")
+			pin = append(pin, m+" 멈춤")
 			continue
 		}
 		own := 0
@@ -306,6 +309,7 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 			if err == nil {
 				full = m
 				mwhy(m, "자리 참")
+				pin = append(pin, pinNote(m, "상한"))
 			}
 			continue
 		}
@@ -313,6 +317,7 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 		if !isa && mc.LCap != "-" {
 			if lc, err := strconv.Atoi(mc.LCap); err != nil || lanesOn(m) >= lc {
 				mwhy(m, "레인상한 참")
+				pin = append(pin, pinNote(m, "상한"))
 				continue
 			}
 		}

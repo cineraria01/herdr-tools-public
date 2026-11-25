@@ -79,11 +79,18 @@ func adviseWait(r Row, now time.Time) opsstate.Wait {
 			w.Keys = strings.Split(k, ",")
 		}
 	}
-	only := dash(r.F(qOnly))
+	only, nd := dash(r.F(qOnly)), needs(r.F(qBrief)) // 지시문 「필요:」 능력 없는 기계엔 안 뜬다(placeCands와 같게 — 감사 atp22es 낮음 1)
 	for _, mc := range machines() {
-		if repoOf(p, mc.Name) != "" && (only == "-" || inlist(mc.Name, only)) {
+		switch {
+		case repoOf(p, mc.Name) == "" || !mhas(mc.Name, nd):
+		case only == "-" || inlist(mc.Name, only):
 			w.Can = append(w.Can, mc.Name)
+		default:
+			w.Wider = append(w.Wider, mc.Name)
 		}
+	}
+	if why, since := pinOf(name, r.F(qRID)); why != "" && since > 0 {
+		w.Pin, w.PinS = why, ptrI(int(max(0, now.Unix()-since)))
 	}
 	return w
 }
@@ -180,6 +187,29 @@ func adviseTick(now time.Time) {
 			now1[k] = true
 		}
 	}
+	// 묶인 기계(pinned)는 그 줄의 주인 지휘에 따로 한 번(ht-advise-only-stuck) — 주인을 모르면 다른 항목과 함께
+	var rest []opsstate.Item
+	for _, it := range fresh {
+		lane, ok := strings.CutPrefix(it.Key, "pinned:")
+		owner := "-"
+		if ok {
+			for _, r := range qRows() {
+				if r.F(qName) == lane {
+					owner = dash(r.F(qOwner))
+				}
+			}
+		}
+		if owner == "-" {
+			rest = append(rest, it)
+			continue
+		}
+		if hcLaneReport("중간", strings.Join(strings.Fields("손댈 것: "+it.Summary()), " "), "hc-fill-advise", owner, "") == 0 {
+			keep = append(keep, it.Key)
+		} else {
+			say("손댈 것 알림 실패(hc-lane report --to %s) — 다음에 다시", owner)
+		}
+	}
+	fresh = rest
 	if len(fresh) > 0 {
 		msg := "손댈 것: " + fresh[0].Summary()
 		if len(fresh) > 1 {

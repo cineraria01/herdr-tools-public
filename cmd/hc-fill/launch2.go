@@ -352,7 +352,7 @@ func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, boo
 // 낮은 기계부터(모르거나 비슷하면 machine 차례 — steer, loadsteer.go. 자동 감사 줄은 machine 차례 그대로).
 // placed 띄움 · bad 지시문을 못 읽어 이 바퀴엔 그만. stuck을 고쳐 적는다. 쓰기 줄은 터미널 주소를 받은 때 실행 기록에 적고 GOTADDR
 func place(lane, p, brief, only, reply, owner, after string) {
-	placed, bad, GOTADDR = false, false, false
+	placed, bad, GOTADDR, ONLYFULL = false, false, false, ""
 	if why := rejHeld(lane, owner, reply); why != "" { // 띄우기 거절로 멈춘 줄 — 지휘가 retry·edit·rm 할 때까지(reject.go)
 		say("멈춤 %s: 띄우기 거절 — %s (hc-fill retry %s)", lane, why, lane)
 		bad = true

@@ -257,6 +257,12 @@ const (
 	loSent  = 9
 	loNF    = 9
 
+	// 묶인 기계 pinned.tsv 「레인 줄ID 처음 본 초 까닭」(pinned.go)
+	pnLane  = 1
+	pnRID   = 2
+	pnSince = 3
+	pnWhy   = 4
+
 	// 기계 닿지 않음 reach.tsv(reachRow 칸 차례)
 	rcMach    = 1
 	rcState   = 2

@@ -76,6 +76,9 @@ type Wait struct {
 	Solo          bool     // 단독 대기
 	Reject        string   // 띄우기 거절 까닭
 	Can           []string // 띄울 수 있는 기계(저장소 있음·기계 제한). nil = 모름(모든 기계로 본다)
+	Wider         []string // 기계 제한 밖이지만 저장소가 있는 기계(--only로 넓힐 수 있는 곳)
+	Pin           string   // 묶인 기계가 모두 상한·멈춤이라 못 뜬 까닭(바퀴가 pinned.tsv에 적음), 아니면 빈 값
+	PinS          *int     // 그렇게 된 지 초
 }
 
 func shq(s string) string {
@@ -305,6 +308,8 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 				Next:     []string{"hc-fill edit " + w.Lane + " --after - --why '선행 풀기(hc-fill advise)'"}, Sure: SureJudge})
 		}
 	}
+
+	o = append(o, pinnedItems(s, f, th, free, freeFor)...) // 묶인 기계(advise_pinned.go)
 
 	// 레인: 터미널 error·blocked·done(보고 없음) · 막힘 · 감사 자리 없음 · 같은 단계에 오래 — 레인마다 하나
 	for _, l := range s.Lanes {
