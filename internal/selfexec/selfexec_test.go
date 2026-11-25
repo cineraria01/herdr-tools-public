@@ -81,7 +81,7 @@ func TestReexecReal(t *testing.T) {
 	if got := tick(); got != "still" { // ② 안 바뀜
 		t.Fatalf("안 바뀐 판에서 %q", got)
 	}
-	put(t, bin, "#!/bin/sh\nprintf 'v2|%s|%s|%s\\n' \"$*\" \"$SELFEXEC_MARK\" \"$(pwd -P)\"\nexit 0\n")
+	put(t, bin, "#!/bin/sh\n[ \"$1\" != --version ] || { echo 'tool (Go v2)'; exit 0; }\nprintf 'v2|%s|%s|%s\\n' \"$*\" \"$SELFEXEC_MARK\" \"$(pwd -P)\"\nexit 0\n")
 	if got := tick(); got != "still" { // 처음 본 바뀜 — 다 쓰였는지 한 바퀴 더 본다
 		t.Fatalf("처음 본 바뀜에 바로 exec했다: %q", got)
 	}
@@ -108,6 +108,7 @@ func fake(t *testing.T, err error) (*Self, string, *int, *strings.Builder) {
 	s := at("시험", p, func(l string) { log.WriteString(l + "\n") })
 	n := 0
 	s.exec = func(bin string, argv, env []string) error { n++; return err }
+	s.probe = func(string) (string, error) { return "tool (Go 새 판)", nil } // 새 판이 뜬다(내용이 가짜라 실제로는 못 띄움)
 	return s, p, &n, &log
 }
 

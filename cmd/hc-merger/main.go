@@ -24,6 +24,7 @@ import (
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/selfexec"
 	"herdr-tools/internal/version"
 )
 
@@ -396,7 +397,14 @@ func residentMain(args []string) {
 	} else {
 		fmt.Printf("hc-lane merger: %s (%s) 큐를 본다 — 빈 바퀴 %d초\n", top, base, tick)
 	}
+	// 바깥 고리도 새 판으로(ht-resident-reexec — 일꾼은 바퀴마다 새 판이지만 이 고리 코드가 바뀌면 손으로 다시 띄울 때까지 옛 판이었다).
+	// 바퀴 사이(일꾼·쉼이 끝난 뒤)라 쥔 자식이 없다. 잠금은 exec 때 풀리고 새 판이 시작하며 다시 쥔다
+	var self *selfexec.Self // --once는 상주가 아니다(nil이면 Check가 그냥 지나감)
+	if !once {
+		self = selfexec.New("hc-lane merger", func(l string) { fmt.Printf("hc-lane merger: %s\n", l) })
+	}
 	for fails := 0; ; {
+		self.Check()
 		pause, rc := tick, 127
 		if exe := workerExe(); exe != "" {
 			c := exec.Command(exe, "--round", strconv.Itoa(os.Getpid()), top, base, mj, mwr, ml, mme, strconv.Itoa(batch))

@@ -128,6 +128,8 @@ var Defs = []Def{
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},
 	{Name: "sweep_r3", Tool: "hc-sweep", Default: "360", Min: 1, Max: 43200, Unit: "분", Remote: true, Desc: "R3: 이만큼 쉬면 닫음"},
+	// 상주 고리가 새 판으로 스스로 넘어가기(2026-11-25 ht-resident-reexec, docs/go/selfexec.md) — 그 기계의 저장 파일만 읽는다(새 판을 본 바퀴에)
+	{Name: "resident_reexec", Tool: "selfexec", Default: "1", Min: 0, Max: 1, Desc: "상주 고리(hc-lane watch·merger, hc-fill watch, herdr-balance --watch, hc-job-server)가 새로 깔린 판으로 스스로 넘어간다(0이면 끔 — 손으로 다시 띄울 때까지 옛 판)"},
 	{Name: "sweep_resident_grace", Tool: "hc-sweep", Default: "5", Min: 1, Max: 1440, Unit: "분", Remote: true, Desc: "새 판이 깔리고(상주가 뜨고) 이만큼 지나도 옛 판·판 모름인 상주에 운영 사건 hc-stale-resident"},
 }
 

@@ -160,7 +160,7 @@ func macrow() {
 		p = append(p, fmt.Sprintf("저장소보다 새로움 %d개 (%s) — 커밋 안 됨?", len(RAH), few(RAH)))
 	}
 	var d []string
-	for _, w := range []string{"지움", "바이너리"} {
+	for _, w := range []string{"지움", "바이너리", "상주"} {
 		for _, x := range rdiff {
 			if x == w {
 				d = append(d, w)

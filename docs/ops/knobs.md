@@ -96,7 +96,8 @@
   - 이 기계에 저장 파일이 있으면(지휘 기계) 그 파일.
   - 없으면 개인 설정 `sweep.knobs_repo`(이 기계의 클론 경로)가 있을 때만 그 origin의 `refs/herdr/knobs`(ls-remote 한 번, 바뀐 때만 fetch).
   - 둘 다 없거나 못 읽으면 기본이다 — 다른 기계에서 문턱을 바꾸려면 그 기계 설정에 `sweep.knobs_repo`를 둔다.
-- `sweep_resident_grace`(분, 기본 5): 상주 판 점검의 유예 — 새 판이 깔린 지도, 상주가 뜬 지도 이만큼 지나야 옛 판·판 모름을 알린다([상주 판 점검](../hc-sweep/resident.md)). 같은 곳에서 읽는다.
+- `sweep_resident_grace`(분, 기본 5): 상주 판 점검의 유예 — 새 판이 깔린 지도, 상주가 뜬 지도 이만큼 지나야 옛 판·판 모름을 알린다([상주 판 점검](../hc-sweep/resident.md)). 같은 곳에서 읽는다. `herdr-sync --check`의 상주 확인도 이 유예를 쓴다(맥 저장 파일).
+- `resident_reexec`(0|1, 기본 1): 상주 고리가 새로 깔린 판으로 스스로 넘어간다 — 0이면 넘어가지 않고 손으로 다시 띄울 때까지 옛 판([selfexec](../go/selfexec.md)). 상주가 새 판을 본 바퀴에 **그 기계의** 저장 파일만 읽는다(원격 참조 없음 — 다른 기계에서 끄려면 그 기계 `~/.local/state/herdr-ops/knobs.tsv`).
 
 ## 옮기지 않은 앞 레인 스위치
 

@@ -425,6 +425,7 @@ func syncMachines(machines []string, mq *qres) {
 				diffs = append(diffs, "지움")
 			}
 		}
+		residentNote(m, &diffs) // 바이너리를 다 깐 뒤 — 옛 판으로 도는 상주(resident.go)
 		row(m, diffs, conf)
 	}
 	// 맥에서 지울 것 (지움 줄은 대상이 무엇이든 맥을 포함한다). 맥 바이너리를 다 못 깔았으면 미룬다
@@ -442,6 +443,9 @@ func syncMachines(machines []string, mq *qres) {
 			warn("%s %s 지우기 실패", LOCAL, k)
 			rdiff = append(rdiff, "지움")
 		}
+	}
+	if macBins || check {
+		residentNote(LOCAL, &rdiff)
 	}
 	saved := rows
 	rows = ""

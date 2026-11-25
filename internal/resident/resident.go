@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,7 +78,7 @@ type Report struct {
 }
 
 // Kind: 상주 표 한 줄 — Who는 selfexec.New에 준 이름(표시의 who), Bin은 실행 파일 이름, Match는 그 바이너리의 인자 가운데 상주인 꼴.
-// hc-lane merger(병합기 상주)는 바퀴마다 일꾼을 새 경로로 띄워 늘 새 판을 타서, hc-sweep·hc-core-relaunch는 단발이라 표에 없다(docs/go/selfexec.md)
+// hc-sweep·hc-core-relaunch는 단발이라 표에 없다(docs/go/selfexec.md)
 type Kind struct {
 	Who, Bin string
 	Match    func(args []string) bool
@@ -100,6 +101,13 @@ var Kinds = []Kind{
 		return false
 	}},
 	{"hc-job-server", "hc-job-server", func([]string) bool { return true }},
+	// 병합기 바깥 고리(hc-lane merger → hc-merger --repo …). 바퀴 일꾼(--round)·추측 일꾼·한 번(--once)은 상주가 아니다
+	{"hc-lane merger", "hc-merger", func(a []string) bool {
+		if len(a) < 2 || a[1] != "--repo" && a[1] != "--tick" && strings.HasPrefix(a[1], "-") {
+			return false // --round·--spec-verify·--version … 하위 명령
+		}
+		return slices.Contains(a, "--repo") && !slices.Contains(a, "--once")
+	}},
 }
 
 // KindOf: 인자(argv[0]의 이름 + 하위 명령)로 본 상주 종류

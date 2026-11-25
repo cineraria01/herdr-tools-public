@@ -169,6 +169,27 @@ func TestKindsCoverSelfexecCallers(t *testing.T) {
 	}
 }
 
+// 병합기 바깥 고리만 상주(ht-resident-reexec) — 바퀴 일꾼·추측 일꾼·한 번은 아니다
+func TestKindMerger(t *testing.T) {
+	for _, c := range []struct {
+		args string
+		want bool
+	}{
+		{"/u/.local/bin/hc-merger --repo /u/m main", true},
+		{"/u/.local/bin/hc-merger main --repo /u/m --tick 5", true},
+		{"/u/.local/bin/hc-merger --tick 5 --repo /u/m main", true},
+		{"/u/.local/bin/hc-merger --repo /u/m --once main", false},
+		{"/u/.local/bin/hc-merger --round 123 /u/m main", false},
+		{"/u/.local/bin/hc-merger --spec-verify --repo /u/m", false},
+		{"/u/.local/bin/hc-merger --version", false},
+	} {
+		k, ok := KindOf(strings.Fields(c.args))
+		if ok != c.want || ok && k.Who != "hc-lane merger" {
+			t.Errorf("%s: %v %q, 바람 %v", c.args, ok, k.Who, c.want)
+		}
+	}
+}
+
 func TestEnvOf(t *testing.T) {
 	term, label := EnvOf("/u/bin/hc-job-server PATH=/bin HC_TERMINAL_ID=t4kk XPC_SERVICE_NAME=com.example.jobs HOME=/u")
 	if term != "t4kk" || label != "com.example.jobs" {
