@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -62,6 +63,28 @@ func hangLastTurn(scr string) string {
 		}
 	}
 	return ""
+}
+
+// hangBgLive: hang.tsv 종류 — 마지막 턴 끝 줄의 배경 셸을 기다리고 그 셸이 살아 있음(알리지 않음)
+const hangBgLive = "b-live"
+
+// hangBgFresh: hang.tsv가 이보다 오래면(run 바퀴가 안 돎·hang_min 0) 배경 일 기다림을 모름으로 본다
+const hangBgFresh = 10 * time.Minute
+
+// hangBgWait <레인> <주소>: run 바퀴가 그 레인 터미널이 살아 있는 배경 셸을 기다린다고 적었나(hang.tsv b-live) — 상태 한 장·status가
+// 「작업 중(done)」을 「배경 일 기다림」으로 세어 「끝났는데 보고 없음」을 내지 않는다(ht-advise-done-noreport, 2026-11-26 「1 shell still running」).
+// 셸이 죽었으면 종류 b라 거짓 — 그대로 알린다
+func hangBgWait(n, a string) bool {
+	fi, err := os.Stat(DATA + "/hang.tsv")
+	if err != nil || time.Since(fi.ModTime()) > hangBgFresh {
+		return false
+	}
+	for _, r := range readRows(DATA + "/hang.tsv") {
+		if r.F(hgLane) == n && r.F(hgAddr) == a && r.F(hgKind) == hangBgLive {
+			return true
+		}
+	}
+	return false
 }
 
 // hangFP <화면 윗부분>: 바뀜 비교용 지문
@@ -145,7 +168,8 @@ func hangLane(q Row, st string, p Row, now time.Time, lim int) Row {
 	case !ok:
 		return row
 	case sh > 0 && kind == "b":
-		return nil // 배경 셸이 살아 있다 — 기다리는 것이 맞다
+		row[hgKind-1] = hangBgLive // 배경 셸이 살아 있다 — 기다리는 것이 맞다. 상태 한 장이 이 줄로 「배경 일 기다림」을 센다(hangBgWait)
+		return row
 	case sh > 0:
 		return row // 도구가 도는 중(긴 검증 등) — 생각 중 멈춤이 아니다
 	case kind == "b" && now.Unix()-since < hangShellGrace:

@@ -22,6 +22,7 @@ type stIn struct {
 	Aud          string // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
 	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
 	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
+	Bg           bool   // 살아 있는 배경 셸을 기다림(hangBgWait)
 }
 
 // stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
@@ -60,6 +61,8 @@ func stStage0(in stIn) string {
 		return "완료 " + sha
 	case strings.HasPrefix(in.Live, "?"):
 		return "모름(" + in.Live[1:] + ")"
+	case in.Live != "" && in.Bg:
+		return "배경 일 기다림(" + in.Live + ")"
 	case in.Live != "":
 		return "작업 중(" + in.Live + ")"
 	}
@@ -270,6 +273,7 @@ func statusCmd(args []string) {
 		}
 		if in.State == "up" {
 			in.Live = stLive(terms, termsOK, conn, connKnown, addr, name)
+			in.Bg = hangBgWait(name, addr)
 			if r.F(qAudit) == "auto" {
 				in.Aud = anote(name)
 			}

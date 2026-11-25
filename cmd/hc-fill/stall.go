@@ -145,10 +145,11 @@ func uniqOK(a []string) []string {
 func stallTick() {
 	// 병합기 살아 있음(mergeralive.go)을 먼저 — stallMerger가 「큐에 있음 = 병합기가 맡음」으로 보는 것은 병합기가 살아 있을 때만 맞다
 	mergerAliveTick()
-	unreachTick()            // 레인 있는 기계가 오래 닿지 않음(unreach.go)
+	unreachTick() // 레인 있는 기계가 오래 닿지 않음(unreach.go)
+	// 멈춤 판정을 손댈 것보다 먼저 — 턴이 끝난 첫 바퀴에 hang.tsv b-live(배경 일 기다림)가 아직 없어 lane-done이 나갔다(감사 atp2gk8-mt7ny8 중간)
+	hangTick(time.Now())     // 「생각 중」에 멈춤·배경 셸이 소리 없이 죽음(hang.go)
 	adviseTick(time.Now())   // 지금 손댈 것에 새 항목이면 사건 한 번(advise.go)
 	opsAgentTick(time.Now()) // 켜져 있고 새 손댈 것이 있으면 운영 에이전트 한 바퀴, 도는 것은 끝을 본다(opsagent.go)
-	hangTick(time.Now())     // 「생각 중」에 멈춤·배경 셸이 소리 없이 죽음(hang.go)
 	lim := auMinutes("done_stall", 60)
 	if lim == 0 || dry || EVBAD || !nonEmpty(Q) {
 		return

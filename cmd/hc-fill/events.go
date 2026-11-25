@@ -66,6 +66,28 @@ func sublast(n, a string) string {
 	return joblast(n, a, "제출")
 }
 
+// evLast <레인> <주소>: last.tsv에 적을 사건 — 그 실행의 마지막 사건. 제출 뒤 정리 중간 보고가 끼어도 같은 실행의 병합 결과(착지·막힘)를,
+// 결과가 아직 없고 그 중간이 제출한 커밋의 것(sha 같음·없음)이면 그 제출을 — 착지·반송을 기다리는 레인이 「작업 중(done)」으로 읽혀
+// 「끝났는데 보고 없음」이 났다(ht-advise-done-noreport, 2026-11-25 「착지 안 됨」 중간 메모). 다른 커밋의 중간은 제출 뒤 이어 간 일이라 그대로
+func evLast(n, a string) string {
+	l := joblast(n, a, "")
+	st := evF(l, evState)
+	if st != "제출" && st != "중간" {
+		return l
+	}
+	subm := sublast(n, a)
+	if subm == "" {
+		return l
+	}
+	if r := mgres(n, evSid(subm)); r != "" {
+		return r
+	}
+	if s, ss := evF(l, evSHA), evF(subm, evSHA); st == "중간" && (dash(s) == "-" || ss != "" && (strings.HasPrefix(s, ss) || strings.HasPrefix(ss, s))) {
+		return subm
+	}
+	return l
+}
+
 // evSortU: awk 'NF' | sort -u (바이트 차례)
 func evSortU(xs []string) []string {
 	var o []string
@@ -150,21 +172,10 @@ func evTick() {
 			}
 			continue
 		}
-		l := joblast(n, a, "")
+		l := evLast(n, a)
 		if l == "" {
 			b.WriteString(strings.Join([]string{n, "-", "-", "-", "-", enow, "fresh", rid}, "\t") + "\n")
 			continue
-		}
-		// 제출 뒤 정리 중간 보고가 끼어도 같은 실행의 병합 결과를 보인다
-		subm := ""
-		switch evF(l, evState) {
-		case "제출", "중간":
-			subm = sublast(n, a)
-		}
-		if subm != "" {
-			if r := mgres(n, evSid(subm)); r != "" {
-				l = r
-			}
 		}
 		eh := "?"
 		if t, err := time.Parse("2006-01-02T15:04:05Z", evF(l, evTime)); err == nil {

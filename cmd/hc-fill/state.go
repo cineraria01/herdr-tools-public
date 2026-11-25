@@ -159,7 +159,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 			continue
 		}
 		f.Addr[name] = r.F(qAddr)
-		in := stIn{State: st, Early: r.F(qEarly), Last: last[name], Pos: -1}
+		in := stIn{State: st, Early: r.F(qEarly), Last: last[name], Pos: -1, Bg: hangBgWait(name, r.F(qAddr))}
 		in.Live = stLive(terms, termsOK, conn, connKnown, r.F(qAddr), name)
 		if r.F(qAudit) == "auto" {
 			in.Aud = anote(name)

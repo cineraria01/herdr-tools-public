@@ -25,7 +25,7 @@
 | `rejected` | 띄우기 거절로 멈춘 줄 | 대기 줄에 띄우기 거절 기록 | `hc-fill retry <레인> --why …`(까닭을 고친 뒤) | 판단 필요 |
 | `lane-error` | 멈춘 레인 | 터미널 상태 error | `hc read <주소>` · `hc-fill nudge <레인> --why …`(맨 `hc send`가 아니라 — 주소의 터미널 이름 대조·이미 보고한 실행 거절·`nudge_every` 되풀이 막기를 거친다) | 판단 필요 |
 | `lane-blocked` | 답을 기다리는 레인 | 터미널 상태 blocked(물음·권한 창) | `hc read <주소>` | 판단 필요 |
-| `lane-done` | 끝났는데 보고 없음 | 터미널 상태 done인데 마지막 사건이 완료·착지가 아님 | `hc read <주소>` | 판단 필요 |
+| `lane-done` | 끝났는데 보고 없음 | 터미널 상태 done인데 마지막 사건이 완료·착지가 아님. 제출 뒤 착지 기다림(제출 뒤 그 커밋의 중간 메모 — [마지막 보고](../hc-fill/last-report.md))과 살아 있는 배경 셸 기다림(단계 「배경 일 기다림」 — [멈춘 레인](../hc-fill/hang.md))은 빼고, 배경 셸이 죽었으면 그대로 낸다 | `hc read <주소>` | 판단 필요 |
 | `lane-escalated` | 막힌 레인 | 단계가 막힘(감사·도구가 지휘로 넘긴 것) | `hc read <주소>` | 판단 필요 |
 | `audit-starve` | 굶는 감사 | 단계 「감사 대기(자리 없음 N분)」에서 N이 `advise_wait` 이상 | `hc-fill machine <기계> --seats <지금+1> --for 60 --why …` | 판단 필요 |
 | `lane-long` | 같은 단계에 오래 | 터미널이 살아 있는(또는 모르는) 레인이 같은 단계에 `state_stage`분 — 터미널이 끝난 줄(완료로 보고하고 스스로 착지·정리한 레인, 착지 없는 검토 레인)은 자리를 안 잡아 빼고, 완료 뒤 멈춤은 `done_stall` 사건이 본다 | `hc read <주소>` | 판단 필요 |
