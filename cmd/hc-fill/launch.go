@@ -386,9 +386,7 @@ func tryOldBusy(name, rid string) bool {
 	return false
 }
 
-// unsureWarn: 미확정 시도 기다림이 이만큼 바퀴 이어지면 키로 한 번 막힘 사건(fill/R-4M01 — 사건 없이 끝없이 wait였다)
-const unsureWarn = 5
-
+// 미확정 시도 기다림이 손잡이 unsure_warn 바퀴 이어지면 키로 한 번 막힘 사건(fill/R-4M01 — 사건 없이 끝없이 wait였다)
 // tryUnsure: 같은 줄 ID의 미확정 시도(주소 칸 ? — 띄우기 시간 넘김·주소 못 읽음·띄운 직후 죽음)가 있으면 그 기계가 끊겼거나
 // 그 시도일 수 있는 터미널이 보이는 동안 기다린다(참 — 다른 기계에 또 띄우지 않는다, gofix-fill F01·E02). 그 시도일 수 있는 것:
 // 같은 이름, 받은 주소(8칸 — hc-lane 종료 8 등에서 받음), 주소를 못 받았으면 라벨 목록(hc-lane=1)의 이름 모를 터미널(재감사3
@@ -415,7 +413,7 @@ func tryUnsure(name, rid string) bool {
 				return x.Set(trGot, a).Set(trWaits, strconv.Itoa(n))
 			}
 			return x
-		}) == 0 && n >= unsureWarn { // 키가 같으면 hc-lane이 한 번만 남긴다
+		}) == 0 && n >= knobInt("unsure_warn") { // 키가 같으면 hc-lane이 한 번만 남긴다
 			aesc(name, qown(name), fmt.Sprintf("미확정 시도 %s @%s 기다림 %d바퀴 — 떴는지 확정 못 함(그 기계 터미널을 확인·정리)", name, m, n), "hf:unsure:"+rid)
 		}
 		return true

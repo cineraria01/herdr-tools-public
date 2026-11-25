@@ -22,8 +22,8 @@ func (m *M) defer_(why string) {
 	m.deferred = why
 }
 
-// deferNote: 같은 까닭의 「다음 바퀴에」가 deferAlarm 바퀴 이어지면 막힘 사건을 한 번 낸다(G4 — 영구 실패가 사건 없이 75만 되풀이하지 않게).
-// 바퀴가 쉬지 않고 끝나면(다른 까닭 포함) 센 것을 지운다
+// deferNote: 같은 까닭의 「다음 바퀴에」가 손잡이 merger_defer_alarm(기본 deferAlarm) 바퀴 이어지면 막힘 사건을 한 번 낸다(G4 — 영구
+// 실패가 사건 없이 75만 되풀이하지 않게). 바퀴가 쉬지 않고 끝나면(다른 까닭 포함) 센 것을 지운다. 시작 단계(startWait)는 손잡이를 읽기 전이라 기본
 const deferAlarm = 10
 
 func (m *M) deferNote() {
@@ -47,7 +47,7 @@ func (m *M) deferNote() {
 	if since == "" {
 		since = strconv.FormatInt(time.Now().Unix(), 10)
 	}
-	if n >= deferAlarm && !sent {
+	if n >= intSetting("merger_defer_alarm", rk["merger_defer_alarm"], deferAlarm, 1) && !sent {
 		h := fnv.New32a()
 		h.Write([]byte(m.top + "\t" + m.deferred))
 		sent = reportBlockedKey(fmt.Sprintf("병합기가 같은 까닭으로 %d바퀴째 쉼: %s (클론 %s)", n, m.deferred, m.top),

@@ -73,15 +73,14 @@ func probe(bin string) (string, error) {
 	return l, nil
 }
 
-// knobOff: 이 기계 손잡이 resident_reexec=0(살아 있을 때만). 못 읽으면 켬 — 넘어가기는 안전한 기본이다
+// knobOff: 이 기계 resident_reexec=0(손잡이 > 설정 파일 > 기본). 손잡이 저장 파일을 못 읽으면 켬 — 넘어가기는 안전한 기본이다
 func knobOff() bool {
 	h, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	es, err := knob.Load(knob.Path(h))
-	e, ok := es["resident_reexec"]
-	return err == nil && ok && e.Live(time.Now()) && e.Value == "0"
+	v, err := knob.Local(h, "resident_reexec", nil, time.Now())
+	return err == nil && v == "0"
 }
 
 // Check: 실행 파일이 바뀌었고 그 바뀐 stat이 두 바퀴 연속 같으면(손 cp·제자리 쓰기로 반쯤 쓴 판을 exec하지 않게) 새 판으로 exec.

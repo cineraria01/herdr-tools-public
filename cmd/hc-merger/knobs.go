@@ -1,8 +1,10 @@
 package main
 
 // 공통 손잡이(knobs-migrate, docs/ops/knobs.md): 지휘 기계의 hc-fill이 올린 원격 참조 refs/herdr/knobs를 바퀴의 ls-remote 한 번에 함께
-// 읽는다(조회를 늘리지 않는다 — 그 SHA가 바뀐 때만 cat-file, 없으면 fetch 한 번). 우선순위: 손잡이 > 일지 폴더 파일(옛 길) > 환경
-// 변수(·--tick) > 기본. 참조가 없거나 못 읽으면 손잡이가 없는 것(지금 값 그대로). 바퀴 일꾼은 바퀴마다 새 프로세스라 다음 바퀴에 먹고,
+// 읽는다(조회를 늘리지 않는다 — 그 SHA가 바뀐 때만 cat-file, 없으면 fetch 한 번). 참조에는 지휘 기계가 손잡이 > 설정 파일로 푼 값이
+// 실린다(프로젝트 몫). 우선순위: 참조 > 이 기계 손잡이 설정 파일(ht-config-knobs — 참조에 없는 값) > 일지 폴더 파일(옛 길) > 환경
+// 변수(·--tick) > 기본. 참조가 없거나 못 읽으면 설정 파일, 그다음 지금 값 그대로. 설정 파일의 거절한 줄은 여기서 알리지 않는다
+// (바퀴마다 새 프로세스라 줄이 쌓인다 — herdr-tools-config knobs-lint·hc-fill이 알린다). 바퀴 일꾼은 바퀴마다 새 프로세스라 다음 바퀴에 먹고,
 // 상주 부모의 빈 바퀴 쉼(merger_tick)은 일꾼이 남긴 <일지 폴더>/knobs.remote(SHA 한 줄 + 메시지)를 쉬기 전마다 읽는다.
 
 import (
@@ -36,8 +38,8 @@ func (m *M) loadKnobs() {
 		if sha != "" {
 			var st gitx.State
 			if msg, st = knob.ReadMsg(m.top, sha, os.Stderr); st != gitx.Yes {
-				fmt.Fprintf(os.Stderr, "hc-lane merger: 손잡이 참조 %s 를 못 읽었다 — 이번 바퀴는 손잡이 없이\n", knob.Ref)
-				rk = knob.Remote{}
+				fmt.Fprintf(os.Stderr, "hc-lane merger: 손잡이 참조 %s 를 못 읽었다 — 이번 바퀴는 손잡이 없이(설정 파일·옛 설정)\n", knob.Ref)
+				rk = knob.Remote{}.With(knob.LoadConf(knob.ConfPath(), nil))
 				return
 			}
 		}
@@ -45,7 +47,7 @@ func (m *M) loadKnobs() {
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 손잡이 사본을 못 썼다: %v\n", err)
 		}
 	}
-	rk = knob.ParseRemote(msg, now)
+	rk = knob.ParseRemote(msg, now).With(knob.LoadConf(knob.ConfPath(), nil))
 	if sha != osha {
 		fmt.Printf("hc-lane merger: 손잡이 %s\n", knobLine(rk))
 	}
@@ -82,7 +84,7 @@ func tickKnob(mj string, def int) int {
 		return def
 	}
 	_, msg, _ := strings.Cut(string(b), "\n")
-	if v, ok := knob.ParseRemote(msg, time.Now())["merger_tick"]; ok {
+	if v, ok := knob.ParseRemote(msg, time.Now()).With(knob.LoadConf(knob.ConfPath(), nil))["merger_tick"]; ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}

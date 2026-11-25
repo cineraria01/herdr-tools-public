@@ -2,7 +2,7 @@ package main
 
 // 닫는 문턱 손잡이(knobs-migrate, docs/ops/knobs.md): sweep_r1·sweep_r2·sweep_r3(분). 읽는 곳은 하나 — 이 기계에 공통 손잡이 저장 파일이
 // 있으면(지휘 기계) 그 파일, 없으면 개인 설정 sweep.knobs_repo(이 기계의 클론 경로)가 있을 때만 그 origin의 원격 참조 refs/herdr/knobs
-// (ls-remote 한 번, 바뀐 때만 fetch). 둘 다 없거나 못 읽으면 기본(30·30·360분 — 지금 값 그대로).
+// (ls-remote 한 번, 바뀐 때만 fetch). 거기 없는 값은 손잡이 설정 파일(ht-config-knobs), 그것도 없으면 기본(30·30·360분 — 지금 값 그대로).
 
 import (
 	"fmt"
@@ -40,12 +40,13 @@ func knobMinutes(vals map[string]string, name string) time.Duration {
 }
 
 // knobVals: 이번 쓸기에 살아 있는 손잡이 값(이름 → 값) — 한 번 읽어 닫는 문턱과 상주 판 점검이 함께 쓴다
+// 어느 길이든 손잡이에 없는 값은 이 기계의 손잡이 설정 파일(herdr-sync로 맞춘 같은 파일 — knob.ConfName), 그다음 기본
 func knobVals(now time.Time) map[string]string {
-	vals := map[string]string{}
+	vals := knob.Remote{}
 	if _, err := os.Stat(knob.Path(home)); err == nil {
 		es, err := knob.Load(knob.Path(home))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "hc-sweep: 손잡이를 못 읽어 기본 문턱으로: %v\n", err)
+			fmt.Fprintf(os.Stderr, "hc-sweep: 손잡이를 못 읽어 설정 파일·기본 문턱으로: %v\n", err)
 		}
 		for n, e := range es {
 			if e.Live(now) {
@@ -55,11 +56,11 @@ func knobVals(now time.Time) map[string]string {
 	} else if dir, ok := conf("sweep.knobs_repo", ""); ok && dir != "" {
 		r, st := knob.ReadRemote(dir, io.Discard, now)
 		if st == gitx.Unknown {
-			fmt.Fprintf(os.Stderr, "hc-sweep: 손잡이 참조를 못 읽어 기본 문턱으로(%s)\n", dir)
+			fmt.Fprintf(os.Stderr, "hc-sweep: 손잡이 참조를 못 읽어 설정 파일·기본 문턱으로(%s)\n", dir)
 		}
 		vals = r
 	}
-	return vals
+	return vals.With(knob.LoadConf(knob.ConfPath(), os.Stderr))
 }
 
 // r3Text: 남기는 까닭의 R3 문턱(시간으로 나뉘면 「6시간」, 아니면 「90분」)

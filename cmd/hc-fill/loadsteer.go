@@ -225,12 +225,19 @@ func machPaused(m string) bool {
 
 // machAdj: 그 기계의 살아 있는 조정(자리·멈춤) 글. 없으면 빈 글
 func machAdj(m string) string {
-	es := knobEntries()
+	es, cf := knobEntries(), knobFile()
 	now := time.Now()
 	var o []string
 	for _, k := range []string{"seats@", "pause@", "light_only@"} {
 		e, ok := es[k+m]
-		if !ok || !e.Live(now) || k == "light_only@" && e.Value != "1" {
+		if !ok || !e.Live(now) { // 손잡이가 없으면 설정 파일에 정해 둔 값
+			c, ok := cf[k+m]
+			if !ok {
+				continue
+			}
+			e = knob.Entry{Value: c.Value, By: "설정 파일", Why: c.Why}
+		}
+		if k == "light_only@" && e.Value != "1" {
 			continue
 		}
 		u := "계속"

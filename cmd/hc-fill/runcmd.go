@@ -130,7 +130,7 @@ func runCmd(args []string) {
 	}
 	// 앞 바퀴(SIGKILL로 죽음)의 자식 무리를 거두고도 소유를 모르는 채 우두머리가 도는 것이 있으면 그 자식(hc ls·herdr-balance 등이
 	// 쥔 잠금)과 겹치지 않게 이 바퀴를 미룬다(재감사 fill R-06). 다른 도구가 남긴 무리는 proc이 세지 않는다(기록의 도구 칸). 건너뜀이
-	// orphanAlarm 바퀴 이어지면 주인 없는 막힘 사건 한 줄(재감사 3바퀴 fill/R-3M02 — 옛 판은 무리가 사라질 때까지 사건 없이 75)
+	// 손잡이 orphan_alarm 바퀴 이어지면 주인 없는 막힘 사건 한 줄(재감사 3바퀴 fill/R-3M02 — 옛 판은 무리가 사라질 때까지 사건 없이 75)
 	if left := proc.Left(); len(left) > 0 {
 		why := strings.Join(left, ", ")
 		say("앞 바퀴가 남긴 자식 무리 %d개가 아직 도는지 모른다(%s): %s — 이번 바퀴는 건너뜀", len(left), proc.RecordDir(), why)
@@ -141,10 +141,7 @@ func runCmd(args []string) {
 	runRound()
 }
 
-// orphanAlarm: 남은 무리로 바퀴를 건너뜀이 같은 까닭으로 이만큼 이어지면 사건
-const orphanAlarm = 10
-
-// orphanSkip: 남은 무리로 건너뛴 바퀴를 센다(<DATA>/orphan-skip: 「<횟수>\t<처음 초>\t<sent|->\t<까닭>」). 같은 까닭이 orphanAlarm 바퀴째면
+// orphanSkip: 남은 무리로 건너뛴 바퀴를 센다(<DATA>/orphan-skip: 「<횟수>\t<처음 초>\t<sent|->\t<까닭>」). 같은 까닭이 손잡이 orphan_alarm 바퀴째면
 // 주인 없는 막힘 사건(열쇠 — 같은 까닭은 한 번, 못 적으면 다음 바퀴에 다시). 빈 까닭(돈 바퀴)이면 센 것을 지운다. dry-run은 쓰지 않는다
 func orphanSkip(why string) {
 	if dry {
@@ -167,7 +164,7 @@ func orphanSkip(why string) {
 		n, since, sent = atoi10(c[0]), c[1], c[2] == "sent"
 	}
 	n++
-	if n >= orphanAlarm && !sent {
+	if n >= knobInt("orphan_alarm") && !sent {
 		h := fnv.New32a()
 		h.Write([]byte(why))
 		msg := fmt.Sprintf("hc-fill 바퀴가 남은 자식 무리로 %d바퀴째 건너뜀: %s (기록 폴더 %s — 그 무리가 끝나거나 사람이 확인해 기록을 지울 때까지)", n, why, proc.RecordDir())

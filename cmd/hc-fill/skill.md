@@ -35,7 +35,7 @@
 
 - 바꾸는 명령은 먼저 `--dry-run`으로 무엇이 바뀔지 본다: `hc-fill rm <레인> --dry-run`, `hc-fill prio <레인> <우선> --dry-run`, `hc-fill knob set <이름> <값> --why <까닭> --dry-run`, `hc-fill machine <기계> --pause --why <까닭> --dry-run`.
 - 우선순위: `hc-fill prio <레인> 긴급|높음|보통|낮음 --why <까닭>`
-- 손잡이: `hc-fill knob set <이름> <값> --why <까닭> [--for <분>]` · 되돌리기 `hc-fill knob unset <이름>`
+- 손잡이: `hc-fill knob set <이름> <값> --why <까닭> [--for <분>]` · 되돌리기 `hc-fill knob unset <이름>` — 잠깐 바꾼 값. 정해 둘 값이면 `hc-fill knob save <이름> --why <까닭>`(개인 설정 knobs.tsv에 쓰고 손잡이는 지움, 커밋은 직접 — docs/ops/knobs.md 「설정 파일」)
 - 기계: `hc-fill machine <기계> --seats <n> --why <까닭> [--for <분>]` · `--pause` · 되돌리기 `--resume` 또는 `--seats -`
 - 기계 이름 바꾸기: hc가 새 이름을 보인 뒤 `hc-fill machine --rename <옛> <새> --dry-run` → `--why <까닭>`으로 실행 → 출력 「다음:」대로 `hc-fill merger restart <프로젝트>` → 설정 파일 커밋(이 명령은 커밋 안 함). 되돌리기 `hc-fill machine --rename <새> <옛>`
 - 빼기: `hc-fill rm <레인> --why <까닭>` (주차 중이면 `--force`가 있어야 — 준비 커밋을 버린다). 되돌리는 add 한 줄이 일지에 남는다.

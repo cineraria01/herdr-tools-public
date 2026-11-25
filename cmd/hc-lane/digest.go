@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -15,13 +16,11 @@ import (
 	"herdr-tools/internal/knob"
 )
 
-// digestMax: 모인 것이 이만큼을 넘으면 주기 전이라도 보낸다
-const digestMax = 20
-
 // digestState: 이 watch의 묶음 상태(메모리 — 다시 뜨면 처음부터 세어 늦을 뿐 놓치지 않는다)
 type digestState struct {
-	seen map[string]time.Time // 묶음 사건 열쇠 → 이 watch가 처음 본 때(보내면 지움). 주기는 지금 모인 것 가운데 가장 이른 때부터
-	kbad bool                 // 손잡이 파일을 못 읽었다고 한 번 알렸음
+	seen  map[string]time.Time // 묶음 사건 열쇠 → 이 watch가 처음 본 때(보내면 지움). 주기는 지금 모인 것 가운데 가장 이른 때부터
+	kbad  bool                 // 손잡이 파일을 못 읽었다고 한 번 알렸음
+	cwarn bool                 // 손잡이 설정 파일의 거절한 줄을 한 번 알렸음
 }
 
 // sent: 보낸 묶음의 열쇠를 지운다
@@ -72,9 +71,7 @@ func (e *ev) digestPeriod() time.Duration {
 	if s := os.Getenv("HC_LANE_COORD_DIGEST_SEC"); s != "" && digits(s) {
 		return time.Duration(atoi(s)) * time.Second
 	}
-	d, _ := knob.Find("coord_digest")
-	now := time.Now()
-	es, err := knob.Load(knob.Path(os.Getenv("HOME")))
+	v, err := e.knob("coord_digest")
 	if err != nil {
 		if !e.dg.kbad {
 			e.dg.kbad = true
@@ -82,12 +79,24 @@ func (e *ev) digestPeriod() time.Duration {
 		}
 		return 0
 	}
-	v := d.Default
-	if k, ok := es[d.Name]; ok && k.Live(now) {
-		v = k.Value
-	}
 	n, _ := strconv.Atoi(v)
 	return time.Duration(n) * time.Minute
+}
+
+// knob: 이 기계 손잡이 값(저장 파일 > 설정 파일 > 기본). 설정 파일의 거절한 줄은 이 watch에서 처음 한 번만 알린다
+func (e *ev) knob(name string) (string, error) {
+	var w io.Writer
+	if !e.dg.cwarn {
+		e.dg.cwarn, w = true, os.Stderr
+	}
+	return knob.Local(os.Getenv("HOME"), name, w, time.Now())
+}
+
+// digestMax: 모인 것이 손잡이 coord_digest_max(개)를 넘으면 주기 전이라도 보낸다(저장 파일이 깨졌으면 설정 파일·기본)
+func (e *ev) digestMax() int {
+	v, _ := e.knob("coord_digest_max")
+	n, _ := strconv.Atoi(v)
+	return n
 }
 
 // digest: 보낼 줄을 묶음(dig)·즉시(imm)로 가른다. hold면 이번 바퀴는 아무것도 안 보낸다(모아 둠 — 커서에 안 적음).
@@ -127,7 +136,7 @@ func (e *ev) digest(lines []string) (dig, imm []string, since time.Duration, hol
 		}
 	}
 	since = now.Sub(oldest)
-	if len(dig) > 0 && len(imm) == 0 && len(dig) <= digestMax && since < p {
+	if len(dig) > 0 && len(imm) == 0 && len(dig) <= e.digestMax() && since < p {
 		return nil, nil, since, true
 	}
 	return dig, imm, since, false

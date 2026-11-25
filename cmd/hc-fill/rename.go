@@ -169,12 +169,16 @@ func rnKnobLine(l, o, n string) (string, bool) {
 	if l == "" || strings.HasPrefix(l, "#") {
 		return l, false
 	}
-	k, rest, _ := strings.Cut(l, "\t")
+	i := strings.IndexAny(l, " \t") // 저장 파일은 탭, 설정 파일(knob.ConfName)은 공백·탭
+	if i < 0 {
+		return l, false
+	}
+	k, rest := l[:i], l[i:]
 	d, ok := knob.Find(k)
 	if !ok || d.Per != "기계" || d.Of() != o {
 		return l, false
 	}
-	return strings.TrimSuffix(k, o) + n + "\t" + rest, true
+	return strings.TrimSuffix(k, o) + n + rest, true
 }
 
 // rnEdit: 파일 하나의 바꿈(원본 사본을 들고 있어 되돌린다)
@@ -245,8 +249,10 @@ func rnPlan(o, n string) ([]*rnEdit, error) {
 			}
 		}
 	}
-	if err := add(knob.Path(HOME), func(l string) (string, bool) { return rnKnobLine(l, o, n) }); err != nil {
-		return nil, err
+	for _, p := range []string{knob.Path(HOME), knob.ConfPath()} {
+		if err := add(p, func(l string) (string, bool) { return rnKnobLine(l, o, n) }); err != nil {
+			return nil, err
+		}
 	}
 	a, err := rnAliasEdit(o, n)
 	if err != nil {

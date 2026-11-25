@@ -4,7 +4,7 @@ package main
 // 멈췄고, 그 앞에는 「1 shell still running」을 기다리는데 검증 프로세스가 없어 1시간 넘게 아무도 몰랐다). run 바퀴가 stallTick 안에서 부른다.
 // (a) working인데 진행 표시 줄 「… (Nm Ns」이 hang_min분 넘고 그 위 화면이 hang_min분 그대로이며 도구 셸이 없음 → 알림, hang_esc면
 // Escape 한 번 + 이어 가라는 글(한 레인에 한 시간에 한 번) (b) 마지막 턴 끝 줄의 「N shell still running」을 기다리는데(idle·done) 그 터미널 아래
-// 도구 셸이 hangShellGrace 넘게 없음 → 알림만. 대상은 떠 있는 대기열 줄의 주소에 그 레인 이름 터미널이 있을 때만(감사 줄 빼고) — 사람·병합기
+// 도구 셸이 손잡이 hang_shell_grace초 넘게 없음 → 알림만. 대상은 떠 있는 대기열 줄의 주소에 그 레인 이름 터미널이 있을 때만(감사 줄 빼고) — 사람·병합기
 // 터미널은 대기열에 없고, 주소가 재사용되면 이름이 달라 빠진다
 
 import (
@@ -21,9 +21,6 @@ import (
 // hangShellMark: Claude Code의 Bash 도구 셸(포그라운드·배경 모두)이 명령 줄에 담는 글자 — hc-lane lane.wait_procs 기본과 같다.
 // 에이전트 자손 가운데 MCP 서버 등은 작업 트리를 cwd로 써도 도구 실행이 아니라 cwd 대신 이것으로 센다
 const hangShellMark = "shell-snapshots"
-
-// ponytail: 고정 3분 — 셸이 막 끝나 에이전트가 깨기 직전을 멈춤으로 보지 않을 만큼. 헛알림이 나면 손잡이로
-const hangShellGrace = 3 * 60
 
 var (
 	hangSpinRe  = regexp.MustCompile(`^\s*\S+\s+\S.*…\s*\((?:(\d+)h\s*)?(?:(\d+)m\s*)?(\d+)s\b`)
@@ -172,7 +169,7 @@ func hangLane(q Row, st string, p Row, now time.Time, lim int) Row {
 		return row
 	case sh > 0:
 		return row // 도구가 도는 중(긴 검증 등) — 생각 중 멈춤이 아니다
-	case kind == "b" && now.Unix()-since < hangShellGrace:
+	case kind == "b" && now.Unix()-since < int64(knobInt("hang_shell_grace")):
 		return row
 	}
 	own := dash(q.F(qOwner))

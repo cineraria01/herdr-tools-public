@@ -55,13 +55,13 @@ func TestSetPinExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _ := Find("idle")
-	if v, src, e := Effective(d, es, "15", now); v != "30" || src != FromKnob || e.By != "b" {
+	if v, src, e := Resolve(d, es, nil, "15", now); v != "30" || src != FromKnob || e.By != "b" {
 		t.Fatalf("손잡이 값 = %s %s %+v", v, src, e)
 	}
-	if v, src, _ := Effective(d, es, "15", now.Add(2*time.Minute)); v != "15" || src != FromConf {
+	if v, src, _ := Resolve(d, es, nil, "15", now.Add(2*time.Minute)); v != "15" || src != FromConf {
 		t.Fatalf("기한 뒤 = %s %s (설정 15여야)", v, src)
 	}
-	if v, src, _ := Effective(d, es, "", now.Add(2*time.Minute)); v != "10" || src != FromDefault {
+	if v, src, _ := Resolve(d, es, nil, "", now.Add(2*time.Minute)); v != "10" || src != FromDefault {
 		t.Fatalf("기한 뒤·설정 없음 = %s %s (기본 10이어야)", v, src)
 	}
 	// 기한 지난 줄은 다음 쓰기에서 걷힌다

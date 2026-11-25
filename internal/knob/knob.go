@@ -1,7 +1,8 @@
 // Package knob: 실행 중에 바로 먹는 공통 손잡이(2026-11-24 ops-knobs, docs/ops/knobs.md).
 //
 // 손잡이가 될 수 있는 값은 등록 표 Defs에 있는 것뿐이다 — 착지 판정·보호 규칙·훅·잠금 같은 안전 관문은 올리지 않는다.
-// 값은 git 밖 상태 파일(Path)에 「이름·값·누가·왜·언제·언제까지·고정」으로 두고, 우선순위는 손잡이 > 설정 > 기본.
+// 값은 git 밖 상태 파일(Path)에 「이름·값·누가·왜·언제·언제까지·고정」으로 두고(잠깐 바꾼 값), 정해 둔 값은 개인 설정 폴더의 설정 파일
+// (ConfName, conffile.go). 우선순위는 손잡이 > 설정 파일 > 도구별 옛 설정 > 기본(Resolve).
 // 기한이 지난 값·범위 밖 값·표에 없는 이름은 읽을 때 버린다(설정 값으로 돌아감). 파일이 깨졌으면 손잡이가 없는 것으로 읽는다.
 package knob
 
@@ -91,6 +92,12 @@ var Defs = []Def{
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
 	{Name: "light_only@", Per: "기계", Tool: "hc-fill", Enum: []string{"0", "1"}, Desc: "1이면 그 기계에는 가벼운 레인(과 그 감사)만 띄우고, 가벼운 레인은 그 기계를 먼저 씀(느린 기계 — docs/hc-fill/load-steer.md, 없거나 0이면 끔)"},
+	// ht-config-knobs(2026-11-26): 상수로 박혀 있던 운영 정책 — 기본은 그때 값 그대로(동작 안 바뀜)
+	{Name: "light_guess", Tool: "hc-fill", Default: "1", Enum: []string{"0", "1"}, Desc: "무게를 지정하지 않은 레인을 지시문 「파일:」 줄이 문서뿐이면 가벼움으로 추정(0이면 지정한 줄만 가벼움)"},
+	{Name: "hang_shell_grace", Tool: "hc-fill", Default: "180", Min: 0, Max: 3600, Unit: "초", Desc: "「N shell still running」을 기다리는 레인의 도구 셸이 이만큼 넘게 없으면 멈춘 레인으로 알림"},
+	{Name: "unsure_warn", Tool: "hc-fill", Default: "5", Min: 1, Max: 1000, Unit: "바퀴", Desc: "띄움 미확정 시도 기다림이 이만큼 이어지면 막힘 사건 한 번"},
+	{Name: "orphan_alarm", Tool: "hc-fill", Default: "10", Min: 1, Max: 1000, Unit: "바퀴", Desc: "남은 무리로 바퀴를 건너뜀이 같은 까닭으로 이만큼 이어지면 막힘 사건 한 번"},
+	{Name: "pr_open_max", Tool: "hc-fill", Default: "15", Min: 1, Max: 10080, Unit: "분", Desc: "착지 뒤 PR이 이만큼 넘게 OPEN이면 까닭 댓글 뒤 닫음(docs/hc-fill/pr.md)"},
 	// knobs-migrate(2026-11-24): 고정으로 박혔던 hc-fill 설정 키(설정 줄보다 앞선다 — conf가 먼저 본다). 기본은 지금 코드의 값 그대로
 	{Name: "gc", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "끝난 레인 정리 간격(0이면 끔)"},
 	{Name: "idle_empty", Tool: "hc-fill", Default: "0", Min: 0, Max: 1440, Unit: "분", Desc: "띄울 것 없는 빈 자리 묶음 알림 간격(0이면 안 보냄)"},
@@ -124,9 +131,11 @@ var Defs = []Def{
 	{Name: "merger_land_on", Tool: "hc-merger", Default: "auto", List: true, Unit: "기계", Remote: true, Desc: "직접 검증 착지를 돌릴 기계 — auto(검증 기계 목록에서 검증 자리 남은·코어당 부하 가장 낮은 워커, 닿는 워커가 없을 때만 병합기 기계) · local(병합기 기계) · 기계 목록(쉼표, 그 안에서만)(HC_LANE_MERGER_LAND_ON)"},
 	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
 	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
+	{Name: "merger_defer_alarm", Tool: "hc-merger", Default: "10", Min: 1, Max: 1000, Unit: "바퀴", Remote: true, Desc: "같은 까닭의 「다음 바퀴에」가 이만큼 이어지면 막힘 사건 한 번(시작 단계는 늘 기본)"},
 	{Name: "merger_resolve_stuck", Tool: "hc-merger", Default: "3", Min: 0, Max: 1440, Unit: "분", Remote: true, Desc: "풀이·풀이 감사 에이전트가 blocked·error로 이만큼 머물면 운영 사건 한 번(0이면 끔, HC_LANE_MERGER_RESOLVE_STUCK)"},
 	// 지휘 알림 묶기(2026-11-24 coord-digest, docs/hc-lane/watch.md) — 지휘 기계의 hc-lane watch가 보낼 때마다 읽는다
 	{Name: "coord_digest", Tool: "hc-lane", Default: "0", Min: 0, Max: 120, Unit: "분", Desc: "지휘에게 가는 묶음 사건(완료·판정·제출·착지…)을 이 주기마다 한 메시지로(0이면 하나씩 — 막힘 등 즉시 사건은 늘 바로)"},
+	{Name: "coord_digest_max", Tool: "hc-lane", Default: "20", Min: 1, Max: 1000, Unit: "개", Desc: "모인 묶음 사건이 이만큼을 넘으면 주기 전이라도 보냄"},
 	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},
@@ -405,19 +414,3 @@ const (
 	FromConf    Source = "설정"
 	FromKnob    Source = "손잡이"
 )
-
-// Effective: 손잡이 > 설정(빈 값이 아니면) > 기본. 손잡이면 그 줄도. 프로젝트별(PerProject)은 그 값이 없으면 공통 손잡이 차례로
-func Effective(d Def, es map[string]Entry, confVal string, now time.Time) (string, Source, *Entry) {
-	if e, ok := es[d.Name]; ok && e.Live(now) {
-		return e.Value, FromKnob, &e
-	}
-	if d.Per == PerProject {
-		if b, ok := Find(d.Base()); ok {
-			return Effective(b, es, confVal, now)
-		}
-	}
-	if confVal != "" {
-		return confVal, FromConf, nil
-	}
-	return d.Default, FromDefault, nil
-}

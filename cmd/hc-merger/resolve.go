@@ -56,7 +56,7 @@ func (m *M) knobStr(file, env string) string {
 // knobSrc: knobStr과 그 값이 온 곳 — 반송 글에 적어, 원격 손잡이만 보고 옛 파일을 놓치지 않게(2026-11-25 한 저장소의 PR 제출 반송)
 func (m *M) knobSrc(file, env string) (string, string) {
 	if v, ok := rk["merger_"+file]; ok {
-		return v, "공통 손잡이 merger_" + file
+		return v, "공통 손잡이·설정 파일 merger_" + file
 	}
 	if b, err := os.ReadFile(m.mj + "/" + file); err == nil {
 		return strings.TrimSpace(string(b)), m.mj + "/" + file

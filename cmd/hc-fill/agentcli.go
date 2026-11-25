@@ -178,7 +178,7 @@ func knobPreview(name, what string, force bool, now time.Time) error {
 	}
 	cur := "설정 값"
 	if d, ok := knob.Find(name); ok {
-		if v, src, _ := knob.Effective(d, knobEntries(), confRaw(name), now); v != "" {
+		if v, src, _ := knob.Resolve(d, knobEntries(), knobFile(), confRaw(name), now); v != "" {
 			cur = v + "(" + string(src) + ")"
 		}
 	}

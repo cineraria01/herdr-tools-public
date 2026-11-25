@@ -30,7 +30,8 @@ const (
 func scopeModeOK(m string) bool { return m == "observe" || m == "on" || m == "off" }
 
 // scopeMode: 저장 파일(이 기계 ~/.local/state/herdr-ops/knobs.tsv — 지휘 기계)에 살아 있는 verify_scope가 있으면 그 값,
-// 없으면 이 클론 origin의 refs/herdr/knobs(원격 손잡이의 정본 — 지휘 기계 hc-fill이 올린다), 참조가 없으면 기본 on
+// 없으면 이 클론 origin의 refs/herdr/knobs(원격 손잡이의 정본 — 지휘 기계 hc-fill이 손잡이 > 설정 파일로 푼 값을 올린다),
+// 참조에 값이 없으면 이 기계의 손잡이 설정 파일, 그것도 없으면 기본 on
 func scopeMode(root string, w io.Writer) string {
 	if m := os.Getenv("HERDR_VERIFY_SCOPE"); m != "" {
 		if !scopeModeOK(m) {
@@ -64,9 +65,30 @@ func scopeMode(root string, w io.Writer) string {
 		return "observe"
 	}
 	if v == "" {
-		return knobDefault
+		return knobConfValue()
 	}
 	return v
+}
+
+// knobConfValue: 손잡이 설정 파일(개인 설정 폴더 knobs.tsv — internal/knob ConfName·ParseConf 꼴 「이름 값 # 까닭」)의 verify_scope.
+// 원격 참조에는 지휘 기계가 설정 파일 값도 실으니 이 길은 참조가 없을 때만 먹는다. 없거나 범위 밖이면 기본
+func knobConfValue() string {
+	dir := os.Getenv("HERDR_TOOLS_CONFIG")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config/herdr-tools")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "knobs.tsv"))
+	if err != nil {
+		return knobDefault
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		body, _, _ := strings.Cut(l, "#")
+		if f := strings.Fields(body); len(f) == 2 && f[0] == knobName && scopeModeOK(f[1]) {
+			return f[1]
+		}
+	}
+	return knobDefault
 }
 
 // knobLive: 값이 범위 안이고 기한(초, "-" = 계속)이 안 지났는가

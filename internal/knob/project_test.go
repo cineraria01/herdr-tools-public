@@ -52,14 +52,14 @@ func TestForProject(t *testing.T) {
 	if ParseRemote("hc-knobs\n\nmerger_batch@app-b\t5\t-\n", now)["merger_batch@app-b"] != "" {
 		t.Fatal("원격의 「이름@프로젝트」 줄을 받았다")
 	}
-	// Effective: 프로젝트별 값이 없거나 지났으면 공통 손잡이 → 기본
+	// Resolve: 프로젝트별 값이 없거나 지났으면 공통 손잡이 → 기본
 	d, _ := Find("merger_idle_load@app-b")
-	if v, src, _ := Effective(d, es, "", now); v != "70" || src != FromKnob {
-		t.Fatalf("Effective 지난 값 = %s %s", v, src)
+	if v, src, _ := Resolve(d, es, nil, "", now); v != "70" || src != FromKnob {
+		t.Fatalf("Resolve 지난 값 = %s %s", v, src)
 	}
 	d, _ = Find("merger_tick@app-b")
-	if v, src, _ := Effective(d, es, "", now); v != "10" || src != FromDefault {
-		t.Fatalf("Effective 없음 = %s %s", v, src)
+	if v, src, _ := Resolve(d, es, nil, "", now); v != "10" || src != FromDefault {
+		t.Fatalf("Resolve 없음 = %s %s", v, src)
 	}
 }
 

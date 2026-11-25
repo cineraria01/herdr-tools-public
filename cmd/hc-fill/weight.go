@@ -29,13 +29,16 @@ var (
 
 // laneWeight <대기열 줄>: 가벼운 레인인가와 그 근거. 18칸 light·normal이 앞서고, 비었으면 지시문 「파일:」 줄(여러 줄이면 모두)의
 // 낱말이 모두 문서(*.md·docs/ 아래)일 때만 가벼움 — 파일 줄이 없거나 코드 경로·도구 이름·설명 글이 하나라도 섞이면 보통(모르면 보통).
-// 낱말 끝에 붙은 조사(「README.md와」)는 경로 뒤라 뗀다
+// 낱말 끝에 붙은 조사(「README.md와」)는 경로 뒤라 뗀다. 손잡이 light_guess 0이면 추정하지 않는다(지정한 줄만 가벼움)
 func laneWeight(r Row) (bool, string) {
 	switch r.F(qWeight) {
 	case "light":
 		return true, "가벼움(지정)"
 	case "normal":
 		return false, "보통(지정)"
+	}
+	if knobInt("light_guess") == 0 {
+		return false, "보통(추정 끔)"
 	}
 	n := 0
 	for _, l := range readLines(r.F(qBrief)) {

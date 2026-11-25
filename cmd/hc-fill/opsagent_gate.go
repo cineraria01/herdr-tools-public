@@ -123,6 +123,8 @@ func oaHandoff(cmd string, args []string) string {
 		return "운영 에이전트 안에서 운영 에이전트를 띄우지 않는다"
 	case cmd == "run" || cmd == "watch" || strings.HasPrefix(cmd, "_"):
 		return "바퀴·속 명령은 hc-fill이 돈다"
+	case cmd == "knob" && len(args) > 0 && args[0] == "save":
+		return "설정 파일에 정해 두기는 사람이 정한다(개인 설정 저장소 파일 — 잠깐 바꿀 값은 knob set --for)"
 	case (cmd == "machine" || cmd == "machines") && has(args, "--rename"):
 		return "기계 이름 바꾸기는 사람이 정한다(설정·상태·병합기 표식을 한 번에 바꿔 되돌리기 어렵다)"
 	case cmd == "knob" || cmd == "machine" || cmd == "machines":

@@ -6,7 +6,7 @@
   - 도구 셸 = 명령 줄에 `shell-snapshots`가 든 자손(Claude Code Bash 도구 셸, `hc-lane` `lane.wait_procs` 기본과 같은 표식). MCP 서버도 작업 트리를 cwd로 쓰므로 cwd로는 세지 않는다.
   - 도구 셸이 있으면(긴 포그라운드 검증 등) 멈춤이 아니다. 화면이 바뀌면 처음부터 센다.
   - 한계: 셸 없이 오래 걸리는 도구(큰 MCP 호출 등)도 진행 표시만 돌고 화면이 그대로라 `hang_min`분 뒤 끊길 수 있다 — 한 시간에 한 번이고 레인이 이어 간다.
-- **(b) 배경 셸이 소리 없이 죽음**: hc 상태가 idle·done이고 화면의 **마지막** 턴 끝 줄(`✻ Crunched for … · 1 shell still running` 꼴, 머리 글자는 `hc-lane` `lane.wait_line` 기본과 같다)에 「N shell(s) still running」이 있는데 도구 셸 자손이 3분 넘게 없을 때. 그 줄 아래에 `Interrupted` 줄이 있으면 보지 않는다(끊긴 턴은 끝 줄을 안 찍어, 그 줄은 옛 턴 것이다).
+- **(b) 배경 셸이 소리 없이 죽음**: hc 상태가 idle·done이고 화면의 **마지막** 턴 끝 줄(`✻ Crunched for … · 1 shell still running` 꼴, 머리 글자는 `hc-lane` `lane.wait_line` 기본과 같다)에 「N shell(s) still running」이 있는데 도구 셸 자손이 3분(손잡이 `hang_shell_grace`초, 기본 180) 넘게 없을 때. 그 줄 아래에 `Interrupted` 줄이 있으면 보지 않는다(끊긴 턴은 끝 줄을 안 찍어, 그 줄은 옛 턴 것이다).
   옛 턴 줄·본문 인용에 남은 같은 글은 보지 않는다(완료 뒤 감사 기다림 화면에 흔히 남는다). 원격 기계는 `hc exec`로 `ps`를 읽는다. 셸이 살아 있으면 알리지 않고 종류 `b-live`로 적는다.
 - **배경 일 기다림**(2026-11-26 ht-advise-done-noreport — 턴이 끝나(done) 「1 shell still running」으로 마지막 검증을 기다리던 레인이 「끝났는데 보고 없음」으로 58분 울렸다): `hc-fill state`·`advise`·`status`는 `hang.tsv`에 그 레인·주소의 `b-live` 줄이 있으면 단계를 「작업 중(done)」 대신 「배경 일 기다림(done)」으로 센다. 파일이 10분 넘게 안 바뀌었으면(바퀴가 안 돎·`hang_min` 0) 모름이라 쓰지 않는다. 셸이 죽었으면 종류 `b`라 그대로 알린다.
 - 상태가 working·idle·done이 아니면(blocked·error·모름) 화면을 읽지 않는다.

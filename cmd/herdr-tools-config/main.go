@@ -3,11 +3,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"herdr-tools/internal/knob"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/toolcfg"
 	"herdr-tools/internal/version"
@@ -19,6 +21,9 @@ const usage = `herdr-tools-config: 개인 설정 폴더($HERDR_TOOLS_CONFIG, 기
   lint [--strict] [<파일>…]  개인 값 패턴(private-patterns.txt, 한 줄에 ERE 하나)에 걸린 줄을 「파일:줄: 패턴」으로. 걸리면 종료 1
                        패턴 파일이 없으면 경고 뒤 건너뜀(종료 0), --strict면 패턴 파일·패턴 줄이 없을 때 종료 3
                        이진·UTF-8 아닌 파일도 바이트로 본다. 상대 경로 파일은 경로 글자도(「파일:0: 경로 패턴」). 못 읽으면 종료 2. 패턴은 바이트 단위(LC_ALL=C), 대소문자 무시(ASCII)
+  knobs-lint [<파일>]  손잡이 설정 파일(기본 그 폴더의 knobs.tsv)에서 표에 없는 이름·범위 밖 값·같은 이름 두 번·꼴이 틀린 줄을
+                       「파일:줄: 까닭」으로. 있으면 종료 1, 파일이 없으면 0, 못 읽으면 2 (docs/ops/knobs.md 「설정 파일」)
+  knobs-template       범용 틀 config.example/knobs.tsv의 내용(등록 표에서 만든 것)을 찍는다
   sync-lint <범용 저장소> [<sync.list>]  바이너리 줄(<뿌리>bin/<도구>  tools:cmd/<도구>)마다 그 대상(또는 덮는 all·macos)의 Go 소스 나무 줄
                        (go.mod·cmd/**·internal/**)과 곁 도구(cmd/<곁>/OWNER에 그 도구 이름 — 예: hc-merger → hc-lane) 바이너리 줄이 없으면
                        더할 줄을 찍고 종료 1. 걷힌 셸 판 줄(저장소에 없는 tools:bin/<도구>·tools:lib/…·*.sh·*.py)이 남아도 종료 1
@@ -63,6 +68,13 @@ func main() {
 			files = a[2:]
 		}
 		os.Exit(toolcfg.Lint(dir, strict, files, os.Stdout, os.Stderr))
+	case "knobs-template":
+		fmt.Print(knob.Template())
+	case "knobs-lint":
+		if len(a) > 2 {
+			usage2("knobs-lint [<파일>]")
+		}
+		os.Exit(knobsLint(append(a[1:], knob.ConfPath())[0]))
 	case "sync-lint":
 		if len(a) < 2 || len(a) > 3 {
 			usage2("sync-lint <범용 저장소> [<sync.list>]")
@@ -80,6 +92,26 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+}
+
+// knobsLint: 손잡이 설정 파일의 거절할 줄(표에 없는 이름·범위 밖 값·같은 이름 두 번·꼴)을 「경로:줄: 까닭」으로. 있으면 1, 없음은 0(설정 파일은 골라 둔다), 못 읽으면 2
+func knobsLint(p string) int {
+	b, err := os.ReadFile(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: 못 읽음: %v\n", me, err)
+		return 2
+	}
+	_, errs := knob.ParseConf(string(b), p)
+	for _, e := range errs {
+		fmt.Println(e)
+	}
+	if len(errs) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // listForm: sync.list의 줄 끝 CR·끝 줄바꿈 없음을 줄 번호로 알린다(있으면 참). 옛 herdr-sync 셸 판은 CR 줄을 어느 기계에도 못 맞추고

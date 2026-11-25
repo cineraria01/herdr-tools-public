@@ -73,6 +73,23 @@ func TestScopeMode(t *testing.T) {
 			t.Errorf("%s: %q여야 %q\n%s", c.what, c.want, got, out)
 		}
 	}
+	// 손잡이 설정 파일(ht-config-knobs): 참조에 값이 없을 때만 먹고, 참조 값(지휘 기계가 손잡이 > 설정 파일로 푼 것)이 앞선다
+	cd := t.TempDir()
+	t.Setenv("HERDR_TOOLS_CONFIG", cd)
+	if err := os.WriteFile(cd+"/"+knob.ConfName, []byte("verify_scope off # 이 저장소는 늘 전부\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cf, errs := knob.ParseConf("verify_scope off # x\n", "t"); len(errs) != 0 || cf[knobName].Value != "off" {
+		t.Fatalf("설정 파일 꼴이 internal/knob과 어긋난다: %v %v", cf, errs)
+	}
+	if got, out := mode(modeRepo(t, map[string]string{"sweep_r1": "40"}), ""); got != "off" {
+		t.Errorf("참조에 값 없음 → 설정 파일 off여야 %q\n%s", got, out)
+	}
+	if got, out := mode(modeRepo(t, map[string]string{"verify_scope": "observe"}), ""); got != "observe" {
+		t.Errorf("참조 값이 설정 파일보다 앞서야 %q\n%s", got, out)
+	}
+	t.Setenv("HERDR_TOOLS_CONFIG", t.TempDir())
+
 	// 손잡이를 못 읽음(origin 없음) → observe와 한 줄 알림
 	if got, out := mode(tmp(t), ""); got != "observe" || !strings.Contains(out, "손잡이를 못 읽어") {
 		t.Errorf("origin 없음: observe와 알림이어야 %q\n%s", got, out)

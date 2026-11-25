@@ -119,15 +119,9 @@ func residentStale(p resProbe, now time.Time, grace time.Duration, cur string) [
 	return o
 }
 
-// residentGrace: 손잡이 sweep_resident_grace(이 기계 저장 파일, 분) — 없거나 범위 밖이면 기본
+// residentGrace: sweep_resident_grace(분 — 이 기계 손잡이 > 설정 파일 > 기본, 손잡이 파일이 깨졌으면 설정 파일·기본)
 func residentGrace() time.Duration {
-	d, _ := knob.Find("sweep_resident_grace")
-	v := d.Default
-	if es, err := knob.Load(knob.Path(home)); err == nil {
-		if e, ok := es[d.Name]; ok && e.Live(time.Now()) {
-			v = e.Value
-		}
-	}
+	v, _ := knob.Local(home, "sweep_resident_grace", os.Stderr, time.Now())
 	n, _ := strconv.Atoi(v)
 	return time.Duration(n) * time.Minute
 }

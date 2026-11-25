@@ -11,7 +11,7 @@ import (
 	"herdr-tools/internal/events"
 )
 
-// prOpenMax: 착지 뒤 OPEN을 기다리는 한도. 넘으면 까닭 댓글 뒤 닫는다(2026-11-26 ht-reland-pr-of — GitHub가 머리 가지 갱신을 PR에
+// prOpenMax: 착지 뒤 OPEN을 기다리는 한도의 기본(손잡이 pr_open_max, 분). 넘으면 까닭 댓글 뒤 닫는다(2026-11-26 ht-reland-pr-of — GitHub가 머리 가지 갱신을 PR에
 // 반영하지 않아(PR 머리가 옛 커밋에 멈춤) 다시 맞춤 레인이 이어 쓴 원래 PR이 착지 뒤 4시간 OPEN으로 남았다. 정상이면 몇 초 안에 Merged)
 const prOpenMax = 15 * time.Minute
 
@@ -34,8 +34,9 @@ func (r *prRun) landedState(e *prEnt, ev events.Event, key string) {
 			say("PR #%s 착지 %s — 닫힘(GitHub가 Merged로 표시하지 않음)", e.Num, e.Lane)
 		}
 	case "OPEN":
-		if at, err := time.Parse("2006-01-02T15:04:05Z", ev.Time); err == nil && time.Since(at) > prOpenMax {
-			r.close(e, key+":open", "착지 "+head(ev.SHA, 8)+" — 변경은 기준 가지에 들어갔는데 GitHub가 "+strconv.Itoa(int(prOpenMax.Minutes()))+"분 넘게 OPEN(PR 머리 갱신 미반영)이라 닫는다")
+		lim := knobInt("pr_open_max")
+		if at, err := time.Parse("2006-01-02T15:04:05Z", ev.Time); err == nil && time.Since(at) > time.Duration(lim)*time.Minute {
+			r.close(e, key+":open", "착지 "+head(ev.SHA, 8)+" — 변경은 기준 가지에 들어갔는데 GitHub가 "+strconv.Itoa(lim)+"분 넘게 OPEN(PR 머리 갱신 미반영)이라 닫는다")
 			return
 		}
 		say("PR #%s 착지 %s — GitHub가 아직 OPEN, 다음 바퀴에 다시 본다", e.Num, e.Lane)

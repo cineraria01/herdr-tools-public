@@ -23,10 +23,22 @@ func init() { register("knob", knobCmd) }
 var (
 	knobOnce sync.Once
 	knobES   map[string]knob.Entry
+	knobCF   knob.Conf
 )
 
 // knobEntries: 저장 파일을 한 번 읽는다. 깨졌거나 못 읽으면 손잡이 없이(설정 값으로) 돌고 한 줄 알린다
 func knobEntries() map[string]knob.Entry {
+	knobLoad()
+	return knobES
+}
+
+// knobFile: 손잡이 설정 파일(개인 설정 폴더 knobs.tsv)을 한 번 읽는다. 거절한 줄은 한 줄씩 알리고 아래 층으로
+func knobFile() knob.Conf {
+	knobLoad()
+	return knobCF
+}
+
+func knobLoad() {
 	knobOnce.Do(func() {
 		es, err := knob.Load(knob.Path(HOME))
 		if err != nil {
@@ -34,11 +46,11 @@ func knobEntries() map[string]knob.Entry {
 			es = map[string]knob.Entry{}
 		}
 		knobES = es
+		knobCF = knob.LoadConf(knob.ConfPath(), os.Stderr)
 	})
-	return knobES
 }
 
-// knobConf: hc-fill 손잡이가 살아 있으면 그 값(설정 줄보다 앞선다). 표에 없는 키는 손잡이를 보지도 않는다
+// knobConf: hc-fill 손잡이가 살아 있으면 그 값, 아니면 설정 파일 값(둘 다 hc-fill.tsv 줄보다 앞선다). 표에 없는 키는 보지도 않는다
 func knobConf(k string) (string, bool) {
 	d, ok := knob.Find(k)
 	if !ok || d.Tool != "hc-fill" {
@@ -46,6 +58,9 @@ func knobConf(k string) (string, bool) {
 	}
 	if e, ok := knobEntries()[k]; ok && e.Live(time.Now()) {
 		return e.Value, true
+	}
+	if c, ok := knobFile()[k]; ok {
+		return c.Value, true
 	}
 	return "", false
 }
@@ -62,6 +77,8 @@ func knobCmd(args []string) {
 		err = knobSet(args[1:], time.Now())
 	case "unset":
 		err = knobUnset(args[1:], time.Now())
+	case "save":
+		err = knobSave(args[1:], time.Now())
 	default:
 		usage()
 	}
@@ -89,72 +106,79 @@ type knobRow struct {
 	Range  string `json:"range"`
 	Remote bool   `json:"remote"`
 	Desc   string `json:"desc"`
+	Where  string `json:"where,omitempty"` // 설정 파일이면 「경로:줄」
+	Kind   string `json:"kind,omitempty"`  // 잠깐 바꾼 것(손잡이) · 정해 둔 것(설정 파일)
 }
 
+const (
+	kindTemp  = "잠깐 바꾼 것"
+	kindFixed = "정해 둔 것"
+)
+
 func knobRows(now time.Time) []knobRow {
-	es := knobEntries()
+	es, cf := knobEntries(), knobFile()
 	var rs []knobRow
 	for _, d := range knob.Defs {
-		if d.Per != "" { // 묶음 손잡이(seats@<기계> 등)는 둔 값만 한 줄씩
-			var ns []string
-			for n, e := range es {
-				if strings.HasPrefix(n, d.Name) && e.Live(now) {
-					ns = append(ns, n)
+		if d.Per == "" {
+			cv := ""
+			if d.Tool == "hc-fill" {
+				if cv = confRaw(d.Name); cv == "" {
+					cv = maLegacy(d.Name) // 옛 표식 파일(병합기 살아 있음)도 「설정」으로 보인다
 				}
 			}
-			sort.Strings(ns)
-			for _, n := range ns {
-				e := es[n]
-				fd, _ := knob.Find(n)
-				r := knobRow{Name: n, Value: e.Value, Source: string(knob.FromKnob), Tool: d.Tool, Unit: d.Unit, Range: fd.Range(), Remote: d.Remote, Desc: d.Desc,
-					By: e.By, Why: e.Why, Pin: e.Pin, At: stamp(e.At)}
-				if e.Until != 0 {
-					r.Until = stamp(e.Until)
-				}
-				rs = append(rs, r)
-			}
-			continue
+			rs = append(rs, knobRowOf(d, d.Desc, es, cf, cv, now))
 		}
-		cv := ""
-		if d.Tool == "hc-fill" {
-			if cv = confRaw(d.Name); cv == "" {
-				cv = maLegacy(d.Name) // 옛 표식 파일(병합기 살아 있음)도 「설정」으로 보인다
+		// 「이름@대상」(묶음 손잡이 seats@<기계> 등 · 병합기 프로젝트별 merger-knob-per-project)은 손잡이나 설정 파일에 둔 것만 한 줄씩
+		var ns []string
+		for n := range knobAtNames(es, cf, now) {
+			if fd, _ := knob.Find(n); d.Per != "" && strings.HasPrefix(n, d.Name) || fd.Per == knob.PerProject && fd.Base() == d.Name {
+				ns = append(ns, n)
 			}
 		}
-		v, src, e := knob.Effective(d, es, cv, now)
-		r := knobRow{Name: d.Name, Value: v, Source: string(src), Tool: d.Tool, Unit: d.Unit, Range: d.Range(), Remote: d.Remote, Desc: d.Desc}
-		if e != nil {
-			r.By, r.Why, r.Pin, r.At = e.By, e.Why, e.Pin, stamp(e.At)
-			if e.Until != 0 {
-				r.Until = stamp(e.Until)
+		sort.Strings(ns)
+		for _, n := range ns {
+			fd, _ := knob.Find(n)
+			desc := d.Desc
+			if fd.Per == knob.PerProject {
+				desc += " — 프로젝트 " + fd.Of() + " 몫"
 			}
+			rs = append(rs, knobRowOf(fd, desc, es, cf, "", now))
 		}
-		rs = append(rs, r)
-		rs = append(rs, knobProjectRows(d, es, now)...)
 	}
 	return rs
 }
 
-// knobProjectRows: 병합기 손잡이의 프로젝트별 값(이름@프로젝트 — merger-knob-per-project)을 공통 줄 바로 밑에 둔 것만 한 줄씩
-func knobProjectRows(d knob.Def, es map[string]knob.Entry, now time.Time) []knobRow {
-	var ns []string
+// knobAtNames: 살아 있는 손잡이와 설정 파일 줄 가운데 「이름@대상」 이름
+func knobAtNames(es map[string]knob.Entry, cf knob.Conf, now time.Time) map[string]bool {
+	o := map[string]bool{}
 	for n, e := range es {
-		if fd, ok := knob.Find(n); ok && fd.Per == knob.PerProject && fd.Base() == d.Name && e.Live(now) {
-			ns = append(ns, n)
+		if strings.Contains(n, "@") && e.Live(now) {
+			o[n] = true
 		}
 	}
-	sort.Strings(ns)
-	var rs []knobRow
-	for _, n := range ns {
-		e := es[n]
-		r := knobRow{Name: n, Value: e.Value, Source: string(knob.FromKnob), Tool: d.Tool, Unit: d.Unit, Range: d.Range(), Remote: d.Remote,
-			Desc: d.Desc + " — 프로젝트 " + n[len(d.Name)+1:] + " 몫", By: e.By, Why: e.Why, Pin: e.Pin, At: stamp(e.At)}
+	for n := range cf {
+		if strings.Contains(n, "@") {
+			o[n] = true
+		}
+	}
+	return o
+}
+
+// knobRowOf: 손잡이 한 줄 — 지금 값과 그 출처(손잡이면 누가·왜·언제까지, 설정 파일이면 경로:줄·까닭)
+func knobRowOf(d knob.Def, desc string, es map[string]knob.Entry, cf knob.Conf, legacy string, now time.Time) knobRow {
+	v, src, e := knob.Resolve(d, es, cf, legacy, now)
+	r := knobRow{Name: d.Name, Value: v, Source: string(src), Tool: d.Tool, Unit: d.Unit, Range: d.Range(), Remote: d.Remote, Desc: desc}
+	switch {
+	case e != nil:
+		r.By, r.Why, r.Pin, r.At, r.Kind = e.By, e.Why, e.Pin, stamp(e.At), kindTemp
 		if e.Until != 0 {
 			r.Until = stamp(e.Until)
 		}
-		rs = append(rs, r)
+	case src == knob.FromFile:
+		c, _ := cf.Lookup(d)
+		r.Why, r.Where, r.Kind = c.Why, c.Where(knob.ConfPath()), kindFixed
 	}
-	return rs
+	return r
 }
 
 func stamp(s int64) string { return time.Unix(s, 0).Format("2006-01-02 15:04") }
@@ -177,9 +201,14 @@ func knobLs(args []string) error {
 		return nil
 	}
 	for _, r := range rs {
-		line := fmt.Sprintf("%-12s %6s %s  %-6s 범위 %s  %s(%s)", r.Name, r.Value, r.Unit, r.Source, r.Range, r.Desc, r.Tool)
-		if r.Source == string(knob.FromKnob) {
-			u := "계속"
+		src := r.Source
+		if r.Where != "" {
+			src += " " + r.Where
+		}
+		line := fmt.Sprintf("%-12s %6s %s  %-6s 범위 %s  %s(%s)", r.Name, r.Value, r.Unit, src, r.Range, r.Desc, r.Tool)
+		switch r.Source {
+		case string(knob.FromKnob):
+			u := "계속 — 정해 둘 값이면 hc-fill knob save " + r.Name
 			if r.Until != "" {
 				u = r.Until + "까지"
 			}
@@ -187,7 +216,13 @@ func knobLs(args []string) error {
 			if r.Pin {
 				pin = " · 고정"
 			}
-			line += fmt.Sprintf("\n             누가 %s · 왜 %s · %s부터 %s%s", r.By, r.Why, r.At, u, pin)
+			line += fmt.Sprintf("\n             %s · 누가 %s · 왜 %s · %s부터 %s%s", r.Kind, r.By, r.Why, r.At, u, pin)
+		case string(knob.FromFile):
+			why := r.Why
+			if why == "" {
+				why = "-"
+			}
+			line += fmt.Sprintf("\n             %s · 왜 %s", r.Kind, why)
 		}
 		fmt.Println(line)
 	}
@@ -263,7 +298,7 @@ func knobSet(args []string, now time.Time) error {
 		}
 		e.Until = t.Unix()
 	}
-	old, src, oe := knob.Effective(d, knobEntries(), confRaw(name), now)
+	old, src, oe := knob.Resolve(d, knobEntries(), knobFile(), confRaw(name), now)
 	if dryK {
 		return knobPreview(name, "= "+val, force, now)
 	}
@@ -311,7 +346,7 @@ func knobUnset(args []string, now time.Time) error {
 	if !ok {
 		return unknownKnob(pos[0])
 	}
-	ov, osrc, oe := knob.Effective(d, knobEntries(), confRaw(d.Name), now)
+	ov, osrc, oe := knob.Resolve(d, knobEntries(), knobFile(), confRaw(d.Name), now)
 	if dryK {
 		return knobPreview(pos[0], "지움", force, now)
 	}
@@ -325,7 +360,7 @@ func knobUnset(args []string, now time.Time) error {
 			rest[k] = e
 		}
 	}
-	v, src, _ := knob.Effective(d, rest, confRaw(d.Name), now)
+	v, src, _ := knob.Resolve(d, rest, knobFile(), confRaw(d.Name), now)
 	if v == "" { // 묶음 손잡이(seats@<기계> 등) — 설정 줄 값으로
 		v, src = "설정 값", knob.FromConf
 	}
@@ -342,6 +377,48 @@ func knobUnset(args []string, now time.Time) error {
 	jot("knob unset", d.Name, why, "됨", undo, fmt.Sprintf("전 %s(%s) → %s(%s)", ov, osrc, v, src))
 	return nil
 }
+
+// knobSave: save <이름> [--why <까닭>] — 실행 중 손잡이 값을 설정 파일(개인 설정 폴더 knobs.tsv)에 정해 두고 손잡이는 지운다.
+// 먹는 값은 그대로다(고정 손잡이도 옮긴다). 까닭을 안 주면 손잡이의 까닭. 기한은 옮기지 않는다(이제 계속). git 커밋은 하지 않는다
+func knobSave(args []string, now time.Time) error {
+	args, dryK := takeDry(args)
+	args, why := takeWhy(args)
+	if len(args) != 1 || strings.HasPrefix(args[0], "--") {
+		return errKnobUsage
+	}
+	name := args[0]
+	if _, ok := knob.Find(name); !ok {
+		return unknownKnob(name)
+	}
+	e, ok := knobEntries()[name]
+	if !ok || !e.Live(now) {
+		return fmt.Errorf("실행 중 손잡이가 없다: %s — 옮길 값이 없다(설정 파일 %s를 직접 고치거나 먼저 knob set)", name, knob.ConfPath())
+	}
+	if strings.TrimSpace(why) == "" {
+		why = e.Why
+	}
+	cp := knob.ConfPath()
+	if dryK {
+		preview("손잡이 %s = %s 를 설정 파일 %s 에 정해 두고 손잡이는 지움", name, e.Value, cp)
+		return nil
+	}
+	if err := knob.SaveConf(cp, name, e.Value, why); err != nil {
+		return fmt.Errorf("설정 파일 %s에 못 썼다(손잡이는 그대로): %w", cp, err)
+	}
+	if _, err := knob.Unset(knob.Path(HOME), name, true, now); err != nil {
+		return fmt.Errorf("설정 파일에는 썼는데 손잡이를 못 지웠다(값은 같다 — hc-fill knob unset %s --force): %w", name, err)
+	}
+	note := ""
+	if e.Until != 0 {
+		note = " · 기한(" + stamp(e.Until) + "까지)은 옮기지 않았다 — 이제 계속"
+	}
+	say("손잡이 %s = %s 를 설정 파일 %s 에 정해 뒀다(실행 중 손잡이는 지움 — 먹는 값은 그대로)%s", name, e.Value, cp, note)
+	next("개인 설정 저장소에서 커밋한다: git -C %s add %s && git -C %s commit -m \"손잡이 %s 정해 둠\"", toolDir(cp), knob.ConfName, toolDir(cp), name)
+	jot("knob save", name, why, "됨", knobSetLine(e)+" (설정 파일 줄은 직접 지움)", fmt.Sprintf("손잡이 %s → 설정 파일 %s", e.Value, cp))
+	return nil
+}
+
+func toolDir(p string) string { return p[:strings.LastIndex(p, "/")] }
 
 // knobSetLine: 그 손잡이 값을 다시 두는 명령 한 줄(되돌리기 — 기한은 옮기지 않는다)
 func knobSetLine(e knob.Entry) string {
@@ -396,7 +473,7 @@ func knobsRemoteTick() {
 			continue
 		}
 		p := f[1]
-		msg := knob.FormatRemote(knob.ForProject(es, p, now), now)
+		msg := knob.FormatRemote(knobRemoteOf(es, p, now), now)
 		sum := sha256hex([]byte(msg))
 		if done[p] == sum || (msg == "" && done[p] == "") {
 			if done[p] != "" {
@@ -424,6 +501,18 @@ func knobsRemoteTick() {
 			say("손잡이 원격: 기록을 쓰지 못했다: %v", err)
 		}
 	}
+}
+
+// knobRemoteOf: 프로젝트 p의 원격 몫 — 설정 파일 값 위에 살아 있는 손잡이(둘 다 그 프로젝트 몫으로 푼 것). 다른 기계는 이 참조만
+// 읽어도 지휘 기계와 같은 값(손잡이 > 설정 파일)을 쓴다. 설정 파일이 없으면 손잡이만(전과 바이트까지 같다)
+func knobRemoteOf(es map[string]knob.Entry, p string, now time.Time) map[string]knob.Entry {
+	o := knob.ForProject(knobFile().Entries(), p, now)
+	for n, e := range knob.ForProject(es, p, now) {
+		if e.Live(now) {
+			o[n] = e
+		}
+	}
+	return o
 }
 
 func knobsRemoteOne(p, r, msg string) bool {

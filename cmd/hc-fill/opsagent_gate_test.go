@@ -87,6 +87,13 @@ func TestOpsGateOwnKnob(t *testing.T) {
 	if _, se, rc := k.run(t, "knob", "set", "idle", "20", "--why", "ops_agent 판단: 알림이 잦음"); rc != 0 {
 		t.Fatalf("다른 손잡이: %d %q", rc, se)
 	}
+	// 설정 파일에 정해 두기(knob save — 개인 저장소 파일)는 사람이 정한다(ht-config-knobs). 미리 보기는 된다
+	if _, se, rc := k.run(t, "knob", "save", "idle", "--why", "정함"); rc != 1 || !strings.Contains(se, "정해 두기는 사람이") || fileHas(k.home+"/conf/knobs.tsv", "idle") {
+		t.Fatalf("save: %d %q", rc, se)
+	}
+	if _, se, rc := k.run(t, "knob", "save", "idle", "--dry-run"); rc != 0 {
+		t.Fatalf("save 미리 보기: %d %q", rc, se)
+	}
 }
 
 // ⑦ 레인 지우기는 어느 방식이든 거절·사건, 대기열 그대로. 끝난 실행(다른 ID)의 조치도 거절

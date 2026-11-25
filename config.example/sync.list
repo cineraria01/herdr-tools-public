@@ -35,6 +35,8 @@ Go           .local/lib/herdr-go/internal/**                  tools:internal/   
 도구         .local/bin/herdr-settings-merge                  tools:cmd/herdr-settings-merge                  all
 설정         .local/share/herdr-sync/keys.json                settings/keys.json                              all
 패턴         .local/share/herdr-tools/private-patterns.txt    private-patterns.txt                            macos
+# 손잡이 설정 파일(정해 둔 값 — docs/ops/knobs.md 「설정 파일」): 모든 기계의 도구가 같은 값을 읽게 개인 설정 폴더 그 자리로
+손잡이       .config/herdr-tools/knobs.tsv                    knobs.tsv                                       all
 맥도구       .local/bin/herdr-sync                            tools:cmd/herdr-sync                            local
 맥도구       .local/bin/hc-core-relaunch                      tools:cmd/hc-core-relaunch                      local
 맥도구       .local/bin/herdr-balance                         tools:cmd/herdr-balance                         local
