@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/events"
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/tri"
 )
 
@@ -459,8 +461,20 @@ func aproj(aid string) string {
 	return ""
 }
 
-// auSend: hc send <주소> <글>을 20초 시한으로(셸 판 perl alarm 20 — 넘기면 그 프로세스만 끈다). 참 = 종료 0
+// auSend: hc send <주소> <글>을 20초 시한으로(셸 판 perl alarm 20 — 넘기면 그 프로세스만 끈다). 참 = 종료 0.
+// 받는 쪽 판정(hc get 한 번)을 먼저 — 셸만 남았거나 서비스 터미널이면 보내지 않고 거짓(부르는 쪽의 「못 보냄」 길, ht-send-target-live)
 func auSend(addr, msg string) bool {
+	t, found, err := hcGet(addr)
+	return auSendTo(addr, msg, t, found, err)
+}
+
+// auSendTo: auSend와 같되 이미 받은 hc get 결과로 받는 쪽을 가른다. 조회 실패·판정 모름은 지금처럼 보낸다(hcjson.SendBlocked)
+func auSendTo(addr, msg string, t hcjson.Terminal, found bool, err error) bool {
+	if why := hcjson.SendBlocked(t, found, err); why != "" {
+		jotBy("hc-fill 스스로", "send-skip", addr, "받는 쪽 "+why, "보내지 않음", "-", "글 "+events.Flat(msg))
+		fmt.Fprintf(os.Stderr, "hc-fill: %s 에 보내지 않음 — 받는 쪽 %s\n", addr, why)
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	tickCall("hc", []string{"send"})

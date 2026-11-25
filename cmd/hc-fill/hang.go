@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 // hangShellMark: Claude Code의 Bash 도구 셸(포그라운드·배경 모두)이 명령 줄에 담는 글자 — hc-lane lane.wait_procs 기본과 같다.
@@ -159,15 +161,19 @@ func hangLane(q Row, st string, p Row, now time.Time, lim int) Row {
 			n, hangShellRe.FindString(hangLastTurn(scr)), age, a, a, a), key)
 		return row
 	}
-	did := hangEsc(n, a, spin, now)
+	did := hangEsc(n, a, spin, now, t)
 	aesc(n, own, fmt.Sprintf("%s 멈춘 레인 — 「생각 중」 표시 %d분째, 그 위 화면 %d분 그대로·도구 셸 없음(%s) — %s. 다음: hc read %s", n, spin, age, a, did, a), key)
 	return row
 }
 
 // hangEsc: hang_esc가 켜져 있고 그 레인에 한 시간 안에 끊은 적이 없으면 Escape + 이어 가라는 글 — 한 일을 글로
-func hangEsc(n, a string, spin int, now time.Time) string {
+// t는 hangLane이 이미 받은 hc get — 받는 쪽 판정에 다시 묻지 않고 쓴다(ht-send-target-live)
+func hangEsc(n, a string, spin int, now time.Time, t hcjson.Terminal) string {
 	if knobInt("hang_esc") == 0 {
 		return "끊지 않음(손잡이 hang_esc 0)"
+	}
+	if why := hcjson.SendBlocked(t, true, nil); why != "" {
+		return "끊지 않음(받는 쪽 " + why + ")" // 알림 글(aesc — 같은 멈춤에 한 번)에 실린다. 바퀴마다 일지에 쌓지 않는다
 	}
 	var keep []string // 한 시간 안의 줄만 남긴다(감사 atp1rzf 낮음 — 더하기만 하던 파일)
 	for _, r := range readRows(DATA + "/hang-esc.tsv") {
@@ -190,7 +196,7 @@ func hangEsc(n, a string, spin int, now time.Time) string {
 	}
 	time.Sleep(hangGap)
 	msg := fmt.Sprintf("앞 요청이 %d분 멈춰 끊었다 — 마지막 지시를 이어서 하라", spin)
-	if !auSend(a, msg) {
+	if !auSendTo(a, msg, t, true, nil) {
 		jotBy("hc-fill 스스로", "hang-esc", n, "생각 중 멈춤", "글 실패", "-", "주소 "+a)
 		return "Escape는 보냈고 이어 가라는 글은 실패 — hc send로 다시"
 	}

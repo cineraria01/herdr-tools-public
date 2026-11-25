@@ -3,8 +3,8 @@ package main
 // hc send·keys 받는 쪽 확인(ht-send-shell-guard, 2026-11-25): 지휘가 `hc send t3yx "…"`를 보냈는데 t3yx는 에이전트가 끝나 zsh만 남은
 // 터미널이라 글이 셸 프롬프트에 쳐졌다. hc(herdr-core)는 이 저장소 밖이라 hc-lane-wait-guard(Bash 명령마다 도는 편의 막)에 갈래를 둔다 —
 // settings.json 훅 항목을 늘리지 않아 herdr-sync가 바이너리만 바꿔 깐다. 명령의 `hc send|keys <대상>`마다 hc get으로 받는 쪽을 보고
-// 셸만 남았으면(hcjson.AgentState 없음 — hc-lane 지휘 확인과 같은 판정) 막는다. 판정 못 함(hc 없음·실패·시간 넘김·변수 대상)은 막지 않고
-// additionalContext로 경고만 — 지금 동작을 깨지 않는다. 서비스 터미널(serviceTerm — 프록시 서버·병합기 검증·감시)도 원래 보내는 곳이
+// 셸만 남았으면(hcjson.SendTarget 없음 — Go 도구가 직접 부르는 hc send·keys와 같은 판정) 막는다. 판정 못 함(hc 없음·실패·시간 넘김·변수 대상)은 막지 않고
+// additionalContext로 경고만 — 지금 동작을 깨지 않는다. 서비스 터미널(hcjson.ServiceTerm — 프록시 서버·병합기 검증·감시)도 원래 보내는 곳이
 // 아니라 막는다: 글은 버려지고 ctrl+c는 서버를 끊는다(감사 atp1om3 중간 1). 막 뜬 에이전트(상태 보고 전)는 서비스로 읽지 않는다.
 
 import (
@@ -148,35 +148,10 @@ func sendTargetState(target string) (tri.State, string) {
 	if err != nil {
 		return tri.Unknown, err.Error()
 	}
-	if !found || t.State != "live" {
+	if !found {
 		return tri.Yes, ""
 	}
-	if why := serviceTerm(t); why != "" {
-		return tri.No, why
-	}
-	return hcjson.AgentState(t)
-}
-
-// serviceTerm: 에이전트가 아닌 서비스 터미널이면 까닭 — 이 저장소 도구의 서비스 라벨(hc-lane-watch·hc-merger-spec), 또는 상태 보고가
-// 한 번도 없고(status·status_ms 없음) 전경 argv가 `… server`(계정 풀 프록시 꼴, 2026-11-25 실측). 막 뜬 에이전트는 상태 보고 전이라도
-// 전경이 `… server`가 아니라 여기 걸리지 않는다
-// ponytail: 서버 꼴은 argv 끝 낱말 하나로 가른다 — 다른 꼴의 서비스가 생기면 그 표식을 여기에 더한다
-func serviceTerm(t hcjson.Terminal) string {
-	for _, l := range []string{"hc-lane-watch", "hc-merger-spec"} {
-		if t.Labels[l] == "1" {
-			return "에이전트가 아닌 서비스 터미널이다(라벨 " + l + ")"
-		}
-	}
-	if r, ok := t.Raw["status_ms"]; t.Status != "" || ok && string(r) != "null" {
-		return ""
-	}
-	var fg struct {
-		Argv []string `json:"argv"`
-	}
-	if r, ok := t.Raw["foreground"]; !ok || json.Unmarshal(r, &fg) != nil || len(fg.Argv) < 2 || fg.Argv[len(fg.Argv)-1] != "server" {
-		return ""
-	}
-	return "에이전트가 아닌 서버 터미널이다(상태 보고 없음, 전경이 … server)"
+	return hcjson.SendTarget(t)
 }
 
 // hcBin: 실행할 수 있는 hc — PATH, 없으면 ~/.local/bin/hc. 둘 다 아니면 ""

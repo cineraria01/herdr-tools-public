@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
 )
 
@@ -112,6 +113,12 @@ func addrOK(s string) bool {
 	return s != "" && s[0] != '-' && strings.Trim(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") == ""
 }
 
+// sendBlockedJSON: 이미 받은 hc get 응답(js, 종료 rc)으로 보내지 말아야 할 까닭(hcjson.SendBlocked — 셸만 남음·서비스 터미널). 못 읽으면 ""
+func sendBlockedJSON(js string, rc int) string {
+	t, found, err := hcjson.ParseGet([]byte(js), rc, "")
+	return hcjson.SendBlocked(t, found, err)
+}
+
 // sameRun: hc get 결과가 그 레인의 같은 실행인가 — 최상위 state live·name = 레인·created_ms = 제출 때 적은 값.
 // ok 거짓 = 응답을 해석하지 못함(잘린 JSON 등 — 다른 실행이라는 근거가 아니다, E06). 응답은 정확히 JSON 객체 하나여야 하고(뒤에 글이
 // 붙으면 모름), live면 이름(글자)·시작 시각이 있어야 「다른 실행」으로 확정한다(R-H07 — 칸이 빠진 live로 보낼 함을 지웠다)
@@ -200,7 +207,11 @@ func (m *M) send(n string) {
 			case !ok: // 응답을 해석하지 못함 — 다른 실행이라는 근거가 아니다(E06)
 				retry = true
 			case same:
-				if _, sr, _ := hcRun(5*time.Second, "send", ad, fmt.Sprintf("hc-lane merger: %s %s %s — %s", ln, st, strings.TrimPrefix(sha, "-"), msg)); sr != 0 {
+				// 받는 쪽 판정(ht-send-target-live) — 이미 받은 응답으로. 셸만 남았으면 보내지 않고 못 보냄 길(세 번 뒤 사건만)
+				if why := sendBlockedJSON(js, gr); why != "" {
+					fmt.Fprintf(os.Stderr, "hc-lane merger: %s 레인 터미널(%s)에 보내지 않음 — 받는 쪽 %s\n", ln, ad, why)
+					retry = true
+				} else if _, sr, _ := hcRun(5*time.Second, "send", ad, fmt.Sprintf("hc-lane merger: %s %s %s — %s", ln, st, strings.TrimPrefix(sha, "-"), msg)); sr != 0 {
 					retry = true
 				}
 			}

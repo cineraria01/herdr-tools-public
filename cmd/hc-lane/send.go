@@ -106,6 +106,12 @@ func sendCmd(a []string) int {
 		if !aud && (strings.HasPrefix(n, "audit-") || km[[2]string{lastSeg(ad), n}] == "read") {
 			continue
 		}
+		// 받는 쪽 판정(ht-send-target-live) — hc ls에는 전경 칸이 없어 보낼 레인마다 hc get 한 번. 셸만 남았으면 보류
+		if why := sendBlocked(ad); why != "" {
+			fmt.Printf("보류 %s %s — 받는 쪽 %s\n", ad, n, flat(why))
+			held++
+			continue
+		}
 		var eb strings.Builder
 		if _, rc := captErr(60, &eb, "hc", "send", ad, m); rc == 0 {
 			fmt.Printf("보냄 %s %s\n", ad, n)

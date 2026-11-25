@@ -81,8 +81,14 @@ func tinfoOf(t hcjson.Terminal, found bool, err error) (pid, name string, laneLa
 	return strconv.Itoa(t.PID), name, laneLabel, tri.Yes
 }
 
-// agentState: 받는 터미널에 에이전트가 있나 — 판정은 hcjson.AgentState 한 곳(herdr-hooks의 hc send·keys 막기와 같은 판정)
-var agentState = hcjson.AgentState
+// agentState: 받는 터미널에 에이전트가 있나 — 판정은 hcjson.SendTarget 한 곳(herdr-hooks의 hc send·keys 막기, hc-fill·병합기의
+// hc send와 같은 판정: 셸만 남음·서비스 터미널은 없음)
+var agentState = hcjson.SendTarget
+
+// sendBlocked <주소>: hc get 한 번으로 그 주소에 hc send·keys를 보내지 말아야 할 까닭(hcjson.SendBlocked). 조회 실패·모름은 "" — 지금처럼 보낸다
+func sendBlocked(addr string) string {
+	return hcjson.SendBlocked(hcGet(10, addr))
+}
 
 func coordFile(addr string) string { return evdir() + "/coord." + ckey(addr) }
 

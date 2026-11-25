@@ -46,7 +46,7 @@ func (m *M) rwatch(r *rstate) {
 		return
 	}
 	if (t.Status == "" || t.Status == "blocked") && strings.TrimSpace(readS(r.dir+"/trusted")) != r.addr {
-		m.rtrust(r)
+		m.rtrust(r, t)
 	}
 	sf := r.dir + "/stuck"
 	if t.Status != "blocked" && t.Status != "error" {
@@ -75,8 +75,12 @@ func (m *M) rwatch(r *rstate) {
 	fmt.Fprintf(os.Stderr, "hc-lane merger: %s\n", msg)
 }
 
-// rtrust: 화면이 신뢰 질문이면(설정 lane.auto_trust on일 때) 키를 한 번 보낸다
-func (m *M) rtrust(r *rstate) {
+// rtrust: 화면이 신뢰 질문이면(설정 lane.auto_trust on일 때) 키를 한 번 보낸다. t는 rwatch가 이미 받은 hc get
+func (m *M) rtrust(r *rstate, t hcjson.Terminal) {
+	// 에이전트가 끝나 셸만 남았으면 화면에 질문 글이 남아 있어도 키는 셸로 간다(ht-send-target-live) — 다음 바퀴에 다시 본다
+	if hcjson.SendBlocked(t, true, nil) != "" {
+		return
+	}
 	scr, rc, _ := hcRun(hcLook, "read", r.addr)
 	if rc != 0 {
 		return

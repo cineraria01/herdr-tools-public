@@ -64,6 +64,7 @@ func TestHangTick(t *testing.T) {
 		keys                              int    // hc keys 부른 수
 		row                               string // hang.tsv에 남을 종류("" = 줄 없음)
 		escHas, escNot                    string // 끝난 뒤 hang-esc.tsv에 있어야·없어야 할 조각
+		get                               string // hc get 응답 JSON(빈 값 = 판정 칸 없는 기본)
 	}{
 		{name: "끊음 기록 정리 — 같은 레인 옛 줄은 버리고 다른 레인 최근 줄은 남김", status: "working", scr: spin, ps: idle,
 			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
@@ -71,6 +72,11 @@ func TestHangTick(t *testing.T) {
 				now.Add(-2*time.Hour).Unix()),
 			want: "w 멈춘 레인", keys: 1, row: "a",
 			escHas: fmt.Sprintf("x\tm/x\t%d\nw\tm/w\t%d\n", now.Add(-10*time.Minute).Unix(), now.Unix()), escNot: "y\t"},
+		// ht-send-target-live: 에이전트가 끝나 셸만 남았으면 Escape도 글도 보내지 않는다(셸이 글을 명령으로 실행한다)
+		{name: "셸만 남음 — 끊지 않고 알리기만", status: "working", scr: spin, ps: idle,
+			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
+			get:  `{"address":"m/w","state":"live","name":"w","pid":61774,"created_ms":1,"cwd":"/wt","argv":["zsh","-l"],"foreground":{"argv":["zsh","-l"],"pid":61774},"status":null}`,
+			want: "끊지 않음(받는 쪽 에이전트가 끝나 셸만 남음", row: "a"},
 		{name: "생각 중 멈춤 — 끊고 이어 보냄", status: "working", scr: spin, ps: idle,
 			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
 			want: "w 멈춘 레인 — 「생각 중」 표시 20분째", keys: 1, row: "a"},
@@ -121,9 +127,14 @@ func TestHangTick(t *testing.T) {
 			wr("scr.txt", c.scr)
 			wr("ps.txt", c.ps)
 			wr("ps", "#!/bin/sh\ncat "+DATA+"/ps.txt\n")
+			get := c.get
+			if get == "" {
+				get = `{"address":"m/w","state":"live","name":"w","pid":61774,"created_ms":1,"cwd":"/wt","status":null}`
+			}
+			wr("get.json", get+"\n")
 			wr("hc", "#!/bin/sh\nprintf 'hc %s\\n' \"$*\" >>"+log+"\ncase $1 in\n"+
 				"read) cat "+DATA+"/scr.txt;;\n"+
-				"get) printf '{\"address\":\"m/w\",\"state\":\"live\",\"name\":\"w\",\"pid\":61774,\"created_ms\":1,\"cwd\":\"/wt\",\"status\":null}\\n';;\n"+
+				"get) cat "+DATA+"/get.json;;\n"+
 				"esac\nexit 0\n")
 			t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
 			aud := c.aud

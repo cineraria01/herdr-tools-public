@@ -69,6 +69,12 @@ func s21b3(k *K) {
 	}
 	k.check("send --all --: 뒤 낱말은 옵션 꼴이어도 글(감사 L4)", k.rc == 0 && contains(s21bLines(send), "tA1\t--all --audits 끝") && !tA3)
 	os.Remove(send)
+	// ht-send-target-live: 에이전트가 끝나 셸만 남은 레인 터미널은 보내지 않고 보류(셸이 글을 명령으로 실행한다). 나머지는 그대로 보낸다
+	sh := `{"address":"tA1","argv":["zsh","-l"],"created_ms":1,"cwd":"/","foreground":{"argv":["zsh","-l"],"pid":5},"name":"impl-a","pid":5,"state":"live","status":null}`
+	k.runE(append(append([]string{}, tc...), "HC_FAKE_GET_ADDR=tA1", "HC_FAKE_GET_BODY="+sh), "send", "--all", "x")
+	k.check("send --all: 셸만 남은 레인은 보내지 않고 보류(종료 1, 까닭 한 줄)", k.rc == 1 && sent() == "mini/tA2 tA6 tA9 " &&
+		strings.Contains(k.out, "보류 tA1 impl-a — 받는 쪽 에이전트가 끝나 셸만 남음") && strings.Contains(k.out, "보냄 3 · 실패 0 · 보류 1"))
+	os.Remove(send)
 	// 같은 주소·이름의 기록이 두 지휘(tC 다음 tO)이고 지금 부모는 tC — 소유 충돌이라 어느 쪽도 보내지 않고 보류(재감사2 lane/R-209: 마지막 기록이 이기던 것)
 	write(k.t, SD+"/lanes.tsv", "tA8\tmoved\ttC\ntA8\tmoved\ttO\n")
 	lsM := `{"terminals":[{"address":"tA8","cwd":"/","name":"moved","parent":"mac/tC","state":"live"}]}`

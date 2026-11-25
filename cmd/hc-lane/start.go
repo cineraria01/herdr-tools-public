@@ -87,7 +87,12 @@ func redactHit(s string) string {
 	return reHitLng.ReplaceAllString(s, "<가림>")
 }
 
+// hcKeys <주소> <키…>: 받는 쪽 판정(sendBlocked)을 먼저 — 셸만 남았거나 서비스 터미널이면 보내지 않고 거짓(ht-send-target-live)
 func hcKeys(args ...string) bool {
+	if why := sendBlocked(args[0]); why != "" {
+		errf("hc-lane: %s 에 키를 보내지 않음 — 받는 쪽 %s\n", args[0], why)
+		return false
+	}
 	return proc.Run(exec.Command("hc", append([]string{"keys"}, args...)...)) == nil
 }
 
