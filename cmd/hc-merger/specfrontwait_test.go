@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -58,6 +59,28 @@ func TestFrontWaitUnderCapWaits(t *testing.T) {
 	s.round(1)
 	if len(s.lines(s.landlog)) != 0 || s.mainSHA() != m0 || len(s.dispatched()) != 1 {
 		t.Fatalf("① 상한 안이면 기다린다: 착지 %v 띄움 %v", s.lines(s.landlog), s.dispatched())
+	}
+}
+
+// 추측을 기다린 바퀴(묶음 2 — 후보를 쌓느라 착지 로그를 연다)는 빈 착지 로그를 남기지 않는다(2026-11-25 한 저장소의 병합기: 맨 앞
+// 묶음 2가 추측 기다림 74바퀴 동안 빈 <레인>-<시각>-<pid>.log 74개 — 재시도가 아니라 기다림 바퀴)
+func TestSpecWaitNoEmptyLog(t *testing.T) {
+	s := specFx(t)
+	for i, l := range []string{"a", "b", "c", "d"} {
+		s.sub(1000000001+i, l, false)
+	}
+	for i := 0; i < 3; i++ {
+		s.round(2)
+		time.Sleep(1100 * time.Millisecond) // 로그 이름이 초 단위 — 바퀴마다 다른 이름이 되게
+	}
+	if s.onMain("a.txt") || len(s.dispatched()) == 0 {
+		t.Fatalf("추측을 기다려야(착지 없음): 띄움 %v", s.dispatched())
+	}
+	lg, _ := filepath.Glob(s.dir + "/a-*.log")
+	for _, f := range lg {
+		if st, err := os.Stat(f); err == nil && st.Size() == 0 {
+			t.Fatalf("기다린 바퀴가 빈 착지 로그를 남겼다: %s", f)
+		}
 	}
 }
 

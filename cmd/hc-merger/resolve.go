@@ -49,13 +49,19 @@ func (m *M) conflictMode() string {
 
 // knobStr: 글 손잡이 — 공통 손잡이 merger_<파일>(knobs.go)이 있으면 그 값, 다음은 <일지 폴더>/<파일>(옛 길, 바퀴마다 읽음), 없으면 환경 변수
 func (m *M) knobStr(file, env string) string {
+	v, _ := m.knobSrc(file, env)
+	return v
+}
+
+// knobSrc: knobStr과 그 값이 온 곳 — 반송 글에 적어, 원격 손잡이만 보고 옛 파일을 놓치지 않게(2026-11-25 한 저장소의 PR 제출 반송)
+func (m *M) knobSrc(file, env string) (string, string) {
 	if v, ok := rk["merger_"+file]; ok {
-		return v
+		return v, "공통 손잡이 merger_" + file
 	}
 	if b, err := os.ReadFile(m.mj + "/" + file); err == nil {
-		return strings.TrimSpace(string(b))
+		return strings.TrimSpace(string(b)), m.mj + "/" + file
 	}
-	return strings.TrimSpace(os.Getenv(env))
+	return strings.TrimSpace(os.Getenv(env)), "환경 변수 " + env
 }
 
 // resolveMax: 한 단계(풀이·풀이 감사)의 상한, 손잡이 resolve_max(초, 기본 3600)
@@ -115,27 +121,32 @@ func loadR(dir string) (*rstate, bool) {
 
 func (r *rstate) name() string { return strings.TrimPrefix(r.q, "refs/merge-queue/") }
 
-// conflictTake: 충돌한 제출을 병합 쪽 풀이로 넘긴다. false = 지금처럼 반송할 것(손잡이 reject·제출 기록 없음·지금 다시 해 보니 안
-// 부딪힘). true = 넘겼거나(푸는 중) 이미 푸는 중이거나 넘기다 못해 반송까지 했다 — 부른 쪽은 반송하지 않는다
-func (m *M) conflictTake(q, s, ln, rec, B, why string) bool {
+// conflictTake: 충돌한 제출을 병합 쪽 풀이로 넘긴다. skip != "" = 지금처럼 반송할 것, 그 까닭(손잡이 reject·제출 기록 없음·지금 다시
+// 해 보니 안 부딪힘 — 부른 쪽이 반송 글 끝에 「 — 병합 쪽 풀이 안 함: <skip>」으로 붙인다). 빈 값 = 넘겼거나(푸는 중) 이미 푸는
+// 중이거나 넘기다 못해 반송까지 했다 — 부른 쪽은 반송하지 않는다
+func (m *M) conflictTake(q, s, ln, rec, B, why string) (skip string) {
 	mode := m.conflictMode()
 	if mode == "reject" {
-		return false
+		_, src := m.knobSrc("conflict", "HC_LANE_MERGER_CONFLICT")
+		return "손잡이 conflict=reject(" + src + ")"
 	}
 	mt, ok := readMeta(strings.TrimPrefix(rec, "-"), s)
-	if !ok || mt.id == "" { // 풀이의 감사 판정을 묶을 제출 기록이 없다(손 제출)
-		return false
+	if !ok {
+		return "제출 기록을 못 읽음"
+	}
+	if mt.id == "" { // 풀이의 감사 판정을 묶을 제출 기록이 없다(손 제출)
+		return "제출 기록 없음(손 제출 — 풀이 판정을 묶을 곳이 없다)"
 	}
 	m.B = B // 충돌 파일(conflicts)·반송 글의 기준
 	n := strings.TrimPrefix(q, "refs/merge-queue/")
 	dir := m.mj + "/resolve/" + n
 	if fileExists(dir + "/st") {
-		return true // 이미 푸는 중(한 제출을 두 곳에서 풀지 않는다)
+		return "" // 이미 푸는 중(한 제출을 두 곳에서 풀지 않는다)
 	}
 	wt := m.top + ".merger-resolve/" + n
 	if err := os.MkdirAll(dir, 0o777); err != nil || os.MkdirAll(filepath.Dir(wt), 0o777) != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 풀이 폴더를 만들지 못했다 — 지금처럼 반송\n")
-		return false
+		return "풀이 폴더를 만들지 못함"
 	}
 	r := &rstate{dir: dir, q: q, s: s, ln: ln, rec: rec, B: B, wt: wt, why: why, mode: mode, phase: "resolve", t0: time.Now().Unix()}
 	lg := fmt.Sprintf("%s/%s-resolve-%s-%d.log", m.ml, ln, time.Now().Format("20060102-150405"), os.Getpid())
@@ -144,22 +155,22 @@ func (m *M) conflictTake(q, s, ln, rec, B, why string) bool {
 	}
 	if inLog("", lg, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "-f", "--detach", wt, s) != 0 {
 		m.rdrop(r)
-		return false
+		return "풀이 작업 트리를 만들지 못함(로그 " + lg + ")"
 	}
 	rc := inLog(wt, lg, "-c", "core.hooksPath=/dev/null", "rebase", "-q", "--reapply-cherry-picks", B)
 	if rc == 0 || !m.rebasing(wt) {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: %s 를 병합 쪽에서 다시 얹어 보니 충돌로 멈추지 않았다(종료 %d) — 지금처럼 반송\n", ln, rc)
 		m.rdrop(r)
-		return false
+		return fmt.Sprintf("병합 쪽에서 다시 얹어 보니 충돌로 멈추지 않음(종료 %d, 로그 %s)", rc, lg)
 	}
 	r.files = m.conflicts(s)
 	if err := r.save(); err != nil {
 		m.rdrop(r)
-		return false
+		return "풀이 상태를 쓰지 못함"
 	}
 	if err := writeVia(dir+"/context.md", m.rcontext(r, mt)); err != nil {
 		m.giveUp(r, "풀이 준비 글을 쓰지 못했다")
-		return true
+		return ""
 	}
 	jw := fmt.Sprintf("충돌 — 병합 쪽에서 푸는 중(%s, 충돌 %s, 작업 트리 %s)", mode, r.files, wt)
 	if mode == "event" {
@@ -167,12 +178,12 @@ func (m *M) conflictTake(q, s, ln, rec, B, why string) bool {
 		msg := fmt.Sprintf("충돌 — 풀 수 있음: %s · 양쪽 뜻을 살려 풀고 rebase --continue까지 마친 뒤 이어 가기: printf '풀림\\n' >%s/result (못 풀면 printf '못 풂 — <까닭>\\n' >%s/result). 레인 %s, 충돌 %s, 준비 글 %s/context.md, 상한 %d초 — 그 뒤 풀이 감사를 거쳐 착지",
 			wt, dir, dir, ln, r.files, dir, m.resolveMax())
 		m.ownerEvent(mt, "막힘", "hc-merger-resolve:"+s, msg)
-		return true
+		return ""
 	}
 	addr, err := m.rlaunch(r, "merge-"+ln, "merger-resolve.md", map[string]string{"{result}": dir + "/result"})
 	if err != "" {
 		m.giveUp(r, "푸는 에이전트를 못 띄움 — "+err)
-		return true
+		return ""
 	}
 	r.addr = addr
 	if err := r.save(); err != nil {
@@ -180,7 +191,7 @@ func (m *M) conflictTake(q, s, ln, rec, B, why string) bool {
 	}
 	m.jline(mt, n, ln, jResolving, "-", jw, r.t0, r.t0, "1")
 	m.ownerEvent(mt, "중간", "hc-merger-resolve:"+s, fmt.Sprintf("충돌 — 병합 쪽에서 푸는 중: 레인 %s, 충돌 %s, 에이전트 merge-%s, 작업 트리 %s", ln, r.files, ln, wt))
-	return true
+	return ""
 }
 
 // rcontext: 풀이 준비 글 — 기준·제출, 충돌 파일, 양쪽에서 그 파일을 고친 커밋 제목, 레인 지시문(이 기계에 있으면)

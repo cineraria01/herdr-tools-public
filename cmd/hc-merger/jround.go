@@ -120,6 +120,9 @@ func firstLine(lines []string, test, noTop bool) string {
 
 // specWaitNote: 이 바퀴가 맨 앞 추측을 기다렸다 — 모아 둔 기다림과 맨 앞이 같으면 횟수만 늘리고, 다르면 앞 기다림을 적고 새로 센다
 func (m *M) specWaitNote() {
+	if st, err := os.Stat(m.lgf); err == nil && st.Size() == 0 {
+		os.Remove(m.lgf) // 기다린 바퀴의 빈 착지 로그(후보를 쌓은 git -q) — 바퀴마다 하나씩 쌓였다(2026-11-25 한 저장소에 74개)
+	}
 	now := time.Now().Unix()
 	first, n, re := now, 0, ""
 	if f, l, k, b, mach, ok := m.specWaitRead(); ok {

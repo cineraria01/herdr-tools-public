@@ -124,10 +124,12 @@ func (m *M) judge() {
 	if m.lr == "3" { // rebase 충돌 — hc-fill이 이 꼴(「종료 3, 충돌 」 바로 뒤 「) — 」)을 보고 다시 맞춤 레인을 넣는다(cmd/hc-fill/reland.go).
 		// 검증 전에 멈췄으니 검증 길을 붙이지 않는다
 		why = "착지 실패(종료 3, 충돌 " + m.conflicts(m.b[0].s) + ")"
-		if m.conflictTake(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.O, why) { // 병합 쪽에서 푼다(resolve.go)
+		skip := m.conflictTake(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.O, why)
+		if skip == "" { // 병합 쪽에서 푼다(resolve.go)
 			m.mq = "x"
 			return
 		}
+		why += " — 병합 쪽 풀이 안 함: " + skip
 	}
 	if !m.fail(m.b[0].q, m.b[0].s, m.b[0].l, m.b[0].m, m.lgf, why) {
 		m.mer = true

@@ -95,10 +95,12 @@ func (m *M) prescan() {
 		}
 		m.B = B
 		why := "착지 실패(종료 3, 충돌 " + m.conflicts(ms) + ") — 미리 훑기(차례 전)"
-		if m.conflictTake(mq, ms, ln, mm, B, why) { // 병합 쪽에서 푼다(resolve.go) — 반송하지 않는다
+		skip := m.conflictTake(mq, ms, ln, mm, B, why)
+		if skip == "" { // 병합 쪽에서 푼다(resolve.go) — 반송하지 않는다
 			m.qs = dropRefs(m.qs, mq, "refs/merge-queue-meta/"+mn)
 			continue
 		}
+		why += " — 병합 쪽 풀이 안 함: " + skip
 		if !m.fail(mq, ms, ln, mm, lg, why) {
 			m.mer = true
 			continue

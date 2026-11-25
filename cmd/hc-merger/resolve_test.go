@@ -253,11 +253,30 @@ func TestResolveRejectMode(t *testing.T) {
 	t.Setenv("HC_LANE_MERGER_CONFLICT", "reject")
 	r.rounds(1)
 	fq := strings.Replace(q, "refs/merge-queue/", "refs/merge-failed/", 1)
-	if !r.has(fq) || r.launched() != "" || strings.Contains(r.evs(), "병합 쪽") {
+	if !r.has(fq) || r.launched() != "" || strings.Contains(r.evs(), "병합 쪽에서") {
 		t.Fatalf("바로 반송(지금 그대로): 반송 %v, 띄움 %q\n%s", r.has(fq), r.launched(), r.evs())
 	}
-	if !strings.Contains(r.evs(), "병합기: 착지 실패(종료 3, 충돌 c.txt) — 미리 훑기(차례 전) — 원본 ") {
-		t.Fatalf("반송 글이 지금과 같아야:\n%s", r.evs())
+	// 반송 글 꼴(「충돌 <파일>) — 」)은 그대로, 끝에 왜 병합 쪽에서 안 풀었는지와 그 손잡이가 어디서 왔는지를 붙인다
+	if !strings.Contains(r.evs(), "병합기: 착지 실패(종료 3, 충돌 c.txt) — 미리 훑기(차례 전) — 병합 쪽 풀이 안 함: 손잡이 conflict=reject(환경 변수 HC_LANE_MERGER_CONFLICT) — 원본 ") {
+		t.Fatalf("반송 글에 풀이를 안 한 까닭이 있어야:\n%s", r.evs())
+	}
+}
+
+// 옛 일지 폴더 파일 <일지 폴더>/conflict = reject(공통 손잡이 없음)도 반송하고, 그 파일 경로를 까닭에 적는다 — 2026-11-25 한 저장소의
+// PR 제출이 이 파일로 반송됐는데 일지 줄에 그 까닭이 없어, 원격 손잡이(refs/herdr/knobs)만 본 지휘가 PR 흐름 탓으로 오진했다
+func TestResolveRejectLegacyFile(t *testing.T) {
+	r, q := resolveFx(t, "ok", "pass")
+	mj := r.merger().mj
+	os.MkdirAll(mj, 0o777)
+	os.WriteFile(mj+"/conflict", []byte("reject\n"), 0o666)
+	r.rounds(1)
+	fq := strings.Replace(q, "refs/merge-queue/", "refs/merge-failed/", 1)
+	if !r.has(fq) || r.launched() != "" {
+		t.Fatalf("옛 파일 reject면 바로 반송: 반송 %v, 띄움 %q", r.has(fq), r.launched())
+	}
+	want := "— 미리 훑기(차례 전) — 병합 쪽 풀이 안 함: 손잡이 conflict=reject(" + mj + "/conflict) — 원본 "
+	if !strings.Contains(r.evs(), want) || !strings.Contains(r.journal(), "병합 쪽 풀이 안 함: 손잡이 conflict=reject("+mj+"/conflict)") {
+		t.Fatalf("사건·일지에 옛 파일 경로가 있어야 (%s):\n%s\n%s", want, r.evs(), r.journal())
 	}
 }
 
