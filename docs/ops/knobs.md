@@ -27,6 +27,7 @@
 - `hc-fill knob set <이름> <값> --why <까닭> [--for <분> | --until <시각>] [--pin] [--force]`
   - `--why`는 꼭 받는다(빈 글은 거절).
   - 누가 = 부른 터미널 주소(`HC_TERMINAL_ID`), 없으면 `사람`.
+  - 다른 누가가 `advise_claim`분(기본 30) 안에 정한 같은 손잡이를 덮으면 표준 오류에 한 줄 `hc-fill: <누가>가 n분 전 <값>로 정함(<까닭>) — 덮음`(막지 않는다 — 같은 알림에 지휘 둘이 서로 덮었다, 2026-11-26 ht-advise-claim).
   - `--until` 꼴은 RFC3339 또는 `2006-01-02 15:04`(이 기계 시간대), 지난 시각은 거절.
 - `hc-fill knob unset <이름> [--force] [--why <까닭>]` — 손잡이를 지워 설정 값으로 돌린다.
 - set·unset은 [운영 일지](journal.md)에 한 줄씩 남는다(되돌리는 명령과 함께).
@@ -54,7 +55,7 @@
   멈춘 레인 다시 굴리기([nudge](../hc-fill/edit.md)): `nudge_every`(분, 한 레인에 다시 보내기까지, 0 막지 않음).
   멈춘 레인 감지([멈춘 레인](../hc-fill/hang.md)): `hang_min`(분, 기본 15, 0 끔)·`hang_esc`(0·1, 기본 1 — 「생각 중」 멈춤에 Escape와 이어 가라는 글).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%). 기본 출력이 끝난 레인을 남기는 시간: `state_done`(분).
-  지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_pinned`·`advise_merge_slow`·`advise_spec_fresh`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다. 밀린 배포의 착지 뒤 유예 `deploy_grace`(분, 기본 5). 착지 뒤 명령의 종료 75 다시 돌리기 상한 `onland_retry_wait`(분, 기본 10, 0 끔 — [착지 뒤 명령](../hc-fill/on-land.md)).
+  지금 손댈 것([advise](advise.md)): `advise_wait`·`advise_pinned`·`advise_merge_slow`·`advise_spec_fresh`·`advise_every`(분, 0 끔) — 풀 수 있는 대기·사슬의 문턱은 `idle`과 같다. 조치함·덮음 알림의 기간 `advise_claim`(분, 기본 30, 0 끔). 밀린 배포의 착지 뒤 유예 `deploy_grace`(분, 기본 5). 착지 뒤 명령의 종료 75 다시 돌리기 상한 `onland_retry_wait`(분, 기본 10, 0 끔 — [착지 뒤 명령](../hc-fill/on-land.md)).
   운영 에이전트([agent](agent.md)): `ops_agent`(끔|판단만|조치, 기본 끔)·`ops_agent_max_hour`(번)·`ops_agent_timeout`(분)·`ops_agent_tries`(번)·`ops_agent_scope`(프로젝트)·`ops_agent_close`(0·1, 기본 1) — 운영 에이전트 실행 안에서는 이 여섯을 바꾸지 못한다.
 - 옮긴 hc-fill 설정 키(knobs-migrate, 2026-11-24 — 기본은 지금 코드 값 그대로): `gc`·`idle_empty`·`reland_wait`(분), `reland_max`·`audit_max`(번),
   `audit_close`·`audit_seat_rounds`(바퀴), `lows_hour`·`lows_min`(개).

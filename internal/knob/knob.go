@@ -79,6 +79,7 @@ var Defs = []Def{
 	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
 	{Name: "advise_pinned", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "--only로 묶인 기계가 모두 상한·멈춤이라 이만큼 못 뜬 대기 줄이 있고 다른 기계에 빈 자리가 있으면 주인 지휘에 손댈 것(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
+	{Name: "advise_claim", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "손댈 것 대상에 이만큼 안의 다른 지휘 조치(일지)가 있으면 항목에 「조치함」, knob set이 다른 지휘가 이만큼 안에 정한 값을 덮으면 한 줄 알림(0이면 끔)"},
 	{Name: "deploy_grace", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "마지막 착지 뒤 이만큼은 배포 밀림을 손댈 것으로 안 침(배포 도는 중·착지 뒤 명령 차례 남음도 안 침, 0이면 착지 시각은 안 봄)"},
 	{Name: "onland_retry_wait", Tool: "hc-fill", Default: "10", Min: 0, Max: 120, Unit: "분", Desc: "착지 뒤 명령이 종료 75(일시 실패 — 다른 herdr-sync가 돎 등)면 이만큼까지 30초마다 다시 돌림(0이면 안 다시, 바로 막힘)"},
 	// 운영 에이전트(2026-11-24 ops-agent, docs/ops/agent.md). 이름이 agent가 아닌 까닭: hc-fill 설정 agent(에이전트 CLI 종류)를 덮는다.

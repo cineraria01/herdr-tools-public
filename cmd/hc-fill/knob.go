@@ -320,6 +320,10 @@ func knobSet(args []string, now time.Time) error {
 	if pin {
 		undo += " --force"
 	}
+	// 다른 지휘가 advise_claim분 안에 정한 같은 손잡이를 덮으면 한 줄(막지 않는다 — 같은 알림에 지휘 둘이 서로 덮었다, ht-advise-claim)
+	if w := knobInt("advise_claim"); src == knob.FromKnob && oe != nil && oe.Name == name && oe.By != e.By && w > 0 && now.Unix()-oe.At < int64(w)*60 {
+		fmt.Fprintf(os.Stderr, "hc-fill: %s가 %d분 전 %s로 정함(%s) — 덮음\n", oe.By, (now.Unix()-oe.At)/60, oe.Value, oe.Why)
+	}
 	jot("knob set", name, why, "됨", undo, fmt.Sprintf("전 %s(%s) → %s, %s", old, src, val, u))
 	return nil
 }

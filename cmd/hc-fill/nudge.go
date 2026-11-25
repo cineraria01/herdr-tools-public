@@ -93,22 +93,29 @@ func laneTerm(r Row) (hcjson.Terminal, bool, error) {
 
 // nudgeLast <레인> <주소> <기계> <created_ms>: 그 실행(주소@시작)의 마지막 보고 상태(없으면 빈 값). ok=false면 사건을 못 읽음(모름)
 func nudgeLast(name, addr, m string, created int64) (string, bool) {
+	ev, ok := laneEvents(m)
+	if !ok {
+		return "", false
+	}
+	saved := EV
+	defer func() { EV = saved }()
+	EV = ev
+	run := addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(created, 10)
+	return evF(runlast(name, addr, run, ""), evState), true
+}
+
+// laneEvents <기계>: 그 기계의 레인 사건 줄(hc-lane events [--on]). ok=false면 못 읽음·그 기계 모름 — nudge·edit(주차 맞추기)이 함께 쓴다
+func laneEvents(m string) ([]string, bool) {
 	args := []string{"events"}
 	if m != LOCAL && m != "" && m != "-" {
 		args = append(args, "--on", m)
 	}
 	out, rc := Cmd{Name: "hc-lane", Args: args}.Run()
 	if rc != 0 {
-		return "", false
+		return nil, false
 	}
-	saved := EV
-	defer func() { EV = saved }()
-	EV = lines(sub(out))
-	if has(evUnk(), m) {
-		return "", false
-	}
-	run := addr[strings.LastIndexByte(addr, '/')+1:] + "@" + strconv.FormatInt(created, 10)
-	return evF(runlast(name, addr, run, ""), evState), true
+	ev := lines(sub(out))
+	return ev, !has(ev, "모름 "+m)
 }
 
 // nudgeAt <레인>: 그 레인에 마지막으로 보낸 시각(초, 없으면 0)

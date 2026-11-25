@@ -6,6 +6,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,8 +22,17 @@ func TestAdviseDeployHoldKeepsKnownKey(t *testing.T) {
 	if err := os.Chtimes(head, old, old); err != nil {
 		t.Fatal(err)
 	}
+	// 레인 항목은 주인 지휘에게 따로 간다(ht-advise-claim) — 배포 밀림이 든 사건만 센다
+	dep := func() (o []string) {
+		for _, r := range reports(t) {
+			if strings.Contains(r, "배포 m") {
+				o = append(o, r)
+			}
+		}
+		return o
+	}
 	adviseTick(now)
-	if len(reports(t)) != 1 || !adviseKnown()["deploy:m"] {
+	if len(dep()) != 1 || !adviseKnown()["deploy:m"] {
 		t.Fatalf("밀림이 알려져야: %q", readLines(DATA+"/advise.tsv"))
 	}
 	t1 := now.Add(6 * time.Minute) // 다른 레인 착지 — 보류
@@ -34,7 +44,7 @@ func TestAdviseDeployHoldKeepsKnownKey(t *testing.T) {
 		t.Fatalf("보류 동안 알린 열쇠를 잊음: %q", readLines(DATA+"/advise.tsv"))
 	}
 	adviseTick(t1.Add(6 * time.Minute))
-	if r := reports(t); len(r) != 1 {
+	if r := dep(); len(r) != 1 {
 		t.Fatalf("같은 밀림 사건이 다시 나감: %q", r)
 	}
 }

@@ -263,6 +263,7 @@ func TestDigestable(t *testing.T) {
 		{c("on-land-build", "중간", "착지 뒤 build 성공", ""), true, "착지 뒤 명령 성공"},
 		{c("on-land-build", "막힘", "착지 뒤 build 실패", ""), false, "착지 뒤 명령 실패"},
 		{c("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1"), true, "⑧ 운영 에이전트가 맡은 손댈 것"},
+		{c("hc-fill-advise", "중간", "손댈 것 참고 — 주인 지휘에 보냄: free-wait:x → t1", events.AdviseRefKey+"1"), true, "주인에게 보낸 손댈 것의 참고(ht-advise-claim)"},
 		{c("hc-fill-advise", "중간", "손댈 것: x", ""), false, "⑧ 판단만·끔이면 즉시"},
 		{c("hc-fill-agent", "중간", "운영 에이전트 끝: x", ""), false, "운영 에이전트 끝 사건"},
 		{c("hc-fill-agent", "막힘", "사람이 정한다: x", ""), false, "사람이 정한다"},

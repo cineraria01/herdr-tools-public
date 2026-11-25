@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/journal"
 )
 
 // AdviseSchema: advise json 꼴 판
@@ -34,6 +36,22 @@ type Item struct {
 	Cost     string   `json:"cost"`
 	Next     []string `json:"next"`
 	Sure     string   `json:"sure"`
+	// Claim: 이 항목 대상에 최근 다른 지휘가 한 조치(일지에서 hc-fill이 채움) — 「<지휘> n분 전 — <명령>(<까닭>)」, 없으면 빈 값.
+	// 막지 않는다 — 같은 알림을 두 지휘가 따로 손대지 않게 보이기만(ht-advise-claim). 요약(Summary)·지문에는 넣지 않는다
+	Claim string `json:"claim"`
+}
+
+// laneKinds: 열쇠 이름이 레인인 항목 종류(그 레인 주인 지휘에게 보낸다)
+var laneKinds = map[string]bool{"chain": true, "rejected": true, "free-wait": true, "pinned": true, "audit-starve": true,
+	"lane-error": true, "lane-blocked": true, "lane-done": true, "lane-escalated": true, "lane-long": true}
+
+// Lane: 레인 항목이면 그 레인 이름, 아니면 빈 값
+func (i Item) Lane() string {
+	if !laneKinds[i.Kind] {
+		return ""
+	}
+	_, n, _ := strings.Cut(i.Key, ":")
+	return n
 }
 
 // Summary: 한 줄(상태 한 장의 눈에 띄는 것·사건 글)
@@ -64,6 +82,8 @@ type Facts struct {
 	// Known: 이미 알린 항목 열쇠(advise 사건 기록·운영 에이전트 기록). 보류는 새 열쇠의 첫 알림만 미룬다 — 이미 알린 밀림을 보류 동안
 	// 빼면 열쇠를 잊어 보류가 풀릴 때마다 같은 사건이 다시 나갔다(감사 atozuyd 중간)
 	Known map[string]bool
+	// Acts: 최근 일지(상태 한 장이 읽은 24시간 — 항목의 「조치함」, Claims)
+	Acts []journal.Entry
 }
 
 // Wait: 대기 줄 하나와 기다리는 까닭
@@ -535,6 +555,9 @@ func AdviseHuman(w io.Writer, a Advice) error {
 		p("\n%d. [%s] %s", i+1, x.Sure, x.What)
 		p("   근거: %s", or(x.Evidence, "-"))
 		p("   놓치면: %s", or(x.Cost, "-"))
+		if x.Claim != "" {
+			p("   조치함: %s", x.Claim)
+		}
 		if len(x.Next) == 0 {
 			p("   다음: 없음(%s)", SureHuman)
 		}

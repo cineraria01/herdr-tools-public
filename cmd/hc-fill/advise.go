@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/journal"
 	"herdr-tools/internal/opsstate"
 )
 
@@ -57,6 +59,7 @@ func adviseNow(now time.Time) opsstate.Advice {
 	tr := opsstate.Trim(s, knobInt("state_done"))
 	it := opsstate.Advise(tr, f, stateThresholds())
 	tr.Notable = opsstate.Summaries(it)
+	opsstate.Claims(it, s, f.Acts, journal.Who(), now, time.Duration(knobInt("advise_claim"))*time.Minute) // 지문·요약 뒤 — 조치함은 거기 안 든다
 	return opsstate.Advice{Schema: opsstate.AdviseSchema, At: now, Fingerprint: opsstate.Fingerprint(tr), Items: it}
 }
 
@@ -150,6 +153,64 @@ func adviseHeld(items []opsstate.Item) func(string) bool {
 	}
 }
 
+// adviseMsg <새 항목>: 사건 글 「손댈 것: <첫 요약> · 조치함: <…> 외 N」 — 첫 항목 말고 조치함이 있으면 그 수. 사건 줄은 탭 구분이라 탭·줄바꿈을 없앤다
+func adviseMsg(its []opsstate.Item) string {
+	msg := "손댈 것: " + its[0].Summary()
+	if c := its[0].Claim; c != "" {
+		msg += " · 조치함: " + c
+	}
+	if len(its) > 1 {
+		msg += fmt.Sprintf(" 외 %d", len(its)-1)
+		k := 0
+		for _, it := range its[1:] {
+			if it.Claim != "" {
+				k++
+			}
+		}
+		if k > 0 {
+			msg += fmt.Sprintf("(그 가운데 조치함 %d — hc-fill advise)", k)
+		}
+	}
+	return strings.Join(strings.Fields(msg), " ")
+}
+
+// adviseRoute <새 항목>: 레인 항목(굶는 감사·끝났는데 보고 없음·묶인 기계 등)은 그 줄의 주인 지휘에게만 손댈 것 — 주인마다 한 사건
+// (ht-advise-only-stuck·ht-advise-claim: 같은 알림을 지휘 둘이 각자 받아 따로 손댔다). 주인이 없거나, 주인 터미널이 확인된 없음·끝남·셸만
+// 남음이면(사라진 주인의 watch로만 가면 아무 지휘도 못 받는다 — 감사 atp2vpf 중간 1) rest(모두에게). 주인 조회 모름은 주인에게
+func adviseRoute(fresh []opsstate.Item) (owners []string, byOwner map[string][]opsstate.Item, rest []opsstate.Item) {
+	byOwner = map[string][]opsstate.Item{}
+	gone := map[string]bool{}
+	for _, it := range fresh {
+		owner := "-"
+		if l := it.Lane(); l != "" {
+			owner = qown(l)
+		}
+		if g, seen := gone[owner]; owner != "-" && !seen {
+			t, found, err := hcGet(owner)
+			g = err == nil && (!found || t.State != "live" || hcjson.SendBlocked(t, found, err) != "") // hc-lane getState와 같은 기준 + 셸만 남음
+			gone[owner] = g
+		}
+		if owner == "-" || gone[owner] {
+			rest = append(rest, it)
+			continue
+		}
+		if byOwner[owner] == nil {
+			owners = append(owners, owner)
+		}
+		byOwner[owner] = append(byOwner[owner], it)
+	}
+	return owners, byOwner, rest
+}
+
+// adviseKey <한 사건의 항목>: 조치 방식 운영 에이전트가 다 맡을 항목이면 키(지휘에는 묶음 — coord-digest, 지휘 watch의 digest.go가
+// 이 키 머리로 가른다), 아니면 빈 값. 사건마다 따로 본다(주인 사건·모두에게 사건 — 감사 atp2vpf 낮음 1)
+func adviseKey(its []opsstate.Item, now time.Time) string {
+	if adviseAgentTakes(its) {
+		return events.AdviseAgentKey + strconv.FormatInt(now.Unix(), 10)
+	}
+	return ""
+}
+
 // adviseTick <지금>: advise_every분(손잡이, 0이면 끔)마다 손댈 것을 다시 보고, 지난번 목록(<DATA>/advise.tsv — 첫 줄 본 초, 그다음
 // 줄마다 열쇠)에 없던 항목이 생기면 운영 사건 한 번. 판정 못 함은 사건으로 내지 않는다. 보내기를 실패하면 그 열쇠를 안 적어 다음에 다시
 func adviseTick(now time.Time) {
@@ -192,42 +253,28 @@ func adviseTick(now time.Time) {
 			now1[k] = true
 		}
 	}
-	// 묶인 기계(pinned)는 그 줄의 주인 지휘에 따로 한 번(ht-advise-only-stuck) — 주인을 모르면 다른 항목과 함께
-	var rest []opsstate.Item
-	for _, it := range fresh {
-		lane, ok := strings.CutPrefix(it.Key, "pinned:")
-		owner := "-"
-		if ok {
-			for _, r := range qRows() {
-				if r.F(qName) == lane {
-					owner = dash(r.F(qOwner))
-				}
-			}
-		}
-		if owner == "-" {
-			rest = append(rest, it)
+	owners, byOwner, rest := adviseRoute(fresh)
+	var refs []string
+	for _, o := range owners {
+		its := byOwner[o]
+		if hcLaneReport("중간", adviseMsg(its), "hc-fill-advise", o, adviseKey(its, now)) != 0 {
+			say("손댈 것 알림 실패(hc-lane report --to %s) — 다음에 다시", o)
 			continue
 		}
-		if hcLaneReport("중간", strings.Join(strings.Fields("손댈 것: "+it.Summary()), " "), "hc-fill-advise", owner, "") == 0 {
+		for _, it := range its {
 			keep = append(keep, it.Key)
-		} else {
-			say("손댈 것 알림 실패(hc-lane report --to %s) — 다음에 다시", owner)
+			refs = append(refs, it.Key+" → "+o)
 		}
+	}
+	// 참고는 실패해도 다시 보내지 않는다 — 손댈 것은 주인에게 갔다
+	if len(refs) > 0 && hcLaneReport("중간", "손댈 것 참고 — 주인 지휘에 보냄: "+strings.Join(refs, ", "), "hc-fill-advise", "",
+		events.AdviseRefKey+strconv.FormatInt(now.Unix(), 10)) != 0 {
+		say("손댈 것 참고 알림 실패(hc-lane report) — 다시 보내지 않음")
 	}
 	fresh = rest
 	if len(fresh) > 0 {
-		msg := "손댈 것: " + fresh[0].Summary()
-		if len(fresh) > 1 {
-			msg += fmt.Sprintf(" 외 %d", len(fresh)-1)
-		}
-		msg = strings.Join(strings.Fields(msg), " ") // 사건 줄은 탭 구분 — 글 안의 탭·줄바꿈을 없앤다
 		// 이름은 events.OpsAdvise — 이름 표 시험(internal/events ops_test)이 글자로 찾는다
-		// 조치 방식 운영 에이전트가 다 맡을 항목이면 키를 달아 지휘에는 묶음으로(coord-digest — 지휘 watch의 digest.go가 이 키 머리로 가른다)
-		key := ""
-		if adviseAgentTakes(fresh) {
-			key = events.AdviseAgentKey + strconv.FormatInt(now.Unix(), 10)
-		}
-		if hcLaneReport("중간", msg, "hc-fill-advise", "", key) == 0 {
+		if hcLaneReport("중간", adviseMsg(fresh), "hc-fill-advise", "", adviseKey(fresh, now)) == 0 {
 			for _, it := range fresh {
 				keep = append(keep, it.Key)
 			}

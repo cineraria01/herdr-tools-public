@@ -125,6 +125,7 @@ func editCmd(args []string) {
 			}
 			undo += " --pr-of " + shq(dash(old))
 		}
+		r = editParked(r, brief != "" || ovk != "" || early != "" || wt != "") // 주차를 보고하고 끝난 줄은 바퀴 전에도 주차로(editparked.go)
 		st, prj = r.F(qState), r.F(qProj)
 		if ovk != "" || early != "" || wt != "" { // 무게도 띄울 곳을 고를 때 한 번 본다 — 아직 안 뜬 줄만
 			editNotUp(r, ovk != "", early != "")

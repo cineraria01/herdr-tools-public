@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/opsstate"
 )
 
@@ -30,11 +31,16 @@ func advFx(t *testing.T) {
 	wr("load.tsv", "m\t1.20\t12\t"+itoa(time.Now().Unix()-30)+"\t1\t3\t-\t0\t0\n")
 }
 
-func reports(t *testing.T) []string {
+// reports: 가짜 hc-lane이 받은 사건 — 레인 주인에게 보낸 손댈 것의 참고(키 hf:advise:ref:, ht-advise-claim)는 뺀다(refReports)
+func reports(t *testing.T) []string { return reportsRef(t, false) }
+
+func refReports(t *testing.T) []string { return reportsRef(t, true) }
+
+func reportsRef(t *testing.T, ref bool) []string {
 	b, _ := os.ReadFile(DATA + "/report.log")
 	var o []string
 	for _, l := range strings.Split(string(b), "\n") {
-		if l != "" {
+		if l != "" && strings.Contains(l, "--key "+events.AdviseRefKey) == ref {
 			o = append(o, l)
 		}
 	}

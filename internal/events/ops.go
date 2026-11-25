@@ -33,6 +33,8 @@ const (
 	mergerKeyPre = "hf:merger:" // merger-<프로젝트> 사건의 키 머리 — 진짜 레인 merger-alive 같은 이름과 가르는 것은 이름이 아니라 이것
 	// AdviseAgentKey: 조치 방식 운영 에이전트가 맡을 손댈 것만 든 hc-fill-advise 사건의 키 머리(뒤에 초) — watch가 지휘에 묶음으로(coord-digest)
 	AdviseAgentKey = "hf:advise:agent:"
+	// AdviseRefKey: 레인 주인 지휘에게만 보낸 손댈 것을 다른 지휘에게 참고로 알리는 hc-fill-advise 사건의 키 머리(뒤에 초) — 묶음으로(ht-advise-claim)
+	AdviseRefKey = "hf:advise:ref:"
 )
 
 // Op: 운영 사건 하나 — Name은 문서 제목 꼴(merger-<프로젝트>), Next는 받으면 가장 흔한 다음 명령(watch가 글 끝에 「→ <Next>」로 붙인다)

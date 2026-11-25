@@ -267,21 +267,29 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		s.Knobs = append(s.Knobs, opsstate.Knob{Name: k, Value: e.Value, By: e.By, Why: e.Why, Until: u})
 	}
 
-	// 최근 조치(일지 꼬리 5, 24시간)·최근 사건(마지막 보고 10)
-	jr := opsstate.Source{Name: "journal", AgeS: ptrI(0)}
-	if js, _, err := journal.Read(journal.Filter{Since: now.Add(-24 * time.Hour)}); err != nil {
-		jr.Why = err.Error()
-	} else {
-		for i := max(0, len(js)-5); i < len(js); i++ {
-			e := js[i]
-			s.Journal = append(s.Journal, e.Time.Local().Format("01-02 15:04")+" "+e.By+" "+e.Tool+" "+e.Action+" "+e.Target+" — "+e.Result)
-		}
-	}
+	// 최근 사건(마지막 보고 10)
+	jr := stateJournal(&s, &f, now)
 	s.Events = stateEvents(last)
 	dep := stateDeploy(&s, now)
 	f.DeployHold = deployHoldIf(s.Deploy, now)
 	s.Sources = []opsstate.Source{tick, hc, dep, jr}
 	return s, f
+}
+
+// stateJournal: 최근 조치 — 일지 24시간을 f.Acts(손댈 것의 조치함)에, 꼬리 5줄을 s.Journal에. 못 읽으면 재료 journal의 까닭
+func stateJournal(s *opsstate.State, f *opsstate.Facts, now time.Time) opsstate.Source {
+	jr := opsstate.Source{Name: "journal", AgeS: ptrI(0)}
+	js, _, err := journal.Read(journal.Filter{Since: now.Add(-24 * time.Hour)})
+	if err != nil {
+		jr.Why = err.Error()
+		return jr
+	}
+	f.Acts = js
+	for i := max(0, len(js)-5); i < len(js); i++ {
+		e := js[i]
+		s.Journal = append(s.Journal, e.Time.Local().Format("01-02 15:04")+" "+e.By+" "+e.Tool+" "+e.Action+" "+e.Target+" — "+e.Result)
+	}
+	return jr
 }
 
 // stateWatch: 열린 줄이 있는 주인 지휘마다 그 감시 터미널(hc-lane이 띄우는 이름 lane-watch-<주인>)이 hc ls에 있나.

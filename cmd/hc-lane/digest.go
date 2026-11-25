@@ -35,7 +35,8 @@ func (d *digestState) sent(dig []string) {
 //	즉시: 막힘 · 멈춤 blocked·error·뜻밖의 종료(정리됨이 아닌 것)·연결 안 됨 · 「사람이 정한다」 · 실패·반송·못 … 이 든 중간 ·
 //	      운영 사건(아래 둘 말고) · 주차·모르는 상태
 //	묶음: 완료 · 중간 · 판정(감사 통과·지적) · 제출 · 착지 · 멈춤 done·idle·뜻밖의 종료(정리됨) ·
-//	      운영 중간 가운데 착지 뒤 명령 성공(on-land-<이름>)·운영 에이전트가 맡은 손댈 것(hc-fill-advise, 키 hf:advise:agent:)
+//	      운영 중간 가운데 착지 뒤 명령 성공(on-land-<이름>)·운영 에이전트가 맡은 손댈 것(hc-fill-advise, 키 hf:advise:agent:)·
+//	      레인 주인 지휘에게 보낸 손댈 것의 참고(hc-fill-advise, 키 hf:advise:ref:)
 func digestable(x events.Event) bool {
 	if strings.Contains(x.Msg, "사람이 정한다") {
 		return false
@@ -44,7 +45,8 @@ func digestable(x events.Event) bool {
 		if x.State != "중간" {
 			return false
 		}
-		return strings.HasPrefix(x.Lane, events.OpsOnLand) || x.Lane == events.OpsAdvise && strings.HasPrefix(x.Key, events.AdviseAgentKey)
+		return strings.HasPrefix(x.Lane, events.OpsOnLand) || x.Lane == events.OpsAdvise &&
+			(strings.HasPrefix(x.Key, events.AdviseAgentKey) || strings.HasPrefix(x.Key, events.AdviseRefKey))
 	}
 	switch x.State {
 	case "완료", "판정", "제출", "착지":
