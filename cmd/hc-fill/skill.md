@@ -15,6 +15,7 @@
    - 아직 안 뜬 줄의 겹침 검사·먼저 띄움: `hc-fill edit <레인> --overlap-ok|--overlap-check` · `--early|--no-early` (rm 뒤 add로 다시 넣지 않는다).
    - 레인 터미널이 일시 오류로 멈춤(hc 상태 error, 보고 없음): `hc-fill nudge <레인> --why <까닭>` — 이어 가라는 글 한 줄(한 레인에 손잡이 `nudge_every`분 안에 한 번).
    - 병합기가 제출 탓이 아닌 검증 실패로 돌려보냄(시험 환경·흔들림): `hc-fill requeue <레인> --why <까닭> [--dry-run]` — 같은 커밋·같은 감사 판정으로 줄 끝에(충돌 반송은 거절).
+   - 레인이 PR 사람 리뷰를 「반영 안 함」으로 보고(손잡이 `pr_human`): 맞으면 `hc-fill human-ok <레인> --why <까닭>` — 막은 착지를 푼다(docs/hc-fill/pr.md 「사람 리뷰」).
 4. 착지: 레인이 스스로 한다(`hc-lane land`). 자동 감사가 붙은 레인은 감사 통과 뒤에.
 5. 레인에 말 더하기: `hc-fill note <레인> <글|파일>`(다음 감사 지시문에도 붙는다).
 

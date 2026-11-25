@@ -44,7 +44,7 @@
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).
   옛 표식 파일 `<hc-fill 상태 폴더>/merger_dead`·`merger_unknown`·`merger_restart`는 손잡이가 없을 때 그대로 먹고, `knob ls`에 출처 `설정`으로 보인다.
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
-- 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초)·`pr_inbox`(완료 없는 레인의 PR, 0·1) — [PR 거울](../hc-fill/pr.md).
+- 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초)·`pr_inbox`(완료 없는 레인의 PR, 0·1), 사람 리뷰의 `pr_human`(읽을 작성자 목록, `me` = gh 로그인, `-` = 끔)·`pr_human_block`(착지를 막는 글 종류)·`pr_human_approve`(재승인 기다림, 0·1) — [PR 거울](../hc-fill/pr.md).
 - 지휘 알림 묶기 `coord_digest`(분, 0~120, 기본 0 = 하나씩 — 읽는 도구 hc-lane watch, 보낼 때마다 이 저장 파일을 읽는다) — [watch](../hc-lane/watch.md) 「지휘 알림 묶기」.
 - 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.

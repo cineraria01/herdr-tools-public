@@ -51,6 +51,10 @@ var Defs = []Def{
 	{Name: "pr_fail", Tool: "hc-fill", Default: "3", Min: 1, Max: 100, Unit: "바퀴", Desc: "gh 실패가 이만큼 바퀴 이어지면 운영 사건 hc-fill-pr 한 번"},
 	{Name: "pr_inbox", Tool: "hc-fill", Default: "1", Min: 0, Max: 1, Desc: "완료 없이 제출하는 레인(받은편지·--no-audit)도 SHA가 든 첫 보고(중간·제출)로 PR을 연다(0이면 그 레인은 완료만)"},
 	{Name: "pr_timeout", Tool: "hc-fill", Default: "20", Min: 5, Max: 120, Unit: "초", Desc: "PR 거울 gh 호출 하나의 시간 상한"},
+	// 사람 리뷰 반영(2026-11-25 ht-pr-human-review, docs/hc-fill/pr.md 「사람 리뷰」)
+	{Name: "pr_human", Tool: "hc-fill", Default: "-", List: true, Unit: "로그인", Desc: "PR 거울이 읽을 사람 글의 작성자(GitHub 로그인 쉼표, me = 대기열 기계 gh 로그인, - = 끔)"},
+	{Name: "pr_human_block", Tool: "hc-fill", Default: "changes,line", List: true, Unit: "종류", Desc: "처리 전 착지를 막는 사람 글 종류(changes·line·review·comment, - = 막지 않음)"},
+	{Name: "pr_human_approve", Tool: "hc-fill", Default: "0", Min: 0, Max: 1, Desc: "막은 착지를 사람 재승인까지 기다림(0이면 고친 커밋의 자동 감사 통과로 풂)"},
 	// 부하 보고 고르기(2026-11-24 fill-load-steer, docs/hc-fill/load-steer.md). 코어당 부하는 ×100 정수(%)
 	{Name: "load_band", Tool: "hc-fill", Default: "25", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 차이가 이 안이면 비슷함 — 설정 machine 차례"},
 	{Name: "load_busy", Tool: "hc-fill", Default: "300", Min: 0, Max: 10000, Unit: "%", Desc: "후보가 모두 코어당 부하 이 값을 넘으면 그 바퀴는 안 띄움(0이면 끔)"},

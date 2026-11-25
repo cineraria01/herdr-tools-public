@@ -319,6 +319,37 @@ const (
 	kvVal = 2
 )
 
+// 사람 리뷰 장부 pr-human.tsv(prhuman.go, docs/hc-fill/pr.md 「사람 리뷰」) — 첫 칸이 줄 종류, 둘째 칸이 PR(「<호스트/주인/이름>#<번호>」, on 줄은 프로젝트)
+const (
+	phWhat = 1 // on·note·hand·hold·done·back
+	phPR   = 2
+	// on 줄: 켠 때(그 앞에 쓴 글은 읽지 않는다)
+	phOnAt = 3
+	// note 줄: 글 하나
+	phID     = 3 // r·l·c + GitHub 번호
+	phKind   = 4 // changes·approve·review·line·comment
+	phAt     = 5
+	phAuthor = 6
+	phRes    = 7 // new(넘길 것)·approve(승인 — 넘기지 않음)·skip:bot·skip:author
+	phWhere  = 8 // 줄 댓글의 파일:줄(없으면 -)
+	phBody   = 9 // 한 줄로 편 본문(상한)
+	// hand 줄: 넘김
+	phIDs   = 3 // 넘긴 글 id(쉼표, 다시 막아 넘김이면 -)
+	phLane  = 4 // 그때의 레인(사건 이름·주인)
+	phHow   = 5 // send:<주소>·lane:<새 레인>·tell(막지 않는 글 — 지휘에 알림만)·after(착지·닫힌 뒤 — 사건만)
+	phTime  = 6
+	phBlock = 7 // 1 = 착지를 막는 글이 있음
+	// hold 줄: 병합 줄에서 뺌 / back 줄: 다시 세움
+	phQ     = 3 // 뺀 큐 이름(<초>-<레인>)
+	phQLane = 4
+	phQAt   = 5
+	phQKind = 6 // hold: fix(고칠 것)·approve(재승인 기다림), back: 새 큐 이름
+	// done 줄: 반영됨
+	phSHA    = 3 // 감사를 통과한 고친 커밋(지휘가 풀었으면 -)
+	phDoneAt = 4
+	phWhy    = 5 // 지휘가 풀었을 때의 까닭
+)
+
 // cv: 칸 하나와 값(aupd·lset)
 type cv struct {
 	c int

@@ -287,6 +287,9 @@ func statusCmd(args []string) {
 			if pr, _ := prOf(name); pr != "" { // PR 거울(pr.go) — PR이 없으면 줄이 전과 같다
 				stage += " · " + pr
 			}
+			if h := prHumanNote(name); h != "" { // 사람 리뷰(prhuman.go) — 꺼져 있으면 줄이 전과 같다
+				stage += " · " + h
+			}
 			fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, stEstimate(in.Pos, x.landed)))
 			continue
 		}

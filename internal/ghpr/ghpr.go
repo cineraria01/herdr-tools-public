@@ -1,5 +1,5 @@
-// Package ghpr: PR 거울(2026-11-24 pr-surface, docs/hc-fill/pr.md)이 gh를 부르는 한 곳. PR 열기·댓글·커밋 상태·닫기만 한다 —
-// PR에서 무엇을 읽어 판단하지 않는다(댓글 숨은 표식 확인만 — 같은 댓글을 두 번 달지 않으려고).
+// Package ghpr: PR 거울(2026-11-24 pr-surface, docs/hc-fill/pr.md)이 gh를 부르는 한 곳. PR 열기·댓글·커밋 상태·닫기, 댓글 숨은 표식
+// 확인(같은 댓글을 두 번 달지 않으려고), PR 글 읽기(human.go — 판단은 부르는 쪽이).
 // 호출마다 시간 상한(Client.Timeout), 한 Client의 호출 수 상한(Client.Max — 넘으면 ErrBudget, 부르지 않는다).
 package ghpr
 

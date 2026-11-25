@@ -2,7 +2,7 @@
 # 줄마다 첫 칸이 종류다. 칸은 공백·탭으로 나누고, 마지막 칸(경로·명령 틀·문장)은 줄 끝까지다. # 로 시작하는 줄은 설명.
 # 실행 중에 잠깐 바꿀 값은 이 파일을 고치지 말고 hc-fill knob set(손잡이 — 이 파일보다 앞서고 기한이 지나면 이 값으로 돌아옴,
 # docs/ops/knobs.md). 손잡이가 되는 키: idle hold done_stall wake_every ack_max early_wait auto_submit auto_submit_max
-#   load_band load_busy load_starve skew_min skew_every pr pr_max pr_fail pr_timeout
+#   load_band load_busy load_starve skew_min skew_every pr pr_max pr_fail pr_timeout pr_human pr_human_block pr_human_approve
 # (기계별 자리·멈춤은 hc-fill machine <기계> --seats|--pause — 손잡이 seats@<기계>·pause@<기계>)
 #
 # local    이 기계(hc --on 없이 띄우는 기계)의 이름. machine·repo 줄에서 이 이름을 쓴다. herdr-sync도 이 기계를 이 이름으로 적는다

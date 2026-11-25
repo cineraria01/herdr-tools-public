@@ -271,6 +271,9 @@ func lsCmd(args []string) {
 				note += " 필요 " + x.F(ndNeed) + " — 가진 기계 없음"
 			}
 		}
+		if h := prHumanNote(name); h != "" { // 사람 리뷰(prhuman.go) — 꺼져 있으면 줄이 전과 같다
+			note += " " + h
+		}
 		note = strings.TrimPrefix(note, " ")
 		if js {
 			jrows = append(jrows, lsRow{Lane: name, Project: proj, State: s, Code: state, Address: a, Owner: dash(owner),
