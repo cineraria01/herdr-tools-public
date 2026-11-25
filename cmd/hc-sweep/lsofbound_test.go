@@ -26,11 +26,15 @@ func recRun(calls *[]call, res result) runner {
 	}
 }
 
-// ⑤ 멈출 수 있는 stat을 피하고(-b) 내 프로세스만(-u) 묻는다. 상한은 그대로 60초
+// opq: 출력 꼴만 보는 시험용
+func opq(r runner) map[string]bool { return openPaths(r, time.Minute) }
+
+// ⑤ 멈출 수 있는 stat을 피하고(-b) 내 프로세스만(-u) 한 번에 묻는다. 상한은 받은 값(설정 sweep.lsof_secs).
+// ht-sweep-lsof: 후보만 묻는 +D는 -b와 못 쓰고 열거 비용이 같아(실측) 쓰지 않는다
 func TestOpenPathsArgs(t *testing.T) {
 	var calls []call
-	openPaths(recRun(&calls, result{rc: 1}))
-	if len(calls) != 1 || calls[0].timeout != 60*time.Second || filepath.Base(calls[0].name) != "lsof" {
+	openPaths(recRun(&calls, result{rc: 1}), 7*time.Second)
+	if len(calls) != 1 || calls[0].timeout != 7*time.Second || filepath.Base(calls[0].name) != "lsof" {
 		t.Fatalf("부름 %+v", calls)
 	}
 	a := " " + strings.Join(calls[0].args, " ") + " "
@@ -38,6 +42,44 @@ func TestOpenPathsArgs(t *testing.T) {
 		if !strings.Contains(a, w) {
 			t.Errorf("인자에 %q 없음: %s", w, a)
 		}
+	}
+	if strings.Contains(a, "+D") {
+		t.Errorf("+D는 -b와 못 쓴다: %s", a)
+	}
+}
+
+// ht-sweep-lsof: sweepTmp가 받은 상한을 lsof에 그대로 넘기고, 쓰는 중인 후보는 남기고 안 쓰는 것만 지운다(lsof는 한 번)
+func TestSweepTmpLimit(t *testing.T) {
+	base := realpath(t.TempDir())
+	old := time.Now().Add(-5 * time.Hour)
+	for _, n := range []string{"go-build1", "Test2"} {
+		d := filepath.Join(base, n, "sub")
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(d, old, old)
+		os.Chtimes(filepath.Dir(d), old, old)
+	}
+	var calls []call
+	out := "p" + strconv.Itoa(os.Getpid()) + "\nfcwd\nn/\np1\nfcwd\nn" + base + "/go-build1/sub\n"
+	asked, failed := sweepTmp(base, 3, 9*time.Second, false, recRun(&calls, result{out: out}))
+	if !asked || failed || len(calls) != 1 || calls[0].timeout != 9*time.Second {
+		t.Fatalf("asked=%v failed=%v 부름 %+v", asked, failed, calls)
+	}
+	if !exists(base+"/go-build1") || exists(base+"/Test2") {
+		t.Fatal("쓰는 중은 남기고 안 쓰는 후보만 지워야")
+	}
+}
+
+// 상한 손잡이: 양수면 그 초, 없음·0·음수·숫자 아님이면 60초(상한 없이 돌지도, 쓸기를 끄지도 않는다)
+func TestLsofLimit(t *testing.T) {
+	for v, want := range map[string]time.Duration{"180": 180 * time.Second, "1.5": 1500 * time.Millisecond, "0": time.Minute, "-3": time.Minute, "3m": time.Minute, "": time.Minute} {
+		if got := lsofLimit(v, true); got != want {
+			t.Errorf("%q → %v, 바람 %v", v, got, want)
+		}
+	}
+	if lsofLimit("", false) != time.Minute {
+		t.Error("설정을 못 읽으면 60초")
 	}
 }
 
@@ -67,7 +109,7 @@ func TestSweepTmpLsofTimeout(t *testing.T) {
 	for _, p := range []string{d, filepath.Dir(d)} {
 		os.Chtimes(p, old, old)
 	}
-	asked, failed := sweepTmp(base, 3, false, fakeRun(-1, "", "", errors.New("lsof: 시간 초과")))
+	asked, failed := sweepTmp(base, 3, time.Minute, false, fakeRun(-1, "", "", errors.New("lsof: 시간 초과")))
 	if !asked || !failed {
 		t.Fatalf("건너뜀으로 안 알림 asked=%v failed=%v", asked, failed)
 	}
@@ -76,7 +118,7 @@ func TestSweepTmpLsofTimeout(t *testing.T) {
 	}
 	// 후보가 없으면 lsof를 안 묻는다(건너뜀 셈에 안 듦)
 	var calls []call
-	if asked, _ := sweepTmp(t.TempDir(), 3, false, recRun(&calls, result{})); asked || len(calls) != 0 {
+	if asked, _ := sweepTmp(t.TempDir(), 3, time.Minute, false, recRun(&calls, result{})); asked || len(calls) != 0 {
 		t.Fatalf("후보 없는데 물음 %v %+v", asked, calls)
 	}
 }

@@ -82,12 +82,12 @@ func TestO2OpenPathsMalformed(t *testing.T) {
 		"요청 안 한 필드":  self + "p1\nfcwd\ntDIR\nn/held\n",
 		"잘린 마지막 레코드": self + "p1\n",
 	} {
-		if m := openPaths(fakeRun(0, out, "", nil)); m != nil {
+		if m := opq(fakeRun(0, out, "", nil)); m != nil {
 			t.Errorf("%s: 온전하지 않은 lsof 출력을 받아들임 %v", name, m)
 		}
 	}
 	// 대조: 온전한 출력은 받아들인다
-	if m := openPaths(fakeRun(0, "p1\nfcwd\nn/a/b\n"+self, "", nil)); m == nil || !m["/a/b"] {
+	if m := opq(fakeRun(0, "p1\nfcwd\nn/a/b\n"+self, "", nil)); m == nil || !m["/a/b"] {
 		t.Fatalf("온전한 출력 %v", m)
 	}
 }

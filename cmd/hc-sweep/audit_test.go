@@ -15,13 +15,13 @@ import (
 // [E13] lsof 출력이 온전하지 않으면(이 프로세스 기록 없음·필드 꼴 아님) 열린 경로를 모름(nil) — 0개로 읽고 지우지 않는다
 func TestOpenPathsIncomplete(t *testing.T) {
 	me := strconv.Itoa(os.Getpid())
-	if openPaths(fakeRun(0, "p123\n", "", nil)) != nil {
+	if opq(fakeRun(0, "p123\n", "", nil)) != nil {
 		t.Fatal("pid 줄만 있는 출력을 받아들임")
 	}
-	if openPaths(fakeRun(0, "p1\nfcwd\nn/a\nlsof: WARNING x\n", "", nil)) != nil {
+	if opq(fakeRun(0, "p1\nfcwd\nn/a\nlsof: WARNING x\n", "", nil)) != nil {
 		t.Fatal("필드 꼴이 아닌 줄을 받아들임")
 	}
-	m := openPaths(fakeRun(0, "p1\nfcwd\nn/a/b\np"+me+"\nfcwd\nn/c\n", "", nil))
+	m := opq(fakeRun(0, "p1\nfcwd\nn/a/b\np"+me+"\nfcwd\nn/c\n", "", nil))
 	if m == nil || !m["/a/b"] || !m["/c"] {
 		t.Fatalf("온전한 출력 %v", m)
 	}
