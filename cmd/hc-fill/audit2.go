@@ -300,7 +300,9 @@ func aDeliver() {
 		}
 	}
 	if awt >= int64(ACKMAX*60) && !inlist("noack", dash(auAfl)) {
-		if aesc(auLn, qown(auLn), fmt.Sprintf("%s 감사 %s번째 판정(%s)을 %d분 넘게 수거하지 않는다 — 지휘 판단 (%s: hc-lane verdict %s)", auLn, auRnd, auAv, ACKMAX, auPa, auAid), "hf:"+auAid+":noack") == 0 {
+		if h := auLaneHead(); h != "" && h != auSha { // 통과·지적 뒤 새 커밋을 만들어 검증 중 — 레인은 hc-lane verdict 「지금 커밋으로 완료」대로 기다린다
+			fmt.Println(auLn + " 새 커밋 " + head(h, 8) + " 검증 중 — 다시 감사 기다림 (판정 " + auAid + " 는 " + head(auSha, 8) + " 것)")
+		} else if aesc(auLn, qown(auLn), fmt.Sprintf("%s 감사 %s번째 판정(%s)을 %d분 넘게 수거하지 않는다 — 지휘 판단 (%s: hc-lane verdict %s)", auLn, auRnd, auAv, ACKMAX, auPa, auAid), "hf:"+auAid+":noack") == 0 {
 			f := "noack"
 			if auAfl != "" {
 				f = auAfl + ",noack"
@@ -311,6 +313,21 @@ func aDeliver() {
 	}
 	aCloseDelivered() // 판정 파일을 둔 뒤 — 끝난 감사 터미널이 레인 작업 트리를 쥐지 않게(auditclose.go)
 }
+
+// auLaneHead: 레인 작업 트리(<repo>.wt/<레인>)의 HEAD 40자 — 못 읽거나 꼴이 틀리면 ""(모름 → 지금처럼 막힘)
+func auLaneHead() string {
+	repo := repoOf(aproj(auAid), auAm)
+	if repo == "" {
+		return ""
+	}
+	o, rc := onm(nil, auAm, `git -C "$d" rev-parse --verify -q HEAD`, strings.TrimSuffix(repo, "/")+".wt/"+auLn)
+	if h := sub(o); rc == 0 && sha40Re.MatchString(h) {
+		return h
+	}
+	return ""
+}
+
+var sha40Re = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // a_cleanup: 끝난 차수의 감사 줄을 대기열에서 뺀다 — 안 뜬 줄은 바로, 뜬 줄은 그 터미널이 쉬거나 없으면(정리 주소를 지휘에 한 번)
 func aCleanupNow() { auAst = "taken"; aCleanup() }
