@@ -58,6 +58,25 @@ func TestLastRep(t *testing.T) {
 	}
 }
 
+// ht-clean-unstick(2026-11-25): 넘긴(제출·주차)·착지 뒤 막힘(clean 멈춤 등)에 이은 중간(clean이 적는 「막힘 풀림」)은 막힘 앞 상태로 —
+// 넘긴 레인이 풀린 뒤 쉬어도 「멈춤 idle」이 가지 않게. 넘김 없는 막힘 뒤 중간은 그대로 중간(다시 일하는 중)
+func TestLastRepUnblock(t *testing.T) {
+	r := newLastRep()
+	r.rep("제출", "abcdef12", "3", "")
+	r.rep("막힘", "-", "4", "")
+	r.rep("중간", "-", "5", "")
+	if r.lst["x"] != "제출" || r.ltn["x"] != "5" {
+		t.Fatalf("제출 → 막힘 → 중간이 제출로 돌아오지 않았다: %v %v", r.lst, r.ltn)
+	}
+	r = newLastRep()
+	r.rep("완료", "abcdef12", "3", "")
+	r.rep("막힘", "-", "4", "")
+	r.rep("중간", "-", "5", "")
+	if r.lst["x"] != "중간" {
+		t.Fatalf("완료 → 막힘 → 중간은 중간이어야: %v", r.lst)
+	}
+}
+
 func TestTurnAfter(t *testing.T) {
 	if a, u := turnAfter("3", "4"); a || u {
 		t.Error("4 <= 3+1")

@@ -53,6 +53,12 @@ if [ "$1" = get ]; then   # $HC_FAKE_GET_TURN이면 그 turn을 가진 터미널
   [ "$2" = "${HC_FAKE_ID-}" ] && { echo "{\"address\":\"$2\",\"cwd\":\"/\",\"name\":\"other\",\"state\":\"live\"}"; exit 0; }
   echo '{"error":{"kind":"not_found"}}' >&2; exit 3
 fi
+if [ "$1" = kill ]; then   # 「<주소>」를 $HCLOG.kill에. $HCLOG.lsfile.afterkill이 있으면 그것이 다음 ls 목록(닫힌 터미널이 빠진 꼴)
+  echo "$2" >>"$HCLOG.kill"
+  [ ! -e "$HCLOG.killfail" ] || exit 1
+  [ ! -f "$HCLOG.lsfile.afterkill" ] || mv "$HCLOG.lsfile.afterkill" "$HCLOG.lsfile"
+  exit 0
+fi
 if [ "$1" = ls ]; then   # $HC_FAKE_LS(JSON)를 답한다. $HC_FAKE_LS_FAIL이면 실패. 인자는 $HCLOG.ls에 한 줄로
   echo "$*" >>"$HCLOG.ls"
   [ -z "${HC_FAKE_LS_FAIL-}" ] || exit 3

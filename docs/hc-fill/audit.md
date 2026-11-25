@@ -45,6 +45,8 @@
   - 판정을 넘기면 바로 닫는다(2026-11-24 fill-audit-close — 레인이 판정을 받자마자 착지·`hc-lane clean`으로 가 hc-fill이 수거를 알아채기 전에 「다른 터미널이 이 작업 트리를 쓴다」로 멈췄다, 하루 네 번): 판정 파일을 둔(`deliver`) 바퀴부터 그 감사 터미널이 끝남(done·idle)이면 위와 같은 조건(지금 이름 `audit-<ID>`·`try.tsv`의 실행이 둘 다 맞는 그 정확한 주소)으로만 `hc kill`.
     일하는 중(working·blocked)·닫기 실패·기계에 안 닿음이면 다음 바퀴에 다시, `audit_close`바퀴(기본 5)를 넘기면 그만두고 위 수거 뒤 정리에 맡긴다. 닫기는 판정 전달·깨움에 영향이 없고, 판정 전(`queued`)에는 닫지 않으며, 보고서 파일은 그대로 남는다.
     진행은 차수 16칸 `aclose=<바퀴>`·`aclosed`(닫음·그만둠). 감사 화면을 끝난 뒤에도 보려면 `audit_close 0`(끔 — 예전처럼 수거 뒤 정리만).
+  - 레인이 이 바퀴보다 빠르면(판정 1분 안에 제출·`hc-lane clean`) `hc-lane clean`이 스스로 닫는다(2026-11-25 ht-clean-unstick — 바퀴가 닫기 전에 레인이 clean에서 멈춰 지휘가 손으로 닫았다): 레인 터미널이 자기 가지에 부른 clean(`HC_LANE`이 가지·`--name`과 같고 `--on` 아님)에서, 작업 트리를 쓰는 터미널이 살아 있고 status done·idle·이름 `audit-<ID>`이고, 그 기계 판정 파일 `verdicts/<레인>/<ID>.md`가 이 실행(`run`) 것이며 수거 표시 `<ID>.ack`가 있을 때만 그 주소로 `hc kill`하고 목록을 다시 본다.
+    하나라도 안 맞으면(일하는 중·판정 수거 전·다른 실행·지휘가 부른 clean) 지금처럼 멈춘다. `--dry-run`은 닫을 터미널을 알리기만 한다.
   - 기록 `~/.local/share/hc-fill/audit.tsv` — 한 줄 = 한 차수(17칸: ID 레인 차수 부모실행 sha 기계 부모주소 상태 지적수 판정 깨움수 기다린초 마지막확인 마지막깨움 판정없음 표시 비고).
     상태 `opening`→`queued`→`deliver`→`taken`(끝) · `superseded`(끝) · `escalate:<까닭>`→`coord`(끝) · `nosha`(끝) · `legacy`(옮긴 옛 기록).
     기록이 곧 의도라 바퀴 처음에 끝나지 않은 차수를 잇는다(빈 대기열에서도).

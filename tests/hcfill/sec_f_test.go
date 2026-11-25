@@ -378,4 +378,9 @@ func secF(k *K) {
 	k.runE(utc, "run")
 	k.run("ls")
 	k.check("막힘은 sha 없이 「막힘 09:00 <앞부분>」", strings.Contains(k.fLrl("lr2"), "막힘 09:00 테스트 실패"))
+	// ht-clean-unstick(2026-11-25): clean 멈춤 막힘 뒤 clean이 성공해 「막힘 풀림」 중간을 적으면 마지막 보고는 더는 막힘이 아니다
+	appendFile(k.t, k.T+"/events", "2026-11-19T09:05:00Z\tm\tslow/lr2\tlr2\t중간\t-\t막힘 풀림: hc-lane clean 성공 — lr2 작업 트리·가지 정리 끝\t2\n")
+	k.runE(utc, "run")
+	k.run("ls")
+	k.check("clean 성공 뒤 「막힘 풀림」이면 마지막 보고에 막힘이 남지 않음", !strings.Contains(k.fLrl("lr2"), "막힘 09:00") && strings.Contains(k.fLrl("lr2"), "막힘 풀림"), k.fLrl("lr2"))
 }

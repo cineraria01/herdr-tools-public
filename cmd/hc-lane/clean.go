@@ -65,7 +65,17 @@ func termGate(when string) {
 	if r != 0 {
 		stop(termWhy(r) + ": " + when + "이 폴더에서 도는 터미널을 확인하지 못했다")
 	}
-	if busy := busyTerms(ps, true); len(busy) > 0 {
+	busy := busyTerms(ps, true)
+	// 이 레인 실행의 판정을 수거한 끝난 감사 터미널은 닫고(cleanaudit.go) 목록을 다시 본다 — 닫은 사이 붙은 터미널도 놓치지 않게
+	if rest := auditCloseBusy(busy); len(rest) < len(busy) && !dry {
+		if ps, r = termPairs(); r != 0 {
+			stop(termWhy(r) + ": " + when + "감사 터미널을 닫은 뒤 이 폴더에서 도는 터미널을 확인하지 못했다")
+		}
+		busy = busyTerms(ps, true)
+	} else {
+		busy = rest
+	}
+	if len(busy) > 0 {
 		stop(when+"살아 있는 터미널이 이 폴더에서 돈다(끝났으면 hc kill <주소> 뒤 다시): "+wt, strings.Join(busy, "\n"))
 	}
 }
@@ -178,6 +188,7 @@ func cleanMain(args []string) int {
 		fmt.Printf("정리할 것 없음: 워크트리 %s 와 브랜치 %s 가 이미 없다\n", wt, branch)
 		cleanLease()
 		keepOffSelf()
+		unblockNote()
 		cj("nothing", "")
 		return 0
 	}
@@ -212,6 +223,7 @@ func cleanMain(args []string) int {
 	cleanSummary(here)
 	cleanLease()
 	keepOffSelf()
+	unblockNote()
 	if dry {
 		cj("planned", "")
 	} else {

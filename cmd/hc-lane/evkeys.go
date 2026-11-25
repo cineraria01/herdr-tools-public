@@ -56,10 +56,11 @@ func samesha(a, b string) bool {
 // lastRep: 레인(열쇠)의 마지막 report(셸 판 lrep). 착지·판정 뒤 같은 턴의 같은 sha 완료는 착지 그대로 두고 turn만 그 완료의 것으로
 type lastRep struct {
 	lst, ltn, lsh, lt0 map[string]string
+	pre                map[string]string // 넘김(제출·주차)·착지 바로 뒤 막힘이면 그 앞 상태 — 이어 오는 중간이 되돌린다
 }
 
 func newLastRep() *lastRep {
-	return &lastRep{map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}}
+	return &lastRep{map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}}
 }
 
 func (r *lastRep) rep(s, h, t, k string) {
@@ -70,6 +71,18 @@ func (r *lastRep) rep(s, h, t, k string) {
 	// 완료·막힘·착지·판정은 다시 일을 맡은 것이라 그대로 덮는다. 2026-11-23 stall-after-submit-note
 	if s == "중간" && handedOff(r.lst[k]) {
 		return
+	}
+	// 넘김·착지 뒤 막힘(clean 멈춤 등)에 이은 중간(clean 성공 뒤 「막힘 풀림」)은 막힘 앞 상태로 — 넘긴 레인이 풀린 뒤 쉬어도 조용
+	// (2026-11-25 ht-clean-unstick). 넘김 없는 막힘 뒤 중간은 다시 일하는 중이라 그대로 중간
+	if p := r.pre[k]; s == "중간" && r.lst[k] == "막힘" && p != "" {
+		r.lst[k], r.ltn[k] = p, t
+		delete(r.pre, k)
+		return
+	}
+	if s == "막힘" && (handedOff(r.lst[k]) || r.lst[k] == "착지") {
+		r.pre[k] = r.lst[k]
+	} else {
+		delete(r.pre, k)
 	}
 	if sh, ok := r.lsh[k]; ok && s == "완료" && samesha(h, sh) && num(t) && num(r.lt0[k]) && atoi(t) <= atoi(r.lt0[k]) {
 		r.ltn[k] = t
