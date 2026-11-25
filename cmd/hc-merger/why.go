@@ -120,8 +120,70 @@ func whyMain(a []string) int {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 병합기 일지를 읽지 못했다: %v\n", err)
 		return 1
 	}
-	fmt.Println(whySummary(strings.Split(string(b), "\n"), n))
+	ls := strings.Split(string(b), "\n")
+	fmt.Println(whySummary(ls, n) + landOnSum(ls, n))
 	return 0
+}
+
+// landOnSum: 최근 N번의 착지 실행 기계(일지 「착지 실행」 줄 — landon.go) 「 · 착지 실행 워커 n번(<기계> k …) · 병합기 기계 j번 · 끊김 x번
+// · 마지막 <기계>(<까닭>)」. 줄이 없으면 빈 값. 한 번의 결정 = 구성원마다 같은 줄(시작·까닭으로 하나)
+func landOnSum(lines []string, n int) string {
+	type dec struct{ t0, what string }
+	var ds []dec
+	seen := map[dec]bool{}
+	for _, l := range lines {
+		f := strings.Split(l, "\t")
+		if len(f) < 12 || f[9] != jLandOn {
+			continue
+		}
+		what, _, _ := strings.Cut(f[11], " — 구성원 ")
+		if d := (dec{f[7], what}); !seen[d] {
+			seen[d] = true
+			ds = append(ds, d)
+		}
+	}
+	if len(ds) == 0 {
+		return ""
+	}
+	if len(ds) > n {
+		ds = ds[len(ds)-n:]
+	}
+	per, order := map[string]int{}, []string{}
+	local, lost, last := 0, 0, ""
+	for _, d := range ds {
+		mach, _, _ := strings.Cut(d.what, "(")
+		switch {
+		case strings.Contains(d.what, " 착지 실행 끊김("):
+			lost++
+			continue
+		case strings.Contains(d.what, "("+localTag):
+			local++
+		default:
+			if per[mach] == 0 {
+				order = append(order, mach)
+			}
+			per[mach]++
+		}
+		last = d.what
+	}
+	var ps []string
+	w := 0
+	for _, m := range order {
+		ps = append(ps, fmt.Sprintf("%s %d", m, per[m]))
+		w += per[m]
+	}
+	o := fmt.Sprintf(" · 착지 실행 워커 %d번", w)
+	if len(ps) > 0 {
+		o += "(" + strings.Join(ps, " · ") + ")"
+	}
+	o += fmt.Sprintf(" · 병합기 기계 %d번", local)
+	if lost > 0 {
+		o += fmt.Sprintf(" · 끊김 %d번", lost)
+	}
+	if last != "" {
+		o += " · 마지막 " + last
+	}
+	return o
 }
 
 // whySummary: 일지 줄 → 「최근 착지 N번: 검증 건너뜀 k · 직접 검증 j(까닭별) · 까닭 없음 x · 착지 시간 중앙 — 건너뜀 · 직접」.

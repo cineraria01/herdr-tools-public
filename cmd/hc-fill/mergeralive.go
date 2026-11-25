@@ -294,6 +294,12 @@ func maLines() []string {
 	}
 	sort.Strings(ps)
 	now := nowUnix()
+	locals := 0
+	for _, x := range rs {
+		if x.M == LOCAL {
+			locals++
+		}
+	}
 	var o []string
 	for _, p := range ps {
 		x := rs[p]
@@ -309,6 +315,11 @@ func maLines() []string {
 			l += "(가장 오래 " + stDur(now-x.Oldest) + ")"
 		}
 		l += " · 확인 " + stDur(now-x.Checked) + " 전"
+		if x.M == LOCAL { // 착지 실행 기계(landon.go)
+			if w := maLandOn(p, locals); w != "" {
+				l += " · 착지 실행: " + w
+			}
+		}
 		o = append(o, l)
 	}
 	return o

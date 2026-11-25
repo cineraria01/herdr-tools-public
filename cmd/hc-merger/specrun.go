@@ -63,9 +63,11 @@ func (m *M) spec() (specDecision, string) {
 }
 
 func (m *M) specDecide() (specDecision, string) {
-	m.vw, m.wre, m.sfid = vwhy{why: "모름"}, "", ""
+	m.vw, m.wre, m.sfid, m.vers = vwhy{why: "모름"}, "", "", nil
 	c, ok := m.specLoad()
-	if !ok {
+	if ok {
+		m.vers = c.vers // 착지 실행 기계 후보(landon.go)
+	} else {
 		if m.vw.why == "모름" {
 			m.vw.why = "추측 참조 못 읽음"
 		}

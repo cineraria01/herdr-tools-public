@@ -22,15 +22,18 @@ import (
 // get <기계>/spec-<아이디8>은 $IDLEDIR/get-spec-<아이디8>이 있으면 그 글(살아 있는 터미널), 없으면 not_found(ht-spec-overrun). exec … -- sh …은
 // 이 기계에서 그대로 돌려 그 출력을 돌려준다(추측 진행 확인 — 검증 기계 클론이 이 기계 임시 폴더에 있다. 그 기계가 unreach면 같은 실패)
 const fakeHcIdle = `if [ "$1" = get ]; then
-  case ${2##*/} in spec-*)
+  case ${2##*/} in spec-*|land-*)
     if [ -f "$IDLEDIR/get-${2##*/}" ]; then cat "$IDLEDIR/get-${2##*/}"; exit 0; fi
     echo '{"error":{"kind":"not_found","message":"no terminal"}}'; exit 3 ;;
   esac
 fi
 if [ "$1" = exec ]; then
-  m=
-  while [ $# -gt 0 ]; do [ "$1" = --on ] && m=$2; [ "$1" = -- ] && break; shift; done
+  m= to=60
+  while [ $# -gt 0 ]; do [ "$1" = --on ] && m=$2; [ "$1" = --timeout ] && to=$2; [ "$1" = -- ] && break; shift; done
   [ $# -gt 0 ] && shift
+  if [ "$to" -gt 600 ]; then # 실제 hc exec 계약: --timeout은 0 초과 600 이하(넘으면 실행하지 않고 종료 6)
+    echo '{"error":{"kind":"invalid_params","message":"timeout must be more than 0 and at most 600 s"}}' >&2; exit 6
+  fi
   if [ "$1" = sh ] && [ "$(cat "$IDLEDIR/$m" 2>/dev/null)" != unreach ]; then
     o=$("$@"); r=$?
     printf '{"code":%d,"signal":null,"stderr":"","stdout":"%s","timed_out":false,"truncated":false}\n' "$r" "$(printf '%s\n' "$o" | base64 | tr -d '\n')"

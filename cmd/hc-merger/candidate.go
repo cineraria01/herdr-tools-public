@@ -102,23 +102,48 @@ func (m *M) runCandidate() int {
 		return 75
 	}
 	defer lf.Close()
-	if _, err := os.Stat(m.mwt + "/.claude/herdr-setup.sh"); err == nil {
-		c := exec.Command("bash", ".claude/herdr-setup.sh")
-		c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
-		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+m.top, "LANE_BASE="+m.base)
-		// 준비 훅에도 상한(E11·G1 — 의존성 설치가 망에서 멈추면 main에 쓰는 유일한 프로세스가 선다). 넘으면 무리째 거두고 큐를 둔 채 쉰다
-		rc, ran := proc.WaitFor(c, m.mj+"/child", setupMax(), setupMax() <= 0)
-		if !ran {
-			return rcNotRun
-		}
-		if rc != 0 {
-			fmt.Fprintf(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패(종료 %d)\n", rc)
-			return 75
-		}
+	if rc := setupHook(m.mwt, m.top, m.base, lf, m.mj+"/child"); rc != 0 {
+		return rc
 	}
+	c := exec.Command(gSelf, "land", m.base)
+	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
+	c.Env = append(append(os.Environ(), "HERDR_MERGER=1"), m.landEnv(lf, m.ex, "HERDR_VERIFY_PARTS_FROM="+m.sparts)...)
+	// 착지에도 상한(재감사 3바퀴 merger/R-3M07 — 검증·착지 훅이 끝나지 않으면 일꾼·상주가 사건 없이 끝없이 기다렸다). 넘으면 무리째 거두고
+	// 124(모름 — 일시 실패, judge가 원격부터 본다). keep: 이 일꾼이 죽으면 상한을 걸 쪽이 없지만 그 착지는 끝까지 가게 둔다(다음 바퀴가
+	// 기다리다 상한을 넘기면 쉰 바퀴로 센다 — childWait)
+	rc, ran := proc.WaitFor(c, m.mj+"/child", landMax(), true)
+	if !ran {
+		return rcNotRun
+	}
+	return rc
+}
+
+// setupHook: 작업 트리 wt에 준비 훅이 있으면 돌린다(상한 HERDR_TIMEOUT_SETUP, 자식 기록 rec). 0 통과·없음 · 75 실패 · rcNotRun 못 띄움
+func setupHook(wt, top, base string, lf *os.File, rec string) int {
+	if _, err := os.Stat(wt + "/.claude/herdr-setup.sh"); err != nil {
+		return 0
+	}
+	c := exec.Command("bash", ".claude/herdr-setup.sh")
+	c.Dir, c.Stdout, c.Stderr = wt, lf, lf
+	c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+top, "LANE_BASE="+base)
+	// 준비 훅에도 상한(E11·G1 — 의존성 설치가 망에서 멈추면 main에 쓰는 유일한 프로세스가 선다). 넘으면 무리째 거두고 큐를 둔 채 쉰다
+	rc, ran := proc.WaitFor(c, rec, setupMax(), setupMax() <= 0)
+	if !ran {
+		return rcNotRun
+	}
+	if rc != 0 {
+		fmt.Fprintf(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패(종료 %d)\n", rc)
+		return 75
+	}
+	return 0
+}
+
+// landEnv: 착지(hc-lane land)에 줄 환경(HERDR_MERGER 빼고) — ex는 HERDR_LAND_PUSH_EXTRA, parts는 통과 조각 「키=값」(병합기 기계는
+// HERDR_VERIFY_PARTS_FROM, 워커는 HC_MERGER_LAND_SPEC — landon.go, 빈 값이면 안 넣음). 워커에는 이 값이 env 인자로 간다
+func (m *M) landEnv(lf *os.File, ex, parts string) []string {
 	// 혼자면 착지가 그 제출의 승인 patch-id를 대조한다. 묶음 HEAD는 어느 한 승인 변경도 아니라 묶음 전체에 대한 판정은 넘기지 않는다 —
 	// 판정이 붙은 구성원은 filterBatch(approved)가 하나씩 확인해야만 묶음에 들었다
-	v, p, ex := m.bv, m.bp, m.ex
+	v, p := m.bv, m.bp
 	if len(m.b) > 1 {
 		v, p = "", ""
 		lease := false
@@ -134,23 +159,16 @@ func (m *M) runCandidate() int {
 			ex += " --force-with-lease=refs/heads/" + m.base + ":" + m.B
 		}
 	}
-	c := exec.Command(gSelf, "land", m.base)
-	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
-	c.Env = append(os.Environ(), "HERDR_MERGER=1", "HC_LANE="+m.br, "HERDR_LAND_PUSH_EXTRA="+strings.TrimSpace(ex),
-		"HERDR_LAND_VERDICT="+v, "HERDR_LAND_PATCHID="+p, "HERDR_LAND_SHA="+m.C0, "HERDR_SPEC_TREE="+m.stree,
-		"HERDR_VERIFY_PARTS_FROM="+m.sparts)
-	c.Env = append(c.Env, m.ownerEnv()...)
+	env := []string{"HC_LANE=" + m.br, "HERDR_LAND_PUSH_EXTRA=" + strings.TrimSpace(ex),
+		"HERDR_LAND_VERDICT=" + v, "HERDR_LAND_PATCHID=" + p, "HERDR_LAND_SHA=" + m.C0, "HERDR_SPEC_TREE=" + m.stree}
+	if parts != "" {
+		env = append(env, parts)
+	}
+	env = append(env, m.ownerEnv()...)
 	if h := m.prHeads(); h != "" { // PR 거울의 머리 가지가 있는 구성원만(prhead.go) — 없으면 환경이 전과 같다
-		c.Env = append(c.Env, "HERDR_LAND_PR_HEADS="+h)
+		env = append(env, "HERDR_LAND_PR_HEADS="+h)
 	}
-	// 착지에도 상한(재감사 3바퀴 merger/R-3M07 — 검증·착지 훅이 끝나지 않으면 일꾼·상주가 사건 없이 끝없이 기다렸다). 넘으면 무리째 거두고
-	// 124(모름 — 일시 실패, judge가 원격부터 본다). keep: 이 일꾼이 죽으면 상한을 걸 쪽이 없지만 그 착지는 끝까지 가게 둔다(다음 바퀴가
-	// 기다리다 상한을 넘기면 쉰 바퀴로 센다 — childWait)
-	rc, ran := proc.WaitFor(c, m.mj+"/child", landMax(), true)
-	if !ran {
-		return rcNotRun
-	}
-	return rc
+	return env
 }
 
 // rcNotRun: runCandidate가 준비 훅·착지를 띄우지 못했다(고아 기록·시작 시각을 확정 못 함, 실행 파일 없음 — 명령은 한 줄도 안 돎).

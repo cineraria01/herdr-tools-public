@@ -48,6 +48,7 @@ func specFx(t *testing.T) *sfx {
 	s := &sfx{fx: f, landlog: f.dir + "/land.log", hclog: f.dir + "/hc.log"}
 	t.Setenv("LANDLOG", s.landlog)
 	t.Setenv("HC_LANE_SPEC_LOAD_WAIT", "0")
+	t.Setenv("HC_LANE_MERGER_LAND_ON", "local") // 착지 실행은 병합기 기계(옛 길) — 워커 착지는 landon_test.go가 켠다
 	old, _ := os.ReadFile(gSelf)
 	os.WriteFile(gSelf, []byte(strings.Replace(string(old), "#!/bin/sh\n", "#!/bin/sh\n"+fakeSpecLand, 1)), 0o777)
 	bin := f.dir + "/bin"

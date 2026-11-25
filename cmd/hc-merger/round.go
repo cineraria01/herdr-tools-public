@@ -46,6 +46,7 @@ type M struct {
 	wmach                           string // 맨 앞을 기다리는 바퀴의 검증 기계(손잡이 0으로 맡기지 못해 기다리면 -) — 추측 기다림 일지 줄
 	wre                             string // 이 바퀴에 맨 앞을 바쁨으로 다시 고름 「<바쁨 기계>→<새 기계>」(verifierpick.go) — 추측 기다림 일지 줄
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
+	landOff                                // 착지 실행 기계(landon.go)
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -317,7 +318,7 @@ func (m *M) round() {
 		return
 	}
 	m.fretry()
-	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*", knobRef, prHeadPat, prOfPat, prSrcPat}, specLsPatterns...)...)
+	m.qs, rc = lsRemote(append([]string{"origin", "refs/heads/" + m.base, "refs/merge-queue/*", "refs/merge-queue-meta/*", "refs/merge-done/*", "refs/heads/lane/*", "refs/herdr/merger/*", "refs/herdr/landing/*", landClaims + "*", knobRef, prHeadPat, prOfPat, prSrcPat}, specLsPatterns...)...)
 	if rc != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 원격 큐를 읽지 못했다(git ls-remote) — 다음 바퀴에")
 		m.mer = true
@@ -467,11 +468,11 @@ func (m *M) round() {
 	fmt.Printf("hc-lane merger: 착지 시작 — %s (기준 %s%s)\n", m.mlab, first8(m.B), more)
 	m.mbn, m.ls0 = fmt.Sprint(len(m.b)), time.Now().Unix()
 	// 상주 부모가 끝났으면 새 착지를 시작하지 않는다. 이미 시작한 착지의 결과는 다음 병합기가 일지로 수거한다
-	if !m.parentAlive() {
+	if !m.parentAlive() || !m.landPrep() {
 		return
 	}
-	lrc := m.runCandidate()
-	if !m.parentAlive() {
+	lrc := m.landExec() // 병합기 기계 또는 고른 워커(landon.go)
+	if lrc == rcLost || !m.parentAlive() {
 		return
 	}
 	if lrc == rcNotRun { // 명령은 안 돌았다 — 후보만 치우고 큐는 그대로 쉰다(이어지면 deferNote가 막힘 사건)
@@ -588,13 +589,6 @@ func shas(b []entry) []string {
 	s := make([]string, len(b))
 	for i, e := range b {
 		s[i] = e.s
-	}
-	return s
-}
-
-func first8(s string) string {
-	if len(s) > 8 {
-		return s[:8]
 	}
 	return s
 }

@@ -59,6 +59,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--spec-idle" { // 검증 기계 한가함 재기(verifierpick.go — 병합기가 hc exec --on으로)
 		os.Exit(specIdleMain(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--land-run" { // 착지 실행 워커 쪽(landon.go — 병합기가 hc exec --on으로)
+		os.Exit(landRunMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--why" { // 일지의 검증 길 요약(why.go)
 		os.Exit(whyMain(os.Args[2:]))
 	}
@@ -531,3 +534,10 @@ func roundMain(a []string) {
 
 // parentAlive: 상주 부모가 아직 이 일꾼의 부모인가(죽으면 init·launchd 아래로 옮겨진다)
 func (m *M) parentAlive() bool { return os.Getppid() == m.parent }
+
+func first8(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}

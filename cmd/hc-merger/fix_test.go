@@ -39,6 +39,8 @@ func TestMain(m *testing.M) {
 
 func helper(h string) {
 	switch h {
+	case "landrun": // 워커 쪽 착지 실행(landon_test.go — 가짜 hc exec가 그 기계 클론에서 부른 hc-lane merger --land-run)
+		os.Exit(landRunMain(strings.Fields(os.Getenv("HC_MERGER_TEST_ARGS"))))
 	case "resident":
 		residentMain(strings.Fields(os.Getenv("HC_MERGER_TEST_ARGS")))
 	case "round":

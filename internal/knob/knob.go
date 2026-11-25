@@ -118,7 +118,9 @@ var Defs = []Def{
 	{Name: "merger_front_local", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맡길 수 없을 때 병합기 기계가 직접 검증(0이면 기다림, HC_LANE_FRONT_LOCAL)"},
 	{Name: "merger_idle_load", Tool: "hc-merger", Default: "50", Min: 1, Max: 10000, Unit: "%", Remote: true, Desc: "검증 기계 한가함 = 1분 부하가 코어 수의 이만큼 밑(HC_LANE_SPEC_IDLE_LOAD)"},
 	{Name: "merger_busy_wait", Tool: "hc-merger", Default: "30", Min: 0, Max: 3600, Unit: "초", Remote: true, Desc: "검증 일꾼이 한가해지길 기다리는 상한, 넘으면 바쁨(HC_LANE_SPEC_BUSY_WAIT)"},
-	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음(HC_LANE_SPEC_BUSY_MAX)"},
+	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음 — 착지 실행 워커의 끊김도 같은 상한(HC_LANE_SPEC_BUSY_MAX)"},
+	// ht-merger-land-offload(2026-11-26): 직접 검증 착지(준비 훅·hc-lane land·착지 스크립트)를 병합기 기계 대신 워커에서
+	{Name: "merger_land_on", Tool: "hc-merger", Default: "auto", List: true, Unit: "기계", Remote: true, Desc: "직접 검증 착지를 돌릴 기계 — auto(검증 기계 목록에서 검증 자리 남은·코어당 부하 가장 낮은 워커, 닿는 워커가 없을 때만 병합기 기계) · local(병합기 기계) · 기계 목록(쉼표, 그 안에서만)(HC_LANE_MERGER_LAND_ON)"},
 	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
 	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
 	{Name: "merger_resolve_stuck", Tool: "hc-merger", Default: "3", Min: 0, Max: 1440, Unit: "분", Remote: true, Desc: "풀이·풀이 감사 에이전트가 blocked·error로 이만큼 머물면 운영 사건 한 번(0이면 끔, HC_LANE_MERGER_RESOLVE_STUCK)"},
