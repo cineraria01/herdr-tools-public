@@ -249,8 +249,7 @@ func landWait() int64 {
 
 // landLive: 워커 터미널 land-<차례 8>이 살아 있나 — idBusy 살아 있음 · idIdle 없음(끝남) · idUnknown 못 읽음
 func landLive(mach, cm string) int {
-	o, rc, _ := hcRun(hcLook, "get", mach+"/land-"+cm[:8], "--json")
-	t, found, err := hcjson.ParseGet([]byte(o), rc, "")
+	t, found, err := hcGet(mach+"/land-"+cm[:8], "")
 	switch {
 	case err != nil:
 		return idUnknown
@@ -372,7 +371,7 @@ var (
 	landMiss = 20
 )
 
-// landAwait: 워커 착지의 결과 파일을 짧은 hc exec로 읽어 기다린다. 착지 종료 코드, 또는 lost 까닭(시작 못 함·결과 없이 끝남·닿지 않음·
+// landAwait: 워커 착지의 결과 파일을 짧은 hc exec로 읽어 기다린다. 착지 종료 코드, 또는 lost 까닭(시작 못 함·결과 없이 끝남·닿지 않음·살아 있음 모름·
 // 시간 넘김 — landWait)
 func landAwait(mach, cm, res string) (int, string) {
 	end := time.Now().Add(time.Duration(landWait()) * time.Second)
@@ -386,12 +385,18 @@ func landAwait(mach, cm, res string) (int, string) {
 		case r != "":
 			return landParse(r)
 		default:
-			miss = 0
-			if landLive(mach, cm) == idIdle { // 터미널이 끝났는데 결과가 없다 — 그사이 적었을 수 있어 한 번 더
+			switch landLive(mach, cm) {
+			case idIdle: // 터미널이 끝났는데 결과가 없다 — 그사이 적었을 수 있어 한 번 더
 				if r, ok := landResult(mach, res); ok && r != "" {
 					return landParse(r)
 				}
 				return 0, "결과 없이 끝남"
+			case idUnknown: // 살아 있는지 못 읽음이 이어지면 결과 못 읽음과 같이 끊김(차례 lease가 두 번 넣기를 막는다)
+				if miss++; miss >= landMiss {
+					return 0, "살아 있음 모름"
+				}
+			default:
+				miss = 0
 			}
 		}
 		if time.Now().After(end) {

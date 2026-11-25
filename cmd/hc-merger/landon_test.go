@@ -19,6 +19,8 @@ import (
 //     병합기 쪽 길은 같다). --cwd가 없으면 hc 자신의 실패. get <기계>/land-…은 fakeHcIdle(없으면 not_found = 끝남)
 //   - LANDRUN_OLD=<폴더 이름>: 그 기계 hc-lane은 --land-run을 모르는 옛 판(「알 수 없는 인자」 종료 1, 결과 파일 없음)
 //   - LAND_STEAL=1: 워커 착지가 push 직전에 차례 참조가 지워진다(병합기가 그 실행을 끊긴 것으로 보고 치운 것과 같다)
+//   - LAND_VANISH=<폴더 이름>: 그 기계의 land 터미널이 결과 없이 사라진다(밖에서 SIGTERM — ht-land-offload-lost). LAND_VANISH_AFTER=1이면
+//     착지(push)까지 한 뒤 결과 파일 없이 사라진다
 func landFx(t *testing.T) (*sfx, func() []string) {
 	s := specFx(t)
 	t.Setenv("HC_LANE_MERGER_LAND_ON", "auto")
@@ -53,7 +55,12 @@ if [ "$1" = run ]; then
     cwd=
     while [ $# -gt 0 ]; do case "$1" in --cwd|--on|--name|--label) [ "$1" = --cwd ] && cwd=$2; shift 2;; --*) shift;; *) break;; esac; done
     cd "$cwd" 2>/dev/null || { echo '{"error":{"kind":"spawn_failed","message":"no such cwd"}}' >&2; exit 1; }
-    "$@" >/dev/null 2>&1
+    if [ "$LAND_VANISH" = "$(basename "$cwd")" ]; then
+      [ -n "$LAND_VANISH_AFTER" ] && "$@" >/dev/null 2>&1
+      rm -f "$cwd".land-wt/*.rc
+    else
+      "$@" >/dev/null 2>&1
+    fi
     echo '{"address":"x/t1"}'; exit 0 ;;
   esac
 fi
@@ -256,6 +263,49 @@ func TestLandOnStolenClaimCannotPush(t *testing.T) {
 	s.round(1)
 	if len(runs()) != 1 || s.mainSHA() != m0 || s.onMain("a.txt") || s.has(landClaims+"main") {
 		t.Fatalf("⑩ 차례 없는 push는 거절: 실행 %v main 바뀜 %v", runs(), s.mainSHA() != m0)
+	}
+}
+
+// ⑪ 맡긴 착지 터미널이 결과 없이 사라짐(2026-11-26 05:02 — 밖에서 SIGTERM, 병합기는 표준 오류의 not_found를 못 읽어 15분 넘게 기다렸다):
+// 곧 끊김으로 보고 차례를 치운 뒤 일지로 판정 — 착지 안 됨이면 다음 바퀴 다른 워커로, 착지됨이면 완료(다시 돌리지 않음)
+func TestLandOnWorkerVanishes(t *testing.T) {
+	for _, after := range []bool{false, true} {
+		t.Run(fmt.Sprint("착지 뒤 ", after), func(t *testing.T) {
+			s, runs := landFx(t)
+			t.Setenv("LAND_VANISH", "v1")
+			if after {
+				t.Setenv("LAND_VANISH_AFTER", "1")
+			}
+			s.sub(1000000001, "a", false)
+			t0 := time.Now()
+			s.round(1)
+			if d := time.Since(t0); d > 30*time.Second {
+				t.Fatalf("⑪ 사라진 터미널을 %v 기다림", d)
+			}
+			if len(s.refs(landClaims)) != 0 || s.has("refs/merge-failed/1000000001-a") {
+				t.Fatalf("⑪ 차례 치움·반송 아님: 차례 %v\n%s", s.refs(landClaims), jdump())
+			}
+			if l := landOnRows(t); len(l) < 2 || !strings.HasPrefix(l[1], "v1 착지 실행 끊김(결과 없이 끝남)") {
+				t.Fatalf("⑪ 일지: %q", l)
+			}
+			if after {
+				if !s.onMain("a.txt") || s.has("refs/merge-queue/1000000001-a") || len(jrows(t, "착지")) != 1 {
+					t.Fatalf("⑪ 착지됨 → 완료: 실행 %v\n%s", runs(), jdump())
+				}
+				s.round(1)
+				if len(runs()) != 1 {
+					t.Fatalf("⑪ 착지된 것을 다시 돌림: %v", runs())
+				}
+				return
+			}
+			if s.onMain("a.txt") || !s.has("refs/merge-queue/1000000001-a") {
+				t.Fatalf("⑪ 착지 안 됨 → 큐 그대로: %v", runs())
+			}
+			s.round(1)
+			if r := runs(); len(r) != 1 || r[0] != "v2" || !s.onMain("a.txt") { // 사라진 v1은 --land-run을 돌리지 않았다
+				t.Fatalf("⑪ 다음 바퀴 v2: %v\n%s", r, jdump())
+			}
+		})
 	}
 }
 

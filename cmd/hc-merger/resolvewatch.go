@@ -40,8 +40,7 @@ func (m *M) rwatch(r *rstate) {
 			return // hc에 옵션·이상한 글자로 넘기지 않는다
 		}
 	}
-	o, rc, _ := hcRun(hcLook, "get", r.addr, "--json")
-	t, found, err := hcjson.ParseGet([]byte(o), rc, r.addr)
+	t, found, err := hcGet(r.addr, r.addr)
 	if err != nil || !found || t.State != "live" {
 		return
 	}

@@ -74,8 +74,7 @@ func (m *M) specFresh(r *specRow) (bool, string) {
 		return false, "터미널 없음"
 	}
 	id8 := r.id[:8]
-	o, rc, _ := hcRun(hcLook, "get", r.machine+"/spec-"+id8, "--json")
-	t, found, err := hcjson.ParseGet([]byte(o), rc, "")
+	t, found, err := hcGet(r.machine+"/spec-"+id8, "")
 	switch {
 	case err != nil:
 		return false, "터미널 못 읽음"

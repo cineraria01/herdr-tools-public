@@ -108,6 +108,13 @@ func hcRun(limit time.Duration, args ...string) (string, int, string) {
 	return boundedRun(limit, "hc", nil, args...)
 }
 
+// hcGet: hc get <addr> --json을 읽는다 — 종료 3의 not_found 오류 객체는 표준 오류에 온다(hc 0.1.22, hcjson.GetOut). 표준 출력만 읽으면
+// 「없음」이 「모름」이 되어 사라진 터미널을 하염없이 기다린다(ht-land-offload-lost). want는 hcjson.ParseGet 그대로
+func hcGet(addr, want string) (hcjson.Terminal, bool, error) {
+	o, rc, e := hcRun(hcLook, "get", addr, "--json")
+	return hcjson.ParseGet([]byte(hcjson.GetOut(o, e, rc)), rc, want)
+}
+
 // addrOK: hc에 넘길 주소 조각(기계·터미널) — 옵션으로 읽히지 않게(X1)
 func addrOK(s string) bool {
 	return s != "" && s[0] != '-' && strings.Trim(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") == ""
