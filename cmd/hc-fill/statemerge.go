@@ -2,7 +2,8 @@ package main
 
 // state의 병합 줄 칸(2026-11-24 ops-state-trim): 병합기가 이 기계(LOCAL)에 있는 프로젝트는 이 기계 병합기 일지
 // (<XDG_STATE_HOME, 없으면 ~/.local/state>/hc-lane/merger-journal.tsv — hc-merger result.go jrec)에서 마지막 바퀴·최근 검증·건너뜀·맡김을
-// 읽는다(읽기만, 원격 호출 없음). 다른 기계 병합기는 모름+까닭(원격으로 읽지 않는다).
+// 읽는다(읽기만). 다른 기계 병합기는 모름+까닭(그 일지를 원격으로 읽지 않는다). 원격 호출은 하나뿐 — 이 기계 병합기가 맨 앞 추측 검증을
+// 기다리는 중이면 그 검증 기계에 find 한 번(hc exec, 상한 proc.Limit — stateSpecWait).
 
 import (
 	"fmt"
@@ -80,11 +81,7 @@ func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string, t
 				g.Landing, g.LandingAgeS = ln, ptrI(max(0, int(now.Sub(at).Seconds())))
 			}
 			if md, ok := mergerGitDir(c); ok && g.Length != nil && *g.Length > 0 {
-				var why string
-				g.SpecMachine, g.SpecTerm, g.SpecFresh, why = stateSpecWait(md, terms, knobInt("advise_spec_fresh"), now)
-				if why != "" {
-					g.Why = why
-				}
+				g.SpecMachine, g.SpecTerm, g.SpecFresh, g.SpecWhy = stateSpecWait(md, terms, knobInt("advise_spec_fresh"), now)
 			}
 		}
 		if f.LastAt.IsZero() {
@@ -166,9 +163,10 @@ func mergerGitDir(clone string) (string, bool) {
 
 // specFreshSh: 추측 검증 터미널마다(인자 「주소 클론 아이디8」 셋씩, 첫 인자 = 분) 그 로그 <클론>.spec-wt/<아이디8>.log나 작업 트리
 // <클론>.spec-wt/<아이디8>(node_modules·.git 빼고)에 그 분 안에 쓴 파일이 있으면 그 주소 한 줄. 없는 경로의 find 오류는 「갱신 없음」 —
-// 끝까지 오면 종료 0이라, 종료가 0이 아니면 그 기계에서 못 돌았다(모름)
+// 끝까지 오면 종료 0이라, 종료가 0이 아니면 그 기계에서 못 돌았다(모름). <클론>은 일꾼처럼 git 최상위(링크를 푼 경로, hc-merger
+// specverify.go top), 못 구하면 터미널 폴더 그대로(감사 atp1onr 낮음 4 — 링크 폴더면 늘 「갱신 없음」이었다)
 // ponytail: 멈춘 검증이면 작업 트리 전체를 훑는다(갱신 중이면 첫 파일에서 -quit) — 너무 느려지면 검증 스크립트가 진행 표식을 한 곳에
-const specFreshSh = `n=$d; while [ $# -ge 3 ]; do w="$2.spec-wt/$3"; ` +
+const specFreshSh = `n=$d; while [ $# -ge 3 ]; do c=$(cd "$2" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || c=$2; w="$c.spec-wt/$3"; ` +
 	`if [ -n "$(find "$w.log" "$w" \( -name node_modules -o -name .git \) -prune -o -type f -mmin -"$n" -print -quit 2>/dev/null)" ]; then echo "$1"; exit 0; fi; ` +
 	`shift 3; done; exit 0`
 

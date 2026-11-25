@@ -154,6 +154,7 @@ type MergeLine struct {
 	SpecMachine string `json:"spec_machine"`
 	SpecTerm    string `json:"spec_term"`
 	SpecFresh   bool   `json:"spec_fresh"`
+	SpecWhy     string `json:"spec_why"` // 그 기계에서 갱신을 못 읽은 까닭(읽었으면 빈 값) — 갱신 없음과 가른다
 	Why         string `json:"why"`
 }
 

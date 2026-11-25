@@ -101,6 +101,16 @@ func TestMergeStallSpecAlive(t *testing.T) {
 	if len(it) != 1 || it[0].Kind != "merge-stall" || !strings.Contains(it[0].Evidence, "box-2/t2h2") || !strings.Contains(it[0].Evidence, "갱신") {
 		t.Errorf("② 멈춘 추측 검증: %+v", it)
 	}
+	// 감사 atp1onr 낮음 2: 그 기계를 못 읽었으면 근거에 「갱신 없음」이 아니라 못 읽은 까닭
+	m.SpecWhy = "추측 검증 갱신 못 읽음(box-2 종료 255)"
+	it = mergeItems(m)
+	if len(it) != 1 || !strings.Contains(it[0].Evidence, "box-2 종료 255") || strings.Contains(it[0].Evidence, "갱신 없음") {
+		t.Errorf("못 읽음: %+v", it)
+	}
+	m.SpecWhy = ""
+	if it = mergeItems(m); len(it) != 1 || strings.Contains(it[0].Evidence, "못 읽음") {
+		t.Errorf("갱신 없음은 못 읽음과 가른다: %+v", it)
+	}
 	// ③ 터미널 없음 — 안 움직임, 근거에 검증 기계
 	m.SpecTerm = ""
 	it = mergeItems(m)

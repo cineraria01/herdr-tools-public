@@ -61,4 +61,17 @@ func cleanAuditSec(k *K) {
 
 	k.runE(lane, "clean", "--repo", k.R, "--branch", "c-aud")
 	k.check("clean: 다시 돌려도 풀림을 또 적지 않음", k.rc == 0 && strings.Count(read(filepath.Join(k.T, ".local/state/hc-lane/events.tsv")), "막힘 풀림") == 1)
+
+	// 감사 atp1pxd 낮음 2: hc-fill 바퀴가 같은 감사 터미널을 먼저 닫아 clean의 hc kill이 실패해도, 다시 본 목록에 없으면 멈추지 않는다
+	k.land("c-aud2")
+	wt = k.wt
+	vd2 := filepath.Join(k.T, ".local/share/hc-fill/verdicts/c-aud2")
+	write(k.t, vd2+"/a1-x.md", "aid\ta1-x\nlane\tc-aud2\nrun\tt7@100\nsha\t"+strings.Repeat("ab", 20)+"\nverdict\tpass\nbase\tmain\n")
+	write(k.t, vd2+"/a1-x.ack", "taken\n")
+	write(k.t, k.HCLOG+".killfail", "1\n")
+	write(k.t, k.HCLOG+".lsfile", ls("t7", "t8")+"\n")
+	write(k.t, k.HCLOG+".lsfile.afterkill", ls("t7")+"\n")
+	k.runE([]string{"HC_TERMINAL_ID=t7", "HC_LANE=c-aud2", "HC_LANE_JOB=t7@100", "HC_FAKE_GET_ADDR=t8", "HC_FAKE_GET_BODY=" + get("done")},
+		"clean", "--repo", k.R, "--branch", "c-aud2")
+	k.check("clean: 감사 터미널 닫기가 실패해도(이미 닫힘) 다시 본 목록에 없으면 정리", k.rc == 0 && k.gone("c-aud2"))
 }

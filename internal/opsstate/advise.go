@@ -128,8 +128,10 @@ func mergeStall(m MergeLine, th Thresholds) (Item, bool) {
 		return Item{}, false
 	case m.SpecMachine != "" && m.SpecTerm == "":
 		ev += " · 추측 검증 기다림(" + m.SpecMachine + ") — 살아 있는 spec 터미널 없음"
+	case m.SpecMachine != "" && m.SpecWhy != "":
+		ev += " · 추측 검증 " + m.SpecTerm + ": " + m.SpecWhy
 	case m.SpecMachine != "":
-		ev += " · 추측 검증 " + m.SpecTerm + " 로그·작업 트리 갱신 없음(advise_spec_fresh분 넘게, 또는 못 읽음)"
+		ev += " · 추측 검증 " + m.SpecTerm + " 로그·작업 트리 갱신 없음(advise_spec_fresh분 넘게)"
 	}
 	switch {
 	case m.LastRoundAgeS == nil:

@@ -6,6 +6,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,6 +82,24 @@ func TestStateSpecWait(t *testing.T) {
 	wait("here", now)
 	if m, _, f, _ := stateSpecWait(mj, term("t2"), 0, now); m != "" || f {
 		t.Errorf("손잡이 0: %q %v", m, f)
+	}
+
+	// 감사 atp1onr 낮음 4: 터미널 폴더가 클론을 가리키는 링크여도 일꾼이 만든 곳(git 최상위 = 링크를 푼 경로)의 .spec-wt를 본다
+	real := filepath.Join(d, "real-app")
+	if err := os.MkdirAll(real+".spec-wt", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", "-q", real).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.Symlink(real, filepath.Join(d, "app-link")); err != nil {
+		t.Fatal(err)
+	}
+	write(real+".spec-wt/c9ea4788.log", "", now)
+	linked := []hcjson.Terminal{{Address: "t4", State: "live", Name: "spec-c9ea4788", Cwd: filepath.Join(d, "app-link")}}
+	wait("here", now)
+	if m, tm, f, why := stateSpecWait(mj, linked, 10, now); m != "here" || tm != "t4" || !f || why != "" {
+		t.Errorf("링크 폴더: %q %q %v %q", m, tm, f, why)
 	}
 
 	// ④ 다른 기계(원격 hc): hc exec --on box-2 -- sh … 로 그 기계에서 본다(가짜 hc는 부른 기계를 적고 로컬 sh로 돈다)

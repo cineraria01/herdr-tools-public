@@ -38,6 +38,8 @@ func TestHangSpinParse(t *testing.T) {
 		{"✻ Crunched for 21m 24s · 1 shell still running\n● 완료 보고\n✻ Baked for 2m 3s · done 오후 4:40\n> \n", false},
 		{"● 「1 shell still running」은 죽은 셸이다\n✻ Baked for 2m 3s\n", false},
 		{"  ⎿  1 shell still running\n", false},
+		// 감사 atp1sl0 낮음: 사람이 Escape로 끊은 턴은 끝 줄을 안 찍는다 — 옛 턴 줄 아래 Interrupted면 기다림이 아니다
+		{"✻ Crunched for 21m 24s · 1 shell still running\n● 배경 셸이 끝나 이어 본다\n  ⎿  Interrupted · What should Claude do instead?\n> \n", false},
 	} {
 		if got := hangShellWait(c.scr); got != c.want {
 			t.Errorf("%q: %v — 바람 %v", c.scr, got, c.want)
@@ -61,7 +63,14 @@ func TestHangTick(t *testing.T) {
 		want                              string // 알림 글 조각("" = 알리지 않음)
 		keys                              int    // hc keys 부른 수
 		row                               string // hang.tsv에 남을 종류("" = 줄 없음)
+		escHas, escNot                    string // 끝난 뒤 hang-esc.tsv에 있어야·없어야 할 조각
 	}{
+		{name: "끊음 기록 정리 — 같은 레인 옛 줄은 버리고 다른 레인 최근 줄은 남김", status: "working", scr: spin, ps: idle,
+			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
+			esc: fmt.Sprintf("w\tm/w\t%d\nx\tm/x\t%d\ny\tm/y\t%d\n", now.Add(-2*time.Hour).Unix(), now.Add(-10*time.Minute).Unix(),
+				now.Add(-2*time.Hour).Unix()),
+			want: "w 멈춘 레인", keys: 1, row: "a",
+			escHas: fmt.Sprintf("x\tm/x\t%d\nw\tm/w\t%d\n", now.Add(-10*time.Minute).Unix(), now.Unix()), escNot: "y\t"},
 		{name: "생각 중 멈춤 — 끊고 이어 보냄", status: "working", scr: spin, ps: idle,
 			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
 			want: "w 멈춘 레인 — 「생각 중」 표시 20분째", keys: 1, row: "a"},
@@ -155,6 +164,10 @@ func TestHangTick(t *testing.T) {
 			}
 			if got != c.row {
 				t.Fatalf("hang.tsv 종류 %q — 바람 %q (%q)", got, c.row, h)
+			}
+			e, _ := os.ReadFile(DATA + "/hang-esc.tsv")
+			if c.escHas != "" && (string(e) != c.escHas || strings.Contains(string(e), c.escNot)) {
+				t.Fatalf("hang-esc.tsv %q — 바람 %q(없을 것 %q)", e, c.escHas, c.escNot)
 			}
 		})
 	}

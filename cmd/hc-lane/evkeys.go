@@ -79,9 +79,10 @@ func (r *lastRep) rep(s, h, t, k string) {
 		delete(r.pre, k)
 		return
 	}
+	// 막힘이 이어지면(clean을 다시 돌려 또 멈춤) 넘김은 첫 막힘 앞 그대로(감사 atp1pxd 낮음 1)
 	if s == "막힘" && (handedOff(r.lst[k]) || r.lst[k] == "착지") {
 		r.pre[k] = r.lst[k]
-	} else {
+	} else if s != "막힘" || r.lst[k] != "막힘" {
 		delete(r.pre, k)
 	}
 	if sh, ok := r.lsh[k]; ok && s == "완료" && samesha(h, sh) && num(t) && num(r.lt0[k]) && atoi(t) <= atoi(r.lt0[k]) {

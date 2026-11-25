@@ -6,7 +6,7 @@
   - 도구 셸 = 명령 줄에 `shell-snapshots`가 든 자손(Claude Code Bash 도구 셸, `hc-lane` `lane.wait_procs` 기본과 같은 표식). MCP 서버도 작업 트리를 cwd로 쓰므로 cwd로는 세지 않는다.
   - 도구 셸이 있으면(긴 포그라운드 검증 등) 멈춤이 아니다. 화면이 바뀌면 처음부터 센다.
   - 한계: 셸 없이 오래 걸리는 도구(큰 MCP 호출 등)도 진행 표시만 돌고 화면이 그대로라 `hang_min`분 뒤 끊길 수 있다 — 한 시간에 한 번이고 레인이 이어 간다.
-- **(b) 배경 셸이 소리 없이 죽음**: hc 상태가 idle·done이고 화면의 **마지막** 턴 끝 줄(`✻ Crunched for … · 1 shell still running` 꼴, 머리 글자는 `hc-lane` `lane.wait_line` 기본과 같다)에 「N shell(s) still running」이 있는데 도구 셸 자손이 3분 넘게 없을 때.
+- **(b) 배경 셸이 소리 없이 죽음**: hc 상태가 idle·done이고 화면의 **마지막** 턴 끝 줄(`✻ Crunched for … · 1 shell still running` 꼴, 머리 글자는 `hc-lane` `lane.wait_line` 기본과 같다)에 「N shell(s) still running」이 있는데 도구 셸 자손이 3분 넘게 없을 때. 그 줄 아래에 `Interrupted` 줄이 있으면 보지 않는다(끊긴 턴은 끝 줄을 안 찍어, 그 줄은 옛 턴 것이다).
   옛 턴 줄·본문 인용에 남은 같은 글은 보지 않는다(완료 뒤 감사 기다림 화면에 흔히 남는다). 원격 기계는 `hc exec`로 `ps`를 읽는다. 셸이 살아 있으면 기록을 지운다.
 - 상태가 working·idle·done이 아니면(blocked·error·모름) 화면을 읽지 않는다.
 - **알림**: 그 레인 주인 지휘에 막힘 한 번(키 `hf:<레인>:hang-<a|b>:<처음 본 초>`, 받은편지 레인은 모든 지휘). 글에 근거(분·주소)와 다음 명령(`hc read <주소>`, (b)는 `hc send` 한 줄)이 든다.

@@ -47,12 +47,16 @@ func hangSpin(scr string) (int, string, bool) {
 // (감사 atp1rzf 중간, hc-lane wait와 같은 방식)
 func hangShellWait(scr string) bool { return hangShellRe.MatchString(hangLastTurn(scr)) }
 
-// hangLastTurn <화면>: 마지막 턴 끝 줄(없으면 빈 값)
+// hangLastTurn <화면>: 마지막 턴 끝 줄(없으면 빈 값). 그 아래 Interrupted 줄이 있으면 빈 값 — 끊긴 턴은 끝 줄을 안 찍어 그 줄은 옛 턴 것이다
+// (감사 atp1sl0 낮음 — 배경 셸이 끝나 시작한 자동 턴을 사람이 Escape로 끊은 꼴)
 func hangLastTurn(scr string) string {
 	ls := strings.Split(scr, "\n")
 	for i := len(ls) - 1; i >= 0; i-- {
 		if hangTurnRe.MatchString(ls[i]) {
 			return ls[i]
+		}
+		if strings.Contains(ls[i], "Interrupted") {
+			return ""
 		}
 	}
 	return ""

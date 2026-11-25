@@ -39,9 +39,9 @@ func auditCloseBusy(busy []string) []string {
 			fmt.Printf("%s끝난 감사 터미널 %s 를 닫는다(판정 %s 수거됨)\n", dryP(), a, lva)
 			continue
 		}
+		// 실패해도 rest에 남기지 않는다 — hc-fill 바퀴가 먼저 닫았을 수 있어, termGate가 목록을 다시 보고 살아 있으면 그때 멈춘다(감사 atp1pxd 낮음 2)
 		if _, r := hcRun(30, errDrop, "kill", a); r != 0 {
-			errf("hc-lane clean: 끝난 감사 터미널 %s 닫기 실패(종료 %d)\n", a, r)
-			rest = append(rest, b)
+			errf("hc-lane clean: 끝난 감사 터미널 %s 닫기 실패(종료 %d) — 목록을 다시 본다\n", a, r)
 			continue
 		}
 		fmt.Printf("hc-lane clean: 끝난 감사 터미널 닫음 %s (판정 %s 수거됨)\n", a, lva)

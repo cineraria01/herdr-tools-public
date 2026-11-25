@@ -75,6 +75,15 @@ func TestLastRepUnblock(t *testing.T) {
 	if r.lst["x"] != "중간" {
 		t.Fatalf("완료 → 막힘 → 중간은 중간이어야: %v", r.lst)
 	}
+	// 감사 atp1pxd 낮음 1: clean을 두 번 돌려 막힘이 두 번 이어져도 풀림은 넘김(제출)으로
+	r = newLastRep()
+	r.rep("제출", "abcdef12", "3", "")
+	r.rep("막힘", "-", "4", "")
+	r.rep("막힘", "-", "5", "")
+	r.rep("중간", "-", "6", "")
+	if r.lst["x"] != "제출" {
+		t.Fatalf("제출 → 막힘 → 막힘 → 중간이 제출로 돌아오지 않았다: %v", r.lst)
+	}
 }
 
 func TestTurnAfter(t *testing.T) {
