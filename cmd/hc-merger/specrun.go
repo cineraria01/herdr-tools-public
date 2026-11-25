@@ -57,6 +57,9 @@ func (m *M) spec() (specDecision, string) {
 	m.vw, m.wre = vwhy{why: "모름"}, ""
 	c, ok := m.specLoad()
 	if !ok {
+		if m.vw.why == "모름" {
+			m.vw.why = "추측 참조 못 읽음"
+		}
 		return specLand, ""
 	}
 	groups := m.specGroups()
@@ -112,19 +115,11 @@ func (m *M) spec() (specDecision, string) {
 	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go). 맨 앞 혼자 추측은 길 밖이어도 지킨다 — 묶음이 검증 기계에서
 	// 실패해 줄이는 바퀴(specShrink)는 혼자 추측이 끝난 뒤라, 치우면 범인 반송 근거를 잃고 다시 돌린다
 	m.specClean(c, append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...))
-	d := specFront(st)
-	over := false
-	if w := specFrontWait(); d == specWaitFront && now-st[0].row.at > w {
-		over = true
-		// 기다릴 값어치는 남은 시간이 직접 검증보다 짧을 때뿐 — 검증 기계가 죽었거나 바쁘거나 느리면 그 뒤 큐 전체가 멈춘다.
-		// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다
-		fmt.Printf("hc-lane merger: 맨 앞 검증이 %d초 넘게 도는 중(%s)\n", w, st[0].row.machine)
-		d = specLand
-		if disp && m.overRedo(c, st[0], busy, now) { // 기다리거나 직접 검증하기 전에 한가한 다른 기계에 한 번(통과 조각 이어 씀, specfront.go)
-			d, over = specWaitFront, false
-		}
-	}
+	d, over, stall := m.frontOver(c, st, specFront(st), busy, now, disp) // 맨 앞 기다림 상한(specfront.go)
 	m.vw.why = frontWhy(st, c.rows, over, disp)
+	if over && stall != "" {
+		m.vw.why += "·" + stall // 상한에서 직접 검증한 까닭(갱신 없음·터미널 없음·못 읽음)
+	}
 	m.wmach = ""
 	switch {
 	case d == specWaitFront:
@@ -306,9 +301,15 @@ func (m *M) specLoad() (*specCtx, bool) {
 	now, start := time.Now().Unix(), specStartMax()
 	specResolve(c.rows, ver, failed, now, specTimeout())
 	for i := range c.rows {
-		if r := &c.rows[i]; r.state == specRun && c.refs[specStarts+r.id] == "" && now-r.at >= start {
+		r := &c.rows[i]
+		switch {
+		case r.state == specRun && c.refs[specStarts+r.id] == "" && now-r.at >= start:
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 추측 %s — %s 일꾼이 %d초 안에 뜨지 않았다(모름)\n", first8(r.id), r.machine, start)
-			r.state = specLost
+			r.state, r.lost = specLost, "안 뜸"
+		case r.dispatchX && c.refs[specStarts+r.id] != "": // 일꾼이 떴는데 state=lost로 끝냄(준비 실패·검증이 트리를 바꿈)
+			r.lost = "준비 실패"
+		case r.dispatchX && r.machine == "-":
+			r.lost = "못 띄움"
 		}
 	}
 	return c, true
@@ -459,7 +460,7 @@ func (m *M) specLaunch(r *specRow, v verified.Verifier, lanes string, now int64)
 		return
 	}
 	ref, cm := specRefs+r.id, r.commit
-	r.dispatchX, r.state, r.machine = true, specLost, "-"
+	r.dispatchX, r.state, r.machine, r.lost = true, specLost, "-", "못 띄움"
 	if lc, ok := commitTree("", r.tree, cm+"^", specMsg(r.parent, r.group, "-", now, "lost")); ok &&
 		runO("push", "-q", "--force-with-lease="+ref+":"+cm, "origin", lc+":"+ref) == 0 {
 		r.commit = lc

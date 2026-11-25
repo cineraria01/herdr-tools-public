@@ -19,13 +19,95 @@ package main
 //   - 맨 앞이 기다림 상한을 넘기거나 실패·모름이면, 서서 기다리거나 병합기 기계에서 직접 검증하기(착지 스크립트 포함) 전에 한가한
 //     다른 기계에 맨 앞 제출마다 한 번 더 맡긴다(workerRedo — 통과한 조각은 이어 쓴다, specparts.go). 맡길 기계가 없을 때만 손잡이대로.
 
+//   - 맨 앞 추측이 기다림 상한을 넘겨도 진행 중이면(specFresh — spec-<아이디 8> 터미널 살아 있음 + 로그·작업 트리가 손잡이 spec_fresh분
+//     안에 갱신, hc-fill advise_spec_fresh와 같은 verified.FreshSh) 직접 검증을 새로 시작하지 않고 merger_spec_timeout까지 더 기다린다
+//     (ht-spec-overrun — 1471초째 도는 추측을 두고 맥에서 처음부터 전체 직접 검증을 시작해 23~34분 걸렸다). 멈췄으면 지금처럼.
+
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/verified"
 )
+
+// jOverWait: 맨 앞 추측이 기다림 상한을 넘겼는데 진행 중이라 더 기다리기 시작함(맨 앞 제출마다 한 줄)
+const jOverWait = "추측 상한 넘김"
+
+// frontOver: 맨 앞 판정 d가 기다림인데 기다림 상한(merger_front_wait)을 넘겼나. 넘겼으면 over와 판정 — 진행 중(specFresh)이면 더
+// 기다림, 아니면 직접 검증(stall = 상한에서 직접 검증한 까닭)이나 손잡이 front_local 0의 다시 맡김(overRedo)
+func (m *M) frontOver(c *specCtx, st []specStep, d specDecision, busy map[string]bool, now int64, disp bool) (specDecision, bool, string) {
+	w := specFrontWait()
+	if d != specWaitFront || now-st[0].row.at <= w {
+		return d, false, ""
+	}
+	// 기다릴 값어치는 남은 시간이 직접 검증보다 짧을 때뿐 — 검증 기계가 죽었거나 바쁘거나 느리면 그 뒤 큐 전체가 멈춘다.
+	// 그 추측은 통과도 실패도 아니다(반송·범인 판정에 안 씀): 지금 「모름」 길 그대로, 뒤늦은 결과는 specClean이 거둔다.
+	// 다만 살아서 진행 중이면 처음부터 직접 검증하지 않고 merger_spec_timeout까지 더 기다린다
+	fmt.Printf("hc-lane merger: 맨 앞 검증이 %d초 넘게 도는 중(%s)\n", w, st[0].row.machine)
+	fresh, stall := m.specFresh(st[0].row)
+	switch {
+	case fresh:
+		m.overWait(st[0], now)
+		return specWaitFront, false, ""
+	case disp && m.overRedo(c, st[0], busy, now): // 기다리거나 직접 검증하기 전에 한가한 다른 기계에 한 번(통과 조각 이어 씀)
+		return specWaitFront, false, ""
+	}
+	return specLand, true, stall
+}
+
+// specFreshMin: 손잡이 spec_fresh(분, 기본 10, 0이면 끔 — 상한에서 지금처럼 직접 검증)
+func (m *M) specFreshMin() int { return m.knobInt("spec_fresh", "HC_LANE_SPEC_FRESH", 10, 0) }
+
+// specFresh: 맨 앞 추측 r이 그 기계에서 진행 중인가 — spec-<아이디 8> 터미널이 살아 있고(hc get) 그 로그·작업 트리가 spec_fresh분 안에
+// 갱신됐다(hc exec로 verified.FreshSh). 아니면 까닭(갱신 없음·터미널 없음·못 읽음), 손잡이 0이면 빈 까닭
+// ponytail: 상한을 넘긴 바퀴마다 hc get·exec 한 번씩 — 바퀴가 잦아 무거우면 표식 파일에 마지막 확인 시각을 두고 1분에 한 번으로
+func (m *M) specFresh(r *specRow) (bool, string) {
+	min := m.specFreshMin()
+	if min == 0 {
+		return false, ""
+	}
+	if !addrOK(r.machine) || len(r.id) < 8 {
+		return false, "터미널 없음"
+	}
+	id8 := r.id[:8]
+	o, rc, _ := hcRun(hcLook, "get", r.machine+"/spec-"+id8, "--json")
+	t, found, err := hcjson.ParseGet([]byte(o), rc, "")
+	switch {
+	case err != nil:
+		return false, "터미널 못 읽음"
+	case !found || t.State != "live" || t.Cwd == "":
+		return false, "터미널 없음"
+	}
+	const lim = 30
+	o, rc, e := boundedRun((lim+10)*time.Second, "hc", nil, "exec", "--on", r.machine, "--json", "--timeout", strconv.Itoa(lim),
+		"--", "sh", "-c", "n=$1; shift; "+verified.FreshSh, "_", strconv.Itoa(min), t.Address, t.Cwd, id8)
+	x, err := hcjson.ParseExec([]byte(o), []byte(e), rc)
+	switch {
+	case err != nil || x.Code != 0 || x.TimedOut:
+		return false, "갱신 못 읽음"
+	case strings.TrimSpace(string(x.Stdout)) == "":
+		return false, "갱신 없음"
+	}
+	return true, ""
+}
+
+// overWait: 상한을 넘긴 맨 앞이 진행 중이라 더 기다린다 — 화면에 바퀴마다, 일지에 맨 앞 제출마다 한 줄(<일지 폴더>/overwait에 그 SHA)
+func (m *M) overWait(s specStep, now int64) {
+	what := fmt.Sprintf("추측 상한 넘김 — 진행 중이라 더 기다림(%d분째, %s, 끝 상한 merger_spec_timeout %d초)", (now-s.row.at)/60, s.row.machine, specTimeout())
+	fmt.Printf("hc-lane merger: 맨 앞 %s %s\n", s.g.lanes, what)
+	p := m.mj + "/overwait"
+	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == m.b[0].s {
+		return
+	}
+	m.jmembers(m.b, jOverWait, what, "", s.row.at, now)
+	if err := writeVia(p, m.b[0].s+"\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 상한 넘김 표식을 적지 못했다(다음 바퀴에 일지 줄이 또 나온다): %v\n", err)
+	}
+}
 
 // frontDispatch: 맨 앞 무리도 검증 기계에 맡기나. 손잡이 파일 <병합기 일지 폴더>/front_dispatch가 있으면 그 값, 없으면
 // HC_LANE_FRONT_DISPATCH, 둘 다 없으면 1. 0이면 옛 길 그대로(맨 앞은 병합기가 직접 검증 — 이 레인 앞의 동작으로 실행 중에 되돌리기)

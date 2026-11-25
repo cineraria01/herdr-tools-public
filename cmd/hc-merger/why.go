@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,14 +33,19 @@ func frontWhy(st []specStep, rows []specRow, over, disp bool) string {
 	if f.row == nil && disp || f.row != nil && f.row.state == specBusyX {
 		return "맡길 한가한 기계 없음" // 한가한 검증 기계가 없었거나, 맡긴 기계들이 바빠 다시 고를 기계가 없음(verifierpick.go)
 	}
+	// 「모름」을 까닭별로(ht-spec-overrun — 한 저장소의 직접 검증 15번 가운데 7번이 까닭 모름이었다). 까닭 글에 괄호를 넣지 않는다(whySummary가
+	// 첫 「)」에서 자른다)
 	if r := f.row; r != nil && r.machine != "-" { // 검증 기계에 띄운 추측
 		if r.state == specFail {
 			return "추측 실패"
 		}
-		return "모름" // 시간 넘김·안 뜸(통과·도는 중은 여기 안 온다)
+		return lostWhy(r) // 시간 넘김·안 뜸(통과·도는 중은 여기 안 온다)
 	}
-	if r := f.row; r != nil && (r.state == specConflict || disp) {
-		return "모름" // 충돌 · 맡겼는데 못 띄움·준비 실패(state=lost, 기계 -)
+	if r := f.row; r != nil && r.state == specConflict {
+		return "추측 충돌" // 부모 위에 못 얹음·병합 커밋
+	}
+	if r := f.row; r != nil && disp {
+		return lostWhy(r) // 맡겼는데 못 띄움·준비 실패(state=lost, 기계 -)
 	}
 	if len(f.g.shas) > 1 {
 		return "묶음"
@@ -51,6 +57,17 @@ func frontWhy(st []specStep, rows []specRow, over, disp bool) string {
 	}
 	return "추측 없음"
 }
+
+// lostWhy: 모름인 추측의 까닭 「추측 <시간 넘김|안 뜸|못 띄움|준비 실패>」, 모르면 「모름」
+func lostWhy(r *specRow) string {
+	if r.lost == "" {
+		return "모름"
+	}
+	return "추측 " + r.lost
+}
+
+// narrowRe: 착지 스크립트의 가장 좁은 검증 줄(착지 스크립트 저장소의 꼴 「  기준: 추측 통과 트리 <12자> 이후 <N>개」 — 병합기가 넘긴 통과 트리 이후 바뀐 파일만)
+var narrowRe = regexp.MustCompile(`^\s*기준: 추측 통과 트리 [0-9a-f]+ 이후 ([0-9]+)개`)
 
 // vtag: 일지 까닭 칸에 붙일 글(앞 「, 」 포함). 검증 길을 모르면 빈 값
 func (m *M) vtag() string {
@@ -71,6 +88,13 @@ func (m *M) vtag() string {
 			return fmt.Sprintf(", 검증 건너뜀(추측 %s · %s)", m.vw.id, m.vw.mach)
 		case strings.HasPrefix(l, "hc-lane land: 추측 트리(") && strings.Contains(l, "rebase한 트리가 다르다"):
 			return ", 직접 검증(기준 움직임)"
+		}
+		// 착지 스크립트 저장소의 빠른 길 — 통과 트리 이후 0개면 건너뜀, 아니면 그만큼 좁힌 검증(ht-spec-overrun — 늘 「모름」이었다)
+		if g := narrowRe.FindStringSubmatch(l); g != nil {
+			if g[1] == "0" {
+				return fmt.Sprintf(", 검증 건너뜀(추측 %s · %s · 착지 스크립트 0개)", m.vw.id, m.vw.mach)
+			}
+			return ", 직접 검증(추측 통과 뒤 바뀐 파일 " + g[1] + "개)" // 파일 수 — 묶음은 그 파일로 가린 만큼만 돈다
 		}
 	}
 	return ", 직접 검증(모름)"

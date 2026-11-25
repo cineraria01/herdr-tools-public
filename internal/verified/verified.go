@@ -163,3 +163,13 @@ func Record(dir string, r Rec, stderr io.Writer) gitx.State {
 func Remove(dir, tree, was string, stderr io.Writer) bool {
 	return gitx.Run(dir, nil, stderr, "push", "-q", "--force-with-lease="+Prefix+tree+":"+was, "origin", ":"+Prefix+tree) == 0
 }
+
+// FreshSh: 추측 검증이 진행 중인가(ht-spec-overrun — hc-fill advise_spec_fresh와 병합기 맨 앞 기다림 상한이 같은 판정을 쓴다). sh 본문
+// 조각이고, 앞에서 n(분)을 정한 뒤 인자 「주소 클론 아이디8」 셋씩: 그 로그 <클론>.spec-wt/<아이디8>.log나 작업 트리
+// <클론>.spec-wt/<아이디8>(node_modules·.git 빼고)에 n분 안에 쓴 파일이 있으면 그 주소 한 줄. 없는 경로의 find 오류는 「갱신 없음」 —
+// 끝까지 오면 종료 0이라, 종료가 0이 아니면 그 기계에서 못 돌았다(모름). <클론>은 일꾼처럼 git 최상위(링크를 푼 경로, hc-merger
+// specverify.go top), 못 구하면 터미널 폴더 그대로
+// ponytail: 멈춘 검증이면 작업 트리 전체를 훑는다(갱신 중이면 첫 파일에서 -quit) — 너무 느려지면 검증 스크립트가 진행 표식을 한 곳에
+const FreshSh = `while [ $# -ge 3 ]; do c=$(cd "$2" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || c=$2; w="$c.spec-wt/$3"; ` +
+	`if [ -n "$(find "$w.log" "$w" \( -name node_modules -o -name .git \) -prune -o -type f -mmin -"$n" -print -quit 2>/dev/null)" ]; then echo "$1"; exit 0; fi; ` +
+	`shift 3; done; exit 0`

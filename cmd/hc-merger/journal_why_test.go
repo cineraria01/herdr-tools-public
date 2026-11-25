@@ -124,10 +124,10 @@ func TestJournalWhySpecFailReject(t *testing.T) {
 	}
 }
 
-// ② 직접 검증 까닭: 맨 앞 기다림 상한
+// ② 직접 검증 까닭: 맨 앞 기다림 상한(진행 확인 — spec 터미널이 없으면 「·터미널 없음」, ht-spec-overrun)
 func TestJournalWhyFrontWaitCap(t *testing.T) {
 	s, _ := overCap(t)
-	if w := s.jwhy("p", "착지"); w != "병합기 착지, 직접 검증(맨 앞 기다림 상한)" {
+	if w := s.jwhy("p", "착지"); w != "병합기 착지, 직접 검증(맨 앞 기다림 상한·터미널 없음)" {
 		t.Fatalf("② 맨 앞 기다림 상한: %q", w)
 	}
 }
@@ -140,6 +140,7 @@ func TestFrontWhyTable(t *testing.T) {
 	row := func(st specState, mach, parent, group string) *specRow {
 		return &specRow{id: "0123456789abcdef", tree: "t", parent: parent, group: group, machine: mach, state: st}
 	}
+	lost := func(mach, why string) *specRow { r := row(specLost, mach, "B", "s1"); r.lost = why; return r }
 	for _, c := range []struct {
 		name string
 		st   []specStep
@@ -150,8 +151,10 @@ func TestFrontWhyTable(t *testing.T) {
 	}{
 		{"줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, false, "추측 없음"},
 		{"병합기가 지은 맨 앞", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, false, "추측 없음"},
-		{"검증 기계 추측 시간 넘김", []specStep{{g: g, parent: "B", row: row(specLost, "v1", "B", "s1")}}, nil, false, false, "모름"},
-		{"충돌", []specStep{{g: g, parent: "B", row: row(specConflict, "-", "B", "s1")}}, nil, false, false, "모름"},
+		{"검증 기계 추측 까닭 모름", []specStep{{g: g, parent: "B", row: row(specLost, "v1", "B", "s1")}}, nil, false, false, "모름"},
+		{"검증 기계 추측 시간 넘김", []specStep{{g: g, parent: "B", row: lost("v1", "시간 넘김")}}, nil, false, false, "추측 시간 넘김"},
+		{"검증 기계 추측 안 뜸", []specStep{{g: g, parent: "B", row: lost("v1", "안 뜸")}}, nil, false, false, "추측 안 뜸"},
+		{"충돌", []specStep{{g: g, parent: "B", row: row(specConflict, "-", "B", "s1")}}, nil, false, false, "추측 충돌"},
 		{"실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, false, "추측 실패"},
 		{"도는 중 상한 넘김", []specStep{{g: g, parent: "B", row: row(specRun, "v1", "B", "s1")}}, nil, true, false, "맨 앞 기다림 상한"},
 		{"묶음", []specStep{{g: g2, parent: "B"}}, nil, false, false, "묶음"},
@@ -160,7 +163,9 @@ func TestFrontWhyTable(t *testing.T) {
 		{"맡김 · 줄 없음", []specStep{{g: g, parent: "B"}}, nil, false, true, "맡길 한가한 기계 없음"},
 		{"맡김 · 묶음 줄 없음", []specStep{{g: g2, parent: "B"}}, []specRow{*row(specPass, "v1", "A", "s1")}, false, true, "맡길 한가한 기계 없음"},
 		{"맡김 · 바쁨(다시 고를 기계 없음)", []specStep{{g: g, parent: "B", row: row(specBusyX, "v2", "B", "s1")}}, nil, false, true, "맡길 한가한 기계 없음"},
-		{"맡김 · 못 띄움(기계 -)", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, true, "모름"},
+		{"맡김 · 까닭 모를 lost(기계 -)", []specStep{{g: g, parent: "B", row: row(specLost, "-", "B", "s1")}}, nil, false, true, "모름"},
+		{"맡김 · 못 띄움(기계 -)", []specStep{{g: g, parent: "B", row: lost("-", "못 띄움")}}, nil, false, true, "추측 못 띄움"},
+		{"맡김 · 준비 실패(기계 -)", []specStep{{g: g, parent: "B", row: lost("-", "준비 실패")}}, nil, false, true, "추측 준비 실패"},
 		{"맡김 · 실패", []specStep{{g: g, parent: "B", row: row(specFail, "v1", "B", "s1")}}, nil, false, true, "추측 실패"},
 	} {
 		if got := frontWhy(c.st, c.rows, c.over, c.disp); got != c.want {

@@ -18,9 +18,24 @@ import (
 )
 
 // fakeHcIdle: 가짜 hc의 exec(한가함 확인) — --on 기계의 $IDLEDIR/<기계> 글을 표준 출력으로(없으면 한가함), unreach면 hc 자신의 실패
-const fakeHcIdle = `if [ "$1" = exec ]; then
+//
+// get <기계>/spec-<아이디8>은 $IDLEDIR/get-spec-<아이디8>이 있으면 그 글(살아 있는 터미널), 없으면 not_found(ht-spec-overrun). exec … -- sh …은
+// 이 기계에서 그대로 돌려 그 출력을 돌려준다(추측 진행 확인 — 검증 기계 클론이 이 기계 임시 폴더에 있다)
+const fakeHcIdle = `if [ "$1" = get ]; then
+  case ${2##*/} in spec-*)
+    if [ -f "$IDLEDIR/get-${2##*/}" ]; then cat "$IDLEDIR/get-${2##*/}"; exit 0; fi
+    echo '{"error":{"kind":"not_found","message":"no terminal"}}'; exit 3 ;;
+  esac
+fi
+if [ "$1" = exec ]; then
   m=
   while [ $# -gt 0 ]; do [ "$1" = --on ] && m=$2; [ "$1" = -- ] && break; shift; done
+  [ $# -gt 0 ] && shift
+  if [ "$1" = sh ]; then
+    o=$("$@"); r=$?
+    printf '{"code":%d,"signal":null,"stderr":"","stdout":"%s","timed_out":false,"truncated":false}\n' "$r" "$(printf '%s\n' "$o" | base64 | tr -d '\n')"
+    exit 0
+  fi
   f="$IDLEDIR/$m"
   o="load=0.00 cpus=8 verifies=0"
   [ -f "$f" ] && o=$(cat "$f")

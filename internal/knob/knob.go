@@ -106,6 +106,8 @@ var Defs = []Def{
 	{Name: "merger_spec_start", Tool: "hc-merger", Default: "300", Min: 0, Max: 86400, Unit: "초", Remote: true, Desc: "추측 일꾼이 떴다는 표식을 기다리는 상한(HC_LANE_SPEC_START)"},
 	{Name: "merger_spec_timeout", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "추측 검증 한 번의 상한(HC_LANE_SPEC_TIMEOUT)"},
 	{Name: "merger_front_wait", Tool: "hc-merger", Default: "600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "맨 앞 추측 기다림 상한(HC_LANE_SPEC_FRONT_WAIT)"},
+	// ht-spec-overrun(2026-11-25): 상한을 넘긴 맨 앞이 진행 중이면 다른 기계로 옮기거나 직접 검증하지 않고 더 기다림
+	{Name: "merger_spec_fresh", Tool: "hc-merger", Default: "10", Min: 0, Max: 1440, Unit: "분", Remote: true, Desc: "맨 앞 기다림 상한을 넘긴 추측의 spec-<아이디 8> 터미널이 살아 있고 로그·작업 트리가 이만큼 안에 갱신됐으면 merger_spec_timeout까지 더 기다림(0이면 끔 — 상한에서 직접 검증, HC_LANE_SPEC_FRESH)"},
 	{Name: "merger_pre_max", Tool: "hc-merger", Default: "2700", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "미리 줄 표식 수명(HC_LANE_PRE_MAX)"},
 	{Name: "merger_pre_rebuild", Tool: "hc-merger", Default: "1", Min: 0, Max: 10, Unit: "번", Remote: true, Desc: "미리 줄 다시 짓기 횟수(HC_LANE_PRE_REBUILD)"},
 	{Name: "merger_front_dispatch", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맨 앞 무리도 검증 기계에 맡김(0이면 병합기가 직접, HC_LANE_FRONT_DISPATCH)"},

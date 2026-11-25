@@ -71,8 +71,9 @@ type specRow struct {
 	machine             string // 띄운 검증 기계(충돌·띄우기 실패면 -)
 	at                  int64  // 띄운 시각(유닉스 초)
 	state               specState
-	conflict, dispatchX bool // 제목의 state=conflict · state=lost(띄우기 실패)
-	busy                bool // 제목의 state=busy(그 기계 일꾼이 바빠 검증하지 않음)
+	conflict, dispatchX bool   // 제목의 state=conflict · state=lost(띄우기 실패)
+	busy                bool   // 제목의 state=busy(그 기계 일꾼이 바빠 검증하지 않음)
+	lost                string // 모름의 까닭(시간 넘김·안 뜸·못 띄움·준비 실패 — 일지 「직접 검증(추측 <까닭>)」, 모르면 빈 값)
 }
 
 // specGroup: 무리 하나
@@ -159,8 +160,10 @@ func specResolve(rows []specRow, verified, failed map[string]bool, now, timeout 
 			r.state = specFail
 		case r.busy:
 			r.state = specBusyX
-		case r.dispatchX || timeout > 0 && now-r.at > timeout:
+		case r.dispatchX:
 			r.state = specLost
+		case timeout > 0 && now-r.at > timeout:
+			r.state, r.lost = specLost, "시간 넘김"
 		default:
 			r.state = specRun
 		}
