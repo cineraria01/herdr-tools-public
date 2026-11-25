@@ -46,6 +46,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 줄 고치기 (edit)](docs/hc-fill/edit.md)
 - [hc-fill: 빈 지시문 거절](docs/hc-fill/empty-brief.md)
 - [hc-fill: Go 구현](docs/hc-fill/go-impl.md)
+- [hc-fill: 멈춘 레인](docs/hc-fill/hang.md)
 - [hc-fill: 놀고 있음 알림](docs/hc-fill/idle.md)
 - [hc-fill: 받은편지](docs/hc-fill/inbox.md)
 - [hc-fill: 마지막 보고](docs/hc-fill/last-report.md)

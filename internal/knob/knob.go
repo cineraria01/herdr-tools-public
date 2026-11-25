@@ -63,6 +63,9 @@ var Defs = []Def{
 	{Name: "state_hot", Tool: "hc-fill", Default: "200", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 이 값 이상인 기계와 state_cool 이하인 기계가 함께 있으면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_cool", Tool: "hc-fill", Default: "50", Min: 0, Max: 10000, Unit: "%", Desc: "치우침의 한가한 쪽 코어당 부하"},
 	{Name: "nudge_every", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "hc-fill nudge가 한 레인에 다시 보내기까지(0이면 막지 않음)"},
+	// 멈춘 레인(2026-11-25 ht-lane-hang-detect, docs/hc-fill/hang.md)
+	{Name: "hang_min", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "레인 터미널의 「생각 중」 진행 표시와 그 위 화면이 도구 실행 없이 이만큼 그대로면 멈춘 레인으로 알림(0이면 멈춘 레인 감지 끔)"},
+	{Name: "hang_esc", Tool: "hc-fill", Default: "1", Min: 0, Max: 1, Desc: "「생각 중」에 멈춘 레인에 Escape 한 번 + 이어 가라는 글(한 레인에 한 시간에 한 번, 0이면 알리기만)"},
 	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	// 지금 손댈 것(2026-11-24 ops-advise, docs/ops/advise.md). 풀 수 있는 대기·사슬의 문턱은 놀고 있음 알림과 같은 idle
 	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔)"},

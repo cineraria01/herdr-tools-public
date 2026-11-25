@@ -291,10 +291,17 @@ const (
 	upAddr = 3
 	upRID  = 4
 
-	// 다시 굴림 기록 nudge.tsv(nudge.go) 「레인 주소 보낸 시각(초)」
+	// 다시 굴림 기록 nudge.tsv(nudge.go)·멈춤 끊음 기록 hang-esc.tsv(hang.go) 「레인 주소 보낸 시각(초)」
 	nuLane = 1
 	nuAddr = 2
 	nuAt   = 3
+
+	// 멈춘 레인 의심 hang.tsv(hang.go) 「레인 주소 종류(a|b) 처음 본 초 화면 지문」
+	hgLane  = 1
+	hgAddr  = 2
+	hgKind  = 3
+	hgSince = 4
+	hgFP    = 5
 
 	// 기계 옛 이름 machine-alias.tsv 「옛 새 바꾼 초」(rename.go — 병합기가 옛 이름으로 적은 결과 사건을 새 이름 것으로)
 	aaOld = 1
