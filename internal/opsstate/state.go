@@ -144,8 +144,8 @@ type MergeLine struct {
 	// 줄에 선 가장 오래된 제출(병합기 살아 있음 기록 — 큐 참조 이름의 초)의 나이와 레인. 모르면 nil·빈 값
 	OldestAgeS *int   `json:"oldest_age_s"`
 	OldestLane string `json:"oldest_lane"`
-	// 이 기계 병합기가 지금 착지 중인 맨 앞 레인과 그 착지 나이(착지 자식 기록이 살아 있음 — hc-fill statemerge.go stateLanding). 착지 중이
-	// 아니거나 다른 기계 병합기면 빈 값·nil, 착지 중인데 레인을 못 찾으면 「모름」
+	// 이 기계 병합기가 지금 착지 중인 맨 앞 레인과 그 착지 나이(착지 자식 기록이 살아 있음 — hc-fill statemerge.go stateLanding, 또는
+	// 워커 착지가 살아서 갱신 중 — 아래 LandOn). 착지 중이 아니거나 다른 기계 병합기면 빈 값·nil, 착지 중인데 레인을 못 찾으면 「모름」
 	Landing     string `json:"landing"`
 	LandingAgeS *int   `json:"landing_age_s"`
 	// 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중(클론의 <git-path hc-merger>/specwait 마지막 기다림 바퀴가 advise_spec_fresh분 안 — hc-fill
@@ -155,6 +155,14 @@ type MergeLine struct {
 	SpecTerm    string `json:"spec_term"`
 	SpecFresh   bool   `json:"spec_fresh"`
 	SpecWhy     string `json:"spec_why"` // 그 기계에서 갱신을 못 읽은 까닭(읽었으면 빈 값) — 갱신 없음과 가른다
+	// 이 기계 병합기가 맨 앞 착지를 워커에서 돌리는 중(일지 마지막 줄이 워커 「착지 실행」 — hc-fill statemerge.go stateLandOn)이면 그
+	// 워커, 그 결정부터의 나이, 그 기계에 살아 있는 land-<차례 8> 터미널 주소(없으면 빈 값), 그 착지 로그·작업 트리에 advise_spec_fresh분
+	// 안에 쓴 파일이 있나(있으면 Landing·LandingAgeS도 채운다), 못 읽은 까닭. 워커 착지 아님·다른 기계 병합기·손잡이 0이면 빈 값
+	LandOn      string `json:"land_on"`
+	LandOnAgeS  *int   `json:"land_on_age_s"`
+	LandOnTerm  string `json:"land_on_term"`
+	LandOnFresh bool   `json:"land_on_fresh"`
+	LandOnWhy   string `json:"land_on_why"`
 	Why         string `json:"why"`
 }
 

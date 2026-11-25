@@ -138,12 +138,17 @@
 | `merge[].delegated` | 최근 검증 맡김 수(20번까지) |
 | `merge[].oldest_age_s` | 줄에 선 가장 오래된 제출의 나이(초, 큐 참조 이름의 초 — `hc-fill status`의 「가장 오래」와 같은 출처) |
 | `merge[].oldest_lane` | 그 제출의 레인 |
-| `merge[].landing` | 이 기계 병합기가 지금 착지 중인 맨 앞 레인(착지 자식 기록 `child`가 살아 있음 — 레인은 그 병합기 pid의 착지 로그 이름, 못 찾으면 「모름」. 다른 기계 병합기·착지 중 아님은 빈 값) |
+| `merge[].landing` | 이 기계 병합기가 지금 착지 중인 맨 앞 레인(착지 자식 기록 `child`가 살아 있음 — 레인은 그 병합기 pid의 착지 로그 이름, 못 찾으면 「모름」. 또는 워커 착지가 살아서 갱신 중 — 아래 `land_on_fresh`, 레인은 그 일지 줄. 다른 기계 병합기·착지 중 아님은 빈 값) |
 | `merge[].landing_age_s` | 그 착지의 나이(초, 착지 로그 이름의 시각 = 바퀴 시작 — 없으면 자식 기록 시각) |
 | `merge[].spec_machine` | 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중이면 맡긴 검증 기계(클론 `<git-path hc-merger>/specwait`의 마지막 기다림 바퀴가 `advise_spec_fresh`분 안). 기다림 아님·다른 기계 병합기·손잡이 0이면 빈 값 |
 | `merge[].spec_term` | 그 기계에 살아 있는 추측 검증 터미널 `spec-<아이디 8>`의 주소(`hc ls`), 없으면 빈 값 |
 | `merge[].spec_fresh` | 그 추측 로그 `<클론>.spec-wt/<아이디 8>.log`나 작업 트리(`node_modules`·`.git` 빼고)에 `advise_spec_fresh`분 안에 쓴 파일이 있다(그 기계에서 `find -mmin`). `<클론>`은 일꾼처럼 터미널 폴더의 git 최상위(링크를 푼 경로) |
 | `merge[].spec_why` | 그 기계에서 갱신을 못 읽은 까닭(`hc exec` 실패 등), 읽었으면 빈 값 — advise 근거는 「갱신 없음」과 이것을 가른다 |
+| `merge[].land_on` | 이 기계 병합기가 맨 앞 착지를 워커에서 돌리는 중이면 그 워커(병합기 일지에서 이 프로젝트의 마지막 줄이 워커 「착지 실행」 결정 — 병합기 기계에서 돌림·끊김 줄은 아님). 아니면·다른 기계 병합기·손잡이 `advise_spec_fresh` 0이면 빈 값 |
+| `merge[].land_on_age_s` | 그 결정부터의 나이(초, 일지 줄 시각) |
+| `merge[].land_on_term` | 그 기계에 살아 있는 착지 터미널 `land-<차례 8>`의 주소(`hc ls`), 없으면 빈 값 |
+| `merge[].land_on_fresh` | 그 착지 로그 `<클론>.land-wt/<차례 12>.log`나 작업 트리(`node_modules`·`.git` 빼고)에 `advise_spec_fresh`분 안에 쓴 파일이 있다(추측과 같은 판정 `verified.FreshSh`). 참이면 `landing`·`landing_age_s`도 그 레인·나이로 채운다 |
+| `merge[].land_on_why` | 그 기계에서 갱신을 못 읽은 까닭, 읽었으면 빈 값 |
 | `merge[].why` | 모르는 칸의 까닭 |
 | `deploy` | 배포(기계마다) |
 | `deploy[].machine` | 기계 |

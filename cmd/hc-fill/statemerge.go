@@ -2,8 +2,9 @@ package main
 
 // state의 병합 줄 칸(2026-11-24 ops-state-trim): 병합기가 이 기계(LOCAL)에 있는 프로젝트는 이 기계 병합기 일지
 // (<XDG_STATE_HOME, 없으면 ~/.local/state>/hc-lane/merger-journal.tsv — hc-merger result.go jrec)에서 마지막 바퀴·최근 검증·건너뜀·맡김을
-// 읽는다(읽기만). 다른 기계 병합기는 모름+까닭(그 일지를 원격으로 읽지 않는다). 원격 호출은 하나뿐 — 이 기계 병합기가 맨 앞 추측 검증을
-// 기다리는 중이면 그 검증 기계에 find 한 번(hc exec, 상한 proc.Limit — stateSpecWait).
+// 읽는다(읽기만). 다른 기계 병합기는 모름+까닭(그 일지를 원격으로 읽지 않는다). 원격 호출은 둘뿐 — 이 기계 병합기가 맨 앞 추측 검증을
+// 기다리는 중이면 그 검증 기계에, 맨 앞 착지를 워커에서 돌리는 중이면 그 워커에 find 한 번씩(hc exec, 상한 proc.Limit — stateSpecWait·
+// stateLandOn).
 
 import (
 	"fmt"
@@ -85,6 +86,9 @@ func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string, t
 				g.SpecMachine, g.SpecTerm, g.SpecFresh, g.SpecWhy = stateSpecWait(md, terms, knobInt("advise_spec_fresh"), now)
 			}
 		}
+		if x.St == "alive" && g.Landing == "" && g.Length != nil && *g.Length > 0 {
+			stateLandOn(g, f, terms, knobInt("advise_spec_fresh"), now)
+		}
 		if f.LastAt.IsZero() {
 			g.Why = "이 기계 병합기 일지에 이 프로젝트 줄 없음"
 			return
@@ -162,11 +166,55 @@ func mergerGitDir(clone string) (string, bool) {
 	return d, true
 }
 
-// specFreshSh: 추측 검증 터미널마다(인자 「주소 클론 아이디8」 셋씩, 첫 인자 = 분 — onm의 머리말이 $d로) 그 추측이 분 안에 갱신됐으면
-// 그 주소 한 줄. 판정 본문은 병합기의 맨 앞 기다림 상한과 같은 verified.FreshSh(ht-spec-overrun — 한 곳)
-const specFreshSh = `n=$d; ` + verified.FreshSh
+var (
+	specIDRe = regexp.MustCompile(`^spec-([0-9a-f]{8})$`)
+	landIDRe = regexp.MustCompile(`^land-([0-9a-f]{8})$`) // 워커 착지 터미널 land-<차례 8>(hc-merger landon.go runRemote)
+)
 
-var specIDRe = regexp.MustCompile(`^spec-([0-9a-f]{8})$`)
+// stateFresh <기계> <폴더 종류 spec·land> <터미널 이름 꼴> <살아 있는 터미널> <분>: 그 기계의 살아 있는 <종류>-<아이디8> 터미널(첫
+// 주소, 없으면 빈 값)과 그 로그·작업 트리가 분 안에 갱신됐나. 판정 본문은 병합기의 맨 앞 기다림 상한과 같은 verified.FreshSh(한 곳 —
+// 터미널마다 인자 「주소 클론 아이디8」 셋씩, 첫 인자 = 분 — onm의 머리말이 $d로). 그 기계를 못 읽으면 why에 까닭(갱신 아님 쪽)
+func stateFresh(mach, kind, label string, re *regexp.Regexp, terms []hcjson.Terminal, min int) (term string, fresh bool, why string) {
+	args := []string{strconv.Itoa(min)}
+	for _, t := range terms {
+		m, id := LOCAL, re.FindStringSubmatch(t.Name)
+		if a, _, ok := strings.Cut(t.Address, "/"); ok {
+			m = a
+		}
+		if t.State != "live" || id == nil || m != mach || t.Cwd == "" {
+			continue
+		}
+		if term == "" {
+			term = t.Address
+		}
+		args = append(args, t.Address, t.Cwd, id[1])
+	}
+	if term == "" {
+		return
+	}
+	out, rc := onm(nil, mach, "n=$d; k="+kind+"; "+verified.FreshSh, args...)
+	if rc != 0 {
+		return term, false, fmt.Sprintf("%s 갱신 못 읽음(%s 종료 %d)", label, mach, rc)
+	}
+	if a := strings.TrimSpace(out); a != "" {
+		return a, true, ""
+	}
+	return term, false, ""
+}
+
+// stateLandOn: 이 기계 병합기 일지의 마지막 줄이 워커 착지 실행 결정(f.LandOn — opsstate.LandRemote)이면 그 워커·나이·land 터미널·갱신을
+// g에 채운다(ht-advise-land-remote — 워커 착지를 기다리는 동안 일지는 그 한 줄뿐이라 안 움직임이 올라갔다). 갱신 중이면 병합기가 그 레인을
+// 착지 중(Landing — advise는 안 움직임이 아니라 느림 문턱과 견준다). 손잡이 advise_spec_fresh 0이면 보지 않는다(추측과 같은 손잡이)
+func stateLandOn(g *opsstate.MergeLine, f opsstate.JournalFacts, terms []hcjson.Terminal, min int, now time.Time) {
+	if f.LandOn == "" || min <= 0 {
+		return
+	}
+	g.LandOn, g.LandOnAgeS = f.LandOn, ptrI(max(0, int(now.Sub(f.LandOnAt).Seconds())))
+	g.LandOnTerm, g.LandOnFresh, g.LandOnWhy = stateFresh(f.LandOn, "land", "워커 착지", landIDRe, terms, min)
+	if g.LandOnFresh {
+		g.Landing, g.LandingAgeS = f.LandOnLane, g.LandOnAgeS
+	}
+}
 
 // stateSpecWait <병합기 기록 폴더> <살아 있는 터미널> <분>: 병합기가 맨 앞 추측 검증을 기다리는 중이면(specwait 첫 줄 「첫 마지막 횟수
 // [기계[/사슬]]」의 마지막 기다림 바퀴가 분 안 — 병합기는 기다리는 바퀴마다 고쳐 쓰고 기다림이 끝나면 지운다, hc-merger jround.go
@@ -190,29 +238,6 @@ func stateSpecWait(dir string, terms []hcjson.Terminal, min int, now time.Time) 
 	if mach == "-" {
 		return "", "", false, ""
 	}
-	args := []string{strconv.Itoa(min)}
-	for _, t := range terms {
-		m, id := LOCAL, specIDRe.FindStringSubmatch(t.Name)
-		if a, _, ok := strings.Cut(t.Address, "/"); ok {
-			m = a
-		}
-		if t.State != "live" || id == nil || m != mach || t.Cwd == "" {
-			continue
-		}
-		if term == "" {
-			term = t.Address
-		}
-		args = append(args, t.Address, t.Cwd, id[1])
-	}
-	if term == "" {
-		return
-	}
-	out, rc := onm(nil, mach, specFreshSh, args...)
-	if rc != 0 {
-		return mach, term, false, fmt.Sprintf("추측 검증 갱신 못 읽음(%s 종료 %d)", mach, rc)
-	}
-	if a := strings.TrimSpace(out); a != "" {
-		return mach, a, true, ""
-	}
+	term, fresh, why = stateFresh(mach, "spec", "추측 검증", specIDRe, terms, min)
 	return
 }
