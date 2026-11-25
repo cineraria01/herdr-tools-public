@@ -34,17 +34,8 @@ func nudgeCmd(args []string) {
 		noLane(name)
 	}
 	addr, m := r.F(qAddr), r.F(qMach)
-	if r.F(qState) != "up" || dash(addr) == "-" {
-		die("%s: 떠 있는 레인이 아니다(대기열 상태 %s) — 보낼 터미널이 없다", name, r.F(qState))
-	}
-	t, found, err := hcGet(addr)
+	t, found, err := laneTerm(r)
 	switch {
-	case err != nil:
-		die("%s: 터미널 %s 상태를 모른다(%v) — 보내지 않음", name, addr, err)
-	case !found || t.State == "finished":
-		die("%s: 터미널 %s 가 없다(끝남) — 보내지 않음. 다시 띄울지는 지휘가 정한다", name, addr)
-	case !t.HasName || t.Name != name:
-		die("%s: 주소 %s 의 터미널 이름이 %q 다(주소 재사용) — 보내지 않음", name, addr, t.Name)
 	case t.Status != "error" && t.Status != "done":
 		die("%s: 터미널 %s 상태가 %s 다 — error·done일 때만 보낸다(일하는 중·입력 기다림이면 그대로 둔다)", name, addr, dash(t.Status))
 	case t.Created <= 0:
@@ -79,6 +70,25 @@ func nudgeCmd(args []string) {
 	}
 	say("보냄 %s → %s: %s", name, addr, msg)
 	jot("nudge", name, why, "보냄", "-", state)
+}
+
+// laneTerm <대기열 줄>: 그 줄이 기록한 지금 run 터미널(주소 qAddr)의 hc get 결과. 같은 이름의 앞 run 터미널은 보지 않는다(hc ls로
+// 이름을 찾지 않는다). 떠 있지 않음·터미널 없음(끝남)·이름 다름(주소 재사용)·모름이면 까닭과 종료 1 — nudge·tell이 함께 쓴다
+func laneTerm(r Row) (hcjson.Terminal, bool, error) {
+	name, addr := r.F(qName), r.F(qAddr)
+	if r.F(qState) != "up" || dash(addr) == "-" {
+		die("%s: 떠 있는 레인이 아니다(대기열 상태 %s) — 보낼 터미널이 없다", name, r.F(qState))
+	}
+	t, found, err := hcGet(addr)
+	switch {
+	case err != nil:
+		die("%s: 터미널 %s 상태를 모른다(%v) — 보내지 않음", name, addr, err)
+	case !found || t.State == "finished":
+		die("%s: 터미널 %s 가 없다(끝남) — 보내지 않음. 다시 띄울지는 지휘가 정한다", name, addr)
+	case !t.HasName || t.Name != name:
+		die("%s: 주소 %s 의 터미널 이름이 %q 다(주소 재사용) — 보내지 않음", name, addr, t.Name)
+	}
+	return t, found, err
 }
 
 // nudgeLast <레인> <주소> <기계> <created_ms>: 그 실행(주소@시작)의 마지막 보고 상태(없으면 빈 값). ok=false면 사건을 못 읽음(모름)

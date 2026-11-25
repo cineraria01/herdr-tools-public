@@ -17,4 +17,5 @@ hc-fill retry <레인>            # 띄우기 거절(hc-lane 종료 11)로 멈�
 hc-fill edit <레인> [--after <레인>,…|-] [--after-any-project] [--priority <우선>] [--only <기계>,…|-] [--brief <지시문>] [--overlap-ok | --overlap-check] [--early | --no-early] [--pr-of <원래 레인>|-]   # 그 줄의 칸만 바꾼다(주차·줄 ID·주인 그대로). 겹침 검사·먼저 띄움은 아직 안 뜬 줄만(docs/hc-fill/edit.md)
 hc-fill machine --rename <옛> <새> [--dry-run] [--json] [--why <까닭>]   # 기계 이름을 설정·상태 파일·손잡이·병합기 켬 표식에서 한 번에(잠금 안, 실패면 전부 되돌림). 차례 dry-run → 실행 → merger restart → 설정 커밋(docs/hc-fill/machine-rename.md)
 hc-fill nudge <레인> [<글>] [--why <까닭>]   # 일시 오류로 턴이 끊겨 멈춘 레인 터미널(hc 상태 error·done, 그 실행의 완료·막힘 등 보고 없음)에 이어 가라는 글 한 줄. 한 레인에 손잡이 nudge_every분(기본 10) 안에 한 번, 안 보내면 까닭과 종료 1(docs/hc-fill/edit.md)
+hc-fill tell [--audit] <레인> <글>   # 레인에 글 보내기는 이것으로 — 대기열 줄이 기록한 지금 run 터미널(주소·이름이 맞고 살아 있는 것) 하나에만 hc send. 같은 이름의 앞 run 터미널은 보지 않는다. --audit이면 그 레인의 지금 감사 줄 터미널로. 떠 있지 않음·끝남·이름 다름·셸만 남음·모름은 보내지 않고 까닭과 종료 1
 ```
