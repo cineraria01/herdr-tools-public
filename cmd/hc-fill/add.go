@@ -209,8 +209,48 @@ func addCmd(args []string) {
 	}
 	say("더함 %s (%s%s)", name, prj, note)
 	dupWarn(name, prj, bf)
+	siblingNote(name, prj, coord, time.Now())
 	thenHint(after, prj)
 	exit(0)
+}
+
+// siblingNote <레인> <프로젝트> <넣는 지휘> <지금>: 같은 프로젝트에 다른 지휘가 손잡이 sibling_min분 안에 넣은 안 끝난 쓰기 줄(대기·떠 있음·감사 중 —
+// 마지막 사건이 착지·정리됨이면 끝남)마다 한 줄. 넣기는 막지 않는다 — 같은 알림을 지휘 둘이 각자 받아 같은 일을 따로 넣은 일 뒤(2026-11-25)
+func siblingNote(name, prj, coord string, now time.Time) {
+	lim := knobInt("sibling_min")
+	if lim <= 0 {
+		return
+	}
+	ended := map[string]bool{}
+	for _, x := range readRows(DATA + "/last.tsv") {
+		if s := x.F(lsState); s == "착지" || s == "정리됨" {
+			ended[x.F(lsName)+"\t"+x.F(lsRID)] = true
+		}
+	}
+	for _, r := range qRows() {
+		n, own, st := r.F(qName), dash(r.F(qOwner)), r.F(qState)
+		if n == name || r.F(qProj) != prj || own == "-" || own == coord || strings.HasPrefix(r.F(qAudit), "audit=") || st != "wait" && st != "up" {
+			continue
+		}
+		if ended[n+"\t"] || ended[n+"\t"+r.F(qRID)] {
+			continue
+		}
+		age, ok := stateAddedAge(r.F(qAdded), now)
+		if !ok || age > lim*60 {
+			continue
+		}
+		say("알림: 같은 프로젝트에 다른 지휘가 막 넣은 레인 — 같은 일이면 합쳐라: %s (지휘 %s, %d분 전) — %s", n, own, max(age, 0)/60, briefTitle(r.F(qBrief)))
+	}
+}
+
+// briefTitle: 지시문의 빈 줄 아닌 첫 줄(머리 # 뗌)
+func briefTitle(brief string) string {
+	for _, l := range readLines(brief) {
+		if t := strings.TrimSpace(strings.TrimLeft(l, "#")); t != "" {
+			return t
+		}
+	}
+	return "(제목 없음)"
 }
 
 // thenHint <선행 목록> <프로젝트>: 선행이 아직 대기 중인 같은 프로젝트 줄이면 --then을 알리는 한 줄(add의 마지막 단계)

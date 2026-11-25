@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+// ruleDocs: 모든 지시문이 규칙으로 적는 문서 — 본문 언급(M)은 겹침 근거로 세지 않는다(예약 R·실제 A는 그대로).
+// 「ht-merger-spec-reuse 언급 (CONTRACT.md)」 같은 잡음만 나고 진짜 겹침은 못 봤다(ht-add-sibling-notice, 2026-11-25)
+var ruleDocs = map[string]bool{"CLAUDE.md": true, "AGENTS.md": true, "CONTRACT.md": true}
+
 // own_store: 쓰기 소유 실행 기록 OREC를 own.tsv에(dry-run은 안 씀)
 func ownStore() {
 	if dry {

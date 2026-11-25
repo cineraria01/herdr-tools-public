@@ -62,6 +62,7 @@ var Defs = []Def{
 	{Name: "state_stage", Tool: "hc-fill", Default: "90", Min: 0, Max: 10080, Unit: "분", Desc: "레인이 같은 단계에 이만큼 머물면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_hot", Tool: "hc-fill", Default: "200", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 이 값 이상인 기계와 state_cool 이하인 기계가 함께 있으면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_cool", Tool: "hc-fill", Default: "50", Min: 0, Max: 10000, Unit: "%", Desc: "치우침의 한가한 쪽 코어당 부하"},
+	{Name: "sibling_min", Tool: "hc-fill", Default: "120", Min: 0, Max: 10080, Unit: "분", Desc: "hc-fill add가 같은 프로젝트에 다른 지휘가 이만큼 안에 넣은 안 끝난 레인을 보인다(0이면 끔)"},
 	{Name: "nudge_every", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "hc-fill nudge가 한 레인에 다시 보내기까지(0이면 막지 않음)"},
 	// 멈춘 레인(2026-11-25 ht-lane-hang-detect, docs/hc-fill/hang.md)
 	{Name: "hang_min", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "레인 터미널의 「생각 중」 진행 표시와 그 위 화면이 도구 실행 없이 이만큼 그대로면 멈춘 레인으로 알림(0이면 멈춘 레인 감지 끔)"},

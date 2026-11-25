@@ -382,7 +382,7 @@ func lkeys(p, brief string) []Row {
 			vs = []string{v}
 		}
 		for _, x := range vs {
-			if x == "" {
+			if x == "" || k == "M" && ruleDocs[filepath.Base(x)] {
 				continue
 			}
 			if !ovIgnored(igs, x) && !seen[x] {

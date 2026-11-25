@@ -33,6 +33,7 @@
 - 지금 표의 hc-fill 설정 키: `idle`·`hold`·`done_stall`·`wake_every`·`ack_max`(분), `early_wait`(시간). 뜻은 [설정](../hc-fill/config.md)과 같다.
   부하 보고 고르기([부하](../hc-fill/load-steer.md)): `load_band`·`load_busy`(%), `load_starve`·`skew_min`·`skew_every`(분).
   기계 닿지 않음([끊김](../hc-fill/unreach.md)): `unreach`(분).
+  다른 지휘가 막 넣은 레인 알림([주인 지휘](../hc-fill/owner.md)): `sibling_min`(분, 기본 120, 0 끔).
   멈춘 레인 다시 굴리기([nudge](../hc-fill/edit.md)): `nudge_every`(분, 한 레인에 다시 보내기까지, 0 막지 않음).
   멈춘 레인 감지([멈춘 레인](../hc-fill/hang.md)): `hang_min`(분, 기본 15, 0 끔)·`hang_esc`(0·1, 기본 1 — 「생각 중」 멈춤에 Escape와 이어 가라는 글).
   상태 한 장의 눈에 띄는 것([상태](state.md)): `state_stage`(분), `state_hot`·`state_cool`(%). 기본 출력이 끝난 레인을 남기는 시간: `state_done`(분).
