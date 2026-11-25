@@ -413,8 +413,40 @@ func mergerRestartWhy(p, jwhy string) int {
 
 func init() { register("merger", mergerCmd) }
 
-// merger restart <프로젝트> [--why <까닭>]
+// mergerStatusLines: 설정 merger 줄마다 한 줄 — run 바퀴가 적은 기록(maLines), 없으면 「기록 없음」. 줄이 없으면 그 뜻 한 줄
+// (hc-fill merger status · hc-merger status, 2026-11-26 ht-merger-status-all)
+func mergerStatusLines() []string {
+	rec := map[string]string{}
+	for _, l := range maLines() {
+		if f := strings.Fields(l); len(f) > 1 {
+			rec[f[1]] = l
+		}
+	}
+	var o []string
+	for _, f := range confRows("merger") {
+		if len(f) < 3 {
+			continue
+		}
+		if l, ok := rec[f[1]]; ok {
+			o = append(o, l)
+		} else {
+			o = append(o, fmt.Sprintf("병합기 %s %s: 기록 없음(hc-fill run 바퀴가 아직 안 봄)", f[1], f[2]))
+		}
+	}
+	if len(o) == 0 {
+		return []string{"병합기 없음 — 설정에 merger 줄이 없다"}
+	}
+	return o
+}
+
+// merger status | merger restart <프로젝트> [--why <까닭>]
 func mergerCmd(args []string) {
+	if len(args) == 1 && args[0] == "status" {
+		for _, l := range mergerStatusLines() {
+			fmt.Println(l)
+		}
+		exit(0)
+	}
 	args, why := takeWhy(args)
 	if len(args) != 2 || args[0] != "restart" || args[1] == "" {
 		usage()

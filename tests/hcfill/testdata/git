@@ -5,8 +5,8 @@ if [ -n "${HC_FAKE_GIT_HANG-}" ] && [ "${2-}" = "$HC_FAKE_GIT_HANG" ] && [ "${3-
   sleep 30 & echo $! >>"$T_LOG/hang.pid"; sleep 30; exit 0
 fi
 if [ -n "${HC_REAL_REPO-}" ] && [ "${1-}" = -C ] && [ "${2-}" = "$HC_REAL_REPO" ]; then exec "$HC_REAL_GIT" "$@"; fi
-# HEAD: 레인 작업 트리의 「rev-parse … HEAD」는 $HC_FAKE_HEAD(없으면 아래 그대로 — 빈 출력)
-case " $* " in *" rev-parse "*" HEAD ") [ -z "${HC_FAKE_HEAD-}" ] || { echo "$HC_FAKE_HEAD"; exit 0; } ;; esac
+# HEAD: 레인 작업 트리의 「rev-parse … HEAD」는 $HC_FAKE_HEAD(없으면 아래 그대로 — 빈 출력). HC_FAKE_HEAD_CWD가 있으면 -C 그 폴더일 때만, 다른 폴더는 종료 1
+case " $* " in *" rev-parse "*" HEAD ") [ -z "${HC_FAKE_HEAD-}" ] || { [ -z "${HC_FAKE_HEAD_CWD-}" ] || [ "${2-}" = "$HC_FAKE_HEAD_CWD" ] || exit 1; echo "$HC_FAKE_HEAD"; exit 0; } ;; esac
 for a in "$@"; do case $a in
   fetch) sleep "${HC_FAKE_FETCH_SLOW:-0}"; [ -z "${HC_FAKE_FETCH_FAIL-}" ] || exit 1   # FETCH_SLOW: 초만큼 늦게 · FETCH_HOOK: 첫 fetch 때 한 번 돌릴 셸 글(바퀴 도중 대기열 바꾸기)
          [ -z "${HC_FAKE_FETCH_HOOK-}" ] || [ -e "$T_LOG/fetch-hook.done" ] || { : >"$T_LOG/fetch-hook.done"; bash -c "$HC_FAKE_FETCH_HOOK" >/dev/null 2>&1; }

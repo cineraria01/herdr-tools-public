@@ -300,8 +300,22 @@ func aDeliver() {
 		}
 	}
 	if awt >= int64(ACKMAX*60) && !inlist("noack", dash(auAfl)) {
-		if h := auLaneHead(); h != "" && h != auSha { // 통과·지적 뒤 새 커밋을 만들어 검증 중 — 레인은 hc-lane verdict 「지금 커밋으로 완료」대로 기다린다
-			fmt.Println(auLn + " 새 커밋 " + head(h, 8) + " 검증 중 — 다시 감사 기다림 (판정 " + auAid + " 는 " + head(auSha, 8) + " 것)")
+		h := ""
+		if alive(auPa) == "working" { // 쉬는 레인은 새 커밋이 있어도 보고 없이 멈춘 것 — 지금처럼 막힘(감사 atp2nmt-bisrf4 낮음 1)
+			h = auLaneHead()
+		}
+		if h != "" && h != auSha { // 통과·지적 뒤 새 커밋을 만들어 검증 중 — 레인은 hc-lane verdict 「지금 커밋으로 완료」대로 기다린다
+			if nf := "newhead:" + head(h, 8); !inlist(nf, dash(auAfl)) { // 상태 줄은 sha마다 한 번(낮음 2)
+				fmt.Println(auLn + " 새 커밋 " + head(h, 8) + " 검증 중 — 다시 감사 기다림 (판정 " + auAid + " 는 " + head(auSha, 8) + " 것)")
+				var fl []string
+				for _, x := range words(auAfl) {
+					if x != "-" && !strings.HasPrefix(x, "newhead:") {
+						fl = append(fl, x)
+					}
+				}
+				auAfl = strings.Join(append(fl, nf), ",")
+				aupd(auAid, cv{atFlags, auAfl})
+			}
 		} else if aesc(auLn, qown(auLn), fmt.Sprintf("%s 감사 %s번째 판정(%s)을 %d분 넘게 수거하지 않는다 — 지휘 판단 (%s: hc-lane verdict %s)", auLn, auRnd, auAv, ACKMAX, auPa, auAid), "hf:"+auAid+":noack") == 0 {
 			f := "noack"
 			if auAfl != "" {
@@ -313,21 +327,6 @@ func aDeliver() {
 	}
 	aCloseDelivered() // 판정 파일을 둔 뒤 — 끝난 감사 터미널이 레인 작업 트리를 쥐지 않게(auditclose.go)
 }
-
-// auLaneHead: 레인 작업 트리(<repo>.wt/<레인>)의 HEAD 40자 — 못 읽거나 꼴이 틀리면 ""(모름 → 지금처럼 막힘)
-func auLaneHead() string {
-	repo := repoOf(aproj(auAid), auAm)
-	if repo == "" {
-		return ""
-	}
-	o, rc := onm(nil, auAm, `git -C "$d" rev-parse --verify -q HEAD`, strings.TrimSuffix(repo, "/")+".wt/"+auLn)
-	if h := sub(o); rc == 0 && sha40Re.MatchString(h) {
-		return h
-	}
-	return ""
-}
-
-var sha40Re = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // a_cleanup: 끝난 차수의 감사 줄을 대기열에서 뺀다 — 안 뜬 줄은 바로, 뜬 줄은 그 터미널이 쉬거나 없으면(정리 주소를 지휘에 한 번)
 func aCleanupNow() { auAst = "taken"; aCleanup() }
@@ -480,16 +479,7 @@ func aOpen(n, p, m, la string) {
 		return
 	}
 	// 40자 sha: 부모 기계·부모 작업 트리에서. 「없음」은 rev-parse 종료 1에 오류 출력이 없을 때만, 그 밖은 모름
-	cw := ""
-	for _, t := range TERMS {
-		if t.Addr == la {
-			cw = t.Cwd
-			break
-		}
-	}
-	if cw == "" || cw == "-" {
-		cw = strings.TrimSuffix(repoOf(p, m), "/") + ".wt/" + n
-	}
+	cw := laneCwd(la, p, m, n)
 	var so string
 	var rc int
 	if m == LOCAL { // 이 기계: git을 바로(sh 안의 git은 상한을 못 받는다 — Fable F3·아스트라 E01). 같은 셋 가름

@@ -108,25 +108,46 @@ func secE2(k *K) {
 	k.run("run")
 	k.check("ack_max(연결된 동안 센 수거 기다림) 넘으면 지휘에 한 번(hf:<ID>:noack), 기다림은 계속(deliver)",
 		k.nrep("hf:"+D7+":noack") == 1 && k.acol(D7, 8) == "deliver", read(rl))
-	// ht-verdict-stale-alert: 레인이 통과 뒤 새 커밋을 만들어 검증 중이면(작업 트리 HEAD ≠ 판정 sha) 기한이 지나도 막힘 대신 상태 줄
-	k.afresh()
-	k.confAppend("ack_max 0")
-	k.add("d7b", "--only", "box-1")
-	k.run("run")
-	k.lj("box-1/d7b:claude-code:d7b:done:/")
-	k.ev("box-1/d7b", "d7b", "완료", "3838eee", "끝")
-	k.run("run")
-	D7b := k.aidof("d7b")
-	k.verd("box-1/audit-"+D7b, D7b, "0", "0", "0")
-	k.eAudDone("d7b", D7b)
-	nh := s40("3939fff")
-	k.runE([]string{"HC_FAKE_HEAD=" + nh}, "run")
-	k.runE([]string{"HC_FAKE_HEAD=" + nh}, "run")
-	k.check("옛 판정 + 레인 새 커밋(HEAD 다름) → noack 없음, 상태 줄 「새 커밋 … 검증 중 — 다시 감사 기다림」",
-		k.nrep("hf:"+D7b+":noack") == 0 && k.acol(D7b, 8) == "deliver" && strings.Contains(k.out, "새 커밋 3939fff0 검증 중 — 다시 감사 기다림"), k.out, read(rl))
-	k.runE([]string{"HC_FAKE_HEAD=" + s40("3838eee")}, "run")
+	// ht-verdict-stale-alert(+lows-1126-ht 감사 atp2nmt-bisrf4 낮음 1~3): 레인이 통과 뒤 새 커밋을 만들어 검증 중이면
+	// (레인 터미널 working, 그 터미널 cwd의 HEAD ≠ 판정 sha) 기한이 지나도 막힘 대신 상태 줄 — 같은 sha에 한 번
+	lw := "/elsewhere/lane" // 짐작 경로(<repo>.wt/<레인>)가 아닌 레인 터미널 cwd — 가짜 git은 HEAD를 이 폴더에서만 답한다
+	dlv := func(n, sha string) (string, func(st string)) {
+		k.afresh()
+		k.confAppend("ack_max 0")
+		k.add(n, "--only", "box-1")
+		k.run("run")
+		k.lj("box-1/" + n + ":claude-code:" + n + ":done:/")
+		k.ev("box-1/"+n, n, "완료", sha, "끝")
+		k.run("run")
+		id := k.aidof(n)
+		k.verd("box-1/audit-"+id, id, "0", "0", "0")
+		return id, func(st string) {
+			k.lj("box-1/"+n+":claude-code:"+n+":"+st+":"+lw, "box-1/audit-"+id+":claude-code:audit-"+id+":done:/")
+		}
+	}
+	hd := func(h string) []string { return []string{"HC_FAKE_HEAD=" + s40(h), "HC_FAKE_HEAD_CWD=" + lw} }
+	nl := "검증 중 — 다시 감사 기다림"
+	D7b, st7b := dlv("d7b", "3838eee")
+	st7b("working")
+	all := ""
+	for i := 0; i < 3; i++ {
+		k.runE(hd("3939fff"), "run")
+		all += k.out
+	}
+	k.check("옛 판정 + 레인 새 커밋(working, 터미널 cwd의 HEAD 다름) → noack 없음, 상태 줄 「새 커밋 … 검증 중」은 같은 sha에 한 번",
+		k.nrep("hf:"+D7b+":noack") == 0 && k.acol(D7b, 8) == "deliver" && strings.Count(all, "새 커밋 3939fff0 "+nl) == 1 && strings.Count(all, nl) == 1, all, read(rl))
+	k.runE(hd("4040aaa"), "run")
+	k.check("HEAD가 또 바뀌면 상태 줄을 다시 한 번",
+		k.nrep("hf:"+D7b+":noack") == 0 && strings.Contains(k.out, "새 커밋 4040aaa0 "+nl), k.out, read(rl))
+	k.runE(hd("3838eee"), "run")
 	k.check("같은 커밋(HEAD = 판정 sha) → 지금처럼 noack 한 번",
 		k.nrep("hf:"+D7b+":noack") == 1, k.out, read(rl))
+	D7c, st7c := dlv("d7c", "3838fff")
+	st7c("idle")
+	k.runE(hd("3939aaa"), "run")
+	k.runE(hd("3939aaa"), "run")
+	k.check("새 커밋이 있어도 레인 터미널이 쉬면(새 커밋 뒤 보고 없이 멈춤) 지금처럼 noack 한 번, 상태 줄 없음",
+		k.nrep("hf:"+D7c+":noack") == 1 && !strings.Contains(k.out, nl), k.out, read(rl))
 	D8 := k.eOpen("d8", "3939ddd", "끝")
 	k.verd("box-1/audit-"+D8, D8, "0", "0", "0")
 	k.lj("box-1/d8:claude-code:other:done:/", "box-1/audit-"+D8+":claude-code:audit-"+D8+":done:/")

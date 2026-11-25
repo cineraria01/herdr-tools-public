@@ -95,6 +95,10 @@ func TestOpsGateUnknownArg(t *testing.T) {
 	if out, _, rc := k.run(t, "knob", "ls", "--zzz"); rc != 0 || !strings.Contains(out, "판단만") {
 		t.Fatalf("knob ls --zzz: %d %q", rc, out)
 	}
+	// merger는 status만 읽기 — restart는 그대로 조치(ht-merger-status-all)
+	if out, _, rc := k.run(t, "merger", "restart", "app"); rc != 0 || !strings.Contains(out, "판단만") {
+		t.Fatalf("merger restart: %d %q", rc, out)
+	}
 }
 
 // ⑤ 대조: 읽기 꼴은 판단만에서도 관문을 지난다(「하려던 것」이 없다)
@@ -104,7 +108,7 @@ func TestOpsGateReadForms(t *testing.T) {
 		{"machine"}, {"machine", "--json"}, {"machines"}, {"knob", "ls"}, {"knob", "ls", "--json"}, {"ls"}, {"ls", "--json"},
 		{"status"}, {"status", "--mine"}, {"status", "--owner", "t1"}, {"state", "--json"}, {"state", "--all", "--json"}, {"advise"}, {"advise", "--json"},
 		{"journal"}, {"journal", "--by", "t9", "--since", "1h", "--json"}, {"agent", "status"}, {"agent", "status", "--json"},
-		{"machine", "box", "--seats", "2", "--why", "미리", "--dry-run"},
+		{"machine", "box", "--seats", "2", "--why", "미리", "--dry-run"}, {"merger", "status"},
 	} {
 		if out, _, _ := k.run(t, a...); strings.Contains(out, "판단만 — 하지 않고") {
 			t.Errorf("읽기 꼴이 막힘: %q → %q", a, out)

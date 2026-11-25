@@ -8,6 +8,7 @@ hc-fill ls                      # 대기 · 떠 있음(hc 상태) · 끝남 · �
 hc-fill status [--owner <지휘 주소> | --mine]   # 레인마다 한 줄 — 기계 · 넣은 뒤 · 단계(대기·대기(묶인 기계 까닭 — [묶인 기계](pinned.md))·주차·작업 중·완료·감사 n번째·감사 지적·제출됨(병합기 줄 맨 앞 / n번째)·착지 sha·막힘: 까닭·모름(까닭)) · 예상((줄 차례 ÷ 한 번에 넣은 최대 개수) × 최근 착지 6번 간격의 중앙값 — 2분 안의 표식은 묶음 착지 한 번, 근거를 함께, 모르면 비움). 읽기만, 원격은 프로젝트마다 ls-remote 한 번. 줄 차례는 제출 시각 순(병합기의 우선은 안 봄). 표 끝에 바퀴 계측 한 줄(최근 바퀴 걸린 시간·가장 긴 단계·바깥 명령 수, 최근 바퀴들 중앙값 — 「한 바퀴」 문서)
 hc-fill knob set pr <프로젝트>[,…] --why <까닭>   # PR 거울 켜기 — 레인마다 PR 한 장(완료 때 열고 감사·검증·병합 결과를 쓰고 착지하면 Merged, docs/hc-fill/pr.md). status·state에 「PR #n」
 hc-fill note <레인> <글|파일>   # 지휘 지시를 레인 기계 verdicts/<레인>/coord-notes.md에 덧붙이고 레인에도 hc send — 다음 감사가 {coord_notes}로 본다(docs/hc-fill/audit.md). 떠 있지 않은 레인은 종료 1
+hc-fill merger status             # 설정 merger 줄마다 병합기 한 줄(run 바퀴 기록 — 없으면 「기록 없음」, 줄이 없으면 「병합기 없음」), 종료 0. hc-merger status가 부른다
 hc-fill merger restart <프로젝트>   # 병합기를 지금 띄우는 길 그대로 한 번 다시 띄운다(docs/hc-lane/merger.md 「병합기 살아 있음」). ls·status 끝에 프로젝트마다 병합기 한 줄. 살아 있으면 안 띄움(종료 1)
 hc-fill run --dry-run           # 무엇을 어디에 띄울지만. --dry-run 없이 한 바퀴 띄운다
 hc-fill watch --every 60        # 계속(한 번에 하나만, 이미 돌면 종료 75). 바퀴 시작 간격이 60초 — 쉼은 60초 − 바퀴에 든 시간, 하한 설정 rest_min

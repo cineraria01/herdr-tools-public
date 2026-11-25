@@ -1,3 +1,6 @@
+  merger status
+         설정 merger 줄마다 병합기 한 줄(run 바퀴가 적은 기록 — 원격을 더 읽지 않음, 기록이 없으면 「기록 없음」). 줄이 없으면 그 뜻 한 줄. 종료 0.
+         hc-merger status(= hc-lane merger status)가 이것을 부른다
   merger restart <프로젝트>
          설정 「merger <프로젝트> <기계> [<클론>]」의 병합기를 지금 띄우는 길 그대로 한 번 다시 띄운다(hc run --bg [--on <기계>]
          --name merger-<프로젝트> --cwd <클론> --no-parent -- zsh -lc 'export HC_LANE_MACHINE=<기계>; exec hc-lane merger --repo <클론>').

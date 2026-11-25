@@ -65,6 +65,25 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--why" { // 일지의 검증 길 요약(why.go)
 		os.Exit(whyMain(os.Args[2:]))
 	}
+	if len(os.Args) == 2 && os.Args[1] == "status" { // --repo 없이 모든 병합기 한 줄씩(hc-fill merger status — 설정·기록은 hc-fill이 읽는다)
+		p, err := "", error(nil) // 이 바이너리 곁(배포가 함께 맞춘 판) 먼저, 없으면 PATH — hc-lane이 hc-merger를 찾는 것과 같다
+		if self, e := os.Executable(); e == nil {
+			if r, e := filepath.EvalSymlinks(self); e == nil {
+				self = r
+			}
+			q := filepath.Join(filepath.Dir(self), "hc-fill")
+			if st, e := os.Stat(q); e == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+				p = q
+			}
+		}
+		if p == "" {
+			if p, err = exec.LookPath("hc-fill"); err != nil {
+				dieArg("merger status: hc-fill을 곁에도 PATH에도 찾지 못했다 — 한 클론의 병합기는 hc-lane merger --repo <클론>")
+			}
+		}
+		err = syscall.Exec(p, []string{p, "merger", "status"}, os.Environ())
+		dieArg("merger status: %s 를 띄우지 못했다: %v", p, err)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--round" {
 		roundMain(os.Args[2:])
 		return

@@ -82,6 +82,7 @@ var oaReads = map[string]oaRead{
 	"agent":    {sub: "status", flags: []string{"--json"}},
 	"machine":  {flags: []string{"--json"}},
 	"machines": {flags: []string{"--json"}},
+	"merger":   {sub: "status"}, // hc-merger status가 부른다 — restart는 조치
 }
 
 // oaReadOnly: 아무것도 바꾸지 않는 부름 — 읽는 꼴(oaReads)과 미리 보기(아무것도 안 쓴다)
