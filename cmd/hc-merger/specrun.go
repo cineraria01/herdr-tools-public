@@ -54,7 +54,16 @@ type specCtx struct {
 
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
 func (m *M) spec() (specDecision, string) {
-	m.vw, m.wre = vwhy{why: "모름"}, ""
+	d, t := m.specDecide()
+	m.sparts = ""
+	if d == specLand && m.sfid != "" { // 병합기 기계가 직접 검증 — 맨 앞 추측의 통과 조각을 넘긴다(쓸지는 검증 스크립트가)
+		m.sparts = m.directParts(m.sfid)
+	}
+	return d, t
+}
+
+func (m *M) specDecide() (specDecision, string) {
+	m.vw, m.wre, m.sfid = vwhy{why: "모름"}, "", ""
 	c, ok := m.specLoad()
 	if !ok {
 		if m.vw.why == "모름" {
@@ -115,6 +124,9 @@ func (m *M) spec() (specDecision, string) {
 	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go). 맨 앞 혼자 추측은 길 밖이어도 지킨다 — 묶음이 검증 기계에서
 	// 실패해 줄이는 바퀴(specShrink)는 혼자 추측이 끝난 뒤라, 치우면 범인 반송 근거를 잃고 다시 돌린다
 	m.specClean(c, append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...))
+	if st[0].row != nil {
+		m.sfid = st[0].row.id
+	}
 	d, over, stall := m.frontOver(c, st, specFront(st), busy, now, disp) // 맨 앞 기다림 상한(specfront.go)
 	m.vw.why = frontWhy(st, c.rows, over, disp)
 	if over && stall != "" {

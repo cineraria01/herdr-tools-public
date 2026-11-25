@@ -70,3 +70,22 @@ func TestPartsResume(t *testing.T) {
 		t.Fatalf("③ 트리가 바뀌면 이어 쓰지 않는다: 종료 %d 돈 %q\n%s", rc, ran, out)
 	}
 }
+
+// 바깥 검증의 조각 파일은 자식(go test·린트)에 물리지 않는다 — 픽스처로 verify()를 부르는 시험이 바깥 일꾼 파일을 픽스처 트리 줄로 덮던 꼴(감사 atp26g3 낮음 1)
+func TestStartDropsParts(t *testing.T) {
+	t.Setenv("HERDR_VERIFY_PARTS", "/outer.parts")
+	for _, env := range [][]string{nil, {"X=1"}} {
+		f, err := os.CreateTemp(t.TempDir(), "o")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := start(t.TempDir(), []string{"sh", "-c", `printf %s "${HERDR_VERIFY_PARTS-unset}"`}, env, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c.Wait()
+		if b, _ := os.ReadFile(f.Name()); string(b) != "unset" {
+			t.Fatalf("env %v: 자식이 HERDR_VERIFY_PARTS=%q 를 물려받음", env, b)
+		}
+	}
+}

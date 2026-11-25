@@ -215,7 +215,7 @@ func addCmd(args []string) {
 }
 
 // siblingNote <레인> <프로젝트> <넣는 지휘> <지금>: 같은 프로젝트에 다른 지휘가 손잡이 sibling_min분 안에 넣은 안 끝난 쓰기 줄(대기·떠 있음·감사 중 —
-// 마지막 사건이 착지·정리됨이면 끝남)마다 한 줄. 넣기는 막지 않는다 — 같은 알림을 지휘 둘이 각자 받아 같은 일을 따로 넣은 일 뒤(2026-11-25)
+// 마지막 사건이 착지·정리됨이면 끝남 — 제출은 착지 전이라 보인다, dupDone과 다름)마다 한 줄. 넣기는 막지 않는다 — 같은 알림을 지휘 둘이 각자 받아 같은 일을 따로 넣은 일 뒤(2026-11-25)
 func siblingNote(name, prj, coord string, now time.Time) {
 	lim := knobInt("sibling_min")
 	if lim <= 0 {

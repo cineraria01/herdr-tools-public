@@ -51,13 +51,21 @@ func TestVerifiedEnv(t *testing.T) {
 	tree := lvGit(t, w, "rev-parse", "HEAD^{tree}")
 	t.Setenv("HERDR_VERIFIED_TREE", "stale")
 	t.Setenv("HERDR_SPEC_TREE", tree)
+	t.Setenv("HERDR_VERIFY_PARTS_FROM", "/x/direct.parts")
 	specTreeTake(false)
 	verifiedEnv(cand)
 	if _, ok := os.LookupEnv("HERDR_VERIFIED_TREE"); ok || specTree != "" {
 		t.Fatal("병합기 밖: 물려받은 값을 지우고 두지 않는다")
 	}
+	if _, ok := os.LookupEnv("HERDR_VERIFY_PARTS_FROM"); ok {
+		t.Fatal("병합기 밖: 직접 검증 조각 파일도 지운다")
+	}
 	t.Setenv("HERDR_SPEC_TREE", tree)
+	t.Setenv("HERDR_VERIFY_PARTS_FROM", "/x/direct.parts")
 	specTreeTake(true)
+	if os.Getenv("HERDR_VERIFY_PARTS_FROM") != "/x/direct.parts" {
+		t.Fatal("병합기 안: 조각 파일은 검증·착지 스크립트에 물려준다")
+	}
 	verifiedEnv(cand)
 	if _, ok := os.LookupEnv("HERDR_VERIFIED_TREE"); ok {
 		t.Fatal("기록이 없으면 두지 않는다")

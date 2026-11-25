@@ -4,12 +4,32 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"herdr-tools/internal/journal"
 )
 
 // ht-send-target-live(2026-11-25): hc-fill이 직접 부르는 hc send(auSend — 감사 깨움·다시 맞춤·nudge·멈춤 끊기)도 받는 쪽에 에이전트가
 // 있을 때만. 셸만 남은 터미널·서비스 터미널은 보내지 않고(기존 「못 보냄」 길) 일지에 까닭을 남긴다. hc get 실패는 지금처럼 보낸다
+// 막힌 받는 쪽에 바퀴마다 다시 깨워도 send-skip 일지는 같은 주소에 한 시간에 한 줄(감사 atp22qf 낮음 1 — 하루 1440줄까지 쌓였다)
+func TestAuSendSkipJotOnce(t *testing.T) {
+	setData(t)
+	sc := "#!/bin/sh\ncase $1 in\nget) printf '{\"address\":\"m/w\",\"argv\":[\"zsh\",\"-l\"],\"created_ms\":1,\"cwd\":\"/r\",\"foreground\":{\"argv\":[\"zsh\",\"-l\"],\"pid\":5},\"name\":\"w\",\"pid\":5,\"state\":\"live\",\"status\":null}\\n';;\nesac\nexit 0\n"
+	if err := os.WriteFile(DATA+"/hc", []byte(sc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
+	t.Setenv(journal.Env, DATA+"/journal.tsv")
+	for range 3 {
+		if auSend("m/w", "hc-fill: 감사 판정이 왔다") {
+			t.Fatal("셸만 남음에 보냄")
+		}
+	}
+	if n, err := journal.Repeats("send-skip", "m/w", time.Now().Add(-time.Hour)); err != nil || n != 1 {
+		t.Fatalf("send-skip 일지 %d줄(%v) — 한 줄이어야", n, err)
+	}
+}
+
 func TestAuSendTarget(t *testing.T) {
 	for _, c := range []struct {
 		name, get string // get: 가짜 hc get 본문(셸)

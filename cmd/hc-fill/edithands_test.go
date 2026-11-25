@@ -178,7 +178,7 @@ func nudgeKit(t *testing.T) (fillKit, string) {
 	ehPut(t, bin+"/hc", `#!/bin/sh
 F=`+f+`
 case "$1" in
-get) rc=$(cat "$F/get.rc" 2>/dev/null || echo 0); if [ "$rc" = 3 ]; then cat "$F/get.json" >&2; else cat "$F/get.json"; fi; exit "$rc" ;;
+get) echo >> "$F/gets"; rc=$(cat "$F/get.rc" 2>/dev/null || echo 0); if [ "$rc" = 3 ]; then cat "$F/get.json" >&2; else cat "$F/get.json"; fi; exit "$rc" ;;
 send) printf '%s|%s\n' "$2" "$3" >> "$F/sent"; exit 0 ;;
 esac
 exit 1
@@ -200,6 +200,24 @@ func nudgeSent(f string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+}
+
+// 받는 쪽 판정은 이미 받은 hc get으로(한 번만), 막힌 받는 쪽(서비스 터미널)은 「결과 모름」이 아니라 「보내지 않음 — 받는 쪽 …」(감사 atp22qf 낮음 3)
+func TestNudgeOneGetAndBlocked(t *testing.T) {
+	k, f := nudgeKit(t)
+	if _, se, rc := k.run(t, "nudge", "lane-a"); rc != 0 {
+		t.Fatalf("nudge: %d %q", rc, se)
+	}
+	if b, _ := os.ReadFile(f + "/gets"); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("hc get %d번 — 한 번이어야", strings.Count(string(b), "\n"))
+	}
+	ehPut(t, f+"/get.json", `{"address":"t1","state":"live","status":"done","cwd":"/w","name":"lane-a","created_ms":1700000000000,"labels":{"hc-lane-watch":"1"}}`, 0o644)
+	if _, se, rc := k.run(t, "knob", "set", "nudge_every", "0", "--why", "시험"); rc != 0 {
+		t.Fatalf("knob set: %d %q", rc, se)
+	}
+	if _, se, rc := k.run(t, "nudge", "lane-a"); rc != 1 || !strings.Contains(se, "보내지 않음 — 받는 쪽 에이전트가 아닌 서비스 터미널") || len(nudgeSent(f)) != 1 {
+		t.Fatalf("서비스 터미널: 종료 1·까닭·안 보냄이어야 — %d %q %q", rc, se, nudgeSent(f))
+	}
 }
 
 // ④ error 터미널에 정해진 글 한 번 · 간격(nudge_every 기본 10분) 안 두 번째는 안 보냄(종료 1) · 손잡이 0이면 다시 보냄 · ⑦ 일지

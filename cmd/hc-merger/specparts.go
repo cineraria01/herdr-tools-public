@@ -12,6 +12,9 @@ package main
 //     받아 파일에 깔아 남은 조각만 돈다. 아이디가 다르면(기준·구성원이 바뀜 = 트리가 바뀜) 읽히지 않고, 줄의 트리가 이 추측 트리와
 //     다르면 깔지 않는다 — 트리가 바뀌면 이어 쓰지 않는다.
 //   - 참조는 그 추측이 길에서 벗어날 때 spec-fail·spec-run과 함께 치운다(specClean).
+//   - 병합기 기계가 직접 검증(착지)하면 맨 앞 추측의 그 줄을 <일지 폴더>/direct.parts에 적어 착지에 HERDR_VERIFY_PARTS_FROM=<파일>로
+//     넘긴다(ht-merger-direct-parts — 한 기계에서 시험 하나가 흔들린 추측 뒤 맥이 처음부터 다 돌아 main이 1시간 반 섰다). 착지 트리는
+//     추측 트리와 다를 수 있어(문서 접기 등) 트리가 달라도 넘기고, 쓸지는 검증 스크립트가 정한다. 조각이 없으면 빈 값.
 
 import (
 	"fmt"
@@ -36,18 +39,11 @@ type partPub struct {
 func specPartsSeed(id, tree, file string, lf *os.File) *partPub {
 	p := &partPub{id: id, tree: tree, file: file, lf: lf}
 	os.Remove(file)
-	ref := specParts + id
-	if fetchr(true, "-q", "origin", "+"+ref+":"+ref) != 0 {
+	line, sha, ok := specPartsGet(id)
+	if !ok {
 		return p // 없음(또는 원격 실패) — 처음부터 돈다
 	}
-	defer runQ("update-ref", "-d", ref)
-	sha, rc1 := outQ("rev-parse", "-q", "--verify", ref)
-	body, rc2 := outQ("log", "-1", "--format=%b", ref)
-	if rc1 != 0 || rc2 != 0 {
-		return p
-	}
 	p.sha = sha // 이 값 위로만 고쳐 쓴다(다른 일꾼이 그새 올렸으면 덮지 않는다)
-	line := partLine(body)
 	if f := strings.Fields(line); len(f) < 2 || f[0] != tree {
 		fmt.Fprintf(lf, "hc-lane merger: 앞 실행의 통과 조각은 다른 트리 것이다 — 이어 쓰지 않는다\n")
 		return p
@@ -58,6 +54,39 @@ func specPartsSeed(id, tree, file string, lf *os.File) *partPub {
 	}
 	p.line = line
 	fmt.Fprintf(lf, "hc-lane merger: 앞 실행이 통과한 조각을 이어 쓴다 — %s\n", strings.Join(strings.Fields(line)[1:], " "))
+	return p
+}
+
+// specPartsGet: 원격 spec-part/<아이디>의 줄과 커밋. 없거나 못 받거나 못 읽으면 ok=false(로컬 참조는 남기지 않는다)
+func specPartsGet(id string) (line, sha string, ok bool) {
+	ref := specParts + id
+	if fetchr(true, "-q", "origin", "+"+ref+":"+ref) != 0 {
+		return "", "", false
+	}
+	defer runQ("update-ref", "-d", ref)
+	sha, rc1 := outQ("rev-parse", "-q", "--verify", ref)
+	body, rc2 := outQ("log", "-1", "--format=%b", ref)
+	if rc1 != 0 || rc2 != 0 {
+		return "", "", false
+	}
+	return partLine(body), sha, true
+}
+
+// directParts: 병합기 기계가 직접 검증(착지)할 때 맨 앞 추측 id의 통과 조각 줄을 <일지 폴더>/direct.parts에 적고 그 경로
+// (착지에 HERDR_VERIFY_PARTS_FROM으로). 조각이 없으면 "". 착지 트리가 추측 트리와 달라도 넘긴다 — 쓸지는 검증 스크립트가 정한다
+func (m *M) directParts(id string) string {
+	p := m.mj + "/direct.parts"
+	os.Remove(p)
+	line, _, ok := specPartsGet(id)
+	if f := strings.Fields(line); !ok || len(f) < 2 {
+		return ""
+	}
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o666); err != nil {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 통과 조각 파일을 못 썼다(직접 검증은 처음부터): %v\n", err)
+		return ""
+	}
+	fmt.Printf("hc-lane merger: 맨 앞 추측이 통과한 조각을 직접 검증에 넘긴다 — %s (트리 %s, 쓸지는 검증 스크립트가)\n",
+		strings.Join(strings.Fields(line)[1:], " "), first8(strings.Fields(line)[0]))
 	return p
 }
 

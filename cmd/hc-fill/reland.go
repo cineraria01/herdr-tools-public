@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 var (
@@ -393,6 +395,12 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 				}
 				msg += " — 이 저장소의 문서 규칙: " + strings.Join(ls, " / ")
 			}
+			// 받는 쪽이 셸만 남음·서비스 터미널이면(확인된 안 보냄) 기다릴 것 없이 아래 다시 맞춤으로 — 「보냄」을 적지 않는다
+			t, found, gerr := hcGet(a)
+			if b := hcjson.SendBlocked(t, found, gerr); b != "" {
+				say("다시 맞춤 %s: 원래 레인(%s) 받는 쪽 %s — 보내지 않고 다시 맞춤으로", lane, a, b)
+				break
+			}
 			// 보내기 전에 시도를 반송 ID(n)로 「보냄」에 적는다 — hc send가 받은 뒤 응답을 잃으면(255) 받았는지 모르는데 같은 바퀴에
 			// 다시 맞춤까지 넣어 두 레인이 같은 일을 했다(재감사2 fill/R-215). 적은 뒤에는 다음 바퀴들이 relandPend로 원래 레인의
 			// 다시 냄을 대조하고 reland_wait분이 지나야 다시 맞춤(보내지는 않음). 적지 못하면 보내지도 넣지도 않고 다음 바퀴에
@@ -400,7 +408,7 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 				say("다시 맞춤 보류 %s: 보냄 기록을 못 씀(%v) — 다음 바퀴에", lane, err)
 				return
 			}
-			if !auSend(a, msg) {
+			if !auSendTo(a, msg, t, found, gerr) {
 				say("다시 맞춤 %s: 원래 레인(%s)에 hc send 결과 모름(실패·응답 잃음) — 받았을 수 있어 %d분 동안 그 레인의 다시 냄을 본 뒤 다시 맞춤", lane, a, relandWait())
 				return
 			}

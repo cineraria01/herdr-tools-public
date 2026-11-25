@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 func init() { register("nudge", nudgeCmd) }
@@ -64,7 +66,11 @@ func nudgeCmd(args []string) {
 		die("%s: %d분 전에 이미 보냈다(손잡이 nudge_every %d분) — 그 뒤에도 멈춰 있으면 지휘가 들여다본다", name, (now-at)/60, every)
 	}
 	state := "상태 " + t.Status + " · 주소 " + addr
-	if !auSend(addr, msg) {
+	if b := hcjson.SendBlocked(t, found, err); b != "" {
+		jot("nudge", name, why, "안 보냄", "-", state+" · "+b)
+		die("%s: 보내지 않음 — 받는 쪽 %s", name, b)
+	}
+	if !auSendTo(addr, msg, t, found, err) {
 		jot("nudge", name, why, "실패", "-", state)
 		die("%s: hc send %s 실패 — 보냈는지 모른다", name, addr)
 	}

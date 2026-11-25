@@ -16,6 +16,7 @@ import (
 
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/journal"
 	"herdr-tools/internal/tri"
 )
 
@@ -468,10 +469,13 @@ func auSend(addr, msg string) bool {
 	return auSendTo(addr, msg, t, found, err)
 }
 
-// auSendTo: auSend와 같되 이미 받은 hc get 결과로 받는 쪽을 가른다. 조회 실패·판정 모름은 지금처럼 보낸다(hcjson.SendBlocked)
+// auSendTo: auSend와 같되 이미 받은 hc get 결과로 받는 쪽을 가른다. 조회 실패·판정 모름은 지금처럼 보낸다(hcjson.SendBlocked).
+// 막혔다는 일지는 같은 주소에 한 시간에 한 줄 — 감사 깨움은 막혀도 바퀴(1분)마다 다시 부른다
 func auSendTo(addr, msg string, t hcjson.Terminal, found bool, err error) bool {
 	if why := hcjson.SendBlocked(t, found, err); why != "" {
-		jotBy("hc-fill 스스로", "send-skip", addr, "받는 쪽 "+why, "보내지 않음", "-", "글 "+events.Flat(msg))
+		if n, jerr := journal.Repeats("send-skip", addr, time.Now().Add(-time.Hour)); jerr != nil || n == 0 {
+			jotBy("hc-fill 스스로", "send-skip", addr, "받는 쪽 "+why, "보내지 않음", "-", "글 "+events.Flat(msg))
+		}
 		fmt.Fprintf(os.Stderr, "hc-fill: %s 에 보내지 않음 — 받는 쪽 %s\n", addr, why)
 		return false
 	}

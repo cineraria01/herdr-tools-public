@@ -74,10 +74,13 @@ func TestOverrunStalledVerifies(t *testing.T) {
 		age  time.Duration // 0보다 작으면 터미널 없음
 		env  string
 		want string
+		bad  string // get: hc get 응답이 깨짐 · exec: v1에 hc exec가 안 닿음(진행 중인 로그여도 못 읽으면 멈춘 쪽으로, 감사 atp28sz 낮음 1)
 	}{
-		{"갱신 없음", 20 * time.Minute, "", "직접 검증(맨 앞 기다림 상한·갱신 없음)"},
-		{"터미널 없음", -1, "", "직접 검증(맨 앞 기다림 상한·터미널 없음)"},
-		{"손잡이 0", 0, "0", "직접 검증(맨 앞 기다림 상한)"},
+		{"갱신 없음", 20 * time.Minute, "", "직접 검증(맨 앞 기다림 상한·갱신 없음)", ""},
+		{"터미널 없음", -1, "", "직접 검증(맨 앞 기다림 상한·터미널 없음)", ""},
+		{"손잡이 0", 0, "0", "직접 검증(맨 앞 기다림 상한)", ""},
+		{"터미널 못 읽음", 0, "", "직접 검증(맨 앞 기다림 상한·터미널 못 읽음)", "get"},
+		{"갱신 못 읽음", 0, "", "직접 검증(맨 앞 기다림 상한·갱신 못 읽음)", "exec"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("HC_LANE_SPEC_FRESH", c.env)
@@ -85,6 +88,12 @@ func TestOverrunStalledVerifies(t *testing.T) {
 			s.idle("v2", verifyBusy)
 			if c.age >= 0 {
 				s.specTerm("v1", d[1], c.age)
+			}
+			switch c.bad {
+			case "get":
+				os.WriteFile(s.dir+"/idle/get-spec-"+d[1][:8], []byte("garbage\n"), 0o666)
+			case "exec":
+				s.idle("v1", "unreach")
 			}
 			s.round(1)
 			if got := strings.Join(s.lines(s.landlog), " "); got != "verify|p" || len(s.dispatched()) != 1 {

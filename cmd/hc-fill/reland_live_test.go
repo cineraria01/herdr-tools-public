@@ -164,6 +164,30 @@ func TestRelandLiveLane(t *testing.T) {
 	}
 }
 
+// 원래 레인 터미널이 목록에 있어도 받는 쪽이 셸만 남음(확인된 안 보냄)이면 reland_wait분 기다리지 않고 바로 다시 맞춤 — 「보냄」 기록도
+// 「결과 모름」 문구도 없다(감사 atp22qf 낮음 2)
+func TestRelandLiveShellOnly(t *testing.T) {
+	w, git := rlRepo(t)
+	os.WriteFile(DATA+"/hc", []byte("#!/bin/sh\nprintf '%s|' \"$@\" >>"+DATA+"/sends\necho >>"+DATA+"/sends\n"+
+		`[ "$1" = get ] && printf '{"address":"here/t1","argv":["zsh","-l"],"created_ms":1,"cwd":"/r","foreground":{"argv":["zsh","-l"],"pid":5},"name":"l-sh","pid":5,"state":"live","status":null}\n'`+
+		"\nexit 0\n"), 0o755)
+	git(w, "push", "-q", "origin", "HEAD:refs/merge-failed/100-l-sh")
+	os.MkdirAll(w+".wt/l-sh", 0o755)
+	OREC = []Row{{"l-sh", "app", "here", "here/t1", "2026-11-22T00:00:00Z", "-", ",-,", "-"}}
+	TERMS = []Term{{"here", "here/t1", "claude", "l-sh", "idle", "-"}}
+	EV = []string{rlEv("2026-11-22T00:01:00Z", "l-sh", "100-l-sh", "착지 실패(종료 3, 충돌 README.md)", "t9")}
+	relandTick()
+	if qrow("l-sh-reland") == nil {
+		t.Fatalf("셸만 남음 → 바로 다시 맞춤: %v", qRows())
+	}
+	if s, _ := readFile(DATA + "/sends"); strings.Contains(s, "send|") {
+		t.Fatalf("셸만 남은 터미널에 보냄: %q", s)
+	}
+	if rl, _ := readFile(DATA + "/reland.tsv"); strings.Contains(rl, "\t보냄\t") {
+		t.Fatalf("안 보냈는데 보냄 기록: %q", rl)
+	}
+}
+
 // 이름을 바꿔 낸 제출(<원래>-fix가 HC_LANE=<원래>로): 원래 이름 터미널은 닫혔어도, 반송된 제출 기록(refs/merge-failed-meta)의
 // host=·term=이 가리키는 낸 터미널이 살아 있고 그 작업 트리가 남았으면 다시 맞춤 대신 그쪽에 보낸다
 func TestRelandRenamedSubmit(t *testing.T) {

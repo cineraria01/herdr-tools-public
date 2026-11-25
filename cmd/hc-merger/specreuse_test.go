@@ -25,7 +25,10 @@ passed=
 for p in p1 p2; do
   case "$done" in *" $p "*) echo "skip $p@$HC_LANE_MACHINE" >>"$HOOKLOG"; passed="$passed $p"; continue;; esac
   echo "run $p@$HC_LANE_MACHINE" >>"$HOOKLOG"
-  if [ "$p" = p2 ] && [ -e "$PARTDIR/fail-$HC_LANE_MACHINE" ]; then exit 1; fi
+  if [ "$p" = p2 ] && [ -e "$PARTDIR/fail-$HC_LANE_MACHINE" ]; then
+    [ ! -e "$PARTDIR/testfail" ] || printf -- '--- FAIL: TestFlaky (0.01s)\nFAIL\texample/p2\t0.1s\n'
+    exit 1
+  fi
   passed="$passed $p"
   [ -z "$HERDR_VERIFY_PARTS" ] || echo "$t$passed" >"$HERDR_VERIFY_PARTS"
   if [ "$p" = p1 ] && [ -e "$PARTDIR/linger" ]; then
@@ -220,5 +223,63 @@ func TestPartsNotReusedWhenTreeChanges(t *testing.T) {
 	}
 	if _, err := os.Stat(f); err == nil {
 		t.Fatal("마 다른 트리면 조각 파일을 만들지 않는다")
+	}
+}
+
+// 바 맨 앞 추측이 시험 실패(test=1)로 끝나 병합기 기계가 직접 검증(착지 스크립트 저장소 — 다시 맡긴 기계에서도 실패)하면, 그 추측의
+// 통과 조각 줄을 HERDR_VERIFY_PARTS_FROM 파일로 넘긴다(쓸지는 검증 스크립트가). 조각이 없으면 넘기지 않는다
+func TestDirectVerifyGetsSpecParts(t *testing.T) {
+	for _, drop := range []bool{false, true} {
+		t.Run(map[bool]string{false: "조각있음", true: "조각없음"}[drop], func(t *testing.T) {
+			s, _, pd := partsFx(t, true)
+			for _, f := range []string{"fail-v1", "fail-v2", "testfail"} {
+				os.WriteFile(pd+"/"+f, nil, 0o666)
+			}
+			s.sub(1000000001, "a", false)
+			s.round(1)
+			d := s.dispatched()
+			if len(d) != 1 || s.verifyOn(d[0]) != 0 || !s.has(specFails+d[0][1]) {
+				t.Fatalf("v1 추측 실패 기록: %v", d)
+			}
+			og := "--git-dir=" + s.origin
+			if subj := s.git(s.dir, og, "log", "-1", "--format=%s", specFails+d[0][1]); !strings.Contains(subj, " test=1") {
+				t.Fatalf("v1 실패는 시험 실패(test=1): %q", subj)
+			}
+			s.round(1)
+			d = s.dispatched()
+			if len(d) != 2 || d[1][0] != "v2" {
+				t.Fatalf("한가한 v2에 한 번 더: %v", d)
+			}
+			s.verifyOn(d[1])
+			want := s.specTree(d[0][1]) + " p1"
+			if got := s.partOf(d[0][1]); got != want {
+				t.Fatalf("원격 조각 %q, 바람 %q", got, want)
+			}
+			if drop {
+				s.git(s.dir, og, "update-ref", "-d", specParts+d[0][1])
+			}
+			s.round(1)
+			if got := strings.Join(s.lines(s.landlog), " "); got != "verify|a" {
+				t.Fatalf("직접 검증(착지 스크립트): %q", got)
+			}
+			b, _ := os.ReadFile(s.landlog + ".parts")
+			if got := strings.TrimSpace(string(b)); drop && got != "" || !drop && got != "a|"+want {
+				t.Fatalf("직접 검증에 넘긴 조각 %q (조각 없음 %v)", got, drop)
+			}
+		})
+	}
+}
+
+// 사 맨 앞 추측이 없으면(손잡이 front_dispatch 0 — 병합기가 직접 검증, 짓기만) 조각 파일을 넘기지 않는다
+func TestDirectVerifyNoSpecNoParts(t *testing.T) {
+	oldFront(t)
+	s, _, _ := partsFx(t, false)
+	s.sub(1000000001, "a", false)
+	s.round(1)
+	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|a" {
+		t.Fatalf("직접 검증: %q", got)
+	}
+	if _, err := os.Stat(s.landlog + ".parts"); err == nil {
+		t.Fatal("추측이 없으면 조각 파일을 넘기지 않는다")
 	}
 }

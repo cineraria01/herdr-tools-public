@@ -24,6 +24,7 @@ const fakeSpecLand = `if [ "$1" = land ]; then
     echo "fast|$HC_LANE" >>"$LANDLOG"
   else
     echo "verify|$HC_LANE" >>"$LANDLOG"
+    [ -z "$HERDR_VERIFY_PARTS_FROM" ] || echo "$HC_LANE|$(cat "$HERDR_VERIFY_PARTS_FROM")" >>"$LANDLOG.parts"
     [ ! -e bad.txt ] || exit 1
   fi
   git push -q --atomic origin HEAD:refs/heads/main $HERDR_LAND_PUSH_EXTRA || exit 1

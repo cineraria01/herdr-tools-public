@@ -38,6 +38,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -455,9 +456,9 @@ func b2i(b bool) int {
 func start(root string, argv, env []string, out *os.File) (*exec.Cmd, error) {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir, c.Stdout, c.Stderr = root, out, out
-	if len(env) > 0 {
-		c.Env = append(os.Environ(), env...)
-	}
+	// 조각 파일(HERDR_VERIFY_PARTS)은 이 실행 몫 — 자식 go test가 픽스처로 verify()를 부르며 덮어쓰지 않게 물리지 않는다(parts.go)
+	c.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "HERDR_VERIFY_PARTS=") })
+	c.Env = append(c.Env, env...)
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return c, c.Start()
 }

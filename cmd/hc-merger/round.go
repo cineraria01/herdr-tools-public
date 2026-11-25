@@ -41,6 +41,7 @@ type M struct {
 	O, lk2, hs                      string
 	deferred                        string // 이 바퀴가 쉰 까닭(defer_)
 	stree                           string // 맨 앞 추측이 통과한 트리(착지에 HERDR_SPEC_TREE로)
+	sfid, sparts                    string // 이 바퀴 맨 앞 추측의 아이디 · 직접 검증에 넘길 그 통과 조각 파일(착지에 HERDR_VERIFY_PARTS_FROM — specparts.go)
 	vw                              vwhy   // 이번 착지의 검증 길(일지 까닭 칸 — why.go)
 	wmach                           string // 맨 앞을 기다리는 바퀴의 검증 기계(손잡이 0으로 맡기지 못해 기다리면 -) — 추측 기다림 일지 줄
 	wre                             string // 이 바퀴에 맨 앞을 바쁨으로 다시 고름 「<바쁨 기계>→<새 기계>」(verifierpick.go) — 추측 기다림 일지 줄

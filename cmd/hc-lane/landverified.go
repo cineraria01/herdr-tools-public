@@ -22,6 +22,9 @@ func specTreeTake(merger bool) {
 	}
 	os.Unsetenv("HERDR_SPEC_TREE")
 	os.Unsetenv("HERDR_VERIFIED_TREE")
+	if !merger { // 병합기가 넘긴 맨 앞 추측의 통과 조각(직접 검증 — 검증 스크립트·착지 스크립트에 그대로 물려준다). 병합기 밖에서는 지운다
+		os.Unsetenv("HERDR_VERIFY_PARTS_FROM")
+	}
 }
 
 // verifiedEnv: 검증을 부르기 직전에. cand가 있으면(내장 길) 그 트리가 추측 트리와 같을 때만 본다. 기록이 있으면 HERDR_VERIFIED_TREE를 둔다
