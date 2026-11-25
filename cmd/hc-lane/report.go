@@ -259,6 +259,9 @@ func reportMain(a []string) int {
 		die("report: 쓰지 못했다: %s", evf)
 	}
 	fmt.Printf("%s %s: %s %s\n", x.Lane, st, sha, x.Msg)
+	if st == "판정" { // 감사 보고를 원격에 — 다른 기계 레인이 hc-lane audit-report로 읽는다(auditreport.go)
+		auditPublish(msg)
+	}
 	if st == "완료" && rn == "" && key == "" { // 자기 작업 트리의 완료만(도구가 --name으로 적는 사건은 아님) — reportpre.go
 		prePost(lane, sha)
 	}

@@ -380,7 +380,7 @@ func verdictCmd(a []string) int {
 		fmt.Printf("hc-lane verdict: 판정 %s 는 다른 실행(%s)의 것 — 손대지 않았다(이 실행 %s)\n", aid, vd.run, me)
 		return 1
 	}
-	fixMsg := fmt.Sprintf("감사 지적 %s%s — %s. %s를 읽고 높음·중간을 고친 뒤 다시 검증하고 hc-lane report 완료 <새 sha>, 그리고 기다린다", vd.round(), aid, vd.sha, vd.rep)
+	fixMsg := fmt.Sprintf("감사 지적 %s%s — %s. %s(이 기계에 없으면 hc-lane audit-report %s)를 읽고 높음·중간을 고친 뒤 다시 검증하고 hc-lane report 완료 <새 sha>, 그리고 기다린다", vd.round(), aid, vd.sha, vd.rep, aid)
 	switch vd.state() {
 	case "void":
 		fmt.Printf("판정 %s 는 hc-fill이 취소했다 — 아무것도 하지 않는다. 다음 지시를 기다린다\n", aid)

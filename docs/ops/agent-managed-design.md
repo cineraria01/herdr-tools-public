@@ -128,7 +128,7 @@
 | `judge.go:118` R3 | 6시간 쉼 → 닫음 | 코드 | ㉯ | — (빠짐) |
 | 보호 규칙(작업 트리 남음·착지 전 커밋·배경 실행·hc-fill이 되돌리기 전) | 닫지 않음 | 코드 | ㉮(데이터 손실 막기) | — |
 | `sweep.orphan_kill` off | 고아 프로세스 죽이기 | 개인 설정 | ㉮(사용자 규칙 「찾아낸 프로세스를 죽이지 않는다」 — 켜는 것은 사람) | — |
-| `sweep.tmp_hours` 3 · `sweep.disk_free_gb` 10 | 임시 파일 지울 나이·디스크 낮음 사건 | 개인 설정 | ㉯ | — |
+| `sweep.tmp_hours` 3 · `sweep.disk_free_gb` 10 · `sweep.gocache_hours` 6 | 임시 파일 지울 나이·디스크 낮음 사건·디스크 낮을 때 지울 Go 캐시 나이 | 개인 설정 | ㉯ | — |
 | `sweep.tailscale_up_per_hour` 3 | Tailscale 다시 켜기 횟수 | 개인 설정 | ㉯ | — |
 | `HC_SWEEP_DETACHED_REMOVE` | 분리 작업 트리 지우기 | 환경 | ㉮ | — |
 | 잠자기 끔·키체인 점검 | 없음 | — | 눈 | worker-health-sweep |

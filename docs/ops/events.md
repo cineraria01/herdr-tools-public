@@ -59,7 +59,7 @@
 
 - 뜻: 그 기계 홈 볼륨 여유가 `sweep.disk_free_gb` 아래다(hc-sweep, [디스크 쓸기](../hc-sweep/disk-sweep.md)). watch 줄 끝 괄호가 그 기계다.
 - 흔한 까닭: Go 빌드 캐시·임시 찌꺼기가 쌓임, 큰 작업 트리가 남음.
-- 받으면: `hc-sweep --dry-run`으로 지울 것을 보고, 끝난 작업 트리는 `hc-lane gc`로 정리한다. 문턱은 `sweep.disk_free_gb`, Go 캐시 상한은 `sweep.gocache_gb`.
+- 받으면: `hc-sweep --dry-run`으로 지울 것을 보고, 끝난 작업 트리는 `hc-lane gc`로 정리한다. 문턱은 `sweep.disk_free_gb`, 오래 안 쓴 Go 캐시는 hc-sweep이 이미 지웠다(나이 `sweep.gocache_hours`, 글에 그 바퀴에 지운 크기) — 남은 Go 캐시는 쓰는 중이니 통째로 비우지 않는다.
 - 사람에게: 사용자 파일이 자리를 차지할 때(지우지 않는다).
 - 다음: `hc-sweep --dry-run`
 

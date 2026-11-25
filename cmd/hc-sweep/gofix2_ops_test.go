@@ -36,7 +36,7 @@ func TestO2DiskDamagedMarkResends(t *testing.T) {
 		lane := filepath.Join(d, "hc-lane")
 		os.WriteFile(lane, []byte("#!/bin/sh\n"), 0o755)
 		var keys []string
-		if msg := diskAlert(1, 1, 10, state, d, false, lane, o2DiskRep(&keys, 0)); msg == "" || len(keys) != 1 {
+		if msg := diskAlert(1, 1, 10, state, d, "", false, lane, o2DiskRep(&keys, 0)); msg == "" || len(keys) != 1 {
 			t.Errorf("손상된 표식 %q를 보낸 것으로 읽음(알림 %d번)", body, len(keys))
 		}
 	}
@@ -58,7 +58,7 @@ func TestO2DiskAlertMarkAtomic(t *testing.T) {
 	lane := filepath.Join(d, "hc-lane")
 	os.WriteFile(lane, []byte("#!/bin/sh\n"), 0o755)
 	var keys []string
-	if diskAlert(1, 1, 10, state, d, false, lane, o2DiskRep(&keys, 0)) == "" {
+	if diskAlert(1, 1, 10, state, d, "", false, lane, o2DiskRep(&keys, 0)) == "" {
 		t.Fatal("대기 표식인데 보내지 않음")
 	}
 	if b, _ := os.ReadFile(state); strings.HasPrefix(string(b), pendingMark) {

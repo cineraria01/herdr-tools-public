@@ -1,6 +1,6 @@
 package main
 
-// 디스크 쓸기: 임시 찌꺼기(go-build*·Test*), Go 빌드 캐시 상한, 디스크 부족 알림 hc-disk-low — 셸 판 lib/hc-sweep/disk.py와 같다
+// 디스크 쓸기: 임시 찌꺼기(go-build*·Test*), 오래 안 쓴 Go 빌드 캐시, 디스크 부족 알림 hc-disk-low
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -189,90 +188,44 @@ func tmpSkipAlert(state string, failed bool, n int, dry bool, lane string, r run
 	}
 }
 
-// goBusy: go 명령(빌드·시험)이 도는가(ps comm 이름 go — 시험은 HC_SWEEP_GO_COMM으로 바꾼다). 못 보면 true(건드리지 않음).
-// 종료 0이어도 목록이 비면(ps는 적어도 이 프로세스·ps 자신을 찍는다) 못 본 것이다(B22)
-func goBusy(r runner) bool {
-	name := os.Getenv("HC_SWEEP_GO_COMM")
-	if name == "" {
-		name = "go"
-	}
-	res := r(30*time.Second, nil, "ps", "-x", "-o", "comm=")
-	if res.err != nil || res.rc != 0 || strings.TrimSpace(res.out) == "" {
-		return true
-	}
-	for _, l := range strings.Split(res.out, "\n") {
-		if filepath.Base(strings.TrimSpace(l)) == name {
-			return true
-		}
-	}
-	return false
-}
-
-// trimGocache: Go 빌드 캐시 줄이기 한 바퀴(부르는 쪽이 디스크가 문턱 가까울 때만). GOCACHE(없으면 ~/.cache/go-build — 병합기 기본)의
-// <두 자리 16진>/ 아래 항목을 mtime 오래된 것부터 cap 아래로, 옛 자리 ~/Library/Caches/go-build는 GOCACHE와 다르면 통째로 비운다
-func trimGocache(capGB float64, dry bool, r runner) {
-	cache := os.Getenv("GOCACHE")
-	if cache == "" {
-		cache = filepath.Join(home, ".cache", "go-build")
-	}
-	old := filepath.Join(home, "Library", "Caches", "go-build")
-	if goBusy(r) {
-		fmt.Println("Go 캐시 줄이기: go가 도는 중이거나 프로세스 목록을 못 읽음 — 건너뜀")
-		return
-	}
-	type ent struct {
-		mt   time.Time
-		size int64
-		p    string
-	}
-	var files []ent
-	var total int64
-	filepath.WalkDir(cache, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !hexDir.MatchString(filepath.Base(filepath.Dir(p))) {
-			return nil
-		}
-		if st, err := os.Lstat(p); err == nil && st.Mode().IsRegular() {
-			files = append(files, ent{st.ModTime(), blocks(st), p})
-			total += blocks(st)
-		}
-		return nil
-	})
-	sort.SliceStable(files, func(i, j int) bool { return files[i].mt.Before(files[j].mt) })
-	over, n, freed := float64(total)-capGB*gb, 0, int64(0)
-	for _, f := range files { // go는 쓸 때 mtime을 새로 한다: 오래된 것부터
-		if float64(freed) >= over {
-			break
-		}
-		if !dry && os.Remove(f.p) != nil {
+// gocacheDirs: 이 기계의 Go 빌드 캐시 자리들 — GOCACHE, 병합기 기본 ~/.cache/go-build, macOS 기본 ~/Library/Caches/go-build.
+// 없는 곳은 빼고, 같은 곳(링크·GOCACHE가 둘 중 하나)은 한 번만
+func gocacheDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, p := range []string{os.Getenv("GOCACHE"), filepath.Join(home, ".cache", "go-build"), filepath.Join(home, "Library", "Caches", "go-build")} {
+		if st, err := os.Stat(p); p == "" || err != nil || !st.IsDir() || seen[realpath(p)] {
 			continue
 		}
-		n, freed = n+1, freed+f.size
+		seen[realpath(p)] = true
+		dirs = append(dirs, p)
 	}
-	var oldSize int64
-	if st, err := os.Lstat(old); err == nil && st.IsDir() && realpath(old) != realpath(cache) {
-		size, _, err := scan(old, time.Now().Add(24*time.Hour))
-		if err == nil && !dry {
-			err = removeTree(old)
-		}
-		if err != nil {
-			fmt.Printf("Go 옛 캐시 못 비움: %s %v\n", old, err)
-		} else {
-			oldSize = size
-		}
+	return dirs
+}
+
+// trimGocache: Go 빌드 캐시 자리들의 <두 자리 16진>/ 아래 항목 가운데 hours시간 넘게 안 쓴(mtime) 것만 지운다(부르는 쪽이 여유가 문턱
+// 아래일 때만). go는 쓰는 항목의 mtime을 1시간마다 새로 하니 go가 돌아도 쓰는 항목은 남는다 — Go 자체 정리(5일)와 같은 꼴, 지우기 바로
+// 앞에 본 mtime으로 고른다. 통째 비우기(go clean -cache)는 하지 않는다(도는 빌드가 깨진다). 지운(dry면 지울) 개수·바이트와 훑은 자리
+func trimGocache(hours float64, dry bool) (n int, freed int64, dirs []string) {
+	cutoff := time.Now().Add(-time.Duration(hours * float64(time.Hour)))
+	dirs = gocacheDirs()
+	for _, dir := range dirs {
+		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !hexDir.MatchString(filepath.Base(filepath.Dir(p))) {
+				return nil
+			}
+			st, err := os.Lstat(p)
+			if err != nil || !st.Mode().IsRegular() || st.ModTime().After(cutoff) {
+				return nil
+			}
+			if !dry && os.Remove(p) != nil {
+				return nil
+			}
+			n, freed = n+1, freed+blocks(st)
+			return nil
+		})
 	}
-	if n == 0 && oldSize == 0 {
-		return
-	}
-	msg := fmt.Sprintf("캐시 %s 항목 %d개 %.1fGB(상한 %gGB)", cache, n, float64(freed)/gb, capGB)
-	if oldSize > 0 {
-		msg += fmt.Sprintf(" · 옛 캐시 %s %.1fGB", old, float64(oldSize)/gb)
-	}
-	if dry {
-		fmt.Println("Go 캐시 줄이기 (할 것):", msg)
-		return
-	}
-	fmt.Println("Go 캐시 줄이기:", msg)
-	record("go-cache:"+cache, "-", "Go 캐시 줄임(디스크 문턱 가까움)", cache, "-", msg)
+	return
 }
 
 func du(path string, r runner) string {
@@ -312,8 +265,8 @@ func readMark(state string) (bool, string) {
 	return false, ""
 }
 
-// diskAlert: 부족 알림 한 바퀴(free·used = diskUsage). 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 ""
-func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane string, r runner) string {
+// diskAlert: 부족 알림 한 바퀴(free·used = diskUsage, gc = Go 캐시 정리 한 마디 — 괄호 안). 보냈으면(dry면 보낼 것이면) 그 한 줄, 아니면 ""
+func diskAlert(free, used, limitGB float64, state, base, gc string, dry bool, lane string, r runner) string {
 	if free >= limitGB*1.5*gb {
 		if lexists(state) && !dry {
 			os.Remove(state)
@@ -341,8 +294,8 @@ func diskAlert(free, used, limitGB float64, state, base string, dry bool, lane s
 	if total == 0 {
 		total = 1
 	}
-	msg := fmt.Sprintf("디스크 여유 %.1fGB(사용 %.0f%%) < 문턱 %sGB — %s (임시 찌꺼기는 hc-sweep이 지움, Go 캐시는 쓰는 곳이 없을 때만 손으로"+
-		" — ~/Library/Caches/go-build는 macOS 기본 GOCACHE)", free/gb, 100*used/total, pyFloat(limitGB), strings.Join(sizes, " · "))
+	msg := fmt.Sprintf("디스크 여유 %.1fGB(사용 %.0f%%) < 문턱 %sGB — %s (임시 찌꺼기는 hc-sweep이 지움, %s)",
+		free/gb, 100*used/total, pyFloat(limitGB), strings.Join(sizes, " · "), gc)
 	if dry {
 		return msg
 	}
@@ -390,11 +343,6 @@ func laneReport(r runner, lane, name, msg, key string) bool {
 	return res.err == nil && res.rc == 0
 }
 
-func freeBytes(path string) (float64, error) {
-	free, _, err := diskUsage(path)
-	return free, err
-}
-
 // diskRun: 디스크 쓸기 한 바퀴. 설정을 못 읽으면 그 쓸기는 건너뛴다
 func diskRun(dry bool, r runner) error {
 	numConf := func(key, def string) float64 { // 숫자가 아니면 그 키만 끈다
@@ -420,21 +368,36 @@ func diskRun(dry bool, r runner) error {
 	if limit <= 0 {
 		return nil
 	}
-	if capGB := numConf("sweep.gocache_gb", "6"); capGB > 0 {
-		free, err := freeBytes(home)
-		if err != nil {
-			return err
-		}
-		if free < limit*1.5*gb {
-			trimGocache(capGB, dry, r)
-		}
-	}
 	free, used, err := diskUsage(home)
 	if err != nil {
 		return err
 	}
+	// Go 빌드 캐시: 여유가 문턱 아래면(알림과 같은 판정) N시간 넘게 안 쓴 항목만 지운다(2026-11-26 mini-m4 ~/.cache/go-build 48GB)
+	hours := numConf("sweep.gocache_hours", "6")
+	gc := "Go 캐시 정리는 꺼짐(sweep.gocache_hours 0) — 쓰는 곳이 없을 때만 손으로"
+	if hours > 0 {
+		gc = fmt.Sprintf("%g시간 넘게 안 쓴 Go 캐시는 hc-sweep이 지움 — 남은 것은 쓰는 중, 통째로 비우지 말 것", hours)
+	}
+	if hours > 0 && free < limit*gb {
+		if n, freed, dirs := trimGocache(hours, dry); n > 0 {
+			word := "지움"
+			if dry {
+				word = "지울 것"
+			} else if free, used, err = diskUsage(home); err != nil {
+				return err
+			}
+			msg := fmt.Sprintf("%s 항목 %d개 %.1fGB(%g시간 넘게 안 씀) · 남은 여유 %.1fGB", strings.Join(dirs, " "), n, float64(freed)/gb, hours, free/gb)
+			gc += fmt.Sprintf(" · 이번 바퀴 Go 캐시 %d개 %.1fGB %s", n, float64(freed)/gb, word)
+			if dry {
+				fmt.Println("Go 캐시 줄이기 (할 것):", msg)
+			} else {
+				fmt.Println("Go 캐시 줄이기:", msg)
+				record("go-cache:"+home, "-", fmt.Sprintf("Go 캐시 줄임(%g시간 넘게 안 씀)", hours), strings.Join(dirs, " "), "-", msg)
+			}
+		}
+	}
 	state := filepath.Join(stateHome(), "hc-sweep", "disk-low")
-	if msg := diskAlert(free, used, limit, state, base, dry, filepath.Join(binDir, "hc-lane"), r); msg != "" {
+	if msg := diskAlert(free, used, limit, state, base, gc, dry, filepath.Join(binDir, "hc-lane"), r); msg != "" {
 		if dry {
 			fmt.Println("디스크 부족 알림 (보낼 것):", msg)
 		} else {

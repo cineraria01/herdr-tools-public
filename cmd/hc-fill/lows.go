@@ -75,7 +75,7 @@ func lowsBrief(name, lane, aid, m, rep string, items []string) string {
 	b.WriteString("- 하나도 고치지 않으면 커밋 없이 까닭만 보고하고 `hc-lane report 완료 - \"커밋 0 — 낮음 모두 안 고침\"`(지휘가 본다).\n")
 	b.WriteString("- 저장소 공통 규칙(커밋 제목 머리 `" + name + ":`, 시험·검증, 개인 값 금지 등)은 원 레인 지시문을 따른다: " +
 		m + " 기계 `~/.local/share/hc-fill/runs/" + lane + "-run.md`(다른 기계면 `hc file read --on " + m + " …`).\n\n")
-	fmt.Fprintf(&b, "## 지적 원문 (감사 보고 %s:%s)\n", m, rep)
+	fmt.Fprintf(&b, "## 지적 원문 (감사 보고 %s:%s — 어느 기계에서든 전체는 `hc-lane audit-report %s`)\n", m, rep, aid)
 	for i, it := range items {
 		fmt.Fprintf(&b, "\n### 지적 %d\n\n%s\n", i+1, it)
 	}

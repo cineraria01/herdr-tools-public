@@ -12,7 +12,7 @@
    - 조사·감사는 `--read`(작업 트리 없이), 미리 보기는 `--dry-run`, 착지·정리 절차는 `--print-steps`.
 2. 레인 안에서 알리기: `hc-lane report 중간|완료|막힘 <sha|-> "<한 줄>"` — 완료는 `hc-lane report 완료 HEAD "<요약>"`.
 3. 지휘가 기다리기: `hc-lane watch --to <지휘 주소>`(늘 돎) 또는 한 번 `hc-lane wait --lane <레인>`.
-4. 감사 판정 받기(레인 안): `hc-lane verdict <판정 ID>` — 출력대로만 한다.
+4. 감사 판정 받기(레인 안): `hc-lane verdict <판정 ID>` — 출력대로만 한다. 감사 보고 읽기(어느 기계든): `hc-lane audit-report <감사 ID>`.
 5. 착지(레인 작업 트리 안): `hc-lane land main` (감사 통과면 `hc-lane land main --verdict <ID>`).
 6. 정리: `hc-lane clean --repo <저장소> --branch <브랜치>` · 오래 남은 것 `hc-lane gc --repo <저장소> --dry-run`부터.
 7. 선행을 기다리는 먼저 띄운 레인: `hc-lane park "<한 줄>"` 뒤 clean.

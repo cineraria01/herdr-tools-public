@@ -1,0 +1,4 @@
+       hc-lane audit-report <감사 ID> [--repo <저장소>]   (어느 기계 레인에서든 — 다른 기계에서 돈 감사의 보고도)
+  audit-report  감사 보고(~/.local/share/hc-fill/reports/audit-<ID>.md)를 표준 출력에. 이 기계에 없으면 저장소(--repo, 없으면 지금 폴더)
+                origin의 refs/hc-audit/<ID>를 받아 읽고 그 자리에 남긴다. 감사가 report 판정 「감사 완료 <ID> …」을 적을 때
+                그 보고를 그 참조에 올린다(부모 없는 커밋, 파일 audit.md 하나). 종료 0 읽음, 1 어디에도 없음, 2 인자, 75 원격 조회 실패(다시)

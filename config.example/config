@@ -28,6 +28,8 @@ sweep.tmp_hours    3
 # 지울 후보만 묻는 lsof 한 번의 상한(초, 없으면·0이면 60). 넘기면 그 바퀴는 판정 못 한 후보를 건너뛴다
 sweep.lsof_secs    60
 sweep.disk_free_gb 10
+# 여유가 위 문턱 아래면 Go 빌드 캐시(GOCACHE·~/.cache/go-build·~/Library/Caches/go-build)에서 이 시간 넘게 안 쓴 항목만 지움(없으면 6, 0이면 끔)
+sweep.gocache_hours 6
 # hc-sweep Tailscale 점검: 꺼져 있으면(Tailscale is stopped.) 한 시간에 다시 켤 횟수(없으면 3, 0이면 다시 켜지 않고 hc-tailscale 알림만)
 sweep.tailscale_up_per_hour 3
 

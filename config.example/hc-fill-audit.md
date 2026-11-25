@@ -8,7 +8,7 @@
 
 ## 2차 이상이면 (이 감사는 {round}번째)
 - 앞 차수가 본 커밋 `{prev_sha}` · 앞 보고서 `{prev_report}` · 앞 판정 {prev_verdict} · 지휘 지시 `{coord_notes}` (1차거나 없으면 빈 칸)
-- 앞 차수가 있으면 먼저 앞 보고서를 읽고 `git -C {worktree} diff {prev_sha}..{sha}`로 앞 지적이 고쳐졌는지와 그 고침이 새로 연 길을 본다.
+- 앞 차수가 있으면 먼저 앞 보고서를 읽고(이 기계에 없으면 `hc-lane audit-report {prev_report}`) `git -C {worktree} diff {prev_sha}..{sha}`로 앞 지적이 고쳐졌는지와 그 고침이 새로 연 길을 본다.
   지휘 지시 파일이 있으면 그 지시가 지켜졌는지 본다. 그다음 아래 할 일로 나머지를 훑는다(앞에서 확인한 곳은 짧게).
 
 ## 할 일
@@ -24,3 +24,4 @@
 6. 마지막에 정확히 이 꼴로 한 번 부른다(숫자만 바꾼다. hc-fill이 이 줄로 착지·지적을 정한다 — 차수 ID `{audit_id}`와
    40자 sha가 이 감사의 것일 때만 받는다):
    `hc-lane report 판정 {sha} "감사 완료 {audit_id} 높음 <n>·중간 <n>·낮음 <n>"`
+   이 줄이 보고서를 저장소 원격(`refs/hc-audit/<차수 ID>`)에도 올린다 — 다른 기계 레인이 `hc-lane audit-report <차수 ID>`로 읽으니 보고서를 먼저 다 쓴다.
