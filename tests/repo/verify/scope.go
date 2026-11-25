@@ -467,20 +467,12 @@ type passRec struct {
 	secs       int
 }
 
-// scopePlan: HERDR_VERIFY_SCOPE(없음·observe / on / off)대로 판정하고 알림 줄을 찍는다. 지문 실패는 한 줄 알림 뒤 전부 돈다.
+// scopePlan: scopeMode(observe / on / off)대로 판정하고 알림 줄을 찍는다. 지문 실패는 한 줄 알림 뒤 전부 돈다.
 // observe: 전부 돌되 건너뛸 수 있는 조각을 알린다 — 단 전부가 기록과 같으면(문서만 고친 변경 등) 전부 건너뛴다. on: 기록과 같은 조각은 건너뛴다.
 // HERDR_VERIFY_ALL=1이면 어떤 경우에도 전부 돈다(기록은 쓴다)
 func scopePlan(root string, items []shard, w io.Writer) *scopeRun {
 	n := len(items)
-	r := &scopeRun{mode: os.Getenv("HERDR_VERIFY_SCOPE"), keys: make([]string, n), can: make([]bool, n), skip: make([]bool, n), secs: make([]int, n)}
-	switch r.mode {
-	case "", "observe":
-		r.mode = "observe"
-	case "on", "off":
-	default:
-		fmt.Fprintf(w, "verify: HERDR_VERIFY_SCOPE=%q 는 observe·on·off가 아니라 observe로 본다\n", r.mode)
-		r.mode = "observe"
-	}
+	r := &scopeRun{mode: scopeMode(root, w), keys: make([]string, n), can: make([]bool, n), skip: make([]bool, n), secs: make([]int, n)}
 	if r.mode == "off" {
 		return r
 	}

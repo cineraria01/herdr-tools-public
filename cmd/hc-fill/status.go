@@ -301,6 +301,9 @@ func statusCmd(args []string) {
 		if w := rejWhy(name, r.F(qRID)); in.State == "wait" && w != "" {
 			stage = "띄우기 거절 — " + w
 		}
+		if l, why := laneWeight(r); in.State == "wait" && (l || r.F(qWeight) == "normal") { // 무게(weight.go) — 추정 보통은 지금 줄 그대로
+			stage += " · " + why
+		}
 		fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, ""))
 	}
 	maPrint()

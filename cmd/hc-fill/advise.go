@@ -80,9 +80,14 @@ func adviseWait(r Row, now time.Time) opsstate.Wait {
 		}
 	}
 	only, nd := dash(r.F(qOnly)), needs(r.F(qBrief)) // 지시문 「필요:」 능력 없는 기계엔 안 뜬다(placeCands와 같게 — 감사 atp22es 낮음 1)
+	light, _ := laneWeight(r)
 	for _, mc := range machines() {
 		switch {
 		case repoOf(p, mc.Name) == "" || !mhas(mc.Name, nd):
+		case !light && machLight(mc.Name): // 보통 레인은 가벼운 일만 받는 기계에 안 뜬다(placeCands와 같게, weight.go)
+			if only == "-" || inlist(mc.Name, only) {
+				w.LightOnly = append(w.LightOnly, mc.Name)
+			}
 		case only == "-" || inlist(mc.Name, only):
 			w.Can = append(w.Can, mc.Name)
 		default:

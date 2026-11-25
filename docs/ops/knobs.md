@@ -46,7 +46,7 @@
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
 - 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초)·`pr_inbox`(완료 없는 레인의 PR, 0·1), 사람 리뷰의 `pr_human`(읽을 작성자 목록, `me` = gh 로그인, `-` = 끔)·`pr_human_block`(착지를 막는 글 종류)·`pr_human_approve`(재승인 기다림, 0·1) — [PR 거울](../hc-fill/pr.md).
 - 지휘 알림 묶기 `coord_digest`(분, 0~120, 기본 0 = 하나씩 — 읽는 도구 hc-lane watch, 보낼 때마다 이 저장 파일을 읽는다) — [watch](../hc-lane/watch.md) 「지휘 알림 묶기」.
-- 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
+- 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`·`light_only@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.
 
 ## 무엇이 손잡이가 아닌가
@@ -100,6 +100,11 @@
 - `sweep_resident_grace`(분, 기본 5): 상주 판 점검의 유예 — 새 판이 깔린 지도, 상주가 뜬 지도 이만큼 지나야 옛 판·판 모름을 알린다([상주 판 점검](../hc-sweep/resident.md)). 같은 곳에서 읽는다. `herdr-sync --check`의 상주 확인도 이 유예를 쓴다(맥 저장 파일).
 - `sweep_test_orphan`(분, 기본 30): 부모 없는 시험 고아(시험 임시 경로 프로세스)가 이만큼 남아 있으면 운영 사건 `hc-test-orphan` 한 번([시험 고아 점검](../hc-sweep/test-orphans.md)). 같은 곳에서 읽는다.
 - `resident_reexec`(0|1, 기본 1): 상주 고리가 새로 깔린 판으로 스스로 넘어간다 — 0이면 넘어가지 않고 손으로 다시 띄울 때까지 옛 판([selfexec](../go/selfexec.md)). 상주가 새 판을 본 바퀴에 **그 기계의** 저장 파일만 읽는다(원격 참조 없음 — 다른 기계에서 끄려면 그 기계 `~/.local/state/herdr-ops/knobs.tsv`).
+
+## 검증 범위 (`verify_scope`, 검증하는 모든 기계)
+
+- `verify_scope`(`observe`|`on`|`off`, 기본 `on`): 검증이 통과 기록과 같은 조각을 건너뛸지([시험](../repo/tests.md) 「검증의 범위」). 환경 변수 `HERDR_VERIFY_SCOPE`가 앞선다.
+- 검증마다 읽는다 — 이 기계 저장 파일(지휘 기계)에 살아 있는 값이 있으면 그것, 없으면 검증하는 클론 origin의 `refs/herdr/knobs`(다른 기계는 hc-fill 다음 바퀴가 올린 뒤부터). 못 읽으면 `observe`(전부 돈다).
 
 ## 옮기지 않은 앞 레인 스위치
 

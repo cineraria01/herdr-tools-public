@@ -29,6 +29,7 @@ func editCmd(args []string) {
 	// prof: 원래 PR(--pr-of, -는 지움 — prof.go)
 	after, only, brief, prio, anyp, prof := "", "", "", "", false, ""
 	ovk, early := "", "" // 바꿀 겹침칸(overlap-ok·-)·먼저 띄움 칸(-·no-early), 빈 값은 그대로
+	wt := ""             // 바꿀 무게 18칸(light·normal·- = 지시문으로 추정, weight.go)
 	for len(args) > 0 {
 		flag := func(cur *string, v string) {
 			if *cur != "" && *cur != v {
@@ -52,6 +53,9 @@ func editCmd(args []string) {
 		case "--no-early":
 			flag(&early, "no-early")
 			continue
+		case "--light":
+			wt, args = weightArg(wt, "light", "light"), args[1:]
+			continue
 		}
 		if len(args) < 2 {
 			usage()
@@ -66,6 +70,8 @@ func editCmd(args []string) {
 			brief = v
 		case "--pr-of":
 			prof = v
+		case "--weight": // -는 지시문으로 추정
+			wt = weightArg(wt, v, "light", "normal", "-")
 		case "--priority":
 			p, ok := pnorm(v)
 			if !ok {
@@ -77,7 +83,7 @@ func editCmd(args []string) {
 		}
 		args = args[2:]
 	}
-	if after == "" && only == "" && brief == "" && prio == "" && ovk == "" && early == "" && prof == "" {
+	if after == "" && only == "" && brief == "" && prio == "" && ovk == "" && early == "" && prof == "" && wt == "" {
 		usage()
 	}
 	prOfCheck(name, prof)
@@ -111,7 +117,7 @@ func editCmd(args []string) {
 		if r == nil {
 			noLane(name)
 		}
-		undo = editUndo(r, after != "", only != "", brief != "", prio != "", ovk != "", early != "")
+		undo = editUndo(r, after != "", only != "", brief != "", prio != "", ovk != "", early != "", wt != "")
 		if prof != "" {
 			old := prOfGet(name)
 			if undo == "-" {
@@ -120,7 +126,7 @@ func editCmd(args []string) {
 			undo += " --pr-of " + shq(dash(old))
 		}
 		st, prj = r.F(qState), r.F(qProj)
-		if ovk != "" || early != "" {
+		if ovk != "" || early != "" || wt != "" { // 무게도 띄울 곳을 고를 때 한 번 본다 — 아직 안 뜬 줄만
 			editNotUp(r, ovk != "", early != "")
 		}
 		if after != "" {
@@ -178,6 +184,10 @@ func editCmd(args []string) {
 				if early != "" {
 					x = x.Set(qEarly, early)
 					note += ", 먼저 띄움 " + map[string]string{"-": "켬", "no-early": "끔"}[early]
+				}
+				if wt != "" {
+					x = setWeight(x, wt)
+					note += ", 무게 " + weightLabel[wt]
 				}
 			}
 			out = append(out, x)
@@ -290,7 +300,7 @@ func editNotUp(r Row, ov, ea bool) {
 }
 
 // editUndo: 바꾸기 전 줄 r에서, 바꾼 칸만 옛 값으로 되돌리는 edit 한 줄(지시문은 옛 사본 경로 — 같은 경로면 덮였으니 뺀다)
-func editUndo(r Row, a, o, b, p, ov, ea bool) string {
+func editUndo(r Row, a, o, b, p, ov, ea, w bool) string {
 	s := "hc-fill edit " + r.F(qName)
 	if a {
 		s += " --after " + shq(dash(r.F(qAfter)))
@@ -309,6 +319,9 @@ func editUndo(r Row, a, o, b, p, ov, ea bool) string {
 	}
 	if ea {
 		s += map[bool]string{true: " --no-early", false: " --early"}[r.F(qEarly) == "no-early"]
+	}
+	if w {
+		s += " --weight " + dash(r.F(qWeight))
 	}
 	if s == "hc-fill edit "+r.F(qName) {
 		return "-"
@@ -330,6 +343,9 @@ func rmUndo(r Row) string {
 	}
 	if o := prOfGet(r.F(qName)); o != "" {
 		s += " --pr-of " + shq(o)
+	}
+	if w := r.F(qWeight); w == "light" || w == "normal" {
+		s += " --weight " + w
 	}
 	return s
 }

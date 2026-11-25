@@ -264,8 +264,10 @@ func waitRow(r Row) {
 		}
 	}
 	NEED = ""
+	LIGHT, LIGHTWHY = false, ""
 	if !strings.HasPrefix(dash(ak), "audit=") {
 		NEED = needs(brief)
+		LIGHT, LIGHTWHY = laneWeight(r) // 감사 줄은 그 레인의 기계에(무게를 안 본다)
 	}
 	if tryOldBusy(name, rid) {
 		say("옛 실행 정리 기다림 %s", name)
@@ -492,8 +494,10 @@ func earlyRows() {
 		}
 		ESEC = earlySec(after, eb)
 		NEED = ""
+		LIGHT, LIGHTWHY = false, ""
 		if !strings.HasPrefix(dash(ak), "audit=") {
 			NEED = needs(SB)
+			LIGHT, LIGHTWHY = laneWeight(r.Set(qBrief, SB))
 		}
 		AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 		place(name, prj, SB, only, dash(reply), dash(owner), after)

@@ -18,13 +18,17 @@ func init() { register("add", addCmd) }
 func addCmd(args []string) {
 	name, prj, brief, after, only, coord, prof := "", "", "", "-", "-", "", ""
 	cx, prio, early, aud, ovk, thn, xo, onl, anyp := false, "normal", "-", "-", "-", "", "", "", false
+	wt := "" // 무게 18칸(weight.go) — 빈 값이면 17칸 줄(지시문으로 추정)
 	for len(args) > 0 {
 		a := args[0]
 		switch a {
-		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land", "--after-any-project", "--pr-of":
+		case "--no-early", "--no-audit", "--overlap-ok", "--solo", "--after", "--only", "--priority", "--coord", "--on-land", "--after-any-project", "--pr-of", "--light", "--weight":
 			xo += " " + a // --then과 함께 못 씀
 		}
 		switch a {
+		case "--light":
+			wt, args = weightArg(wt, "light", "light"), args[1:]
+			continue
 		case "--after-any-project":
 			anyp, args = true, args[1:]
 			continue
@@ -70,6 +74,8 @@ func addCmd(args []string) {
 			onl = v
 		case "--pr-of":
 			prof = v
+		case "--weight":
+			wt = weightArg(wt, v, "light", "normal")
 		case "--priority":
 			p, ok := pnorm(v)
 			if !ok {
@@ -174,11 +180,24 @@ func addCmd(args []string) {
 			onlandPut(name, onl, prj, coord)
 		}
 		prOfAdd(name, prof) // 원래 PR 잇기(prof.go)
-		qAdd(tmp, name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk)
+		f := []string{name, prj, bf, after, only, "wait", "-", "-", "-", nowMin(), "-", dash(coord), prio, early, aud, ovk}
+		if wt != "" {
+			f = append(f, wt)
+		}
+		qAdd(tmp, f...)
 	}) != 0 {
 		os.Remove(tmp)
 		exit(1)
 	}
+	say("더함 %s (%s%s)", name, prj, addNote(after, only, coord, prio, early, aud, onl, prof, wt, ovk))
+	dupWarn(name, prj, bf)
+	siblingNote(name, prj, coord, time.Now())
+	thenHint(after, prj)
+	exit(0)
+}
+
+// addNote: 「더함」 줄의 괄호 안(프로젝트 뒤) — 기본값이 아닌 칸만
+func addNote(after, only, coord, prio, early, aud, onl, prof, wt, ovk string) string {
 	note := ""
 	if after != "-" {
 		note = ", 선행 " + after
@@ -201,17 +220,16 @@ func addCmd(args []string) {
 		note += ", 착지 뒤 " + onl
 	}
 	note += prOfNote(prof)
+	if wt != "" {
+		note += ", 무게 " + weightLabel[wt]
+	}
 	switch ovk {
 	case "overlap-ok":
 		note += ", 겹침 봄 끔"
 	case "solo":
 		note += ", 단독"
 	}
-	say("더함 %s (%s%s)", name, prj, note)
-	dupWarn(name, prj, bf)
-	siblingNote(name, prj, coord, time.Now())
-	thenHint(after, prj)
-	exit(0)
+	return note
 }
 
 // siblingNote <레인> <프로젝트> <넣는 지휘> <지금>: 같은 프로젝트에 다른 지휘가 손잡이 sibling_min분 안에 넣은 안 끝난 쓰기 줄(대기·떠 있음·감사 중 —

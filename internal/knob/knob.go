@@ -90,6 +90,7 @@ var Defs = []Def{
 	{Name: "ops_agent_scope", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "운영 에이전트가 볼 프로젝트(쉼표, - = 전부 — 프로젝트를 모르는 항목은 늘 본다)"},
 	{Name: "seats@", Per: "기계", Tool: "hc-fill", Min: 0, Max: 99, Unit: "자리", Desc: "그 기계 자리 상한(설정 machine 줄 상한을 덮음 — hc-fill machine <기계> --seats)"},
 	{Name: "pause@", Per: "기계", Tool: "hc-fill", Enum: []string{"1"}, Desc: "그 기계에 새 레인을 안 띄움(떠 있는 레인·그 레인의 감사는 그대로 — hc-fill machine <기계> --pause)"},
+	{Name: "light_only@", Per: "기계", Tool: "hc-fill", Enum: []string{"0", "1"}, Desc: "1이면 그 기계에는 가벼운 레인(과 그 감사)만 띄우고, 가벼운 레인은 그 기계를 먼저 씀(느린 기계 — docs/hc-fill/load-steer.md, 없거나 0이면 끔)"},
 	// knobs-migrate(2026-11-24): 고정으로 박혔던 hc-fill 설정 키(설정 줄보다 앞선다 — conf가 먼저 본다). 기본은 지금 코드의 값 그대로
 	{Name: "gc", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "끝난 레인 정리 간격(0이면 끔)"},
 	{Name: "idle_empty", Tool: "hc-fill", Default: "0", Min: 0, Max: 1440, Unit: "분", Desc: "띄울 것 없는 빈 자리 묶음 알림 간격(0이면 안 보냄)"},
@@ -131,6 +132,7 @@ var Defs = []Def{
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},
 	{Name: "sweep_r3", Tool: "hc-sweep", Default: "360", Min: 1, Max: 43200, Unit: "분", Remote: true, Desc: "R3: 이만큼 쉬면 닫음"},
 	// 상주 고리가 새 판으로 스스로 넘어가기(2026-11-25 ht-resident-reexec, docs/go/selfexec.md) — 그 기계의 저장 파일만 읽는다(새 판을 본 바퀴에)
+	{Name: "verify_scope", Tool: "verify", Default: "on", Enum: []string{"observe", "on", "off"}, Remote: true, Desc: "검증이 통과 기록과 같은 조각을 건너뜀 — on 건너뜀 · observe 전부 돌고 알림만 · off 지문 없이 전부(환경 변수 HERDR_VERIFY_SCOPE가 앞섬, 못 읽으면 observe — docs/repo/tests.md)"},
 	{Name: "resident_reexec", Tool: "selfexec", Default: "1", Min: 0, Max: 1, Desc: "상주 고리(hc-lane watch·merger, hc-fill watch, herdr-balance --watch, hc-job-server)가 새로 깔린 판으로 스스로 넘어간다(0이면 끔 — 손으로 다시 띄울 때까지 옛 판)"},
 	{Name: "sweep_resident_grace", Tool: "hc-sweep", Default: "5", Min: 1, Max: 1440, Unit: "분", Remote: true, Desc: "새 판이 깔리고(상주가 뜨고) 이만큼 지나도 옛 판·판 모름인 상주에 운영 사건 hc-stale-resident"},
 	{Name: "sweep_test_orphan", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "부모 없는 시험 고아(시험 임시 경로 프로세스)가 이만큼 남아 있으면 운영 사건 hc-test-orphan 한 번(끄지 않음)"},

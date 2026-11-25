@@ -146,13 +146,14 @@ func qset(useID bool, qrid, n, s, m, a, k, e, u string) int {
 	return 0
 }
 
-// pad16: 16칸까지 -로 채우고 17칸 줄 ID
+// pad16: 16칸까지 -로 채우고 17칸 줄 ID. 17번째 값을 주면 18칸(무게)
 func pad16(f ...string) Row {
-	r := Row(append([]string(nil), f...))
+	k := min(len(f), qRID-1)
+	r := Row(append([]string(nil), f[:k]...))
 	for len(r) < qRID-1 {
 		r = append(r, "-")
 	}
-	return append(r, rowid())
+	return append(append(r, rowid()), f[k:]...)
 }
 
 func qHasName(n string) bool {

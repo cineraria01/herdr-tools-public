@@ -383,6 +383,9 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			if after != "" {
 				pre, suf = "먼저 ", " 선행 "+after
 			}
+			if LIGHT && !isa {
+				suf += " " + LIGHTWHY
+			}
 			say("%s%s띄울 %s → %s (%s)%s", P, pre, lane, m, repo, suf)
 			NOW = append(NOW, m)
 			placed, UPNOW = true, UPNOW+","+lane
@@ -463,6 +466,9 @@ func place(lane, p, brief, only, reply, owner, after string) {
 					rs := ""
 					if RESUME {
 						rs = ", 주차한 가지 lane/" + lane + " 에서 이어"
+					}
+					if LIGHT { // 무게 근거(weight.go) — 보통은 지금 줄 그대로
+						rs += ", " + LIGHTWHY
 					}
 					say("띄움 %s → %s %s (%s%s)", lane, m, ADDR, repo, rs)
 				}

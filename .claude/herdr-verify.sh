@@ -7,9 +7,9 @@
 # HERDR_VERIFY_NO_LOCK=1(기계 단위 검증 잠금 — 사용자 캐시 herdr-tools/verify.lock, 무거운 단계 앞, 30분 상한 뒤 그대로 진행 — 을 안 본다)·
 # HERDR_VERIFY_RAMTMP(macOS에서 조각 단계의 TMPDIR을 메모리 디스크로 — 없으면 켬·0 끔·<MB> 크기, 기계 메모리의 1/4을 넘으면 안 켬,
 # 못 만들면 알림 한 줄 뒤 보통 임시 폴더로: 2026-11-24 verify-ramdisk, 디스크의 작은 쓰기가 병목이었다)·
-# HERDR_VERIFY_SCOPE(조각마다 입력 지문과 이 기계의 통과 기록 — 사용자 캐시 herdr-tools/verify-pass: 없음·observe는 전부 돌되 건너뛸 수
-# 있었던 조각을 알리고 모든 조각이 기록과 같을 때만 건너뜀, on은 기록과 같은 조각을 건너뜀, off는 지문 없이 전부 — 2026-11-24 verify-scope,
-# docs/repo/tests.md 「검증의 범위」)·HERDR_VERIFY_RETRY(실패한 홀로 단계·조각을 다른 조각이 다 끝난 뒤 혼자 한 번 다시 — 없으면 상한 3·
+# HERDR_VERIFY_SCOPE(조각마다 입력 지문과 이 기계의 통과 기록 — 사용자 캐시 herdr-tools/verify-pass: on은 기록과 같은 조각을 건너뜀,
+# observe는 전부 돌되 건너뛸 수 있었던 조각을 알리고 모든 조각이 기록과 같을 때만 건너뜀, off는 지문 없이 전부. 없으면 손잡이 verify_scope,
+# 그것도 없으면 on — 2026-11-26 ht-verify-scope-on, docs/repo/tests.md 「검증의 범위」)·HERDR_VERIFY_RETRY(실패한 홀로 단계·조각을 다른 조각이 다 끝난 뒤 혼자 한 번 다시 — 없으면 상한 3·
 # 0 끔·<수> 상한, 흔들림 기록 사용자 캐시 herdr-tools/verify-flaky.log, 2026-11-24 flaky-retry, docs/repo/tests.md 「검증의 흔들림」)·HERDR_VERIFY_NO_LINT는 tests/repo/verify/main.go·
 # tests/repo/secrets_test.go 머리말, 조각 표는 docs/repo/tests.md 「검증의 조각 실행」.
 set -u

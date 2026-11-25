@@ -77,6 +77,7 @@ type Wait struct {
 	Reject        string   // 띄우기 거절 까닭
 	Can           []string // 띄울 수 있는 기계(저장소 있음·기계 제한). nil = 모름(모든 기계로 본다)
 	Wider         []string // 기계 제한 밖이지만 저장소가 있는 기계(--only로 넓힐 수 있는 곳)
+	LightOnly     []string // 보통 레인이라 뺀 가벼운 일만 받는 기계(light_only@ — 기계 제한 안). Can이 비고 여기만 있으면 「가벼운 기계만 남음」
 	Pin           string   // 묶인 기계가 모두 상한·멈춤이라 못 뜬 까닭(바퀴가 pinned.tsv에 적음), 아니면 빈 값
 	PinS          *int     // 그렇게 된 지 초
 }
@@ -214,6 +215,14 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			continue
 		}
 		if parentWait(w) != "" || !old(w) {
+			continue
+		}
+		if len(w.Can) == 0 && len(w.LightOnly) > 0 { // 띄울 곳이 가벼운 일만 받는 기계뿐 — 무게를 고치거나 손잡이를 풀 때까지 안 뜬다
+			add(Item{Key: "light-only:" + w.Lane, Kind: "light-only",
+				What:     "가벼운 기계만 남음: " + w.Lane,
+				Evidence: fmt.Sprintf("보통 레인 · 띄울 수 있는 기계 %s는 가벼운 일만(light_only@) · 기다린 지 %s", strings.Join(w.LightOnly, ","), age(w.AgeS)),
+				Cost:     "안 고치면: 이 줄은 안 뜬다 · --light로 고치면: 느린 기계에서 돌아 오래 걸릴 수 있다(지시문을 보고 정한다)",
+				Next:     []string{"hc-fill edit " + w.Lane + " --light --why '가벼운 레인(hc-fill advise)'"}, Sure: SureJudge})
 			continue
 		}
 		n, _, ft := freeFor(w.Can)

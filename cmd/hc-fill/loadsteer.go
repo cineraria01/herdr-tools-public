@@ -228,9 +228,9 @@ func machAdj(m string) string {
 	es := knobEntries()
 	now := time.Now()
 	var o []string
-	for _, k := range []string{"seats@", "pause@"} {
+	for _, k := range []string{"seats@", "pause@", "light_only@"} {
 		e, ok := es[k+m]
-		if !ok || !e.Live(now) {
+		if !ok || !e.Live(now) || k == "light_only@" && e.Value != "1" {
 			continue
 		}
 		u := "계속"
@@ -238,8 +238,11 @@ func machAdj(m string) string {
 			u = stamp(e.Until) + "까지"
 		}
 		t := "자리 " + e.Value
-		if k == "pause@" {
+		switch k {
+		case "pause@":
 			t = "멈춤"
+		case "light_only@":
+			t = "가벼운 일만"
 		}
 		o = append(o, fmt.Sprintf("%s(%s · %s · %s)", t, e.By, u, e.Why))
 	}
@@ -257,7 +260,8 @@ func mwhy(m, w string) {
 func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[string]string, full string) {
 	repos = map[string]string{}
 	nstatic := 0
-	var pin []string // 묶인 기계(--only)가 상한·멈춤으로 빠진 까닭 — 정적 후보가 모두 그렇면 ONLYFULL(pinned.go)
+	var pin []string      // 묶인 기계(--only)가 상한·멈춤으로 빠진 까닭 — 정적 후보가 모두 그렇면 ONLYFULL(pinned.go)
+	var lightOut []string // 보통 레인이라 뺀 가벼운 일만 받는 기계
 	defer func() { pinFinish(only, isa, nstatic, pin, cands) }()
 	for _, mc := range machines() {
 		m := mc.Name
@@ -269,6 +273,11 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 		}
 		repo := repoOf(p, m)
 		if repo == "" {
+			continue
+		}
+		if !isa && !LIGHT && machLight(m) { // 가벼운 일만 받는 기계(weight.go) — 보통 레인의 정적 후보가 아니다(능력이 없는 기계처럼)
+			mwhy(m, "가벼운 일만")
+			lightOut = append(lightOut, m)
 			continue
 		}
 		nstatic++ // 여기까지는 설정·지시문만 본 정적 후보(--only·능력·repo) — 아래는 그 순간의 상태
@@ -325,6 +334,12 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 	}
 	if !isa {
 		cands = steer(lane, cands, nstatic > 1)
+		if LIGHT {
+			cands = lightFirst(cands)
+		}
+	}
+	if nstatic == 0 && len(lightOut) > 0 {
+		say("기다림 %s: 가벼운 기계만 남음(%s — light_only) · 보통 레인이다. 가벼운 레인이면 hc-fill edit %s --light", lane, strings.Join(lightOut, ","), lane)
 	}
 	return cands, repos, full
 }
@@ -502,97 +517,4 @@ func machineLines(withEmpty bool) []string {
 		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), machAdj(mc.Name), x.why)+rn[mc.Name])
 	}
 	return o
-}
-
-// machine [<기계> (--seats <n>|- | --pause | --resume) [--for <분>] [--why <글>] [--force]] — 인자 없으면 기계 줄
-func machineCmd(args []string) {
-	if len(args) == 1 && args[0] == "--json" {
-		machineJSON()
-		exit(0)
-	}
-	if len(args) > 0 && args[0] == "--rename" { // 기계 이름 바꾸기(rename.go)
-		machineRename(args[1:])
-	}
-	args, dryM := takeDry(args)
-	if len(args) == 0 {
-		for _, l := range machineLines(true) {
-			fmt.Println(l)
-		}
-		exit(0)
-	}
-	m := args[0]
-	if strings.HasPrefix(m, "-") {
-		usage()
-	}
-	if !machineKnown(m) {
-		die("설정에 없는 기계: %s — machine 줄의 이름만", m)
-	}
-	act, val, why, forM, force := "", "", "", "", false
-	for i := 1; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--seats" && i+1 < len(args) && act == "":
-			act, val = "seats", args[i+1]
-			i++
-		case (a == "--pause" || a == "--resume") && act == "":
-			act = a[2:]
-		case (a == "--why" || a == "--for") && i+1 < len(args):
-			if a == "--why" {
-				why = args[i+1]
-			} else {
-				forM = args[i+1]
-			}
-			i++
-		case a == "--force":
-			force = true
-		default:
-			usage()
-		}
-	}
-	if act == "" || (forM != "" && (act == "resume" || val == "-")) {
-		usage()
-	}
-	now := time.Now()
-	var err error
-	k := map[string]string{"seats": "seats@" + m, "pause": "pause@" + m, "resume": "pause@" + m}[act]
-	if act == "resume" || val == "-" {
-		var a []string
-		if a = []string{k}; force {
-			a = append(a, "--force")
-		}
-		if dryM {
-			a = append(a, "--dry-run")
-		}
-		err = knobUnset(a, now)
-	} else {
-		v := val
-		if act == "pause" {
-			v = "1"
-		}
-		a := []string{k, v, "--why", why}
-		if forM != "" {
-			a = append(a, "--for", forM)
-		}
-		if force {
-			a = append(a, "--force")
-		}
-		if dryM {
-			a = append(a, "--dry-run")
-		}
-		err = knobSet(a, now)
-	}
-	if err != nil {
-		die("%v", err)
-	}
-	if dryM { // 미리 보기는 조정 기록도 안 남긴다
-		exit(0)
-	}
-	what := act
-	if act == "seats" {
-		what = "seats " + val
-	}
-	if e := appendLine(DATA+"/machine.log", strings.Join([]string{stampLog(), knobBy(), m, what, dash(flat1(forM)), dash(flat1(why))}, "\t")); e != nil {
-		fmt.Fprintf(os.Stderr, "hc-fill: 조정 기록을 남기지 못함: %v\n", e)
-	}
-	exit(0)
 }

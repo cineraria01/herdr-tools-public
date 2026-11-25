@@ -362,8 +362,14 @@ func (m *M) runRemote(v verified.Verifier) (int, string) {
 }
 
 // landWrap: 워커 터미널의 감싸개 — land-run이 결과 파일을 못 썼으면(시작 못 함: hc-lane 없음 127·옛 판 「알 수 없는 인자」 1·폴더 못
-// 만듦 70 등) 「nostart <종료>」를 적는다. 병합기는 그것을 착지 실패가 아니라 워커가 죽은 것으로 본다(반송하지 않음)
-const landWrap = `R=$HC_MERGER_LAND_RESULT; mkdir -p "$HC_MERGER_LAND_DIR" || exit 70; rm -f "$R"; "$@"; r=$?; [ -s "$R" ] || echo "nostart $r" >"$R"; exit $r`
+// 만듦 70 등) 「nostart <종료>」를 적는다. 병합기는 그것을 착지 실패가 아니라 워커가 죽은 것으로 본다(반송하지 않음).
+// 터미널이 신호로 끊기면(hc kill — 무리에 HUP·TERM, 약 1초 뒤 KILL: hc 0.1.22 실측) 그 자리에서 결과가 없으면 「killed」를 적는다
+// — 덫이 없으면 셸이 먼저 죽어 결과 없이 터미널만 사라졌다(2026-11-26 ht-land-run-killed). 착지는 뒤로 띄워 wait로 기다린다:
+// 앞일이면 셸이 착지가 거두고 끝날 때까지 덫을 미뤄 1초 뒤 KILL에 잘렸다(감사 atp2sd0 중간 1). 착지는 같은 무리라 신호를 따로
+// 받는다 — 그사이 넣었으면 차례가 이미 지워져 병합기 recover가 완료로, 넣는 중이면 차례 lease가 두 번 넣기를 막는다.
+// 처음부터 KILL이면 못 적는다(그때는 병합기가 터미널 없음으로 본다)
+const landWrap = `R=$HC_MERGER_LAND_RESULT; mkdir -p "$HC_MERGER_LAND_DIR" || exit 70; rm -f "$R"; ` +
+	`trap '[ -s "$R" ] || echo killed >"$R"; exit 129' HUP TERM INT; "$@" & p=$!; wait $p; r=$?; [ -s "$R" ] || echo "nostart $r" >"$R"; exit $r`
 
 // landPoll: 워커 착지 결과를 읽는 간격(시험이 줄인다) · landMiss: 결과 읽기가 이만큼 잇달아 안 닿으면 끊김(기본 20번 ≈ 5분)
 var (
@@ -410,6 +416,9 @@ func landParse(r string) (int, string) {
 	if n, err := strconv.Atoi(r); err == nil {
 		return n, ""
 	}
+	if r == "killed" {
+		return 0, "워커 착지가 신호로 끊김(hc kill 등)"
+	}
 	if c, ok := strings.CutPrefix(r, "nostart "); ok {
 		return 0, "워커가 착지를 시작 못 함(종료 " + c + ")"
 	}
@@ -436,7 +445,7 @@ func landLogTail(lf *os.File, mach, lg string) {
 }
 
 // landRunMain: hc-lane merger --land-run <기본 브랜치> <차례 커밋> — 워커 쪽(병합기가 hc run --on으로, 그 기계 클론에서 landWrap 안에).
-// 차례 커밋의 부모(후보)를 <폴더>/<차례 12>(폴더 = HC_MERGER_LAND_DIR, 없으면 <클론>.land-wt)에 hc-merger-land/<레인> 가지로 꺼내
+// 차례 커밋의 부모(후보)를 <폴더>/<차례 12>(폴더 = HC_MERGER_LAND_DIR, 없으면 <클론>.land-wt)에 hc-merger-land/<레인>-<차례 12> 가지로 꺼내
 // 준비 훅 → hc-lane land(병합기와 같은 환경 — 부른 쪽이 env로). 로그는 <폴더>/<차례 12>.log. 착지 단계에 들어섰으면 종료 코드를
 // HC_MERGER_LAND_RESULT 파일에 적는다(못 적은 끝은 감싸개가 「nostart」). 종료: 착지 종료 코드 · 75 준비 훅 실패 · 70 시작 못 함 · 2 인자
 func landRunMain(a []string) int {
@@ -491,7 +500,7 @@ func landRun(a []string) (int, bool) {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: --land-run — 착지 차례가 바뀌었다(%s ≠ %s), 착지하지 않는다\n", first8(got), first8(cm))
 		return rcLandRunNot, false
 	}
-	wt, br := dir+"/"+cm[:12], "hc-merger-land/"+ln
+	wt, br := dir+"/"+cm[:12], landBranch(ln, cm)
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — 작업 폴더를 만들지 못했다")
 		return rcLandRunNot, false
@@ -531,6 +540,11 @@ func landRun(a []string) (int, bool) {
 	}
 	return rc, true
 }
+
+// landBranch: 착지 작업 트리의 가지 — 실행(차례)마다 다른 이름. 레인 이름만이면 신호로 끊겨 defer가 못 돈 앞 실행의 작업 트리가 그
+// 가지를 쥐어 같은 레인의 다음 실행이 시작도 못 했다(2026-11-26 ht-land-run-killed — 「used by worktree」 → nostart 70). 남은 것은
+// landSweep이 하루 뒤 치운다. 「/」가 아니라 「-」로 잇는다 — 옛 이름 hc-merger-land/<레인> 가지와 참조 폴더·파일로 부딪히지 않게
+func landBranch(ln, cm string) string { return "hc-merger-land/" + ln + "-" + cm[:12] }
 
 // landRmWT: 착지 작업 트리를 지운다(git이 못 지우면 폴더째 — <폴더> 아래만), 등록은 prune
 func landRmWT(wt string) {

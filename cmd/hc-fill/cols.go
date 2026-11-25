@@ -22,7 +22,8 @@ const (
 	qAudit   = 15 // 자동 감사(-·no-audit·auto·audit=<레인>)
 	qOverlap = 16 // 겹침칸(-·solo·overlap-ok)
 	qRID     = 17 // 줄 ID(16칸까지의 옛 줄은 빈 값)
-	qNF      = 17 // 지금 꼴 칸 수
+	qWeight  = 18 // 무게(light·normal — 지휘가 add·edit --light|--weight로, 없거나 -면 지시문으로 추정, weight.go)
+	qNF      = 18 // 지금 꼴 칸 수(18칸은 무게를 정한 줄에만 — 그 밖은 17칸)
 )
 
 // 감사 기록 audit.tsv(docs/hc-fill/audit.md) — 한 줄 = 한 차수. 17칸 미만(옛 7칸) 줄은 아래 ato…로 읽어 한 번 옮긴다

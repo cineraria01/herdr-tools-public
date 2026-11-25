@@ -34,7 +34,7 @@
 | `merger-alive.tsv` · `seen.tsv` | 기계, 주소 |
 | `held.tsv` · `nudge.tsv` · `onland.tsv` · `onland/*.pending` | 주소 |
 | `reland.tsv` | 주인 주소, 보냄·다시 냄 줄의 주소(다른 줄의 그 칸은 레인 이름·결과 글이라 그대로) |
-| 손잡이 `~/.local/state/herdr-ops/knobs.tsv` | 기계 묶음 손잡이 이름(`seats@<기계>`·`pause@<기계>`) |
+| 손잡이 `~/.local/state/herdr-ops/knobs.tsv` | 기계 묶음 손잡이 이름(`seats@<기계>`·`pause@<기계>`·`light_only@<기계>`) |
 | 원격 `refs/herdr/merger/<기계>` | 같은 커밋으로 새 이름에 옮긴다 — 새 참조는 없을 때만 만들고 옛 참조는 본 값일 때만 지운다(한 번의 `--atomic` push) |
 
 - 바꾸지 않는 것: `machine.log`(지난 조정 기록), `briefs/<기계>/`(받은편지 지시문 사본 — 대기열의 지시문 경로가 그 폴더를 가리킨다), 사건(hc-lane — 이미 적힌 줄은 그대로).
