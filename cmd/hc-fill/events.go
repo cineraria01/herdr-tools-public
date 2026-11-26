@@ -3,13 +3,16 @@ package main
 // 레인 사건 — 셸 판 lib/hc-fill/audit.sh의 mgres·ev_tick·park_tick·wcnt
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/tri"
 )
 
@@ -211,8 +214,68 @@ func parkTick() {
 		}
 		if qset(true, rid, n, "wait", "-", "-", st, "parked", "") == 0 {
 			fmt.Println("주차 " + n + ": " + a + " 가 lane/" + n + " (" + head(evF(PKL, evSHA), 8) + ")에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움" + w)
+			if gone, why := parkClose(n, a, m); !gone {
+				fmt.Println("주차 터미널 남김 " + a + " (" + n + "): " + why + " — 다음 바퀴에 다시 본다")
+			}
 		}
 	}
+}
+
+// parkClose <레인> <주소> <기계>: 주차를 보고하고 차례를 끝낸 터미널을 닫는다(ht-park-close-term, 2026-11-26 — 정리까지 중앙 33분 남아
+// 이어 띄우기가 「같은 이름」으로 13바퀴 거절됐다). hc-sweep의 「닫아도 되는 터미널」과 같이 살아 있고 이름이 그 레인이고 done·idle
+// (또는 hc keep이 셸만 남김)일 때, 그 실행(<주소>@<created_ms>)의 마지막 보고(정리됨 빼고)가 「주차」면 그 정확한 주소로 hc kill.
+// 주차 뒤 닫힘은 hc-lane 감시가 조용히 넘긴다(handedOff). 반환: 이제 없음(닫았거나 이미 없음)·남긴 까닭
+func parkClose(n, a, m string) (bool, string) {
+	if EVBAD || m != LOCAL && (!connHas(m) || has(evUnk(), m)) {
+		return false, "사건 모름"
+	}
+	t, found, err := hcGet(a)
+	switch {
+	case err != nil:
+		return false, "hc get 모름"
+	case !found || t.State == "finished":
+		return true, "이미 없음"
+	case !t.HasName || t.Name != n || t.Created <= 0:
+		return false, "이름·실행이 다름(" + dash(t.Name) + ")"
+	case t.Status != "done" && t.Status != "idle" && !keepShellIdle(t):
+		return false, "상태 " + dash(t.Status)
+	}
+	saved := EV
+	EV = evNoClean()
+	l := runlast(n, a, a[strings.LastIndexByte(a, '/')+1:]+"@"+strconv.FormatInt(t.Created, 10), "")
+	EV = saved
+	if evF(l, evState) != "주차" {
+		return false, "그 실행의 마지막 보고가 주차 아님(" + dash(evF(l, evState)) + ")"
+	}
+	if dry {
+		fmt.Println(P + "주차 터미널 닫을 " + a + " (" + n + ")")
+		return false, "dry-run"
+	}
+	if _, rc := (Cmd{Name: "hc", Args: []string{"kill", a}, Err: errMerge}).Run(); rc != 0 {
+		return false, fmt.Sprintf("hc kill 종료 %d", rc)
+	}
+	fmt.Println("주차 터미널 닫음 " + a + " (" + n + ", " + dash(t.Status) + ")")
+	return true, ""
+}
+
+// keepShellIdle: hc keep이 끝난 에이전트 대신 셸만 남긴 쉬는 터미널인가 — keep이고, hc-lane·herdr-hooks가 함께 쓰는 판정
+// hcjson.AgentState가 「셸만 남음」(전경 pid가 맨 위 셸과 같고 대화형 셸·status 없음)일 때. 셸에서 무엇이 돌거나 모르면 거짓
+// (감사 atp41h9-ie3gcc·atp42ip-3tgv31 — hc get에는 agent·foreground.self 칸이 없다)
+func keepShellIdle(t hcjson.Terminal) bool {
+	var keep bool
+	st, _ := hcjson.AgentState(t)
+	return json.Unmarshal(t.Raw["keep"], &keep) == nil && keep && st == tri.No
+}
+
+// evNoClean: EV에서 「정리됨」을 뺀 줄(report만)
+func evNoClean() []string {
+	var f []string
+	for _, e := range EV {
+		if splitRow(e).F(evState) != "정리됨" {
+			f = append(f, e)
+		}
+	}
+	return f
 }
 
 // wcnt <레인>: 그 줄을 --after로 기다리는 줄 수

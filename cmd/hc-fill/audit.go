@@ -239,13 +239,7 @@ func parkev(lane, addr, m string) tri.State {
 		return tri.Unknown
 	}
 	saved := EV
-	var f []string
-	for _, e := range EV {
-		if splitRow(e).F(evState) != "정리됨" {
-			f = append(f, e)
-		}
-	}
-	EV = f
+	EV = evNoClean()
 	PKL = joblast(lane, addr, "")
 	EV = saved
 	return tri.Of(evF(PKL, evState) == "주차")

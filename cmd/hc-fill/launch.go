@@ -344,9 +344,7 @@ func lanesOn(m string) int {
 // 실행 키)의 마지막 사건(정리됨 빼고)이 제출·착지. 띄운 직후(작업 트리 있고 사건 없음)·모름은 false(자리로 센다). 2026-11-21 mini-m4
 // land-claim-net이 착지·정리 뒤 keep 셸로 13시간 자리를 붙잡았다
 func laneEnded(t Term) bool {
-	switch strings.TrimPrefix(t.Agent, "-") {
-	case "zsh", "bash", "sh", "fish", "dash", "ksh":
-	default:
+	if !shellAgent(t.Agent) {
 		return false
 	}
 	if t.M == LOCAL && strings.HasPrefix(t.Cwd, "/") {
@@ -366,6 +364,15 @@ func laneEnded(t Term) bool {
 		}
 	}
 	return last == "제출" || last == "착지"
+}
+
+// shellAgent: 전경 프로그램이 셸인가(hc keep이 끝난 에이전트 대신 띄운 셸)
+func shellAgent(a string) bool {
+	switch strings.TrimPrefix(a, "-") {
+	case "zsh", "bash", "sh", "fish", "dash", "ksh":
+		return true
+	}
+	return false
 }
 
 // tryput: 시도 기록(이름·줄 ID·기계·먼저·감사·확정 주소·실행). 대기열에서 빠져도 그 터미널이 끝날 때까지 보존한다. 0 됨
@@ -545,22 +552,23 @@ func tryget(name, rid, m string) (string, bool) {
 	return "", false
 }
 
-// park_candidate: 주차한 줄에서 채택할 수 있는 것은 같은 줄의 --resume 시도뿐이다. 주차를 보고한 터미널은 정리가 끝날 때까지 기다린다.
-// 0 채택 · 1 건너뜀 · 2 기다림
-func parkCandidate(name, rid, m, addr, st string) int {
+// park_candidate: 주차한 줄에서 채택할 수 있는 것은 같은 줄의 --resume 시도뿐이다. 같은 이름의 다른 터미널은 이어 띄우기(hc-lane
+// --resume)를 「같은 이름」으로 막으니, 주차를 보고하고 끝낸 터미널이면 닫고(parkClose) 아니면 기다린다(ht-park-close-term — 예전엔
+// done·idle을 건너뛰고 띄워 13바퀴 거절이 「자리 없음」으로 찍혔다). 0 채택 · 1 건너뜀(닫혀 없음) · 2 기다림(까닭)
+func parkCandidate(name, rid, m, addr, st string) (int, string) {
 	attempt, _ := tryget(name, rid, m)
 	if strings.SplitN(attempt, "\t", 2)[0] == "resumed" {
 		if EVBAD || has(EV, "모름 "+m) || pget(addr) != pLive {
-			return 2
+			return 2, "이어 띄운 실행 " + addr + " 확인 못 함"
 		}
 		if runlast(name, addr, PRUN, "주차") == "" {
-			return 0
+			return 0, ""
 		}
 	}
-	if st == "done" || st == "idle" {
-		return 1
+	if gone, why := parkClose(name, addr, m); !gone {
+		return 2, "같은 이름 주차 터미널 살아 있음 " + addr + " (" + dash(st) + ", 안 닫음: " + why + ")"
 	}
-	return 2
+	return 1, ""
 }
 
 // inproj <프로젝트> <기계> <cwd>: cwd가 그 기계 그 프로젝트 저장소(또는 <저장소>.wt/ 아래)면 참

@@ -274,7 +274,7 @@ func waitRow(r Row) {
 		return
 	}
 	var live *Term
-	parkbusy := false
+	parkbusy := "" // 주차 줄인데 같은 이름 터미널을 못 닫은 까닭 — 띄우지 않는다(hc-lane --resume이 「같은 이름」으로 거절)
 	for i := range TERMS {
 		t := &TERMS[i]
 		if t.Name != name || t.Addr == "" || inlist(t.M+"="+t.Addr, stuck) {
@@ -288,11 +288,11 @@ func waitRow(r Row) {
 			continue
 		}
 		if dash(ef) == "parked" {
-			switch parkCandidate(name, rid, t.M, t.Addr, t.Status) {
+			switch pc, why := parkCandidate(name, rid, t.M, t.Addr, t.Status); pc {
 			case 1:
 				continue
 			case 2:
-				parkbusy = true
+				parkbusy = why
 				continue
 			}
 		}
@@ -303,8 +303,8 @@ func waitRow(r Row) {
 		adopt(name, rid, dash(reply), live)
 		return
 	}
-	if parkbusy {
-		say("주차 정리 기다림 %s", name)
+	if parkbusy != "" {
+		say("주차 정리 기다림 %s: %s", name, parkbusy)
 		return
 	}
 	if tryUnsure(name, rid) {
