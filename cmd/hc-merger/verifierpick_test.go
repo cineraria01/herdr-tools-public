@@ -275,3 +275,33 @@ func TestPreSpecNeedsIdle(t *testing.T) {
 		t.Fatalf("⑥ 한가해지면 다음 바퀴에 띄운다: %v", d)
 	}
 }
+
+// 감사 atp3g05 중간 1(ht-skew-verify-cause): 검증 스크립트가 exec로 다른 실행 파일(저장소의 Go 검증 바이너리 등)로 바뀌면 명령 줄에 스크립트 경로가
+// 안 남는다 — 오래 사는 부모(추측 일꾼 --spec-verify·착지 일꾼 --land-run·hc-lane land)를 검증 하나로 센다. 한 검증 나무는 한 번(조상이
+// 이미 센 것이면 안 셈), 재는 프로세스 자신과 그 조상(바쁨 기다림 중인 추측 일꾼)은 안 센다
+func TestVerifyCount(t *testing.T) {
+	ps := strings.Join([]string{
+		"   10     1 /u/.local/bin/hc-merger --spec-verify abc123 main",
+		"   11    10 /u/.cache/app-verify", // exec로 바뀐 검증 — 위 일꾼 하나로
+		"   12    11 node --test x.test.js",
+		"   20     1 /u/.local/bin/hc-lane land main",
+		"   21    20 /u/.cache/herdr-tools/verify",
+		"   30     1 /bin/zsh -c eval 'bash " + verified.Script + " > /tmp/o'",
+		"   31    30 bash " + verified.Script, // 껍데기와 그 자식 — 하나로
+		"   40     1 sh -c x hc-merger-land hc-lane merger --land-run main c0ffee",
+		"   41    40 /u/.local/bin/hc-merger --land-run main c0ffee",
+		"   50     1 /u/.local/bin/hc-merger --spec-verify def456 main", // 재는 자신(바쁨 기다림) — 안 셈
+		"   51    50 /u/.local/bin/hc-lane merger --spec-idle",
+		"   60     1 /u/.local/bin/hc-lane report 완료 HEAD", // 검증 아님
+		"   61     1 grep spec-verify",
+	}, "\n")
+	if n := verifyCount(ps, 51); n != 4 {
+		t.Fatalf("검증 %d, want 4(일꾼·착지·껍데기·착지 일꾼)", n)
+	}
+	if n := verifyCount(ps, 999); n != 5 {
+		t.Fatalf("조상 밖에서 재면 50도 센다: %d", n)
+	}
+	if i, ok := localIdle(); !ok || i.cpus <= 0 {
+		t.Fatalf("이 기계 재기: %v %v", i, ok)
+	}
+}

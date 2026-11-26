@@ -61,3 +61,32 @@ func TestSkewMovableNotReady(t *testing.T) {
 		t.Fatalf("옮길 줄: %q", got)
 	}
 }
+
+// ht-skew-verify-cause: 바쁜 기계 글에 도는 저장소 검증 수 — 레인 0·검증 1이면 「검증 1」, 모름이면 그 칸 없음, 0이면 지금 글 그대로.
+// 상태 한 장 기계 줄도 같은 값(모름·0이면 없음)
+func TestSkewVerifies(t *testing.T) {
+	f := Facts{Waits: []Wait{{Lane: "w1", Project: "p", Can: []string{"h"}}}}
+	for _, c := range []struct {
+		lanes, ver *int
+		want       string
+	}{
+		{ip(0), ip(1), "바쁨 h 3.00(도는 레인 0 · 검증 1) "},
+		{ip(0), nil, "바쁨 h 3.00(도는 레인 0) "},
+		{ip(2), ip(0), "바쁨 h 3.00(도는 레인 2) "},
+	} {
+		s := skewBase()
+		s.Machines[0].Lanes, s.Machines[0].Verifies = c.lanes, c.ver
+		it := kinds(Advise(s, f, ath), "skew")
+		if len(it) != 1 || !strings.Contains(it[0].Evidence, c.want) {
+			t.Errorf("근거에 %q 없음: %+v", c.want, it)
+		}
+		var b strings.Builder
+		if err := Human(&b, s); err != nil {
+			t.Fatal(err)
+		}
+		has := strings.Contains(b.String(), "레인 0/4 · 검증 1")
+		if has != (c.ver != nil && *c.ver > 0) || c.ver == nil && strings.Contains(b.String(), "검증") {
+			t.Errorf("기계 줄 검증 칸(%v): %s", c.ver, b.String())
+		}
+	}
+}

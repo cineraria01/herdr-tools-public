@@ -47,6 +47,7 @@
 ## 모름
 
 - 마지막 바퀴에 그 기계 부하를 못 읽었으면(읽은 때가 바퀴 끝보다 5분 넘게 앞) `load1`·`cores`·`load_per_core`는 `null`이고 치우침에도 안 쓴다.
+- `verifies`는 부하와 같은 호출에서 읽어 같은 규칙으로 `null`이고, 그 기계에서 `hc-lane merger --spec-idle`을 못 부르면(옛 판 등) 부하만 있고 `null`이다. 기계 줄·치우침 근거에는 1 이상일 때만 「검증 n」으로 보인다(모름을 0으로 적지 않는다, 2026-11-26 ht-skew-verify-cause — 레인 0인 바쁜 기계가 병합기 추측 검증으로 바빴는데 「도는 레인 0」만 보여 같은 날 두 번 손으로 찾았다).
 - 닿지 못한 기계(`hc machine ls`에서 연결 아님)는 `reach: unknown`·`why: 연결 안 됨`이고 잰 칸은 모두 `null`이다 — 바퀴 기록에 지난 부하가 있어도 지금 값으로 적지 않는다.
 - `hc machine ls`를 못 읽으면 이 기계 말고는 모두 `연결 모름`. `hc ls`를 못 읽으면 레인 단계가 「모름(hc ls 못 읽음)」이고 `lanes`·`watch[].alive`는 `null`.
 - 아직 모으는 곳이 없는 칸은 `null`이다:
@@ -103,6 +104,7 @@
 | `machines[].live` | 살아 있는 에이전트 수 |
 | `machines[].seats` | 자리 상한 |
 | `machines[].lanes` | hc-fill이 띄운 레인 수 |
+| `machines[].verifies` | 도는 저장소 검증 수(레인·추측·착지 검증 합친 검증 나무 수, `hc-lane merger --spec-idle`과 같은 셈, 부하와 같은 때 읽음) |
 | `machines[].lane_cap` | hc-fill 레인 상한 |
 | `machines[].health` | 건강 |
 | `machines[].health.sleep` | 잠자기 끔 상태 |

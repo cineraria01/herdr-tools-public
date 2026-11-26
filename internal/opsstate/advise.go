@@ -441,7 +441,7 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 		}
 		switch p := *m.LoadPerCore; {
 		case p >= th.SkewHi:
-			hot = append(hot, fmt.Sprintf("%s %.2f(도는 레인 %s)", m.Name, p, ival(m.Lanes)))
+			hot = append(hot, fmt.Sprintf("%s %.2f(도는 레인 %s%s)", m.Name, p, ival(m.Lanes), VerNote(m.Verifies)))
 			hotSet[m.Name] = true
 		case p <= th.SkewLo:
 			cool = append(cool, fmt.Sprintf("%s %.2f", m.Name, p))
@@ -455,6 +455,15 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 			Cost: "바쁜 기계의 레인·검증이 느려진다", Next: []string{"hc-fill machine"}, Sure: SureJudge})
 	}
 	return o
+}
+
+// VerNote: 도는 저장소 검증이 있으면 「 · 검증 n」 — 레인 0인 바쁜 기계의 까닭(병합기 추측 검증 등, ht-skew-verify-cause).
+// 모름(nil)·0은 빈 글: 모름을 0으로 적지 않고, 0이면 지금 글 그대로
+func VerNote(v *int) string {
+	if v == nil || *v <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" · 검증 %d", *v)
 }
 
 // SkewMovable: 치우침을 옮길 수 있는 대기 줄 — 띄울 차례인 줄(거절·겹침·단독·대기 줄 선행이 아님) 가운데 자리가 남는 후보

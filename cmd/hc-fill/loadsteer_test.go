@@ -47,6 +47,35 @@ func TestLoadParse(t *testing.T) {
 	}
 }
 
+// ht-skew-verify-cause: 부하 조각에 실린 hc-lane merger --spec-idle 한 줄의 verifies= → 도는 검증 수. 그 줄이 없거나 꼴이 틀리면 모름
+func TestLoadParseVerifies(t *testing.T) {
+	for _, c := range []struct {
+		in    string
+		ok    bool
+		ver   int
+		verOK bool
+	}{
+		{"load 2.0 8\nload=2.00 cpus=8 verifies=1\n", true, 1, true},
+		{"load=2.00 cpus=8 verifies=0\nload 2.0 8", true, 0, true},
+		{"load 2.0 8\n", true, 0, false},
+		{"load 2.0 8\nload=2.00 cpus=8 verifies=x\n", true, 0, false},
+		{"load 2.0 8\nload=2.00 cpus=8\n", true, 0, false},
+	} {
+		l := loadParse(c.in)
+		if l.OK != c.ok || l.Ver != c.ver || l.VerOK != c.verOK {
+			t.Errorf("%q: %+v", c.in, l)
+		}
+	}
+	if !strings.Contains(loadLine("a", mLoad{L1: 8, Cores: 8, OK: true, Ver: 1, VerOK: true}, 0, 3, "", ""), "부하 8.0/8(코어당 1.00) · 검증 1") {
+		t.Error("기계 줄에 검증 1 없음")
+	}
+	for _, l := range []mLoad{{L1: 8, Cores: 8, OK: true}, {L1: 8, Cores: 8, OK: true, VerOK: true}} {
+		if s := loadLine("a", l, 0, 3, "", ""); strings.Contains(s, "검증") {
+			t.Errorf("모름·0인데 검증 칸: %s", s)
+		}
+	}
+}
+
 // ① 자리가 남는 두 기계 — 코어당 부하가 낮은 쪽이 앞(고치기 전: 설정 차례 그대로)
 func TestLoadOrderLowFirst(t *testing.T) {
 	ms := lsMs("a", "b")

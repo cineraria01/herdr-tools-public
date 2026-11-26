@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +34,7 @@ import (
 type idleInfo struct {
 	load     float64
 	cpus     int
-	verifies int // 도는 저장소 검증(.claude/herdr-verify.sh를 돌리는 프로세스) 수
+	verifies int // 도는 저장소 검증 나무 수(verifyCount)
 }
 
 func (i idleInfo) String() string {
@@ -76,23 +78,71 @@ func parseIdle(s string) (idleInfo, bool) {
 // idleProbe: 이 기계를 잰다(시험이 바꾼다)
 var idleProbe = localIdle
 
-// localIdle: 1분 부하·코어 수·도는 저장소 검증 수(ps). 못 재면 ok=false
+// localIdle: 1분 부하·코어 수·도는 저장소 검증 수(ps — verifyCount). 못 재면 ok=false
 func localIdle() (idleInfo, bool) {
 	l, ok := load1()
 	if !ok {
 		return idleInfo{}, false
 	}
-	o, err := exec.Command("ps", "-A", "-o", "args=").Output()
+	o, err := exec.Command("ps", "-A", "-o", "pid=,ppid=,args=").Output()
 	if err != nil {
 		return idleInfo{}, false
 	}
-	n := 0
-	for _, line := range strings.Split(string(o), "\n") {
-		if strings.Contains(line, verified.Script) {
-			n++
+	return idleInfo{load: l, cpus: runtime.NumCPU(), verifies: verifyCount(string(o), os.Getpid())}, true
+}
+
+// verifyMark: 검증 나무의 뿌리 표식 — 명령 줄에 검증 스크립트가 든 것, 또는 검증하는 동안 살아 있는 부모(추측 일꾼 --spec-verify,
+// 착지 일꾼 --land-run, hc-lane land). 스크립트가 exec로 다른 실행 파일(저장소의 Go 검증 바이너리 등)로 바뀌면 스크립트 경로가 명령 줄에서 사라져
+// 부모로만 잡힌다(감사 atp3g05 중간 1). ponytail: hc-lane land는 rebase·push 동안도 센다 — 짧아서 그대로, 검증 등록부가 생기면 그것으로
+func verifyMark(args string) bool {
+	f := strings.Fields(args)
+	if strings.Contains(args, verified.Script) || slices.Contains(f, "--spec-verify") || slices.Contains(f, "--land-run") {
+		return true
+	}
+	return len(f) > 1 && filepath.Base(f[0]) == "hc-lane" && f[1] == "land"
+}
+
+// verifyCount: 「pid ppid args」 표에서 도는 검증 나무 수 — 표식 프로세스 가운데 조상에 표식이 없는 것만(껍데기와 그 자식은 하나).
+// 재는 프로세스 self와 그 조상은 빼고 본다(바쁨 기다림 중인 추측 일꾼이 자신을 세지 않게)
+func verifyCount(ps string, self int) int {
+	type pr struct {
+		pp   int
+		mark bool
+	}
+	t := map[int]pr{}
+	for _, line := range strings.Split(ps, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(f[0])
+		pp, e2 := strconv.Atoi(f[1])
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		t[pid] = pr{pp, verifyMark(strings.Join(f[2:], " "))}
+	}
+	mine := map[int]bool{}
+	for p, n := self, 0; p > 1 && n < 256 && !mine[p]; p, n = t[p].pp, n+1 {
+		mine[p] = true
+	}
+	c := 0
+	for pid, x := range t {
+		if !x.mark || mine[pid] {
+			continue
+		}
+		root := true
+		for p, n := x.pp, 0; p > 1 && n < 256; p, n = t[p].pp, n+1 {
+			if t[p].mark && !mine[p] {
+				root = false
+				break
+			}
+		}
+		if root {
+			c++
 		}
 	}
-	return idleInfo{load: l, cpus: runtime.NumCPU(), verifies: n}, true
+	return c
 }
 
 // specIdleMain: hc-lane merger --spec-idle — 이 기계의 한가함 한 줄(병합기가 hc exec --on으로 부른다). 못 재면 종료 1

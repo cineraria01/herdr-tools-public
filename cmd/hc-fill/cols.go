@@ -256,6 +256,7 @@ const (
 	loWhy   = 7
 	loHot   = 8
 	loSent  = 9
+	loVer   = 10 // 도는 저장소 검증 수(「-」 모름) — 옛 판 줄에는 없어 loNF는 그대로
 	loNF    = 9
 
 	// 묶인 기계 pinned.tsv 「레인 줄ID 처음 본 초 까닭」(pinned.go)

@@ -225,7 +225,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 			// 마지막 바퀴에 그 기계 부하를 못 읽었으면(loadEnd가 지난 값을 읽은 때와 함께 남긴다) 모름 — 지난 값을 지금 값으로 적지 않는다(감사 atozipa 낮음 2)
 			// ponytail: 「그 바퀴」는 바퀴 끝 5분 안에 읽은 것 — 바퀴가 5분 넘게 걸리면 그 바퀴 값도 모름이 된다
 			if rec.l.OK && rec.l.At+stateLoadFresh >= end {
-				x.Load1, x.Cores, x.LoadPerCore = ptrF(rec.l.L1), ptrI(rec.l.Cores), ptrF(rec.l.Per())
+				x.Load1, x.Cores, x.LoadPerCore, x.Verifies = ptrF(rec.l.L1), ptrI(rec.l.Cores), ptrF(rec.l.Per()), rec.l.verPtr()
 			}
 		}
 		s.Machines = append(s.Machines, x)

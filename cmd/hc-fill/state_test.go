@@ -117,18 +117,23 @@ func TestStateCollectConnUnknown(t *testing.T) {
 func TestStateCollectStaleLoad(t *testing.T) {
 	stFx(t, `{"machines":[{"name":"w","state":"connected"},{"name":"x","state":"connected"}]}`)
 	now := time.Now()
-	os.WriteFile(DATA+"/load.tsv", []byte("m\t1.20\t12\t"+itoa(now.Unix()-30)+"\t1\t3\t-\t0\t0\n"+
-		"w\t30.00\t10\t"+itoa(now.Unix()-3600)+"\t1\t3\t-\t0\t0\n"), 0o644)
+	// 끝 칸 = 도는 검증 수(ht-skew-verify-cause) — 부하와 같은 때 읽은 값이라 같은 신선함 규칙. 칸 없음·「-」은 모름
+	os.WriteFile(DATA+"/load.tsv", []byte("m\t1.20\t12\t"+itoa(now.Unix()-30)+"\t1\t3\t-\t0\t0\t1\n"+
+		"w\t30.00\t10\t"+itoa(now.Unix()-3600)+"\t1\t3\t-\t0\t0\t2\n"+"x\t0.10\t8\t"+itoa(now.Unix()-30)+"\t0\t2\t-\t0\t0\t-\n"), 0o644)
 	s := stateCollect(now)
 	for _, m := range s.Machines {
 		switch m.Name {
 		case "w":
-			if m.Reach != "ok" || m.LoadPerCore != nil || m.Live == nil {
+			if m.Reach != "ok" || m.LoadPerCore != nil || m.Live == nil || m.Verifies != nil {
 				t.Errorf("지난 부하: %+v", m)
 			}
 		case "m":
-			if m.LoadPerCore == nil {
+			if m.LoadPerCore == nil || m.Verifies == nil || *m.Verifies != 1 {
 				t.Errorf("그 바퀴 부하: %+v", m)
+			}
+		case "x":
+			if m.LoadPerCore == nil || m.Verifies != nil {
+				t.Errorf("검증 모름: %+v", m)
 			}
 		}
 	}

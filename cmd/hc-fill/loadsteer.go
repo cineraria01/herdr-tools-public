@@ -22,12 +22,15 @@ func init() {
 	register("machines", machineCmd)
 }
 
-// mLoad: 한 기계의 1분 부하와 코어 수. OK가 거짓이면 모름(한가함이 아니다). At은 읽은 때(status 표시용, 0이면 표시 안 함)
+// mLoad: 한 기계의 1분 부하와 코어 수. OK가 거짓이면 모름(한가함이 아니다). At은 읽은 때(status 표시용, 0이면 표시 안 함).
+// Ver는 같은 때 읽은 도는 저장소 검증 수(VerOK 거짓이면 모름) — 보이는 글만, 배정·치우침 판정에는 안 쓴다(ht-skew-verify-cause)
 type mLoad struct {
 	L1    float64
 	Cores int
 	OK    bool
 	At    int64
+	Ver   int
+	VerOK bool
 }
 
 // Per: 코어당 부하(모름이면 0 — 부르는 쪽은 OK를 먼저 본다)
@@ -38,17 +41,37 @@ func (l mLoad) Per() float64 {
 	return l.L1 / float64(l.Cores)
 }
 
-// loadSnip: 「load <1분 부하> <코어 수>」 한 줄(리눅스 /proc/loadavg·getconf, macOS sysctl). 실패해도 조각을 실패로 만들지 않는다 —
-// 꼴이 틀린 줄은 loadParse가 모름으로 읽는다. 한 줄이다(끝 줄바꿈 없음) — 혼자 부를 때는 끝 표식 없이 그대로(잘린 출력은 꼴이 틀려 모름)
-const loadSnip = `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; } 2>/dev/null || :`
+// verPtr: 도는 검증 수(모름이면 nil — 상태 한 장 칸)
+func (l mLoad) verPtr() *int {
+	if !l.VerOK {
+		return nil
+	}
+	v := l.Ver
+	return &v
+}
 
-// loadParse: 출력에서 「load」로 시작하는 첫 줄. 꼴이 틀리거나 없으면 모름
+// loadSnip: 「load <1분 부하> <코어 수>」 한 줄(리눅스 /proc/loadavg·getconf, macOS sysctl). 실패해도 조각을 실패로 만들지 않는다 —
+// 꼴이 틀린 줄은 loadParse가 모름으로 읽는다. 한 줄이다(끝 줄바꿈 없음) — 혼자 부를 때는 끝 표식 없이 그대로(잘린 출력은 꼴이 틀려 모름).
+// 이어 그 기계의 도는 저장소 검증 수를 병합기 검증 기계 고르기와 같은 명령(hc-lane merger --spec-idle — 「load=… cpus=… verifies=n」)으로
+// 한 줄 더(ht-skew-verify-cause — 레인 0인 바쁜 기계의 까닭이 병합기 추측 검증임을 보이게). 못 부르면 그 줄이 없어 검증 수만 모름
+const loadSnip = `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; hc-lane merger --spec-idle; } 2>/dev/null || :`
+
+// loadParse: 출력에서 「load」로 시작하는 첫 줄(부하). 꼴이 틀리거나 없으면 모름. --spec-idle 줄이 있으면 그 verifies= 를 검증 수로
 func loadParse(out string) mLoad {
+	var o mLoad
+	seen := false
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) == 0 || f[0] != "load" {
+		if len(f) == 3 && strings.HasPrefix(f[0], "load=") && strings.HasPrefix(f[2], "verifies=") {
+			if v, err := strconv.Atoi(strings.TrimPrefix(f[2], "verifies=")); err == nil && v >= 0 {
+				o.Ver, o.VerOK = v, true
+			}
 			continue
 		}
+		if seen || len(f) == 0 || f[0] != "load" {
+			continue
+		}
+		seen = true
 		if len(f) != 3 {
 			return mLoad{}
 		}
@@ -57,9 +80,12 @@ func loadParse(out string) mLoad {
 		if err != nil || err2 != nil || l1 < 0 || l1 != l1 || c <= 0 {
 			return mLoad{}
 		}
-		return mLoad{L1: l1, Cores: c, OK: true}
+		o.L1, o.Cores, o.OK = l1, c, true
 	}
-	return mLoad{}
+	if !o.OK {
+		return mLoad{}
+	}
+	return o
 }
 
 // LOADS: 이번 바퀴에 읽은 부하(기계 → 값). 없는 기계는 모름
@@ -185,6 +211,7 @@ func loadLine(name string, l mLoad, used, cp int, adj, why string) string {
 	ld := "부하 모름"
 	if l.OK {
 		ld = fmt.Sprintf("부하 %.1f/%d(코어당 %.2f)", l.L1, l.Cores, l.Per())
+		ld += opsstate.VerNote(l.verPtr())
 		if l.At > 0 {
 			ld += " " + stDur(time.Now().Unix()-l.At) + " 전"
 		}
@@ -391,7 +418,7 @@ func steer(lane string, cs []Machine, gate bool) []Machine {
 	return g
 }
 
-// ---- 상태 파일 <DATA>/load.tsv: 기계 · 1분 부하 · 코어 · 읽은 때 · 쓴 자리 · 상한 · 안 띄운 까닭 · 바쁨 시작 · 치우침 보낸 때 ----
+// ---- 상태 파일 <DATA>/load.tsv: 기계 · 1분 부하 · 코어 · 읽은 때 · 쓴 자리 · 상한 · 안 띄운 까닭 · 바쁨 시작 · 치우침 보낸 때 · 도는 검증 수(옛 판은 칸 없음) ----
 
 type loadRec struct {
 	m              string
@@ -414,6 +441,9 @@ func loadRecs() map[string]loadRec {
 		x.cp, _ = strconv.Atoi(r.F(loCap))
 		x.hotSince, _ = strconv.ParseInt(r.F(loHot), 10, 64)
 		x.sent, _ = strconv.ParseInt(r.F(loSent), 10, 64)
+		if v, err := strconv.Atoi(r.F(loVer)); err == nil && v >= 0 && x.l.OK { // 칸 없음(옛 판)·「-」은 모름
+			x.l.Ver, x.l.VerOK = v, true
+		}
 		o[x.m] = x
 	}
 	return o
@@ -466,11 +496,14 @@ func loadEnd(now time.Time) {
 				}
 			}
 		}
-		l1, c, at := "-", "-", "-"
+		l1, c, at, ver := "-", "-", "-", "-"
 		if x.l.OK {
 			l1, c, at = strconv.FormatFloat(x.l.L1, 'f', 2, 64), strconv.Itoa(x.l.Cores), strconv.FormatInt(x.l.At, 10)
+			if x.l.VerOK {
+				ver = strconv.Itoa(x.l.Ver)
+			}
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%s\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent, ver)
 	}
 	if dry {
 		return
