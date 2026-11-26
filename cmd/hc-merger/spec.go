@@ -175,6 +175,7 @@ type specStep struct {
 	g      specGroup
 	parent string   // 그 무리를 얹는 부모 트리
 	row    *specRow // 없으면 nil — 지어야 한다
+	note   string   // 지을 때 커밋 본문(한 번 더 확인의 첫 실패 — culprit.go)
 }
 
 // specWalk: 기준 트리에서 무리를 차례로 따라간다(위 2). 줄이 없는 첫 무리에서 멈추고 그 자리를 마지막 단계(row nil)로 돌려준다

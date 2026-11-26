@@ -84,13 +84,22 @@ func (m *M) specDecide() (specDecision, string) {
 	disp := m.frontDispatch()
 	// 빈 검증 기계의 차례: 맨 앞 → 맨 앞 혼자(cap 바퀴) → 뒤 무리. 옛 길(맨 앞은 병합기가 직접)은 혼자를 먼저(감사 atozd0z-zklwye 중간 —
 	// 혼자가 하나뿐인 기계를 먼저 가져가 맨 앞 k−1을 병합기가 직접 검증했다)
-	soloDone := !disp
+	par := m.parCap(disp) // 묶음 실패로 줄인 바퀴 — 앞 무리를 함께 가른다(culprit.go)
+	soloDone := !disp || par
 	if !disp {
 		m.specSolo(c, busy, now, false)
 	}
 	var ff frontFail
 	if disp { // 맨 앞이 실패·모름이면 뒤 추측보다 먼저 다시 띄운다(specfront.go — 한 번 더 확인 · 손잡이 front_local 0의 다시 띄움)
 		ff = m.specFrontRedo(c, specWalk(m.btree, groups, c.rows), busy, now)
+	}
+	var ps []prefix
+	if par {
+		ps = m.prefixScan(c)
+		if d, ok := m.culpritJump(c, ps, busy, now); ok { // 범인을 가렸거나 가운데가 시험 실패 — 뒤 무리를 짓기 전에 줄인다
+			return d, ""
+		}
+		m.prefixDispatch(c, ps, busy, now)
 	}
 	for {
 		st = specWalk(m.btree, groups, c.rows)
@@ -125,9 +134,14 @@ func (m *M) specDecide() (specDecision, string) {
 	}
 	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go). 맨 앞 혼자 추측은 길 밖이어도 지킨다 — 묶음이 검증 기계에서
 	// 실패해 줄이는 바퀴(specShrink)는 혼자 추측이 끝난 뒤라, 치우면 범인 반송 근거를 잃고 다시 돌린다
-	m.specClean(c, append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...))
+	m.specClean(c, append(append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...), prefixKeep(c, ps)...))
 	if st[0].row != nil {
 		m.sfid = st[0].row.id
+	}
+	if par {
+		if d, ok := m.prefixWait(c, ps, st[0].row, now); ok {
+			return d, ""
+		}
 	}
 	d, over, stall := m.frontOver(c, st, specFront(st), busy, now, disp) // 맨 앞 기다림 상한(specfront.go)
 	m.vw.why = frontWhy(st, c.rows, over, disp)
@@ -150,43 +164,6 @@ func (m *M) specDecide() (specDecision, string) {
 		fmt.Printf("hc-lane merger: 추측 검증 도는 중 — %s (%s) 결과를 기다린다\n", st[0].g.lanes, st[0].row.machine)
 	}
 	return d, ""
-}
-
-// specSolo: 묶음이 실패해 줄인 바퀴(cap)에 앞 k−1(≥2)을 검증하는 동안(disp면 검증 기계에서, 아니면 병합기가 직접) 「맨 앞 혼자」를 빈
-// 검증 기계에 맡긴다(merger-batch-culprit). 아이디는 다음 바퀴 맨 앞이 혼자일 때의 무리(기준 트리 + 맨 앞)와 같아, 그 바퀴 specWalk가
-// 결과를 그대로 읽는다. 기계가 없거나 바쁘거나 이미 그 추측이 있으면 아무것도 안 한다(지금 그대로)
-func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64, disp bool) {
-	if m.capN() == 0 || len(m.b) < 2 {
-		return
-	}
-	g := newGroup(m.b[:1])
-	id := specID(m.btree, g.key)
-	for _, r := range c.rows {
-		if r.id == id {
-			return
-		}
-	}
-	v := m.specFree(c, busy)
-	if v.Machine == "" {
-		return
-	}
-	r, ok := m.specBuild([]specStep{{g: g, parent: m.btree}}, v, now)
-	if !ok {
-		return
-	}
-	c.rows = append(c.rows, r)
-	if r.state == specRun {
-		busy[v.Machine] = true
-		// 반송 근거로 믿는 것은 이렇게 cap 바퀴에 지은 추측뿐(같은 아이디의 미리 줄 추측은 아님 — specCulpritWhy, 감사 atoz3el-ese56i)
-		if err := writeVia(m.mj+"/solo", id+"\n"); err != nil {
-			fmt.Fprintln(os.Stderr, "hc-lane merger: 맨 앞 혼자 추측 표식을 적지 못했다 — 실패해도 지금처럼 직접 검증한다")
-		}
-		where := "병합기가 직접"
-		if disp {
-			where = "검증 기계에"
-		}
-		m.jmembers(m.b[:1], jSolo, fmt.Sprintf("묶음 실패 뒤 맨 앞 혼자를 %s 에 추측 검증으로 맡김(앞 %d개는 %s)", v.Machine, len(m.b), where), "", m.r0, now)
-	}
 }
 
 // specCulpritWhy: 묶음이 실패해 줄인 바퀴(cap)의 맨 앞 혼자 추측이 같은 기준에서 시험 실패로 끝났나 — 그렇다면 반송 까닭(m.cwhy·m.clog)을
@@ -361,6 +338,7 @@ func (m *M) specGroups() []specGroup {
 	if !ok {
 		return gs
 	}
+	sus := m.suspect(q)
 	var cur []entry
 	flush := func() {
 		if len(cur) > 0 {
@@ -391,7 +369,7 @@ func (m *M) specGroups() []specGroup {
 		if mt.base != "" && mt.base != m.base {
 			continue
 		}
-		if mt.id == "" {
+		if mt.id == "" || ms == sus { // 손 제출·앞 무리로 가린 범인(pickBatch와 같이 혼자)
 			flush()
 			cur = []entry{{q: mq, s: ms, l: ln}}
 			flush()
@@ -444,7 +422,11 @@ func (m *M) specBuild(st []specStep, v verified.Verifier, now int64) (specRow, b
 		machine = "-"
 	}
 	r := specRow{id: id, tree: tree, parent: s.parent, group: s.g.key, machine: machine, at: now}
-	cm, ok := commitTree("", tree, pc, specMsg(s.parent, s.g.key, machine, now, state))
+	msg := specMsg(s.parent, s.g.key, machine, now, state)
+	if s.note != "" {
+		msg += "\n\n" + s.note
+	}
+	cm, ok := commitTree("", tree, pc, msg)
 	if !ok {
 		return specRow{}, false
 	}

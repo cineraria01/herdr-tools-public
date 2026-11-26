@@ -46,6 +46,7 @@ type M struct {
 	wmach                           string // 맨 앞을 기다리는 바퀴의 검증 기계(손잡이 0으로 맡기지 못해 기다리면 -) — 추측 기다림 일지 줄
 	wre                             string // 이 바퀴에 맨 앞을 바쁨으로 다시 고름 「<바쁨 기계>→<새 기계>」(verifierpick.go) — 추측 기다림 일지 줄
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
+	capTo                           int    // 추측 실패로 줄일 묶음 크기(0이면 하나 빼기 — 앞 무리로 범인을 가르면 그 앞, culprit.go)
 	landOff                                // 착지 실행 기계(landon.go)
 }
 
@@ -223,6 +224,7 @@ func (m *M) pickBatch() bool {
 		m.mer = true
 		return false
 	}
+	sus := m.suspect(q) // 앞 무리로 가린 범인은 혼자(culprit.go)
 	m.b = nil
 	for _, e := range q {
 		mq, ms := e[0], e[1]
@@ -278,7 +280,7 @@ func (m *M) pickBatch() bool {
 		}
 		// 제출 ID가 없는 손 제출은 혼자. 판정이 붙은 제출도 담는다 — 구성원마다 자기 승인 patch-id를 filterBatch(approved)가 확인하고,
 		// 다르면 그 구성원만 이번 묶음에서 뺀다
-		batchable := mt.id != ""
+		batchable := mt.id != "" && ms != sus
 		if !batchable && len(m.b) > 0 {
 			break
 		}
@@ -295,7 +297,7 @@ func (m *M) pickBatch() bool {
 
 // round: 한 바퀴(bash mround)
 func (m *M) round() {
-	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.sfront = "", false, "", 0, 0, time.Now().Unix(), nil
+	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.sfront, m.capTo = "", false, "", 0, 0, time.Now().Unix(), nil, 0
 	defer m.specWaitEarly()
 	m.flush()
 	// 병합기 클론은 병합기만 쓴다 — 앞 실행이 남긴 멈춘 rebase는 풀고, 그래도 깨끗하지 않으면 멈춘다(모르는 변경을 지우지 않음)
@@ -439,7 +441,11 @@ func (m *M) round() {
 	m.specWaitEnd()
 	if sd == specShrink { // 묶음 착지 실패와 같은 길(judge) — 병합기 검증 없이
 		m.jround(jBatchFail, m.cwhy, ", 로그 "+m.clog)
-		m.writeCap(len(m.b) - 1)
+		n := len(m.b) - 1
+		if m.capTo > 0 {
+			n = m.capTo
+		}
+		m.writeCap(n)
 		if m.fin() {
 			m.mq = "x"
 		}

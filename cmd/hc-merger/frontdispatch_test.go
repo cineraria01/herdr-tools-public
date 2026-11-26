@@ -210,8 +210,9 @@ func TestFrontCulpritPathSame(t *testing.T) {
 			t.Fatalf("⑧ 병합기 기계 검증 0번: %v", s.lines(s.landlog))
 		}
 	}
-	if len(jrows(t, "묶음 실패")) == 0 || len(jrows(t, "맨 앞 혼자 추측")) != 1 {
-		t.Fatalf("⑧ 묶음 실패 줄·맨 앞 혼자 추측 한 줄:\n%s", jdump())
+	// 기본 손잡이 culprit parallel — 줄인 바퀴는 맨 앞 혼자만이 아니라 앞 무리를 함께 맡긴다(culprit.go, serial은 culpritpar_test.go ⑤)
+	if len(jrows(t, "묶음 실패")) == 0 || len(jrows(t, jPrefix)) == 0 || len(jrows(t, jSolo)) != 0 {
+		t.Fatalf("⑧ 묶음 실패 줄·앞 무리 추측 줄:\n%s", jdump())
 	}
 	back := jrows(t, "돌려보냄")
 	if len(back) != 1 || back[0][2] != "a" || !strings.Contains(back[0][11], "착지 실패(종료 1") || !strings.Contains(back[0][11], "--- FAIL: TestBad") {

@@ -125,6 +125,8 @@ var Defs = []Def{
 	{Name: "merger_pre_rebuild", Tool: "hc-merger", Default: "1", Min: 0, Max: 10, Unit: "번", Remote: true, Desc: "미리 줄 다시 짓기 횟수(HC_LANE_PRE_REBUILD)"},
 	{Name: "merger_front_dispatch", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맨 앞 무리도 검증 기계에 맡김(0이면 병합기가 직접, HC_LANE_FRONT_DISPATCH)"},
 	{Name: "merger_front_local", Tool: "hc-merger", Default: "1", Enum: []string{"0", "1"}, Remote: true, Desc: "맡길 수 없을 때 병합기 기계가 직접 검증(0이면 기다림, HC_LANE_FRONT_LOCAL)"},
+	// ht-merger-culprit-parallel(2026-11-26): 묶음 실패 뒤 앞 무리 k−1…1을 한가한 검증 기계에 함께 맡겨 범인을 한 번에 가름
+	{Name: "merger_culprit", Tool: "hc-merger", Default: "parallel", Enum: []string{"parallel", "serial"}, Remote: true, Desc: "묶음 실패 뒤 범인 가리기 — parallel(앞 무리 k−1…1을 한가한 검증 기계에 함께, 모자라면 이분 차례) · serial(마지막 빼고 다시, HC_LANE_MERGER_CULPRIT)"},
 	{Name: "merger_idle_load", Tool: "hc-merger", Default: "50", Min: 1, Max: 10000, Unit: "%", Remote: true, Desc: "검증 기계 한가함 = 1분 부하가 코어 수의 이만큼 밑(HC_LANE_SPEC_IDLE_LOAD)"},
 	{Name: "merger_busy_wait", Tool: "hc-merger", Default: "30", Min: 0, Max: 3600, Unit: "초", Remote: true, Desc: "검증 일꾼이 한가해지길 기다리는 상한, 넘으면 바쁨(HC_LANE_SPEC_BUSY_WAIT)"},
 	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음 — 착지 실행 워커의 끊김도 같은 상한(HC_LANE_SPEC_BUSY_MAX)"},

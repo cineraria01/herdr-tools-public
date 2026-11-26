@@ -172,6 +172,9 @@
 # — 맡길 수 없을 때 병합기 기계가 직접 검증(0이면 기다림, HC_LANE_FRONT_LOCAL) (범위 0|1)
 # merger_front_local	1
 # merger_front_local@<프로젝트>	1
+# — 묶음 실패 뒤 범인 가리기 — parallel(앞 무리 k−1…1을 한가한 검증 기계에 함께, 모자라면 이분 차례) · serial(마지막 빼고 다시, HC_LANE_MERGER_CULPRIT) (범위 parallel|serial)
+# merger_culprit	parallel
+# merger_culprit@<프로젝트>	parallel
 # — 검증 기계 한가함 = 1분 부하가 코어 수의 이만큼 밑(HC_LANE_SPEC_IDLE_LOAD) (범위 1~10000 %)
 # merger_idle_load	50
 # merger_idle_load@<프로젝트>	50
