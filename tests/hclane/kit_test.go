@@ -135,6 +135,9 @@ func (k *K) check(name string, ok bool) {
 func (k *K) exe(dir, errPath string, extra []string, name string, args ...string) (string, int) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env = dir, k.environ(extra)
+	if name == k.LANE {
+		k.fakeLaneRec(cmd.Env, args) // fakerec_test.go
+	}
 	cmd.WaitDelay = 30 * time.Second // 출력을 물고 남은 손자가 있어도 끝나게
 	if errPath != "" {
 		f, err := os.Create(errPath)

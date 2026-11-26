@@ -470,14 +470,15 @@ func orDefault(s, d string) string {
 	return s
 }
 
-// lkinds: 레인 기록에서 (주소 끝의 t…, 레인) → 종류(넷째 칸 read·fill만)
+// lkinds: 이 기계 레인 기록(lanes.tsv)의 (주소 끝의 t…, 레인) → 종류(넷째 칸, 없으면 빈 값). 열쇠가 있으면 레인이다 —
+// watch·wait가 멈춤·뜻밖의 종료를 내는 것은 이 기록에 든 레인뿐(라벨 hc-lane=1만으로 짐작하지 않는다). 레인 안에서 띄운 하위 터미널은
+// 그 레인의 기계에만 기록돼 지휘 기계 watch의 레인이 아니다 — 그 결과는 부모 레인이 본다(2026-11-27 ht-watch-child-job)
 func (e *ev) lkinds() map[[2]string]string {
 	k := map[[2]string]string{}
 	ls, _ := readLines(e.ed + "/lanes.tsv")
 	for _, l := range ls {
-		f := strings.Split(l, tab)
-		if len(f) >= 4 && (f[3] == "read" || f[3] == "fill") {
-			k[[2]string{lastSeg(f[0]), f[1]}] = f[3]
+		if f := strings.Split(l, tab); len(f) >= 2 {
+			k[[2]string{lastSeg(f[0]), f[1]}] = at(f, 3)
 		}
 	}
 	return k

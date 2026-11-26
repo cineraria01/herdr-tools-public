@@ -29,6 +29,7 @@ func TestEvWindowStaleCleaned(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(d, "events.tsv"), []byte(strings.Join(ls, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	recLanes(t, d, "t7qp\tyt-cal-chip\tt0", "t8aa\tdead-mid\tt0", "t9bb\tno-report\tt0")
 	e := &ev{ed: d, cur: filepath.Join(d, "cur")}
 	ctx, win := e.evreadCtx(evWin, evCtx)
 	if len(win) != evWin || len(ctx) != 2 || !strings.Contains(win[0], "yt-cal-chip"+tab+"정리됨") {

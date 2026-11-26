@@ -148,7 +148,10 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 			if handedOff(ls) { // 제출·주차 뒤 정리는 turn과 상관없이 조용히(stopped.go handedOff)
 				continue
 			}
-			lk := kind[[2]string{lastSeg(x.Term), x.Lane}]
+			lk, rec := kind[[2]string{lastSeg(x.Term), x.Lane}]
+			if !rec { // 레인 기록에 없는 터미널의 정리는 이 watch의 레인이 아니다(watch.go lkinds)
+				continue
+			}
 			fin := ls == "착지" || ls == "판정" || ls == "완료" && (lk == "read" || lk == "fill")
 			if fin && num(x.Turn) && num(ln) && atoi(x.Turn) <= atoi(ln)+1 {
 				continue

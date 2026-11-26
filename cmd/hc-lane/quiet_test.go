@@ -59,6 +59,7 @@ func TestCleanedEvent(t *testing.T) {
 	}
 	for _, c := range cases {
 		d := t.TempDir()
+		recLanes(t, d, "m/t1\tlane-a\tt0")
 		e := &ev{ed: d, cur: filepath.Join(d, "cur")}
 		cand := []string{
 			strings.Join([]string{"2026-11-22T00:00:00Z", "m", "m/t1", "lane-a", c.last, "abc", "보고", c.lt}, tab),

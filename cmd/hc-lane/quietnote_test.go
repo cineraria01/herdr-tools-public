@@ -59,6 +59,7 @@ func TestCleanedAfterHandoffNote(t *testing.T) {
 	}
 	for _, c := range cases {
 		d := t.TempDir()
+		recLanes(t, d, "m/t1\tlane-a\tt0")
 		e := &ev{ed: d, cur: filepath.Join(d, "cur")}
 		var cand []string
 		for i, st := range c.seq {

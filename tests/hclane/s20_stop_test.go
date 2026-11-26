@@ -36,6 +36,13 @@ func s20Stop(k *K) {
 	// 이미 있는 커서(바닥 없음 — s20b). 커서가 없으면 새 커서는 2시간 전부터라 아래 고정 시각(2026-11-16) 정리됨 사건을 못 본다
 	k.mk("t20c")
 	write(k.t, filepath.Join(k.T, ".local/state/hc-lane/seen"), "")
+	// 정리됨 사건으로만 나오는(목록에서 사라진) 레인도 띄울 때 기록됐다 — 틀(fakerec_test.go)은 목록에 있는 것만 기록한다
+	var rec string
+	for _, l := range strings.Fields("tf3:lane-f3 tf4:lane-f4 tf6:lane-f6 tf9:lane-f9 tf11:lane-f11 tf12:lane-f12 tb1:lane-tb1 tb2:lane-tb2 tc1:lane-tc1 te1:lane-te1 te2:lane-te2") {
+		a, n, _ := strings.Cut(l, ":")
+		rec += a + "\t" + n + "\t-\n"
+	}
+	write(k.t, filepath.Join(k.T, ".local/state/hc-lane/lanes.tsv"), rec)
 	EV := k.s20ev()
 	has := func(s string) bool { return strings.Contains(k.out, s) }
 	wt0 := []string{"wait", "--timeout", "0"}

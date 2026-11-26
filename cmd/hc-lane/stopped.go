@@ -108,7 +108,8 @@ func (e *ev) stopped(evl, mu []string) []string {
 			continue
 		}
 		a, nm, s, ss, tn, pa, rs, cw := t.Address, orHyph(t.Name), t.State, orHyph(t.Status), rawCell(t, "turn"), orHyph(t.Parent), rawCell(t, "reason"), orHyph(t.Cwd)
-		if !e.mineOf(pa) {
+		lk, rec := km[[2]string{lastSeg(a), nm}]
+		if !rec || !e.mineOf(pa) { // 레인 기록에 없는 터미널은 레인이 아니다(watch.go lkinds)
 			continue
 		}
 		uk := false
@@ -123,7 +124,6 @@ func (e *ev) stopped(evl, mu []string) []string {
 			mn = "-"
 		}
 		last, lt, sw := lastIn(evl, a, nm)
-		lk := km[[2]string{lastSeg(a), nm}]
 		why := stopWhy(s, ss, tn, last, lt, sw, lk == "read" || lk == "fill")
 		if s != "live" {
 			// killed가 지휘의 hc kill인지: parent가 없거나 아직 살아 있을 때만 조용히 넘긴다

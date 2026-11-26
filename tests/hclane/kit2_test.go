@@ -204,6 +204,9 @@ func (k *K) bg(dir, outPath, errPath string, extra []string, name string, args .
 	sup, hold := superv(k.t)
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env = dir, k.environ(extra)
+	if name == k.LANE {
+		k.fakeLaneRec(cmd.Env, args) // fakerec_test.go
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: sup.Process.Pid}
 	if outPath != "" {
 		f, err := os.Create(outPath)

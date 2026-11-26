@@ -232,28 +232,39 @@ func (e *ev) prevseen(a, l, o string) bool {
 }
 
 // owner: 그 레인을 띄운 지휘 — 레인 기록의 마지막 줄, 없으면 hc ls parent, 없으면 -. 끝의 t…
+// parent가 레인(hc ls 레인 목록에 있음)이면 그 레인의 주인으로 올라간다 — 레인은 지휘가 아니라 「주인 사라짐」으로 모든 지휘에게 가던 것
+// (2026-11-27 ht-watch-child-job)
 func (e *ev) owner(a string) string {
-	o := ""
 	ls, _ := readLines(e.ed + "/lanes.tsv")
-	for _, x := range ls {
-		f := strings.Split(x, tab)
-		if f[0] == a {
-			o = at(f, 2)
-		}
-	}
-	if o == "" || o == "-" {
-		o = ""
-		for _, r := range e.pmap {
-			if r[0] == a {
-				o = r[1]
-				break
+	for range 8 { // 부모 사슬 상한(고리 막기)
+		o := ""
+		for _, x := range ls {
+			f := strings.Split(x, tab)
+			if f[0] == a {
+				o = at(f, 2)
 			}
 		}
+		if o != "" && o != "-" {
+			return lastSeg(o)
+		}
+		p, lane := "", false
+		for _, r := range e.pmap {
+			if r[0] == a {
+				p = r[1]
+			}
+		}
+		if p == "" || p == "-" {
+			return "-"
+		}
+		for _, r := range e.pmap {
+			lane = lane || r[0] == p
+		}
+		if !lane {
+			return lastSeg(p)
+		}
+		a = p
 	}
-	if o == "" || o == "-" {
-		return "-"
-	}
-	return lastSeg(o)
+	return "-"
 }
 
 // evowner: 사건의 주인 지휘 — 11칸(* = 주인 없음 → -), 없으면 레인 기록(주인이 둘 이상이면 -)
