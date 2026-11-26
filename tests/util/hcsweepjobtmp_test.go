@@ -228,6 +228,8 @@ func testHcSweepTmpBacklog(t *testing.T, T string, e Env) {
 	c.ok("레인 안에서는 지우기 거절(종료 2, --only 있어도)", rc == 2 && exists(O+"/tmp.Os12Ab") && exists(J+"/tmp.Jb12Cd") && strings.Contains(out, "레인 안"))
 	out, rc = run(T, ej, SWEEP, "--tmp-backlog", "48")
 	c.ok("레인 안에서 --only도 없이 지우기 → 거절·아무것도 안 지움", rc == 2 && exists(O+"/tmp.Os12Ab") && exists(J+"/tmp.Jb12Cd"))
+	out, rc = run(T, e.With("TMPDIR="+J+"/"), SWEEP, "--tmp-backlog", "48", "--only", "tmp.*") // ht-jobtmp-slash: macOS 꼴(끝 「/」) TMPDIR도 레인 안
+	c.ok("끝 「/」 있는 작업 TMPDIR도 레인 안 → 거절", rc == 2 && exists(O+"/tmp.Os12Ab") && exists(J+"/tmp.Jb12Cd") && strings.Contains(out, "레인 안"))
 
 	write(t, T+"/bin/lsof", "#!/bin/sh\nexit 1\n")
 	write(t, X+"/tmp.Again1/f", "x")

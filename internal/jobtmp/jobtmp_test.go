@@ -38,7 +38,11 @@ func TestWrapExecGivesJobDir(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	d := lines[0]
 	root := Expand(Default, home)
-	if filepath.Dir(d) != root || len(filepath.Base(d)) != 6 {
+	// ht-jobtmp-slash: macOS 기본 TMPDIR(/var/folders/…/T/)처럼 끝 「/」 — 리눅스는 기본(/tmp·없음)처럼 끝 「/」 없음
+	if strings.HasSuffix(d, "/") != runtimeDarwin() {
+		t.Fatalf("TMPDIR %q 끝 「/」가 운영체제 기본 꼴과 다름(Darwin %v)", d, runtimeDarwin())
+	}
+	if filepath.Dir(filepath.Clean(d)) != root || len(filepath.Base(d)) != 6 {
 		t.Fatalf("TMPDIR %q 가 %s/<6글자> 아님", d, root)
 	}
 	a, n, at, ok := Owner(d)
@@ -53,12 +57,43 @@ func TestWrapExecGivesJobDir(t *testing.T) {
 	}
 }
 
+// ht-jobtmp-slash ②: 「/」 없이 이어 붙인 "${TMPDIR}x"(Go os.TempDir()+"x"도 같은 글 — os.TempDir은 TMPDIR을 그대로 준다)가 작업 폴더 안을 가리킨다.
+// 표식은 끝 「/」 있는 값·없는 값 모두로 읽힌다(옛 꼴로 이미 뜬 작업과 섞여도 같은 폴더)
+func TestWrapTMPDIRConcat(t *testing.T) {
+	home := shortHome(t)
+	f := filepath.Join(t.TempDir(), "out")
+	argv := Wrap(Default, "lane-a", "/w", false, []string{"sh", "-c", `printf '%s\n%s\n' "${TMPDIR}x" "${MAC_CHROMIUM_TMPDIR-}" >"$0"`, f})
+	c := exec.Command(argv[0], argv[1:]...)
+	c.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "TMPDIR=/sys-tmp/", "HC_TERMINAL_ID=t9zz"}
+	if b, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("감싼 명령 실패: %v %s", err, b)
+	}
+	b, _ := os.ReadFile(f)
+	lines := strings.Split(string(b), "\n")
+	x := lines[0]
+	if !runtimeDarwin() {
+		t.Skip("이어 붙이기 꼴은 macOS 기본(끝 「/」)에 기댄 것 — 리눅스는 기본에 끝 「/」가 없다")
+	}
+	d := filepath.Dir(x)
+	if filepath.Dir(d) != Expand(Default, home) || filepath.Base(x) != "x" {
+		t.Fatalf("${TMPDIR}x = %q 가 작업 폴더 안이 아님", x)
+	}
+	if lines[1] != d+"/" {
+		t.Fatalf("MAC_CHROMIUM_TMPDIR %q ≠ TMPDIR %q", lines[1], d+"/")
+	}
+	for _, v := range []string{d, d + "/"} {
+		if a, _, _, ok := Owner(v); !ok || a != "t9zz" {
+			t.Fatalf("Owner(%q) 못 읽음", v)
+		}
+	}
+}
+
 // run 꼴: 끝나면 폴더를 지운다
 func TestWrapRunRemoves(t *testing.T) {
 	home := shortHome(t)
 	out, _ := runWrapped(t, "~/r", home, true, "t9zz")
 	d := strings.Split(out, "\n")[0]
-	if filepath.Dir(d) != filepath.Join(home, "r") {
+	if filepath.Dir(filepath.Clean(d)) != filepath.Join(home, "r") {
 		t.Fatalf("TMPDIR %q", d)
 	}
 	if _, err := os.Lstat(d); !os.IsNotExist(err) {
@@ -118,19 +153,20 @@ func TestWrapOffAndOutside(t *testing.T) {
 	}
 }
 
-// ⑥ 길이: 뿌리 상한 42자면 작업 폴더 49자(지금 macOS 기본 TMPDIR) 이하, 가장 긴 소켓 꼴을 더해도 104바이트 안. 넘는 뿌리는 감싸지 않고 기본으로
+// ⑥ 길이: 뿌리 상한 41자면 TMPDIR 값(작업 폴더 48자 + 끝 「/」, ht-jobtmp-slash)이 49자(지금 macOS 기본 TMPDIR) 이하,
+// 가장 긴 소켓 꼴을 이어 붙여도 104바이트 안. 넘는 뿌리는 감싸지 않고 기본으로
 func TestSocketLength(t *testing.T) {
 	if !strings.Contains(script, fmt.Sprintf("-gt %d ]", MaxRoot)) {
 		t.Fatalf("감싸개의 뿌리 상한이 MaxRoot(%d)와 다름", MaxRoot)
 	}
 	sysTmp := "/var/folders/xx/" + strings.Repeat("x", 30) + "/T/" // macOS 기본 TMPDIR 꼴(/var/folders/<2>/<30>/T/, 49자 — 워커 실측)
-	if MaxDir > len(sysTmp) {
-		t.Fatalf("작업 폴더 상한 %d > 기본 TMPDIR %d", MaxDir, len(sysTmp))
+	if MaxDir+1 != len(sysTmp) {
+		t.Fatalf("TMPDIR 값 상한 %d(작업 폴더 %d + 「/」) ≠ 기본 TMPDIR %d", MaxDir+1, MaxDir, len(sysTmp))
 	}
 	if n := MaxDir + 1 + len(Longest) + 1; n > SockMax {
 		t.Fatalf("소켓 경로 %d > %d", n, SockMax)
 	}
-	for _, h := range []string{"/Users/alice", "/Users/a-twenty-char-name-x", "/home/w"} {
+	for _, h := range []string{"/Users/alice", "/Users/a-19-char-name-xxxx", "/home/w"} {
 		if r := Expand(Default, h); len(r) > MaxRoot {
 			t.Fatalf("기본 뿌리 %s (%d자) > %d — 집 이름이 이만하면 감싸지 않는다", r, len(r), MaxRoot)
 		}
@@ -138,7 +174,7 @@ func TestSocketLength(t *testing.T) {
 	home := shortHome(t)
 	long := filepath.Join(home, strings.Repeat("x", MaxRoot))
 	if out, _ := runWrapped(t, long, home, false, "t9zz"); !strings.HasPrefix(out, "/sys-tmp\n") {
-		t.Fatalf("42자 넘는 뿌리를 썼다: %q", out)
+		t.Fatalf("상한 넘는 뿌리를 썼다: %q", out)
 	}
 }
 

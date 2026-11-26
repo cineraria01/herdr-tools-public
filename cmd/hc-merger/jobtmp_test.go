@@ -104,7 +104,7 @@ func TestLandOnWorkerJobTmp(t *testing.T) {
 	}
 	b, _ := os.ReadFile(seen)
 	d := strings.TrimSpace(string(b))
-	if filepath.Dir(d) != root {
+	if filepath.Dir(filepath.Clean(d)) != root { // macOS는 끝 「/」(운영체제 기본 꼴, ht-jobtmp-slash)
 		t.Fatalf("착지가 본 TMPDIR %q 가 %s 아래 아님", d, root)
 	}
 	if ents, _ := os.ReadDir(root); len(ents) != 0 {

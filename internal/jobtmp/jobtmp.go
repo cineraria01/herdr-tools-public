@@ -13,8 +13,8 @@ const (
 	Key     = "jobtmp.root"                              // 설정 키(뿌리, off면 끔)
 	Default = "~/.hctmp.noindex"                         // .noindex: Spotlight가 색인하지 않음
 	Marker  = ".hc-job"                                  // 작업 폴더 안 표식
-	MaxRoot = 42                                         // 작업 폴더 <뿌리>/XXXXXX가 macOS 기본 TMPDIR(/var/folders/xx/<30>/T/ 49자)보다 길지 않게
-	MaxDir  = MaxRoot + 1 + 6                            // 49
+	MaxRoot = 41                                         // TMPDIR 값 <뿌리>/XXXXXX/가 macOS 기본 TMPDIR(/var/folders/xx/<30>/T/ 49자)보다 길지 않게
+	MaxDir  = MaxRoot + 1 + 6                            // 48(작업 폴더, macOS TMPDIR 값은 끝 「/」 더해 49)
 	SockMax = 104                                        // macOS sun_path(NUL 포함)
 	Longest = "com.google.Chrome.XXXXXX/SingletonSocket" // 알려진 가장 긴 소켓 꼴(화면 점검의 Chrome)
 )
@@ -31,12 +31,12 @@ const scriptSrc = `r=$1 n=$2 m=$3; shift 3;
 case $r in "~") r=$HOME ;; "~/"*) r=$HOME/${r#"~/"} ;; esac;
 d=;
 if [ -n "${HC_TERMINAL_ID-}" ] && [ "$r" != off ]; then
-  if [ ${#r} -gt 42 ]; then
-    echo "jobtmp: 뿌리 $r 가 42자를 넘어(소켓 경로 상한) 기본 TMPDIR로 돈다" >&2;
+  if [ ${#r} -gt 41 ]; then
+    echo "jobtmp: 뿌리 $r 가 41자를 넘어(소켓 경로 상한) 기본 TMPDIR로 돈다" >&2;
   elif { [ -d "$r" ] || { mkdir -p "$r" && chmod 700 "$r"; }; } &&
     d=$(mktemp -d "$r/XXXXXX") && { printf %s "$HC_TERMINAL_ID"; echo; printf %s "$n"; echo; date +%s; } >"$d/.hc-job"; then
     TMPDIR=$d; export TMPDIR;
-    [ "$(uname)" != Darwin ] || { MAC_CHROMIUM_TMPDIR=$d; export MAC_CHROMIUM_TMPDIR; };
+    [ "$(uname)" != Darwin ] || { TMPDIR=$d/; MAC_CHROMIUM_TMPDIR=$d/; export MAC_CHROMIUM_TMPDIR; };
   else
     [ -z "$d" ] || rm -rf "$d";
     d=;

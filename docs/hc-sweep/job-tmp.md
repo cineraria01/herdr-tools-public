@@ -7,12 +7,15 @@
 - 뿌리: 설정 `jobtmp.root`(기본 `~/.hctmp.noindex`, `~`는 그 기계 집), 작업 폴더는 `<뿌리>/<6글자>`(`mktemp -d`).
 - 집 아래인 까닭: macOS는 `/tmp`(사흘 안 쓴 것)와 `/var/folders/…/T`(부팅·사흘)를 스스로 비운다 — 오래 도는 레인의 파일이 사라질 수 있다. 집 아래는 비우지 않으니 지우는 것은 이 구조뿐이다.
 - `.noindex`로 끝나 Spotlight가 색인하지 않는다. Time Machine 제외는 감싸개가 하지 않는다(`tmutil addexclusion`이 한 번에 11초 — 실측, 띄우기를 막는다). 로컬 스냅숏이 문제 되면 기계마다 손으로 한 번 `tmutil addexclusion ~/.hctmp.noindex`.
-- 길이: macOS 유닉스 소켓 경로 상한 104바이트(`sun_path`, NUL 포함). 지금 기본 TMPDIR `/var/folders/xx/<30>/T/`가 49자이니 작업 폴더도 49자를 넘지 않게 뿌리는 42자 이하만 쓴다(넘으면 감싸지 않고 기본 TMPDIR로 돌며 한 줄 알림).
-  가장 긴 알려진 소켓 꼴 `com.google.Chrome.XXXXXX/SingletonSocket`(40자)을 더해도 49+1+40 = 90 < 104. 실측 `/Users/<이름>/.jtprobe/x5NgXe/com.google.Chrome.L6EhZS/SingletonSocket` 73자.
+- 값의 꼴은 운영체제 기본값과 같게(ht-jobtmp-slash, 2026-11-27): macOS는 기본 `/var/folders/…/T/`처럼 **끝 「/」**(`<뿌리>/<6글자>/`), 리눅스는 기본(없음 → `/tmp`, Go `os.TempDir()`도 `/tmp`)처럼 끝 「/」 없음.
+  까닭: `"${TMPDIR}name"`·`os.TempDir()+"name"`처럼 「/」 없이 이어 붙이는 스크립트·시험(정규식 `QuoteMeta(os.TempDir())+"[^/]*/…"`)이 흔하다 — 끝 「/」가 없으면 작업 폴더 **옆**(`<뿌리>/<6글자>name`)을 가리켜, 한 프로젝트의 골든 시험이 병합 줄에서 2시간 넘게 막혔다.
+  hc-sweep은 TMPDIR 값을 보지 않고 뿌리 아래 폴더와 표식을 읽으니(레인 안 판정은 `filepath.Join`) 끝 「/」 있는 값·없는 옛 값 모두 같은 폴더다.
+- 길이: macOS 유닉스 소켓 경로 상한 104바이트(`sun_path`, NUL 포함). 지금 기본 TMPDIR `/var/folders/xx/<30>/T/`가 끝 「/」 포함 49자이니 TMPDIR 값(작업 폴더 + 「/」)도 49자를 넘지 않게 뿌리는 41자 이하만 쓴다(넘으면 감싸지 않고 기본 TMPDIR로 돌며 한 줄 알림).
+  가장 긴 알려진 소켓 꼴 `com.google.Chrome.XXXXXX/SingletonSocket`(40자)을 이어 붙여도 49+40 = 89 < 104. 실측 `/Users/<이름>/.jtprobe/x5NgXe/com.google.Chrome.L6EhZS/SingletonSocket` 73자.
 
 ## 띄울 때 준다 (얹기 — 새 실행 길 없음)
 - 감싸개 `internal/jobtmp`(POSIX sh 한 조각): 뿌리를 만들고 `mktemp -d`, 표식 `.hc-job` 세 줄 `<터미널 주소>`·`<작업 이름>`·`<유닉스 초>`(주소는 그 터미널의 `$HC_TERMINAL_ID`, 감싸개는 한 줄·역슬래시 없음 — hc run 인자를 한 줄로 적는 기록이 안 깨지게), 그다음 `TMPDIR`을 그 폴더로.
-  macOS에서는 `MAC_CHROMIUM_TMPDIR`도 같게 — Chrome은 macOS에서 `TMPDIR`을 보지 않는다(실측: `TMPDIR`만 주면 `SingletonSocket`이 `/var/folders/…/T/com.google.Chrome.*`에 생김).
+  macOS에서는 `MAC_CHROMIUM_TMPDIR`도 같게(둘 다 끝 「/」) — Chrome은 macOS에서 `TMPDIR`을 보지 않는다(실측: `TMPDIR`만 주면 `SingletonSocket`이 `/var/folders/…/T/com.google.Chrome.*`에 생김).
   Go는 `GOTMPDIR`이 없으면 `TMPDIR`을 따른다 — `GOTMPDIR`은 건드리지 않는다(누가 일부러 정한 값).
 - `$HC_TERMINAL_ID`가 없으면(hc 터미널 밖) 감싸지 않은 것과 같다 — 주인을 모르는 폴더는 만들지 않는다.
 - 쓰는 곳: hc-lane이 띄우는 레인·`--read` 감사(hc-fill이 띄우는 것도 이 길)는 `exec` 꼴(에이전트가 그대로 터미널의 프로그램), 병합기 추측 일꾼·몫·워커 착지는 `run` 꼴(명령이 끝나거나 HUP·TERM·INT를 받으면 폴더를 지우고 끝).
