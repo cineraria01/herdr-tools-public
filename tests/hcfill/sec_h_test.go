@@ -195,6 +195,41 @@ func secH(k *K) {
 	k.cpConf()
 
 	secHPark(k)
+	secHBounce(k)
+}
+
+// secHBounce: 반송 다시 띄움(ht-bounce-relaunch) — 「반송됨」 대기 줄(14칸 bounced)은 반송 절 파일이 없으면 띄우지 않고, 같은 이름의
+// 옛 실행은 채택하지 않으며(돌면 기다림), 없으면 새로 띄워 run 지시문 끝에 그 절을 붙이고(--resume 없음) 14칸을 지운다
+func secHBounce(k *K) {
+	Q := k.Q
+	lane := k.T + "/lane.log"
+	k.fresh()
+	rm(k.T + "/events")
+	k.cpConf()
+	k.confAppend("audit " + k.EXA)
+	k.add("bq", "--only", "box-1")
+	k.hSetQ("bq", map[int]string{14: "bounced"})
+	write(k.t, lane, "")
+	k.run("run")
+	k.check("반송됨 줄: 반송 절 파일이 없으면 띄우지 않음",
+		k.where("bq") == "wait - -" && k.col14("bq") == "bounced" && strings.Contains(k.out, "반송 절을 읽지 못함") && !nonEmpty(lane), read(Q)+k.out)
+	if err := os.MkdirAll(k.DATA+"/bounce", 0o755); err != nil {
+		k.t.Fatal(err)
+	}
+	write(k.t, k.DATA+"/bounce/bq.md", "## 반송 — 병합기가 이 레인의 제출을 돌려보냈다 (hc-fill, 시험)\n1. git fetch origin refs/merge-failed/900-bq 뒤 git reset --keep FETCH_HEAD\n")
+	k.lj("box-1/t-old:claude-code:bq:idle:/home/me/src/app.wt/bq") // 반송된 옛 실행이 남음(가짜 hc get은 working)
+	k.set(`HC_FAKE_LS_LANE={"terminals":[{"address":"box-1/t-old","state":"live","cwd":"/"}]}`)
+	k.run("run")
+	k.check("반송됨 줄: 같은 이름 옛 실행이 남으면 채택도 띄우기도 않고 기다림(hc-lane이 같은 이름을 거절)",
+		k.where("bq") == "wait - -" && !grep(k.out, `이미 떠 있음 bq`) && strings.Contains(k.out, "같은 이름 반송된 옛 실행 터미널 살아 있음 box-1/t-old") && !nonEmpty(lane), read(Q)+k.out)
+	k.set("HC_FAKE_GONE=box-1/t-old") // 옛 실행이 닫힘(hc-sweep·endClose)
+	k.run("run")
+	rf := k.DATA + "/runs/bq-run.md"
+	k.check("반송됨 줄: 옛 실행이 없어지면 새로 띄움 — 지시문 끝에 반송 절, --resume 없음, 14칸 지움, 감사 절 그대로",
+		k.where("bq") != "wait - -" && !grep(k.out, `이미 떠 있음 bq`) && nonEmpty(lane) && !hasFx(lane, "--resume") &&
+			hasF(rf, "git fetch origin refs/merge-failed/900-bq ") && hasF(rf, "## 감사·착지 (hc-fill 자동)") && k.col14("bq") == "-", read(Q)+k.out+read(rf))
+	k.lj()
+	k.unset("HC_FAKE_LS_LANE", "HC_FAKE_GONE")
 }
 
 // secHPark: 주차 — 먼저 띄운 레인은 준비 뒤 hc-lane park로 가지를 원격에 두고 끝낸다 → hc-fill이 줄을 주차로 되돌려 자리를 비우고 →

@@ -168,7 +168,7 @@ func relandTick() {
 		case r.F(rlFailed) != "":
 			seen[r.F(rlFailed)] = true
 			delete(pend, r.F(rlFailed))
-			if r.F(rlWhat) == "넣음" {
+			if r.F(rlWhat) == "넣음" || r.F(rlWhat) == "다시 띄움" { // 다시 띄움: 충돌 아닌 반송(bounce.go)
 				cnt[r.F(rlBase)]++
 				bases[r.F(rlArg)] = r.F(rlBase)
 				if r.F(rlMsg) != "" {
@@ -193,6 +193,9 @@ func relandTick() {
 			continue
 		}
 		mm, qm := relandRe.FindStringSubmatch(r.F(evMsg)), relandQRe.FindStringSubmatch(r.F(evMsg))
+		if mm == nil && relandFailRe.MatchString(r.F(evMsg)) {
+			mm = []string{"", ""} // 충돌 아닌 반송 — 충돌 파일 칸이 빈 값(bounce.go)
+		}
 		if mm == nil || qm == nil || seen[qm[1]] {
 			continue
 		}
@@ -381,6 +384,9 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		rec("다시 냄", "-")
 		return
 	}
+	if files == "" && !bounceGate(n, lane, p, rec, recTell) {
+		return
+	}
 	rule := relandDocsRule(p)
 	if live {
 		switch a, st := relandLive(lane, p, n); st {
@@ -418,11 +424,19 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 			say("다시 맞춤 %s: 원래 레인이 살아 있는지 모름 — 다시 맞춤으로", lane)
 		}
 	}
+	why := "rebase 충돌"
+	if files == "" {
+		why = bounceWhy(r.F(evMsg))
+	}
 	if cnt[base] >= mx {
-		msg := fmt.Sprintf("%s 병합기 rebase 충돌로 또 반송 — 자동 다시 맞춤 %d번 넘음, 지휘 판단 (refs/merge-failed/%s, 충돌 %s)", lane, mx, n, files)
+		msg := fmt.Sprintf("%s 병합기 "+why+"로 또 반송 — 자동 다시 맞춤 %d번 넘음, 지휘 판단 (refs/merge-failed/%s, 충돌 %s)", lane, mx, n, files)
 		if aesc(lane, dash(owner), msg, "hf:reland:"+n) == 0 {
 			rec("상한", "-")
 		}
+		return
+	}
+	if files == "" {
+		bounceRelaunch(n, lane, base, why, r, live, rec, recTell)
 		return
 	}
 	name := relandName(base, cnt[base]+1)
@@ -539,6 +553,9 @@ func relandDocsRule(p string) string {
 // relandSendMsg: 살아 있는 원래 레인에 보내는 한 줄. 전체 검증은 넣지 않는다(conflict-fast C, 2026-11-23 — 레인 쪽 전체 검증 뒤 병합기가
 // 같은 전체 검증을 또 돌았다. 기본 브랜치 관문은 병합기 검증 그대로)
 func relandSendMsg(files, n string) string {
+	if files == "" {
+		return fmt.Sprintf("병합기 반송(충돌 아닌 착지 실패, refs/merge-failed/%s — 병합기 사건의 로그를 본다) — origin/main으로 rebase하고 그 실패만 고쳐 커밋한 뒤 hc-lane land main 다시", n)
+	}
 	return fmt.Sprintf("병합기 반송(rebase 충돌 %s, refs/merge-failed/%s) — origin/main으로 rebase해 양쪽 살려 풀고 푼 파일 둘레의 빌드·시험만 돌린 뒤 hc-lane land main 다시(전체 검증은 병합기가 돈다)", files, n)
 }
 

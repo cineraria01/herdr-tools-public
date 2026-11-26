@@ -287,6 +287,12 @@ func waitRow(r Row) {
 			say("알림 %s: 같은 이름 터미널 %s 는 hc-lane 레인(%s 폴더)이 아니라 채택하지 않음", name, t.Addr, prj)
 			continue
 		}
+		if ef == "bounced" { // 반송된 줄(bounce.go): 같은 이름의 옛 실행은 채택하지 않는다 — 제출하고 끝냈으면 닫고 띄우고, 아니면 기다림
+			if gone, why := endClose(name, t.Addr, t.M, "제출"); !gone {
+				parkbusy = "같은 이름 반송된 옛 실행 터미널 살아 있음 " + t.Addr + " (" + dash(t.Status) + ", 안 닫음: " + why + ")"
+			}
+			continue
+		}
 		if dash(ef) == "parked" {
 			switch pc, why := parkCandidate(name, rid, t.M, t.Addr, t.Status); pc {
 			case 1:
@@ -338,13 +344,20 @@ func waitRow(r Row) {
 		say("건너뜀 %s: 대기열 줄이 바뀌었다(rm·다시 add) — 다음 바퀴에", name)
 		return
 	}
-	RESUME, RSEC = false, ""
+	RESUME, RSEC, BOUNCE = false, "", false
 	if dash(ef) == "parked" {
 		RESUME, RSEC = true, resumeSec(name, after, bBranch)
 	}
+	if ef == "bounced" { // 반송 다시 띄움(bounce.go) — 절이 없으면 띄우지 않는다(반송 커밋을 모르는 채 본 작업을 처음부터 하게 된다)
+		if RSEC = bounceSec(name); RSEC == "" {
+			say("실패 %s: 반송 절을 읽지 못함: %s", name, bounceFile(name))
+			return
+		}
+		BOUNCE = true
+	}
 	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
-	RESUME, RSEC = false, ""
+	RESUME, RSEC, BOUNCE = false, "", false
 	if placed || GOTADDR {
 		ovlPlaced(name, prj, SB, after, dash(ak))
 	}

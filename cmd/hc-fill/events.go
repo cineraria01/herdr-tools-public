@@ -225,7 +225,10 @@ func parkTick() {
 // 이어 띄우기가 「같은 이름」으로 13바퀴 거절됐다). hc-sweep의 「닫아도 되는 터미널」과 같이 살아 있고 이름이 그 레인이고 done·idle
 // (또는 hc keep이 셸만 남김)일 때, 그 실행(<주소>@<created_ms>)의 마지막 보고(정리됨 빼고)가 「주차」면 그 정확한 주소로 hc kill.
 // 주차 뒤 닫힘은 hc-lane 감시가 조용히 넘긴다(handedOff). 반환: 이제 없음(닫았거나 이미 없음)·남긴 까닭
-func parkClose(n, a, m string) (bool, string) {
+func parkClose(n, a, m string) (bool, string) { return endClose(n, a, m, "주차") }
+
+// endClose <레인> <주소> <기계> <마지막 보고>: parkClose와 같되 마지막 보고를 고른다 — 반송된 줄(bounce.go)은 제출하고 끝낸 옛 실행을 「제출」로 닫는다
+func endClose(n, a, m, want string) (bool, string) {
 	if EVBAD || m != LOCAL && (!connHas(m) || has(evUnk(), m)) {
 		return false, "사건 모름"
 	}
@@ -244,17 +247,17 @@ func parkClose(n, a, m string) (bool, string) {
 	EV = evNoClean()
 	l := runlast(n, a, a[strings.LastIndexByte(a, '/')+1:]+"@"+strconv.FormatInt(t.Created, 10), "")
 	EV = saved
-	if evF(l, evState) != "주차" {
-		return false, "그 실행의 마지막 보고가 주차 아님(" + dash(evF(l, evState)) + ")"
+	if evF(l, evState) != want {
+		return false, "그 실행의 마지막 보고가 " + want + " 아님(" + dash(evF(l, evState)) + ")"
 	}
 	if dry {
-		fmt.Println(P + "주차 터미널 닫을 " + a + " (" + n + ")")
+		fmt.Println(P + want + " 터미널 닫을 " + a + " (" + n + ")")
 		return false, "dry-run"
 	}
 	if _, rc := (Cmd{Name: "hc", Args: []string{"kill", a}, Err: errMerge}).Run(); rc != 0 {
 		return false, fmt.Sprintf("hc kill 종료 %d", rc)
 	}
-	fmt.Println("주차 터미널 닫음 " + a + " (" + n + ", " + dash(t.Status) + ")")
+	fmt.Println(want + " 터미널 닫음 " + a + " (" + n + ", " + dash(t.Status) + ")")
 	return true, ""
 }
 

@@ -252,6 +252,8 @@ func lsCmd(args []string) {
 			note = "주차(선행 " + after + " — 들어가면 lane/" + name + " 에서 이어 띄움)" + strings.TrimPrefix(note, "선행 "+after)
 		case "resumed":
 			note += " 주차에서 이어 띄움"
+		case "bounced":
+			note += " 반송됨 — 같은 이름으로 다시 띄움 대기"
 		}
 		if stuck != "-" {
 			note += " 상태 안 잡힘 남김 " + stuck

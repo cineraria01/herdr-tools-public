@@ -467,6 +467,9 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			if RESUME {
 				pe = "resumed" // 주차에서 이어 띄움은 resumed(다시 먼저 띄움 후보가 아님)
 			}
+			if BOUNCE {
+				pe = "-" // 반송됨 표시를 지운다(떠 있는 줄)
+			}
 			if tryput(lane, RID, m, pe, LAUTO, ADDR, START_RUN) != 0 {
 				die("실행 기록 저장 실패")
 			}

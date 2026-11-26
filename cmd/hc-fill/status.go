@@ -35,6 +35,9 @@ func stStage0(in stIn) string {
 		if in.Pin != "" { // 선행은 들어갔다 — 「선행 기다림」이 아니라 진짜 까닭(ht-advise-only-stuck)
 			return "대기(묶인 기계 " + in.Pin + ")"
 		}
+		if in.Early == "bounced" { // bounce.go
+			return "반송됨 — 다시 띄움 대기"
+		}
 		if in.Early == "parked" {
 			return "대기(주차 — 선행 기다림)"
 		}
