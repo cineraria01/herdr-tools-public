@@ -195,15 +195,11 @@ func rqFind(lane string) (rqFound, gitx.State) {
 func rqEvent(p, n string) (string, bool) {
 	mg := map[string]bool{}
 	args := []string{"events"}
-	for _, f := range confRows("merger") {
-		if len(f) >= 3 && f[1] == p {
-			for _, m := range f[2:] {
-				if !mg[m] {
-					mg[m] = true
-					if m != LOCAL {
-						args = append(args, "--on", m)
-					}
-				}
+	for _, f := range confRows("merger") { // merger <프로젝트> <기계> [<클론 폴더>] — 기계는 셋째 칸 하나(mergerTick·mergerLaunch와 같게)
+		if len(f) >= 3 && f[1] == p && !mg[f[2]] {
+			mg[f[2]] = true
+			if f[2] != LOCAL {
+				args = append(args, "--on", f[2])
 			}
 		}
 	}

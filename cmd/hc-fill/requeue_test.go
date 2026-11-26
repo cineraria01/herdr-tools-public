@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+// ht-requeue-merger-row 지킴: TestRequeue의 가짜 병합기 줄은 설정 예시의 merger 줄과 칸 수가 같아야 한다(선택 칸까지 —
+// 예시가 칸을 늘리면 시험도 그 꼴로 바꾸게)
+func TestRequeueMergerRowShape(t *testing.T) {
+	ex, err := os.ReadFile("../../config.example/hc-fill.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, l := range strings.Split(string(ex), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 2 || f[0] != "#" || f[1] != "merger" {
+			continue
+		}
+		n = 1
+		for _, x := range f[2:] {
+			if !strings.HasPrefix(strings.TrimPrefix(x, "["), "<") {
+				break
+			}
+			n++
+		}
+	}
+	src, err := os.ReadFile("requeue_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, row, _ := strings.Cut(string(src), "mrow := \"")
+	row, _, _ = strings.Cut(row, "\"")
+	if n < 3 || len(strings.Fields(row)) != n {
+		t.Fatalf("설정 예시 merger 줄 칸 %d, 시험 가짜 줄 %q 칸 %d — 같은 꼴로", n, row, len(strings.Fields(row)))
+	}
+}
+
 // knob-test-leak ⑤: requeue — 검증 실패 반송은 같은 커밋·같은 기록(감사 판정)으로 줄 끝에, 충돌 반송·취소된 판정·이미 든 제출·이미 줄에
 // 있음은 거절, dry-run은 옮기지 않음, 일지에 남김
 func TestRequeue(t *testing.T) {
@@ -59,11 +91,13 @@ func TestRequeue(t *testing.T) {
 		rlEv("2026-11-24T06:00:04Z", "le", "1000000005-le", "착지 실패(종료 1)", "t9"),
 	}, "\n") + "\n"
 	os.WriteFile(DATA+"/ev", []byte(ev), 0o644)
-	os.WriteFile(DATA+"/hc-lane", []byte("#!/bin/sh\n[ \"$1\" = events ] && cat "+DATA+"/ev\n"), 0o755)
+	// 부른 인자를 적는다 — 병합기 줄의 클론 경로 칸이 --on 기계로 넘어가면 안 된다(ht-requeue-merger-row)
+	os.WriteFile(DATA+"/hc-lane", []byte("#!/bin/sh\necho \"$*\" >> "+DATA+"/args\n[ \"$1\" = events ] && cat "+DATA+"/ev\n"), 0o755)
 	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
 	jf := DATA + "/journal.jsonl"
 	t.Setenv("HERDR_TOOLS_JOURNAL", jf)
-	confLines = lines("local here\nrepo app here " + w + "\nmerger app box\n")
+	mrow := "merger app box /srv/clones/app" // 실제 줄 꼴(TestRequeueMergerRowShape가 설정 예시와 견줌)
+	confLines = lines("local here\nrepo app here " + w + "\n" + mrow + "\n")
 	LOCAL = "here"
 	pcRef = map[string]pcRes{}
 
@@ -75,6 +109,21 @@ func TestRequeue(t *testing.T) {
 	if rc := requeue("la", "거짓 반송", false); rc != 0 {
 		t.Fatalf("검증 실패 반송 다시 넣기 rc %d", rc)
 	}
+	if a, _ := os.ReadFile(DATA + "/args"); strings.TrimSpace(string(a)) != "events --on box\nevents --on box" {
+		t.Fatalf("hc-lane 인자 — 병합기 기계 칸만 --on 에, 바람 「events --on box」 두 번:\n%s", a)
+	}
+	// 병합기가 이 기계면 --on 없이
+	os.Remove(DATA + "/args")
+	confLines = lines("local box\nrepo app box " + w + "\n" + mrow + "\n")
+	LOCAL = "box"
+	if _, ok := rqEvent("app", "1000000001-la"); !ok {
+		t.Fatal("병합기가 이 기계일 때 사건을 못 읽음")
+	}
+	if a, _ := os.ReadFile(DATA + "/args"); strings.TrimSpace(string(a)) != "events" {
+		t.Fatalf("병합기가 이 기계면 --on 없이, 받은 인자:\n%s", a)
+	}
+	confLines = lines("local here\nrepo app here " + w + "\n" + mrow + "\n")
+	LOCAL = "here"
 	after := refs()
 	if strings.Contains(after, "1000000001-la") {
 		t.Fatalf("반송 참조가 남았다:\n%s", after)
