@@ -27,7 +27,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +34,6 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
-	"herdr-tools/internal/proc"
 	"herdr-tools/internal/verified"
 )
 
@@ -45,6 +43,7 @@ const (
 	rcLandRunNot = 70                     // --land-run: 착지를 시작하지 못함(받기·차례 바뀜·작업 트리) — 병합기는 워커가 죽은 것과 같게
 	rcLost       = -2                     // landExec: 맡긴 워커가 죽어 일지로 판정했다 — 바퀴는 여기서 끝(round)
 	localTag     = "병합기 기계 · "            // 일지 까닭의 머리 — 병합기 기계에서 돌림(--why가 가른다)
+	lostNoCmd    = "준비 훅 명령 없음"           // landParse: 워커의 준비 훅이 127(그 기계에 도구 없음) — 끊김 길 + 사건 한 번
 )
 
 // landOff: M에 묻는 착지 실행 상태 — 이번 바퀴 검증 기계 목록(specDecide가 채움)
@@ -307,6 +306,10 @@ func (m *M) landExec() int {
 		return rc
 	}
 	m.landDeadAdd(v.Machine)
+	if strings.HasPrefix(lost, lostNoCmd) { // 되풀이해도 같은 까닭 — 운영 사건 한 번(그 기계·맨 앞 제출마다 열쇠)
+		reportBlockedKey(fmt.Sprintf("병합기 맨 앞 %s 착지 — %s 에서 %s — 그 기계를 이 제출의 착지 후보에서 빼고 다른 워커로(그 기계 셸 환경 ~/.zshrc의 PATH에 그 도구를)",
+			m.b[0].l, v.Machine, lost), "hc-merger-land-nocmd:"+v.Machine+":"+m.b[0].s)
+	}
 	m.ls1 = time.Now().Unix()
 	m.jround(jLandOn, fmt.Sprintf("%s 착지 실행 끊김(%s) — 일지로 판정하고 다음 바퀴에 다른 워커로", v.Machine, lost), ", 로그 "+m.lgf)
 	if !m.unclaim(m.lclaim) { // 차례를 못 지움 — 그 실행이 아직 넣을 수 있다. 일지를 두고 다음 바퀴에(landPrep이 기다리거나 치운 뒤 recover)
@@ -432,6 +435,9 @@ func landParse(r string) (int, string) {
 	if c, ok := strings.CutPrefix(r, "nostart "); ok {
 		return 0, "워커가 착지를 시작 못 함(종료 " + c + ")"
 	}
+	if c, ok := strings.CutPrefix(r, "nocmd "); ok {
+		return 0, lostNoCmd + "(" + c + ")"
+	}
 	return 0, "결과 꼴 모름: " + bcut(40, flat(r))
 }
 
@@ -452,134 +458,4 @@ func landLogTail(lf *os.File, mach, lg string) {
 		lf.Write(x.Stdout)
 	}
 	fmt.Fprintf(lf, "\nhc-lane merger: 워커 착지 로그 %s:%s\n", mach, lg)
-}
-
-// landRunMain: hc-lane merger --land-run <기본 브랜치> <차례 커밋> — 워커 쪽(병합기가 hc run --on으로, 그 기계 클론에서 landWrap 안에).
-// 차례 커밋의 부모(후보)를 <폴더>/<차례 12>(폴더 = HC_MERGER_LAND_DIR, 없으면 <클론>.land-wt)에 hc-merger-land/<레인>-<차례 12> 가지로 꺼내
-// 준비 훅 → hc-lane land(병합기와 같은 환경 — 부른 쪽이 env로). 로그는 <폴더>/<차례 12>.log. 착지 단계에 들어섰으면 종료 코드를
-// HC_MERGER_LAND_RESULT 파일에 적는다(못 적은 끝은 감싸개가 「nostart」). 종료: 착지 종료 코드 · 75 준비 훅 실패 · 70 시작 못 함 · 2 인자
-func landRunMain(a []string) int {
-	rc, started := landRun(a)
-	if r := os.Getenv("HC_MERGER_LAND_RESULT"); started && r != "" {
-		if err := os.WriteFile(r, []byte(strconv.Itoa(rc)+"\n"), 0o666); err != nil {
-			fmt.Fprintf(os.Stderr, "hc-lane merger: --land-run — 결과 파일을 못 썼다(병합기는 시작 못 함으로 본다): %v\n", err)
-		}
-	}
-	return rc
-}
-
-func landRun(a []string) (int, bool) {
-	if len(a) != 2 || !plain(a[0]) || len(a[1]) != 40 || strings.Trim(a[1], "0123456789abcdef") != "" {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run <기본 브랜치> <차례 커밋 40자>")
-		return 2, false
-	}
-	base, cm := a[0], a[1]
-	ln := os.Getenv("HC_LANE")
-	top, rc := outQ("rev-parse", "--show-toplevel")
-	if !laneOK(ln) || rc != 0 || os.Chdir(top) != nil {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — git 클론 안에서 HC_LANE과 함께 부른다")
-		return rcLandRunNot, false
-	}
-	if orphansDefer("착지 작업 트리") {
-		return rcLandRunNot, false
-	}
-	dir := os.Getenv("HC_MERGER_LAND_DIR")
-	if dir == "" {
-		dir = top + ".land-wt"
-	}
-	landSweep(dir)
-	ref := landClaims + base
-	if fetchr(false, "-q", "origin", "+"+ref+":"+ref, "+refs/heads/"+base+":refs/remotes/origin/"+base) != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — 착지 차례를 받지 못했다")
-		return rcLandRunNot, false
-	}
-	// 착지 push가 함께 싣는 제출 기록 커밋(<기록>:refs/merge-done/<레인> — exbuild)을 이 클론에도 — 그 push가 지우는 기록 참조를 받기만
-	// (FETCH_HEAD, 참조는 남기지 않음)
-	metas := []string{"-q", "origin"}
-	for _, f := range strings.Fields(os.Getenv("HERDR_LAND_PUSH_EXTRA")) {
-		if r, ok := strings.CutPrefix(f, ":refs/merge-queue-meta/"); ok {
-			metas = append(metas, "refs/merge-queue-meta/"+r)
-		}
-	}
-	if len(metas) > 2 && fetchr(true, metas...) != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — 제출 기록을 받지 못했다")
-		return rcLandRunNot, false
-	}
-	defer runQ("update-ref", "-d", ref) // 이 클론에 차례 참조를 남기지 않는다
-	if got, _ := outQ("rev-parse", "-q", "--verify", ref); got != cm {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: --land-run — 착지 차례가 바뀌었다(%s ≠ %s), 착지하지 않는다\n", first8(got), first8(cm))
-		return rcLandRunNot, false
-	}
-	wt, br := dir+"/"+cm[:12], landBranch(ln, cm)
-	if err := os.MkdirAll(dir, 0o777); err != nil {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — 작업 폴더를 만들지 못했다")
-		return rcLandRunNot, false
-	}
-	lg := wt + ".log"
-	defer runQ("branch", "-q", "-D", br)
-	landRmWT(wt)
-	if inLog("", lg, "worktree", "add", "-q", "-f", "-B", br, wt, cm+"^") != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --land-run — 작업 트리를 만들지 못했다")
-		return rcLandRunNot, false
-	}
-	defer landRmWT(wt)
-	lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
-	if err != nil {
-		return rcLandRunNot, false
-	}
-	defer lf.Close()
-	env := append(os.Environ(), "HERDR_MERGER=1")
-	if id := os.Getenv("HC_MERGER_LAND_SPEC"); id != "" {
-		if line, _, ok := specPartsGet(id, ""); ok && len(strings.Fields(line)) >= 2 && os.WriteFile(wt+".parts", []byte(line+"\n"), 0o666) == nil {
-			env = append(env, "HERDR_VERIFY_PARTS_FROM="+wt+".parts")
-			defer os.Remove(wt + ".parts")
-		}
-	}
-	switch rc := setupHook(wt, top, base, lf, ""); rc {
-	case rcNotRun:
-		return rcLandRunNot, false
-	case 0:
-	default:
-		return rc, true
-	}
-	c := exec.Command(gSelf, "land", base)
-	c.Dir, c.Stdout, c.Stderr, c.Env = wt, lf, lf, env
-	rc, ran := proc.WaitFor(c, "", landMax(), landMax() <= 0)
-	if !ran {
-		return rcLandRunNot, false
-	}
-	return rc, true
-}
-
-// landBranch: 착지 작업 트리의 가지 — 실행(차례)마다 다른 이름. 레인 이름만이면 신호로 끊겨 defer가 못 돈 앞 실행의 작업 트리가 그
-// 가지를 쥐어 같은 레인의 다음 실행이 시작도 못 했다(2026-11-26 ht-land-run-killed — 「used by worktree」 → nostart 70). 남은 것은
-// landSweep이 하루 뒤 치운다. 「/」가 아니라 「-」로 잇는다 — 옛 이름 hc-merger-land/<레인> 가지와 참조 폴더·파일로 부딪히지 않게
-func landBranch(ln, cm string) string { return "hc-merger-land/" + ln + "-" + cm[:12] }
-
-// landRmWT: 착지 작업 트리를 지운다(git이 못 지우면 폴더째 — <폴더> 아래만), 등록은 prune
-func landRmWT(wt string) {
-	if _, err := os.Lstat(wt); err == nil && runQ("worktree", "remove", "-f", "-f", wt) != 0 {
-		os.RemoveAll(wt)
-	}
-	runQ("worktree", "prune")
-}
-
-// landSweep: 시간 넘김(무리째 KILL)으로 defer가 못 돈 앞 실행의 잔재 — <폴더> 아래 하루 넘은 항목과, 어느 작업 트리도 쓰지 않는
-// hc-merger-land/* 가지를 치운다(감사 atp2f36 낮음 1)
-func landSweep(dir string) {
-	es, _ := os.ReadDir(dir) // 없으면 치울 것 없음
-	for _, e := range es {
-		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > 24*time.Hour {
-			if e.IsDir() {
-				landRmWT(dir + "/" + e.Name())
-			} else {
-				os.Remove(dir + "/" + e.Name())
-			}
-		}
-	}
-	runQ("worktree", "prune")
-	bs, _ := outQ("for-each-ref", "--format=%(refname:short)", "refs/heads/hc-merger-land/")
-	for _, b := range strings.Fields(bs) {
-		runQ("branch", "-q", "-D", b) // 작업 트리가 쓰는 가지는 git이 거절한다(도는 실행)
-	}
 }

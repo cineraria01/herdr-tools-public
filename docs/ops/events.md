@@ -34,7 +34,7 @@
 ## merger
 
 - 뜻: 병합기(`hc-lane merger`)가 멈췄거나(막힘) 진행 중 알릴 것이 있다(중간). 병합기가 서면 그 저장소의 모든 착지가 선다.
-- 흔한 까닭: 클론 상태가 깨짐(rebase 중·더러움), 앞 실행의 착지 자식이 남음, 기본 브랜치와 맨 앞 제출이 충돌, 직접 검증 착지를 맡을 워커가 닿지 않아 병합기 기계에서 돌림(키 `hc-merger-land-local:<맨 앞 SHA>` — `hc machine ls`로 워커 연결, 손잡이 `merger_land_on`).
+- 흔한 까닭: 클론 상태가 깨짐(rebase 중·더러움), 앞 실행의 착지 자식이 남음, 기본 브랜치와 맨 앞 제출이 충돌, 직접 검증 착지를 맡을 워커가 닿지 않아 병합기 기계에서 돌림(키 `hc-merger-land-local:<맨 앞 SHA>` — `hc machine ls`로 워커 연결, 손잡이 `merger_land_on`), 워커 착지의 준비 훅이 그 기계에서 명령을 못 찾음(키 `hc-merger-land-nocmd:<기계>:<맨 앞 SHA>` — 그 기계 `~/.zshrc`의 PATH에 그 도구를 넣거나 깐다, 그동안 그 제출은 다른 워커로).
 - 받으면: `hc-lane logs`로 병합기 기록·일지를 보고, `hc-fill status`로 큐에 기다리는 제출을 본다. 병합기 터미널이 없으면 `hc-fill merger restart <프로젝트>`.
 - 사람에게: 클론을 지우거나 되돌려야(남의 변경을 버림) 풀릴 때.
 - 다음: `hc-lane logs`

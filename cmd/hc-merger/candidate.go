@@ -102,7 +102,7 @@ func (m *M) runCandidate() int {
 		return 75
 	}
 	defer lf.Close()
-	if rc := setupHook(m.mwt, m.top, m.base, lf, m.mj+"/child"); rc != 0 {
+	if rc, _ := setupHook(m.mwt, m.top, m.base, lf, m.mj+"/child", false); rc != 0 {
 		return rc
 	}
 	c := exec.Command(gSelf, "land", m.base)
@@ -118,24 +118,32 @@ func (m *M) runCandidate() int {
 	return rc
 }
 
-// setupHook: 작업 트리 wt에 준비 훅이 있으면 돌린다(상한 HERDR_TIMEOUT_SETUP, 자식 기록 rec). 0 통과·없음 · 75 실패 · rcNotRun 못 띄움
-func setupHook(wt, top, base string, lf *os.File, rec string) int {
+// setupHook: 작업 트리 wt에 준비 훅이 있으면 돌린다(상한 HERDR_TIMEOUT_SETUP, 자식 기록 rec). 0 통과·없음 · 75 실패 · rcNotRun 못 띄움,
+// 둘째 값은 훅 자신의 종료 코드. shell이면 그 기계의 셸 환경에서(워커 착지 — 추측 일꾼과 같은 shellCmd, hc 코어 PATH에는 npm·bun 등이 없다)
+func setupHook(wt, top, base string, lf *os.File, rec string, shell bool) (int, int) {
 	if _, err := os.Stat(wt + "/.claude/herdr-setup.sh"); err != nil {
-		return 0
+		return 0, 0
 	}
-	c := exec.Command("bash", ".claude/herdr-setup.sh")
-	c.Dir, c.Stdout, c.Stderr = wt, lf, lf
-	c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+top, "LANE_BASE="+base)
+	var c *exec.Cmd
+	if shell {
+		c = shellCmd(wt, "sh", "-c", noIndexSh, "hc-merger", "bash", ".claude/herdr-setup.sh")
+		c.Env = append(os.Environ(), "LANE_REPO="+top, "LANE_BASE="+base)
+	} else {
+		c = exec.Command("bash", ".claude/herdr-setup.sh")
+		c.Dir = wt
+		c.Env = append(os.Environ(), "PATH="+pathWithout("codebase-memory-mcp"), "LANE_REPO="+top, "LANE_BASE="+base)
+	}
+	c.Stdout, c.Stderr = lf, lf
 	// 준비 훅에도 상한(E11·G1 — 의존성 설치가 망에서 멈추면 main에 쓰는 유일한 프로세스가 선다). 넘으면 무리째 거두고 큐를 둔 채 쉰다
 	rc, ran := proc.WaitFor(c, rec, setupMax(), setupMax() <= 0)
 	if !ran {
-		return rcNotRun
+		return rcNotRun, 0
 	}
 	if rc != 0 {
 		fmt.Fprintf(lf, "hc-lane merger: 준비 훅(.claude/herdr-setup.sh) 실패(종료 %d)\n", rc)
-		return 75
+		return 75, rc
 	}
-	return 0
+	return 0, 0
 }
 
 // landEnv: 착지(hc-lane land)에 줄 환경(HERDR_MERGER 빼고) — ex는 HERDR_LAND_PUSH_EXTRA, parts는 통과 조각 「키=값」(병합기 기계는

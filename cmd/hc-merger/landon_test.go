@@ -29,7 +29,9 @@ func landFx(t *testing.T) (*sfx, func() []string) {
 	landPoll = 10 * time.Millisecond
 	t.Cleanup(func() { landPoll = old })
 	self := s.dir + "/hc-lane-land"
-	os.WriteFile(self, []byte(fmt.Sprintf("#!/bin/sh\n[ \"$1\" = land ] && [ -n \"$LAND_STEAL\" ] && git push -q origin :%smain\nexec %q \"$@\"\n", landClaims, gSelf)), 0o777)
+	// LAND_ENV_OUT: 착지가 본 LANDON_SHELL(시험 ~/.zshrc가 넣는 값)을 그 파일에(landon_env_test.go)
+	os.WriteFile(self, []byte(fmt.Sprintf("#!/bin/sh\n[ \"$1\" = land ] && [ -n \"$LAND_ENV_OUT\" ] && echo \"${LANDON_SHELL-}\" >\"$LAND_ENV_OUT\"\n"+
+		"[ \"$1\" = land ] && [ -n \"$LAND_STEAL\" ] && git push -q origin :%smain\nexec %q \"$@\"\n", landClaims, gSelf)), 0o777)
 	t.Setenv("HC_LANE_SELF", self)
 	runs := s.dir + "/landrun.log"
 	w := fmt.Sprintf(`#!/bin/sh
