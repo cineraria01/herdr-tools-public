@@ -222,6 +222,9 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		}
 		if rec, ok := recs[m]; ok {
 			x.Live, x.SkipWhy = ptrI(rec.used), rec.why
+			if rec.freeOK {
+				x.Free = ptrI(rec.free) // advise의 빈 자리 — 그 바퀴 띄우기 판정(machRoom) 그대로
+			}
 			// 마지막 바퀴에 그 기계 부하를 못 읽었으면(loadEnd가 지난 값을 읽은 때와 함께 남긴다) 모름 — 지난 값을 지금 값으로 적지 않는다(감사 atozipa 낮음 2)
 			// ponytail: 「그 바퀴」는 바퀴 끝 5분 안에 읽은 것 — 바퀴가 5분 넘게 걸리면 그 바퀴 값도 모름이 된다
 			if rec.l.OK && rec.l.At+stateLoadFresh >= end {

@@ -289,6 +289,38 @@ u=$(git -C "$d" rev-list -n 1 HEAD --not --branches --remotes) && [ -z "$u" ] &&
 
 func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) + rsvOn(m, "") }
 
+// machRoom: 그 기계에 지금 띄울 수 있는 수와 못 띄우는 까닭(연결 안 됨·유형 모를 터미널·멈춤(조정)·자리 참·레인상한 참, 상한 글이
+// 숫자가 아니면 까닭 없이 0). 띄우기(placeCands)·바퀴 기록(load.tsv 빈 자리 → 상태 한 장 free → advise)·치우침·빈 자리 알림(gc)이
+// 모두 이 함수로 센다 — 따로 세면 advise 「빈 자리 1」이 띄우기의 「레인상한 참」과 어긋났다(ht-advise-slot-cap).
+// 자동 감사 줄(isa)은 멈춤·레인상한을 안 보고, own은 그 줄이 제 몫으로 잡아 둔 자리(쓴 자리에서 뺀다)
+func machRoom(mc Machine, isa bool, own int) (int, string) {
+	m := mc.Name
+	switch {
+	case m != LOCAL && !connHas(m):
+		return 0, "연결 안 됨"
+	case has(AGUNK, m): // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
+		return 0, "유형 모를 터미널"
+	case !isa && machPaused(m): // 실행 중 멈춤(hc-fill machine --pause) — 떠 있는 레인의 감사는 그대로 띄운다
+		return 0, "멈춤(조정)"
+	}
+	c, err := strconv.Atoi(mc.Cap)
+	if err != nil {
+		return 0, ""
+	}
+	n := c - (agentsOn(m) - own)
+	if n <= 0 {
+		return 0, "자리 참"
+	}
+	if isa || mc.LCap == "-" { // 자동 감사 줄은 레인상한을 보지 않고 레인 수에도 안 든다
+		return n, ""
+	}
+	lc, err := strconv.Atoi(mc.LCap)
+	if err != nil || lanesOn(m) >= lc {
+		return 0, "레인상한 참"
+	}
+	return min(n, lc-lanesOn(m)), ""
+}
+
 // lanes_on: hc-fill이 그 기계에 띄워 살아 있는 레인 수. 자동 감사 줄은 빼고 센다. 감사를 기다리는 쓰기 레인은 센다
 func lanesOn(m string) int {
 	k := 0

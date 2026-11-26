@@ -206,8 +206,9 @@ func skewDue(last int64, now time.Time, every time.Duration) bool {
 	return last == 0 || now.Unix()-last >= int64(every.Seconds())
 }
 
-// loadLine: 기계 한 줄 — 이름 · 부하/코어(코어당) · 자리 쓴/상한(쓴 수 모르면 ?) · 실행 중 조정 · 이번 바퀴에 안 띄운 까닭
-func loadLine(name string, l mLoad, used, cp int, adj, why string) string {
+// loadLine: 기계 한 줄 — 이름 · 부하/코어(코어당) · 자리 쓴/상한(쓴 수 모르면 ?) · 빈 자리(그 바퀴 machRoom, 모르면 -1 — 안 적음) ·
+// 실행 중 조정 · 이번 바퀴에 안 띄운 까닭
+func loadLine(name string, l mLoad, used, cp, free int, adj, why string) string {
 	ld := "부하 모름"
 	if l.OK {
 		ld = fmt.Sprintf("부하 %.1f/%d(코어당 %.2f)", l.L1, l.Cores, l.Per())
@@ -221,6 +222,9 @@ func loadLine(name string, l mLoad, used, cp int, adj, why string) string {
 		u = strconv.Itoa(used)
 	}
 	s := fmt.Sprintf("%s  %s  자리 %s/%d", name, ld, u, cp)
+	if free >= 0 { // 레인상한·멈춤까지 본 띄울 수 있는 수 — advise 빈 자리와 같은 값
+		s += fmt.Sprintf(" · 빈 %d", free)
+	}
 	if adj != "" {
 		s += "  조정 " + adj
 	}
@@ -327,42 +331,29 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 		if isa {
 			repo = strings.TrimSuffix(repo, "/") + ".wt/" + AK[len("audit="):] // 자동 감사: 그 레인 작업 트리에서 --read
 		}
-		if m != LOCAL && !connHas(m) {
-			if !inlist(m, OFF) {
-				say("건너뜀 %s: 연결 안 됨", m)
-				OFF += "," + m
-			}
-			mwhy(m, "연결 안 됨")
-			continue
-		}
-		if has(AGUNK, m) { // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
-			mwhy(m, "유형 모를 터미널")
-			continue
-		}
-		if !isa && machPaused(m) { // 실행 중 멈춤(hc-fill machine --pause) — 떠 있는 레인의 감사는 그대로 띄운다
-			mwhy(m, "멈춤(조정)")
-			pin = append(pin, m+" 멈춤")
-			continue
-		}
 		own := 0
 		if isa && RSV[lane] == m { // 자동 감사 줄은 제 몫으로 잡아 둔 자리를 쓴다
 			own = 1
 		}
-		if c, err := strconv.Atoi(mc.Cap); err != nil || agentsOn(m)-own >= c {
-			if err == nil {
+		if n, why := machRoom(mc, isa, own); n <= 0 { // 빈 자리 셈은 machRoom 하나(바퀴 기록·advise·gc와 같은 판정)
+			switch why {
+			case "연결 안 됨":
+				if !inlist(m, OFF) {
+					say("건너뜀 %s: 연결 안 됨", m)
+					OFF += "," + m
+				}
+			case "멈춤(조정)":
+				pin = append(pin, m+" 멈춤")
+			case "자리 참":
 				full = m
-				mwhy(m, "자리 참")
 				pin = append(pin, pinNote(m, "상한"))
+			case "레인상한 참":
+				pin = append(pin, pinNote(m, "상한"))
+			}
+			if why != "" {
+				mwhy(m, why)
 			}
 			continue
-		}
-		// 자동 감사 줄은 레인상한을 보지 않고 레인 수에도 안 든다
-		if !isa && mc.LCap != "-" {
-			if lc, err := strconv.Atoi(mc.LCap); err != nil || lanesOn(m) >= lc {
-				mwhy(m, "레인상한 참")
-				pin = append(pin, pinNote(m, "상한"))
-				continue
-			}
 		}
 		cands, repos[m] = append(cands, mc), repo
 	}
@@ -418,7 +409,8 @@ func steer(lane string, cs []Machine, gate bool) []Machine {
 	return g
 }
 
-// ---- 상태 파일 <DATA>/load.tsv: 기계 · 1분 부하 · 코어 · 읽은 때 · 쓴 자리 · 상한 · 안 띄운 까닭 · 바쁨 시작 · 치우침 보낸 때 · 도는 검증 수(옛 판은 칸 없음) ----
+// ---- 상태 파일 <DATA>/load.tsv: 기계 · 1분 부하 · 코어 · 읽은 때 · 쓴 자리 · 상한 · 안 띄운 까닭 · 바쁨 시작 · 치우침 보낸 때 · 도는 검증 수 ·
+// 빈 자리(machRoom, 옛 판은 마지막 두 칸 없음) ----
 
 type loadRec struct {
 	m              string
@@ -426,6 +418,16 @@ type loadRec struct {
 	used, cp       int
 	why            string
 	hotSince, sent int64
+	free           int  // 그 바퀴 띄우기가 판정한 보통 레인 빈 자리(machRoom)
+	freeOK         bool // 거짓 = 칸 없음(옛 판) — 모름
+}
+
+// freeN: 빈 자리, 모르면 -1
+func (x loadRec) freeN() int {
+	if !x.freeOK {
+		return -1
+	}
+	return x.free
 }
 
 func loadRecs() map[string]loadRec {
@@ -443,6 +445,9 @@ func loadRecs() map[string]loadRec {
 		x.sent, _ = strconv.ParseInt(r.F(loSent), 10, 64)
 		if v, err := strconv.Atoi(r.F(loVer)); err == nil && v >= 0 && x.l.OK { // 칸 없음(옛 판)·「-」은 모름
 			x.l.Ver, x.l.VerOK = v, true
+		}
+		if v, err := strconv.Atoi(r.F(loFree)); err == nil && v >= 0 {
+			x.free, x.freeOK = v, true
 		}
 		o[x.m] = x
 	}
@@ -465,8 +470,10 @@ func loadEnd(now time.Time) {
 	var idle []string
 	ms := machines()
 	for _, mc := range ms {
-		if l := LOADS[mc.Name]; l.OK && busy > 0 && l.Per() <= busy && !machPaused(mc.Name) && int(num(mc.Cap))-agentsOn(mc.Name) > 0 {
-			idle = append(idle, mc.Name)
+		if l := LOADS[mc.Name]; l.OK && busy > 0 && l.Per() <= busy {
+			if n, _ := machRoom(mc, false, 0); n > 0 {
+				idle = append(idle, mc.Name)
+			}
 		}
 	}
 	var b strings.Builder
@@ -503,7 +510,9 @@ func loadEnd(now time.Time) {
 				ver = strconv.Itoa(x.l.Ver)
 			}
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%s\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent, ver)
+		x.free, _ = machRoom(mc, false, 0) // 이 바퀴 띄우기 판정 그대로의 빈 자리 — 상태 한 장 free, advise는 이것만 읽는다
+		x.freeOK = true
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%s\t%d\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent, ver, x.free)
 	}
 	if dry {
 		return
@@ -525,11 +534,8 @@ func skewMovable(now time.Time, busy float64) []string {
 	free, hot := map[string]int{}, map[string]bool{}
 	for _, mc := range machines() {
 		m := mc.Name
-		n := int(num(mc.Cap)) - agentsOn(m)
-		if lc, err := strconv.Atoi(mc.LCap); err == nil {
-			n = min(n, lc-lanesOn(m))
-		}
-		if machPaused(m) || n <= 0 {
+		n, _ := machRoom(mc, false, 0)
+		if n <= 0 {
 			continue
 		}
 		free[m] = n
@@ -554,7 +560,7 @@ func machineLines(withEmpty bool) []string {
 		if !ok {
 			used = -1
 		}
-		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), machAdj(mc.Name), x.why)+rn[mc.Name])
+		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), x.freeN(), machAdj(mc.Name), x.why)+rn[mc.Name])
 	}
 	return o
 }

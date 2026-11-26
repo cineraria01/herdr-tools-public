@@ -79,6 +79,7 @@ type machRow struct {
 	LoadAgeS *int64   `json:"load_age_s"` // 부하를 잰 지 몇 초(모르면 null)
 	Used     *int     `json:"used"`       // 쓴 자리(지난 바퀴, 모르면 null)
 	Cap      int      `json:"cap"`        // 자리 상한(설정)
+	Free     *int     `json:"free"`       // 빈 자리 — 지난 바퀴 띄우기 판정(machRoom, 레인상한·멈춤 포함), 모르면 null
 	Adjust   string   `json:"adjust"`     // 실행 중 조정(손잡이 seats@·pause@ — 없으면 빈 글)
 	Why      string   `json:"why"`        // 지난 바퀴에 안 띄운 까닭(없으면 빈 글)
 	Unreach  string   `json:"unreach"`    // 끊김 비고(없으면 빈 글)
@@ -98,7 +99,11 @@ func machineJSON() {
 		}
 		cp := int(num(mc.Cap))
 		r := machRow{Machine: mc.Name, Cap: cp, Adjust: machAdj(mc.Name), Why: x.why, Unreach: strings.TrimSpace(rn[mc.Name]),
-			Line: loadLine(mc.Name, x.l, used, cp, machAdj(mc.Name), x.why) + rn[mc.Name]}
+			Line: loadLine(mc.Name, x.l, used, cp, x.freeN(), machAdj(mc.Name), x.why) + rn[mc.Name]}
+		if x.freeOK {
+			f := x.free
+			r.Free = &f
+		}
 		if x.l.OK {
 			l1, c, p := x.l.L1, x.l.Cores, x.l.Per()
 			r.Load1, r.Cores, r.PerCore = &l1, &c, &p

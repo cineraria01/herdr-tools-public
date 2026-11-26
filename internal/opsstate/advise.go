@@ -129,22 +129,17 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 	var o []Item
 	add := func(it Item) { o = append(o, it) }
 
-	// 빈 자리(닿은 기계, 멈춤 아님): min(자리 − 에이전트, 레인 상한 − 레인)
+	// 빈 자리(닿은 기계, 멈춤 아님): 마지막 바퀴의 띄우기가 판정한 값(Machine.Free) 그대로 — 따로 세지 않는다.
+	// 자리·레인 칸으로 다시 세면 띄우기의 「레인상한 참」과 어긋나 거짓 「풀 수 있는 대기」가 났다(ht-advise-slot-cap). 모름(nil)은 세지 않는다
 	free := map[string]int{}
 	cores := map[string]int{}
 	for _, m := range s.Machines {
-		if m.Reach != "ok" || f.Paused[m.Name] || m.Seats == nil || m.Live == nil {
+		if m.Reach != "ok" || f.Paused[m.Name] || m.Free == nil || *m.Free <= 0 {
 			continue
 		}
-		n := *m.Seats - *m.Live
-		if m.LaneCap != nil && m.Lanes != nil {
-			n = min(n, *m.LaneCap-*m.Lanes)
-		}
-		if n > 0 {
-			free[m.Name] = n
-			if m.Cores != nil {
-				cores[m.Name] = *m.Cores
-			}
+		free[m.Name] = *m.Free
+		if m.Cores != nil {
+			cores[m.Name] = *m.Cores
 		}
 	}
 	freeFor := func(can []string) (int, int, string) {

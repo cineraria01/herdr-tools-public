@@ -59,6 +59,7 @@ type Machine struct {
 	Lanes       *int     `json:"lanes"`
 	Verifies    *int     `json:"verifies"` // 도는 저장소 검증 수(레인·병합기 합침, 부하와 같은 때 읽음) — 모름 nil
 	LaneCap     *int     `json:"lane_cap"`
+	Free        *int     `json:"free"` // 마지막 바퀴 띄우기가 판정한 빈 자리(hc-fill machRoom) — 모름 nil. advise는 따로 세지 않고 이것만 읽는다(ht-advise-slot-cap)
 	Health      Health   `json:"health"`
 	Steer       string   `json:"steer"`
 	SkipWhy     string   `json:"skip_why"`
@@ -262,7 +263,7 @@ func Fingerprint(s State) string {
 	h := sha256.New()
 	w := func(a ...any) { fmt.Fprintln(h, a...) }
 	for _, m := range s.Machines {
-		w("m", m.Name, m.Reach, m.Why, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap),
+		w("m", m.Name, m.Reach, m.Why, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), ival(m.Free),
 			m.Health.Sleep, m.Health.Keychain, m.Health.Tailscale, m.Steer, noDigits(m.SkipWhy))
 	}
 	var ks []string
@@ -388,8 +389,8 @@ func Human(w io.Writer, s State) error {
 			ht = fmt.Sprintf("  건강 잠자기 %s·키체인 %s·디스크 %s·tailscale %s",
 				or(hl.Sleep, "모름"), or(hl.Keychain, "모름"), fval(hl.DiskFreeGB, "%.0fGB"), or(hl.Tailscale, "모름"))
 		}
-		p("  %s  %s  에이전트 %s/%s  레인 %s/%s%s%s%s",
-			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), VerNote(m.Verifies), ht, steer(m))
+		p("  %s  %s  에이전트 %s/%s  레인 %s/%s%s  빈 자리 %s%s%s",
+			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), VerNote(m.Verifies), ival(m.Free), ht, steer(m))
 	}
 	if trim && !anyH && len(s.Machines) > 0 {
 		p("  건강 값 없음 — 점검이 아직 안 남김")

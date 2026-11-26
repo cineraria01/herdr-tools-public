@@ -45,7 +45,8 @@ herdr-tools로 <할 일>을 해라. 먼저 쓸 도구의 `<도구> --skill`을 �
 ### hc-fill machine --json
 
 - 설정의 기계마다 한 줄. 모르는 값은 `null`(부하를 못 잼, 지난 바퀴 기록 없음).
-- 칸: `machine` · `load1` · `cores` · `per_core` · `load_age_s` · `used` · `cap` · `adjust` · `why` · `unreach` · `line`
+- 칸: `machine` · `load1` · `cores` · `per_core` · `load_age_s` · `used` · `cap` · `free` · `adjust` · `why` · `unreach` · `line`
+- `free`는 지난 바퀴 띄우기가 판정한 빈 자리(레인상한·멈춤 포함 — 상태 한 장 `machines[].free`와 같은 값, 옛 기록이면 `null`).
 - `adjust`는 실행 중 조정(손잡이 `seats@`·`pause@`), `why`는 지난 바퀴에 안 띄운 까닭, `unreach`는 끊김 비고, `line`은 사람용 줄 그대로.
 
 ### herdr-sync --log --json

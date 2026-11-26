@@ -10,8 +10,8 @@ import (
 
 func pinBase() State {
 	return State{Machines: []Machine{
-		{Name: "a", Reach: "ok", Live: ip(3), Seats: ip(3)},
-		{Name: "b", Reach: "ok", Live: ip(0), Seats: ip(3)},
+		{Name: "a", Reach: "ok", Live: ip(3), Seats: ip(3), Free: ip(0)},
+		{Name: "b", Reach: "ok", Live: ip(0), Seats: ip(3), Free: ip(3)},
 	}}
 }
 
@@ -39,7 +39,7 @@ func TestPinnedItem(t *testing.T) {
 
 func TestPinnedNoItem(t *testing.T) {
 	full := pinBase()
-	full.Machines[1].Live = ip(3)
+	full.Machines[1].Live, full.Machines[1].Free = ip(3), ip(0)
 	for name, c := range map[string]struct {
 		s State
 		w Wait

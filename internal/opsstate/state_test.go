@@ -30,9 +30,9 @@ func fake() State {
 			{Name: "remote", AgeS: ip(0), Calls: 3, Secs: 1.5},
 		},
 		Machines: []Machine{
-			{Name: "a", Reach: "ok", Load1: fp(37.2), Cores: ip(12), LoadPerCore: fp(3.1), Live: ip(3), Seats: ip(3), Lanes: ip(2), LaneCap: ip(3),
+			{Name: "a", Reach: "ok", Load1: fp(37.2), Cores: ip(12), LoadPerCore: fp(3.1), Live: ip(3), Seats: ip(3), Lanes: ip(2), LaneCap: ip(3), Free: ip(0),
 				Health: Health{Sleep: "off", Keychain: "ok", DiskFreeGB: fp(120), Tailscale: "ok"}, Steer: "자리 2(지휘, 30분)", SkipWhy: ""},
-			{Name: "b", Reach: "ok", Load1: fp(0.8), Cores: ip(8), LoadPerCore: fp(0.1), Live: ip(0), Seats: ip(3), Lanes: ip(0), LaneCap: ip(3),
+			{Name: "b", Reach: "ok", Load1: fp(0.8), Cores: ip(8), LoadPerCore: fp(0.1), Live: ip(0), Seats: ip(3), Lanes: ip(0), LaneCap: ip(3), Free: ip(3),
 				Health: Health{Sleep: "off", Keychain: "ok", DiskFreeGB: fp(80), Tailscale: "ok"}},
 			MachineUnknown("u", "연결 안 됨"),
 		},

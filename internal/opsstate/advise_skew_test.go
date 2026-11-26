@@ -10,8 +10,8 @@ import (
 // skewBase: 바쁜 h(자리 남음, 도는 레인 2)와 한가한 c(자리 남음)
 func skewBase() State {
 	return State{Machines: []Machine{
-		{Name: "h", Reach: "ok", Cores: ip(10), LoadPerCore: fp(3), Live: ip(2), Seats: ip(4), Lanes: ip(2), LaneCap: ip(4)},
-		{Name: "c", Reach: "ok", Cores: ip(8), LoadPerCore: fp(0.1), Live: ip(0), Seats: ip(3), Lanes: ip(0), LaneCap: ip(3)},
+		{Name: "h", Reach: "ok", Cores: ip(10), LoadPerCore: fp(3), Live: ip(2), Seats: ip(4), Lanes: ip(2), LaneCap: ip(4), Free: ip(2)},
+		{Name: "c", Reach: "ok", Cores: ip(8), LoadPerCore: fp(0.1), Live: ip(0), Seats: ip(3), Lanes: ip(0), LaneCap: ip(3), Free: ip(3)},
 	}}
 }
 
@@ -43,7 +43,7 @@ func TestSkewWaitToCool(t *testing.T) {
 		t.Fatalf("한가한 기계로 갈 줄인데 항목: %+v", it)
 	}
 	s := skewBase()
-	s.Machines[0].Live = ip(4) // h 자리 참 — h로 갈 줄이 없다
+	s.Machines[0].Live, s.Machines[0].Free = ip(4), ip(0) // h 자리 참 — h로 갈 줄이 없다
 	f = Facts{Waits: []Wait{{Lane: "w1", Project: "p", Can: []string{"h"}}}}
 	if it := kinds(Advise(s, f, ath), "skew"); len(it) != 0 {
 		t.Fatalf("바쁜 기계 자리 참인데 항목: %+v", it)

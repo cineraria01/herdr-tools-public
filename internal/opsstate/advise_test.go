@@ -18,7 +18,7 @@ var ath = Thresholds{StageMin: 90, SkewHi: 2, SkewLo: 0.5, IdleMin: 10, WaitMin:
 // aBase: 기계 a 빈 자리 3(자리 5·에이전트 2, 레인 0/5), 앞 레인 하나가 일하는 중
 func aBase() State {
 	return State{Schema: 1, At: t0,
-		Machines: []Machine{{Name: "a", Reach: "ok", Cores: ip(12), LoadPerCore: fp(0.3), Live: ip(2), Seats: ip(5), Lanes: ip(0), LaneCap: ip(5)}},
+		Machines: []Machine{{Name: "a", Reach: "ok", Cores: ip(12), LoadPerCore: fp(0.3), Live: ip(2), Seats: ip(5), Lanes: ip(0), LaneCap: ip(5), Free: ip(3)}},
 		Queue:    Queue{Counts: map[string]int{}},
 		Lanes:    []Lane{{Name: "lane-front", Machine: "a", Stage: "작업 중(working)", StageAgeS: ip(40 * 60), Open: true}},
 	}
@@ -67,7 +67,7 @@ func TestAdviseFreeWaitDoc(t *testing.T) {
 	}
 	// 빈 자리가 없으면 아니다
 	s := aBase()
-	s.Machines[0].Live = ip(5)
+	s.Machines[0].Live, s.Machines[0].Free = ip(5), ip(0)
 	f.Waits[0].AgeS = ip(30 * 60)
 	if n := len(kinds(Advise(s, f, ath), "free-wait")); n != 0 {
 		t.Errorf("빈 자리 없는데 항목 %d", n)
@@ -217,7 +217,7 @@ func TestAdviseNoPlaceholders(t *testing.T) {
 	f := Facts{Addr: map[string]string{"aud": "a/t1", "blk": "a/t2", "dn": "a/t3", "lane-stuck": "a/t4"},
 		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음"},
 			{Lane: "only-a", Project: "p", AgeS: ip(60), Can: []string{"a"}}}} // 바쁜 a로만 갈 줄 — 치우침
-	s.Machines[0].Live = ip(2)
+	s.Machines[0].Live, s.Machines[0].Free = ip(2), ip(1)
 	it := Advise(s, f, ath)
 	seen := map[string]bool{}
 	for _, x := range it {

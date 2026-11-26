@@ -28,7 +28,8 @@ func advFx(t *testing.T) {
 	q, _ := os.ReadFile(DATA + "/queue.tsv")
 	wr("queue.tsv", string(q)+strings.Join([]string{"lane-c", "app", DATA + "/briefs/added/lane-c.md", "-", "-", "wait", "-", "-", "-", add, "-", "m/t1", "normal", "-", "-", "-", "r3"}, "\t")+"\n")
 	wr("overlap.tsv", "lane-c\tlane-a\tdocs/x.md\t-\tapp\n")
-	wr("load.tsv", "m\t1.20\t12\t"+itoa(time.Now().Unix()-30)+"\t1\t3\t-\t0\t0\n")
+	// 마지막 칸: 그 바퀴 띄우기가 판정한 빈 자리(machRoom — m 자리 3·에이전트 1·레인상한 2·레인 0 → 2). advise는 이것만 읽는다
+	wr("load.tsv", "m\t1.20\t12\t"+itoa(time.Now().Unix()-30)+"\t1\t3\t-\t0\t0\t-\t2\n")
 }
 
 // reports: 가짜 hc-lane이 받은 사건 — 레인 주인에게 보낸 손댈 것의 참고(키 hf:advise:ref:, ht-advise-claim)는 뺀다(refReports)
