@@ -272,10 +272,13 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 	if so != "" {
 		say("단독 대기 %s: %s — 앞 레인이 끝나면 뜬다", name, so)
 		OVWAIT = append(OVWAIT, Row{name, so, "단독", dash(only), p})
+		ovqAdd(name, p, brief, ovk, only, nil, []string{so})
 		return false
 	}
+	// 쓰기 소유와 안 겹쳐도 줄 차례가 앞선 겹침 대기 줄과 겹치면 그 뒤(overlap_fair.go) — --overlap-ok 줄은 안 본다
+	pass := func() bool { return dash(ovk) == "overlap-ok" || !ovqHold(name, p, brief, ovk, only) }
 	if OVM == "off" || dash(ovk) != "-" || len(ovo) == 0 {
-		return true
+		return pass()
 	}
 	ok := map[string]bool{}
 	for _, r := range ovo {
@@ -290,12 +293,12 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 		}
 	}
 	if len(ow) == 0 {
-		return true
+		return pass()
 	}
 	OVKEYS = candKeys(p, name, brief)
 	ov := chainCut(name, ovcmp(ow, OVKEYS)) // 먼저 띄움이면 자기 선행 사슬의 예약은 세지 않는다(overlap_early.go)
 	if len(ov) == 0 {
-		return true
+		return pass()
 	}
 	if OVM == "block" {
 		for _, r := range ov {
@@ -310,9 +313,19 @@ func ovlCheck(name, p, brief, after, ak, ovk, only string) bool {
 					say("겹침 대기 %s: %s (%s) — 앞 레인이 착지하면 뜬다", name, r.F(ovLane), why)
 				}
 				OVWAIT = append(OVWAIT, Row{name, r.F(ovLane), r.F(ovKeys), dash(only), p})
+				var by []string
+				for _, x := range ov {
+					if x.F(ovGrade) != "언급" {
+						by = append(by, x.F(ovLane))
+					}
+				}
+				ovqAdd(name, p, brief, ovk, only, OVKEYS, by)
 				return false
 			}
 		}
+	}
+	if !pass() {
+		return false
 	}
 	OVWARN = ov
 	return true

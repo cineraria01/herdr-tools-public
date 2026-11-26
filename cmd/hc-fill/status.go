@@ -23,6 +23,7 @@ type stIn struct {
 	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
 	Batch        string // 병합기가 지금 도는 묶음의 구성원이면 그 덧말(mqBatch — 「묶음 검증 중 <기계> n분째」), 아니면 빈 값
 	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
+	Ovl          string // 대기 줄: 겹침 비고(ovWaitNote — 「겹침 대기(…)」·「다음 차례(…)」), 아니면 빈 값
 	Bg           bool   // 살아 있는 배경 셸을 기다림(hangBgWait)
 	Land         string // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
 }
@@ -39,6 +40,9 @@ func stStage0(in stIn) string {
 		}
 		if in.Early == "parked" {
 			return "대기(주차 — 선행 기다림)"
+		}
+		if in.Ovl != "" {
+			return "대기(" + in.Ovl + ")"
 		}
 		return "대기"
 	case "sent":
@@ -299,11 +303,13 @@ func statusCmd(args []string) {
 		}
 		fmt.Println(stLine(r.F(qName), dash(r.F(qMach)), stAge(r.F(qAdded), t), stage, est))
 	}
+	ovs := readRows(DATA + "/overlap.tsv")
 	for _, r := range rows {
 		name, addr := r.F(qName), r.F(qAddr)
 		in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: lsFirst(DATA+"/last.tsv", name)}
 		if in.State == "wait" {
 			in.Pin, _ = pinOf(name, r.F(qRID))
+			in.Ovl = ovWaitNote(name, ovs)
 		}
 		if in.State == "up" {
 			in.Live = stLive(terms, termsOK, conn, connKnown, addr, name)

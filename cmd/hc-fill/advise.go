@@ -74,7 +74,7 @@ func adviseWait(r Row, now time.Time) opsstate.Wait {
 		w.After = words(a)
 	}
 	if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
-		w.Front = x.F(wtFront)
+		w.Front, w.Behind = x.F(wtFront), x.F(wtQueue) == "줄"
 		switch k := x.F(wtKey); {
 		case k == "단독":
 			w.Solo = true

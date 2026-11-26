@@ -20,7 +20,7 @@ func launchRows() {
 		say("알림: 설정 overlap은 warn|block|off다, block으로: %s", ov)
 		ov = "block"
 	}
-	OVM, OWN, OVWAIT = ov, nil, nil
+	OVM, OWN, OVWAIT, OVQ = ov, nil, nil, nil
 	LOADS, MWHY = map[string]mLoad{}, map[string]string{} // 부하(loadsteer.go) — actTick이 같은 호출로 읽은 기계부터 채운다
 	tickMark("owners")
 	syncOwners()

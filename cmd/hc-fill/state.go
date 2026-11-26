@@ -407,6 +407,9 @@ func stateWaitWhy(r Row) string {
 		return "거절 " + w
 	}
 	if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
+		if x.F(wtQueue) == "줄" { // 앞선 대기 줄 뒤(overlap_fair.go)
+			return "겹침 앞선 대기 줄 " + x.F(wtFront)
+		}
 		return "겹침 " + x.F(wtFront)
 	}
 	if x := lsFirst(DATA+"/need.tsv", name); x != nil {

@@ -184,6 +184,7 @@ const (
 	wtKey   = 3
 	wtOnly  = 4
 	wtProj  = 5
+	wtQueue = 6 // 「줄」: 앞선 대기 줄 뒤(overlap_fair.go), 없으면 쓰기 소유 레인과 겹침
 
 	ndLane = 1
 	ndNeed = 2

@@ -97,6 +97,7 @@ type Wait struct {
 	AgeS          *int     // 넣은 뒤 초(모르면 nil — 문턱을 적용하지 않는다)
 	After         []string // 선행(「이름」 또는 「이름@프로젝트」)
 	Front         string   // 겹침 앞 레인
+	Behind        bool     // Front는 떠 있는 레인이 아니라 줄 차례가 앞선 겹침 대기 줄(overlap.tsv 6칸 「줄」)
 	Keys          []string // 겹치는 파일·폴더(overlap.tsv — 두 개까지만 적힌다)
 	Solo          bool     // 단독 대기
 	Reject        string   // 띄우기 거절 까닭
@@ -224,7 +225,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 				Next:     []string{"hc-fill retry " + w.Lane + " --why '거절 까닭 고침(hc-fill advise)'"}, Sure: SureJudge})
 			continue
 		}
-		if parentWait(w) != "" || !old(w) {
+		if parentWait(w) != "" || !old(w) || w.Behind { // 앞선 대기 줄 뒤에 선 줄은 그 앞 줄 항목이 맡는다(풀면 줄 차례가 깨진다)
 			continue
 		}
 		if len(w.Can) == 0 && len(w.LightOnly) > 0 { // 띄울 곳이 가벼운 일만 받는 기계뿐 — 무게를 고치거나 손잡이를 풀 때까지 안 뜬다

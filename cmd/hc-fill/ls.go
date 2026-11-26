@@ -279,9 +279,9 @@ func lsCmd(args []string) {
 			note += " 단독"
 		}
 		if state == "wait" {
-			// 겹침 대기: run이 바퀴마다 적은 overlap.tsv(레인 앞레인 파일), 능력 막힘: need.tsv(레인 능력 보냄)
-			if x := lsFirst(DATA+"/overlap.tsv", name); x != nil {
-				note += " 겹침 대기(" + x.F(wtFront) + ": " + x.F(wtKey) + ")"
+			// 겹침 대기·다음 차례: run이 바퀴마다 적은 overlap.tsv(overlap_fair.go ovWaitNote), 능력 막힘: need.tsv(레인 능력 보냄)
+			if x := ovWaitNote(name, readRows(DATA+"/overlap.tsv")); x != "" {
+				note += " " + x
 			}
 			if x := lsFirst(DATA+"/need.tsv", name); x != nil {
 				note += " 필요 " + x.F(ndNeed) + " — 가진 기계 없음"
