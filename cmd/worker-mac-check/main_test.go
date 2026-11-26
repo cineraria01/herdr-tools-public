@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,6 +195,48 @@ func TestVersionShowsCommit(t *testing.T) {
 	}
 	if out, err := exec.Command(bin, "--version").Output(); err != nil || string(out) != "worker-mac-check (Go abc123def456)\n" {
 		t.Fatalf("--version: %q %v", out, err)
+	}
+}
+
+// 화면 기록의 herdr가 허용(2)이 아니면 실패 — UI 레인(ego-browser·화면 캡처)이 그 기계에서 안 된다(2026-11-26 한 워커 맥 herdr=거부가 「통과 … 필수 아님」에 묻힘).
+// 다른 서비스·클라이언트는 기록만, TCC.db 못 읽음은 모름. 가짜 sqlite3로 remote.sh TCC 블록만 돌린다(실제 TCC.db는 안 읽음)
+func TestTCCScreenCapture(t *testing.T) {
+	i := strings.Index(remote, `db="/Library/Application Support/com.apple.TCC/TCC.db"`)
+	j := strings.Index(remote, "printf 'E\\t끝\\n'")
+	if i < 0 || j < i {
+		t.Fatal("remote.sh TCC 블록 못 찾음")
+	}
+	block := `r() { printf 'R\t%s\t%s\t%s\n' "$1" "$2" "$3"; }` + "\n" + remote[i:j]
+	run := func(rows string, rc int) string {
+		d := t.TempDir()
+		os.WriteFile(filepath.Join(d, "sqlite3"), []byte(fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$ROWS\"\nexit %d\n", rc)), 0o755)
+		cmd := exec.Command("bash", "-c", block)
+		cmd.Env = append(os.Environ(), "PATH="+d+":/usr/bin:/bin", "ROWS="+rows)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	fda := "kTCCServiceSystemPolicyAllFiles|/x/herdr|0\n"
+	for _, c := range []struct{ name, rows, want string }{
+		{"거부", fda + "kTCCServiceScreenCapture|/Applications/Terminal.app|2\nkTCCServiceScreenCapture|/x/herdr|0\n",
+			"R\t실패\tTCC 화면 기록\therdr=거부 — UI 레인(ego-browser·화면 캡처)이 그 기계에서 안 된다 — 그 맥 시스템 설정 › 개인정보 보호 및 보안 › 화면 및 시스템 오디오 녹음에서 herdr 허용 뒤 `hc-core-relaunch <기계>` (Terminal=허용 herdr=거부 node=없음 sshd-keygen-wrapper=없음)\n"},
+		{"없음", fda, "R\t실패\tTCC 화면 기록\therdr=없음 — UI 레인"},
+		{"제한", "kTCCServiceScreenCapture|/x/herdr|3\n", "R\t실패\tTCC 화면 기록\therdr=제한 — UI 레인"},
+		{"허용", fda + "kTCCServiceScreenCapture|/x/herdr|2\n", "R\t통과\tTCC 화면 기록\t기록만: Terminal=없음 herdr=허용 node=없음 sshd-keygen-wrapper=없음 (워커 맥 필수 아님)\n"},
+	} {
+		out := run(c.rows, 0)
+		if !strings.Contains(out, c.want) {
+			t.Errorf("%s:\n%s바람 %q", c.name, out, c.want)
+		}
+		// 다른 서비스는 herdr가 거부·없음이어도 기록만
+		if !strings.Contains(out, "R\t통과\tTCC 전체 디스크 접근\t기록만:") || !strings.Contains(out, "R\t통과\tTCC 손쉬운 사용\t기록만:") {
+			t.Errorf("%s: 다른 서비스가 기록만이 아님\n%s", c.name, out)
+		}
+	}
+	if out := run("", 1); strings.Count(out, "R\t모름\tTCC ") != 3 || !strings.Contains(out, "R\t모름\tTCC 화면 기록\t시스템 TCC.db를 못 읽음") {
+		t.Errorf("못 읽음:\n%s", out)
 	}
 }
 

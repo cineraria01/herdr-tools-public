@@ -95,8 +95,12 @@ else
     for c in Terminal herdr node sshd-keygen-wrapper; do
       v=$(echo "$q" | awk -F'|' -v s="$sv" -v c="$c" '$1==s && index($2,c){print $3; exit}')
       case "$v" in 2) v=허용;; 0) v=거부;; 3) v=제한;; '') v=없음;; esac; out="$out $c=$v"
+      [ "$c" = herdr ] && hv=$v
     done
-    r 통과 "TCC $nm" "기록만:${out} (워커 맥 필수 아님)"
+    # 화면 기록의 herdr만 필수: 워커 맥에서도 UI 레인(ego-browser·화면 캡처)을 돌린다(2026-11-26). 허용(2)이 아니면(거부·없음·제한) 실패
+    if [ "$sv" = kTCCServiceScreenCapture ] && [ "$hv" != 허용 ]; then
+      r 실패 "TCC $nm" "herdr=$hv — UI 레인(ego-browser·화면 캡처)이 그 기계에서 안 된다 — 그 맥 시스템 설정 › 개인정보 보호 및 보안 › 화면 및 시스템 오디오 녹음에서 herdr 허용 뒤 \`hc-core-relaunch <기계>\` (${out# })"
+    else r 통과 "TCC $nm" "기록만:${out} (워커 맥 필수 아님)"; fi
   done
 fi
 printf 'E\t끝\n' # 끝 표식 — 맥 쪽은 이 줄이 없으면 점검이 끊긴 것으로 본다(E01)
