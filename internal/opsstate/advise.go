@@ -84,6 +84,11 @@ type Facts struct {
 	Known map[string]bool
 	// Acts: 최근 일지(상태 한 장이 읽은 24시간 — 항목의 「조치함」, Claims)
 	Acts []journal.Entry
+	// Pred: 선행·겹침 앞 레인 단계 — 대기열 전체(주인·상태 상관없이, Trim이 숨긴 끝난 줄도), 대기열에 없으면 그 프로젝트 기본 가지의
+	// 착지(Stage 「착지 <sha8>」, 나이 = 커밋 뒤 초). 착지도 없으면 넣지 않는다(= 대기열에 없음). nil = 재료 없음(단계 모름).
+	// 열쇠는 「이름@프로젝트」(PredKey) — 같은 이름의 다른 프로젝트 줄과 섞지 않는다.
+	// 추린 떠 있는 레인에서만 찾아 착지한 선행·대기 줄·나이 모름이 「단계 모름」으로 보였다(ht-advise-stage-lookup)
+	Pred map[string]Lane
 }
 
 // Wait: 대기 줄 하나와 기다리는 까닭
@@ -155,16 +160,6 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		}
 		return n, c, strings.Join(t, "·")
 	}
-	laneBy := map[string]Lane{}
-	for _, l := range s.Lanes {
-		laneBy[l.Name] = l
-	}
-	stageOf := func(n string) string {
-		if l, ok := laneBy[n]; ok {
-			return fmt.Sprintf("%s %s째", l.Stage, age(l.StageAgeS))
-		}
-		return "단계 모름(떠 있는 레인에 없음)"
-	}
 	// 손잡이 idle 0이면 끔(문서 「0이면 끔」 — 나이 ≥ 0이 늘 참이라 모든 대기 줄이 항목이 됐다, advise-fixes)
 	old := func(w Wait) bool { return th.IdleMin > 0 && (w.AgeS == nil || *w.AgeS >= th.IdleMin*60) }
 	waitBy := map[string]Wait{}
@@ -216,7 +211,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 		}
 		head := "선행 없음"
 		if len(w.After) > 0 {
-			head = "머리 " + w.Lane + "의 선행 " + strings.Join(w.After, ",") + " " + stageOf(afterName(w.After[0]))
+			head = "머리 " + w.Lane + "의 선행 " + predStages(s, f, w) // 선행마다 제 단계(advise_pred.go)
 		}
 		add(Item{Key: "chain:" + w.Lane, Kind: "chain",
 			What:     fmt.Sprintf("한 줄 사슬: %s부터 %d줄이 하나씩만 돈다", w.Lane, len(path)),
@@ -271,17 +266,13 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			}
 			add(Item{Key: "free-wait:" + w.Lane, Kind: "free-wait",
 				What:     fmt.Sprintf("풀 수 있는 대기: %s(%s %s)", w.Lane, what, w.Front),
-				Evidence: fmt.Sprintf("빈 자리 %d(%s) · %s 기다린 지 %s · %s %s — 앞 레인 %s %s", n, ft, w.Lane, age(w.AgeS), what, strings.Join(w.Keys, ","), w.Front, stageOf(w.Front)),
+				Evidence: fmt.Sprintf("빈 자리 %d(%s) · %s 기다린 지 %s · %s %s — 앞 레인 %s %s", n, ft, w.Lane, age(w.AgeS), what, strings.Join(w.Keys, ","), w.Front, predStage(s, f, w.Front, w.Project)),
 				Cost:     "안 풀면: 앞 레인 착지까지 기다림(남은 예상 모름) 동안 자리가 논다 · 풀면: " + gain,
 				Next:     next, Sure: sure})
 		case len(w.After) > 0:
-			var st []string
-			for _, a := range w.After {
-				st = append(st, a+" "+stageOf(afterName(a)))
-			}
 			add(Item{Key: "free-wait:" + w.Lane, Kind: "free-wait",
 				What:     fmt.Sprintf("풀 수 있는 대기: %s(선행 %s)", w.Lane, strings.Join(w.After, ",")),
-				Evidence: fmt.Sprintf("빈 자리 %d(%s) · %s 기다린 지 %s · 선행 %s", n, ft, w.Lane, age(w.AgeS), strings.Join(st, ", ")),
+				Evidence: fmt.Sprintf("빈 자리 %d(%s) · %s 기다린 지 %s · 선행 %s", n, ft, w.Lane, age(w.AgeS), predStages(s, f, w)),
 				Cost:     "안 풀면: 선행 착지까지 기다림(남은 예상 모름) 동안 자리가 논다 · 풀면: 선행의 산출물이 필요한 레인이면 못 푼다(지시문을 본다), 같은 파일이면 착지 때 rebase 충돌 풀이",
 				Next:     []string{"hc-fill edit " + w.Lane + " --after - --why '선행 풀기(hc-fill advise)'"}, Sure: SureJudge})
 		}

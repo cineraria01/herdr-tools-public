@@ -122,15 +122,15 @@ func lmark(lane, sinceS string) int {
 	return missing
 }
 
-// cached_mark <프로젝트> <선행>: ls는 원격을 읽지 않고 마지막 바퀴에서 확인한 표식만 로컬 기본 가지와 다시 견준다
-func cachedMark(p, lane string) bool {
+// cached_mark <프로젝트> <선행>: ls는 원격을 읽지 않고 마지막 바퀴에서 확인한 표식만 로컬 기본 가지와 다시 견준다. 들어간 표식 sha, 아니면 빈 값
+func cachedMark(p, lane string) string {
 	f := DATA + "/after-landed.tsv"
 	if !nonEmpty(f) {
-		return false
+		return ""
 	}
 	stamp, ok := since(lane)
 	if !ok {
-		return false
+		return ""
 	}
 	sha := ""
 	for _, r := range readRows(f) {
@@ -139,10 +139,10 @@ func cachedMark(p, lane string) bool {
 			break
 		}
 	}
-	if sha == "" {
-		return false
+	if sha == "" || pcAncestor(FR, sha, FB) != 0 {
+		return ""
 	}
-	return pcAncestor(FR, sha, FB) == 0
+	return sha
 }
 
 // landing_hit <선행>: 선행의 제목이나 표식에서 확인한 착지(hit). 0 들어감 · 1 아직 · 2 조회 오류

@@ -92,19 +92,11 @@ func lsFirst(path, n string) Row {
 func lsEls(p, after string) (string, bool) {
 	ew, ed := "", ""
 	for _, x := range words(after) {
-		n, op := afterAt(x, p) // <이름>@<프로젝트>는 그 프로젝트 저장소에서(일반 배치와 같은 해석 — 재감사2 fill/R-217)
-		if FR = repoOf(op, LOCAL); FR == "" {
-			return "", false
-		}
-		var ok bool
-		if FB, ok = projectRef(FR); !ok {
-			return "", false
-		}
-		eh, ok := landed(n)
+		sha, ok := afterIn(p, x)
 		if !ok {
 			return "", false
 		}
-		if eh != "" || cachedMark(op, n) {
+		if sha != "" {
 			ed += "," + x
 		} else {
 			ew += "," + x
@@ -118,6 +110,28 @@ func lsEls(p, after string) (string, bool) {
 		s += " · 들어감 " + ed[1:]
 	}
 	return s, true
+}
+
+// afterIn <프로젝트> <선행>: 그 선행이 local 저장소의 지금 있는 origin/<기본>에 들어갔으면 그 커밋(제목 머리 줄의 %h, 없으면 마지막 바퀴가
+// 확인한 착지 표식 sha), 아니면 빈 값 — fetch 없이. <이름>@<프로젝트>는 그 프로젝트 저장소에서(일반 배치와 같은 해석 — 재감사2 fill/R-217).
+// FR·FB를 그 저장소로 바꾼다. ok=false면 판정 못 함. ls와 advise 선행 단계(statepred.go)가 같은 출처로 본다(ht-advise-chain-known에서 가져옴)
+func afterIn(p, x string) (string, bool) {
+	n, op := afterAt(x, p)
+	if FR = repoOf(op, LOCAL); FR == "" {
+		return "", false
+	}
+	var ok bool
+	if FB, ok = projectRef(FR); !ok {
+		return "", false
+	}
+	eh, ok := landed(n)
+	if !ok {
+		return "", false
+	}
+	if sha, _, _ := strings.Cut(eh, " "); sha != "" {
+		return sha, true
+	}
+	return cachedMark(op, n), true
 }
 
 func lsLine(c ...string) string {

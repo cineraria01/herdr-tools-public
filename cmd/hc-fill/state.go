@@ -69,6 +69,28 @@ func stateThresholds() opsstate.Thresholds {
 		PinMin: knobInt("advise_pinned")}
 }
 
+// stateUpLane: 떠 있는(up) 대기열 줄 하나 → 상태 한 장의 레인(stateCollectF의 한 단계). x는 last.tsv 줄(없으면 nil), live는 stLive
+func stateUpLane(r Row, x Row, live string, now time.Time) opsstate.Lane {
+	name := r.F(qName)
+	in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: x, Pos: -1, Bg: hangBgWait(name, r.F(qAddr)), Live: live}
+	if r.F(qAudit) == "auto" {
+		in.Aud = anote(name)
+	}
+	ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: live != ""}
+	if pr, u := prOf(name); pr != "" { // PR 거울(pr.go)
+		ln.PR = strings.TrimSpace(pr + " " + u)
+	}
+	if x != nil && x.F(lsState) != "-" {
+		ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(lsState)+" "+x.F(lsSHA)+" "+x.F(lsMsg), " -", "")), " ")
+		if a, ok := stateClockAge(x.F(lsWhen), now); ok {
+			ln.StageAgeS = ptrI(a)
+		}
+		// 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(「?」 모름은 살아 있을 수 있어 끝남이 아니다)
+		ln.Done = (x.F(lsState) == "정리됨" || x.F(lsState) == "착지") && live == ""
+	}
+	return ln
+}
+
 // stateLoadFresh: 기계 부하를 읽은 때가 마지막 바퀴 끝에서 이 초 안이면 그 바퀴 값
 const stateLoadFresh = 300
 
@@ -84,7 +106,7 @@ func stateCollect(now time.Time) opsstate.State {
 
 // stateCollectF: stateCollect와 손댈 것 재료(대기 줄마다 까닭·레인 주소·멈춘 기계·상주 판 점검) — 같은 읽기에서
 func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
-	f := opsstate.Facts{Addr: map[string]string{}, Paused: map[string]bool{}, Known: adviseKnown(),
+	f := opsstate.Facts{Addr: map[string]string{}, Paused: map[string]bool{}, Known: adviseKnown(), Pred: map[string]opsstate.Lane{},
 		Resident: resident.Show(resident.DirFor(os.Getenv("XDG_STATE_HOME"), HOME), now)}
 	s := opsstate.State{Schema: opsstate.Schema, At: now, Queue: opsstate.Queue{Counts: map[string]int{}},
 		Machines: []opsstate.Machine{}, Lanes: []opsstate.Lane{}, Merge: []opsstate.MergeLine{}, Deploy: []opsstate.Deploy{},
@@ -148,40 +170,27 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	for _, r := range rows {
 		name, st := r.F(qName), r.F(qState)
 		s.Queue.Counts[st]++
-		if st == "wait" {
-			if a, ok := stateAddedAge(r.F(qAdded), now); ok && (oldest == nil || a > oldest.AgeS) {
-				oldest = &opsstate.Waiting{Lane: name, AgeS: a, Why: stateWaitWhy(r)}
-			}
-			f.Waits = append(f.Waits, adviseWait(r, now))
-			continue
-		}
 		if st != "up" {
+			if st == "wait" {
+				if a, ok := stateAddedAge(r.F(qAdded), now); ok && (oldest == nil || a > oldest.AgeS) {
+					oldest = &opsstate.Waiting{Lane: name, AgeS: a, Why: stateWaitWhy(r)}
+				}
+				f.Waits = append(f.Waits, adviseWait(r, now))
+			}
+			predQueued(f.Pred, predWaitLane(r, now), r.F(qProj), false)
 			continue
 		}
 		f.Addr[name] = r.F(qAddr)
-		in := stIn{State: st, Early: r.F(qEarly), Last: last[name], Pos: -1, Bg: hangBgWait(name, r.F(qAddr))}
-		in.Live = stLive(terms, termsOK, conn, connKnown, r.F(qAddr), name)
-		if r.F(qAudit) == "auto" {
-			in.Aud = anote(name)
-		}
-		if in.Live != "" && !strings.HasPrefix(in.Live, "?") {
+		live := stLive(terms, termsOK, conn, connKnown, r.F(qAddr), name)
+		if live != "" && !strings.HasPrefix(live, "?") {
 			laneOn[r.F(qMach)]++
 		}
-		ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: in.Live != ""}
-		if pr, u := prOf(name); pr != "" { // PR 거울(pr.go)
-			ln.PR = strings.TrimSpace(pr + " " + u)
-		}
-		if x := last[name]; x != nil && x.F(lsState) != "-" {
-			ln.LastEvent = strings.Join(strings.Fields(strings.ReplaceAll(x.F(lsState)+" "+x.F(lsSHA)+" "+x.F(lsMsg), " -", "")), " ")
-			if a, ok := stateClockAge(x.F(lsWhen), now); ok {
-				ln.StageAgeS = ptrI(a)
-			}
-			// 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(「?」 모름은 살아 있을 수 있어 끝남이 아니다)
-			ln.Done = (x.F(lsState) == "정리됨" || x.F(lsState) == "착지") && in.Live == ""
-		}
+		ln := stateUpLane(r, last[name], live, now)
 		s.Lanes = append(s.Lanes, ln)
+		predQueued(f.Pred, ln, r.F(qProj), true)
 	}
 	s.Queue.Oldest = oldest
+	predLanded(&f, now) // 선행 단계 재료(statepred.go)
 
 	// 기계: 설정 machine 차례, 부하·쓴 자리·까닭은 바퀴 기록, 조정은 지금 손잡이
 	recs := loadRecs()
