@@ -46,9 +46,7 @@ func TestStateRecSpecWaitAddr(t *testing.T) {
 		t.Fatalf("④ 다시 띄운 병합기가 이어 쓰기: 앞 %+v 뒤 %+v", r, r2)
 	}
 	// 일꾼이 정말 죽음(터미널 없음) — 재도 진행이 아니고 주소는 앞 것 그대로(hc-fill이 그 주소가 사라졌음을 본다)
-	old := stProbeEvery
-	stProbeEvery = 0
-	t.Cleanup(func() { stProbeEvery = old })
+	s.probe = -1
 	os.Remove(s.dir + "/idle/get-spec-" + d[1][:8])
 	time.Sleep(1100 * time.Millisecond)
 	s.round(1)
@@ -60,10 +58,8 @@ func TestStateRecSpecWaitAddr(t *testing.T) {
 // ② 부하 대기(지휘 t1cj ②·t34x — 22:4x 검증 기계 부하 60.8이 기준 50 아래로 내려가길 기다리던 정상 대기): 일꾼이 쓴 <key>.wait 줄 →
 // 단계 load-wait, 까닭에 기계·부하·기준. 안쪽 단계(검증 스크립트가 HERDR_LAND_PHASE에 쓴 줄 — 착지와 같은 계약) → 기록의 inner
 func TestStateRecLoadWaitInner(t *testing.T) {
-	old := stProbeEvery
-	stProbeEvery = 0
-	t.Cleanup(func() { stProbeEvery = old })
 	s, d, _ := frontFx(t, 100)
+	s.probe = -1
 	s.specTerm("v1", d[1], 0)
 	wt := s.dir + "/v1.spec-wt/" + d[1][:8]
 	os.WriteFile(wt+".wait", []byte("부하 대기 — v1 load=60.80 cpus=12 verifies=0 · 기준 부하 50%\n"), 0o666)
@@ -101,9 +97,7 @@ func TestStateRecShards(t *testing.T) {
 	// 마무리(fin) — 보통 이름의 일꾼 하나, 역할 마무리
 	os.WriteFile(mj+"/specshard", []byte(d[1]+" - "+itoa64(time.Now().Unix())+" k=2 1:v1 2:v2 fin=v1@1\n"), 0o666)
 	s.specTerm("v1", d[1], 0)
-	old := stProbeEvery
-	stProbeEvery = 0
-	t.Cleanup(func() { stProbeEvery = old })
+	s.probe = -1
 	s.round(1)
 	if r := recOf(t, s); len(r.Waits) != 1 || r.Waits[0].Role != "마무리" || r.Waits[0].Addr != "v1/t9" {
 		t.Fatalf("③ 마무리: %+v", r)
@@ -145,14 +139,13 @@ func TestStateRecGateFinish(t *testing.T) {
 	}
 }
 
-// ⑤ 병합기 기계 착지 — 단계 land, 맥박이 stBeatEvery마다 다시 쓰고(진행), 착지 스크립트가 HERDR_LAND_PHASE에 쓴 줄을 안쪽 단계로.
+// ⑤ 병합기 기계 착지 — 단계 land, 맥박이 beatEvery마다 다시 쓰고(진행), 착지 스크립트가 HERDR_LAND_PHASE에 쓴 줄을 안쪽 단계로.
 // 멈춘 뒤의 맥박은 쓰지 않는다. 바퀴 끝(stEnd)은 착지 단계를 끝내고 줄 빔이면 idle
 func TestStateRecLandBeat(t *testing.T) {
-	old := stBeatEvery
-	stBeatEvery = 20 * time.Millisecond
-	t.Cleanup(func() { stBeatEvery = old })
 	mj := t.TempDir()
 	m := &M{mj: mj, mme: "box", base: "main", mlab: "ln-a", b: []entry{{l: "ln-a", s: strings.Repeat("a", 40)}}}
+	m.rs.beatEvery = 20 * time.Millisecond
+	t.Cleanup(m.rs.beats.Wait) // 임시 폴더를 지우기 전에 맥박이 끝난다(Cleanup은 거꾸로 돈다)
 	pf, stop := m.stLandLocal()
 	if pf != filepath.Join(mj, landPhaseLocal) {
 		t.Fatalf("안쪽 단계 파일: %s", pf)
@@ -171,7 +164,7 @@ func TestStateRecLandBeat(t *testing.T) {
 	}
 	m.rs.queue = []string{}
 	m.stEnd(76)
-	time.Sleep(100 * time.Millisecond) // 멈춘 맥박이 덮어쓰지 않는다
+	m.rs.beats.Wait() // 멈춘 뒤 한 번 더 돈 맥박도 끝났다 — 그 맥박이 덮어쓰지 않았다
 	if r, _ := mergerstate.Read(mj); r.Phase != mergerstate.Idle || r.Inner != nil {
 		t.Fatalf("⑤ 바퀴 끝: %+v", r)
 	}
@@ -179,9 +172,6 @@ func TestStateRecLandBeat(t *testing.T) {
 
 // 워커 착지(land-on) — 맥박이 그 워커의 착지 터미널을 재어 주소·진행·안쪽 단계(<클론>.land-wt/<차례 12>.phase)를 적고, 착지 실행 결정을 싣는다
 func TestStateRecLandRemoteBeat(t *testing.T) {
-	ob, op := stBeatEvery, stProbeEvery
-	stBeatEvery, stProbeEvery = 20*time.Millisecond, 0
-	t.Cleanup(func() { stBeatEvery, stProbeEvery = ob, op })
 	s := specFx(t)
 	cm := strings.Repeat("d", 40)
 	n := "land-" + cm[:8]
@@ -192,6 +182,8 @@ func TestStateRecLandRemoteBeat(t *testing.T) {
 	os.WriteFile(wt+".phase", []byte("공개 선점 기다림 — 쥔 쪽 ln-x(box-2)\n"), 0o666)
 	m := s.merger()
 	m.mlab, m.b = "ln-a", []entry{{l: "ln-a", s: strings.Repeat("a", 40)}}
+	m.rs.beatEvery, m.rs.probeEvery = 20*time.Millisecond, -1
+	t.Cleanup(m.rs.beats.Wait) // 멈춘 뒤 한 번 더 도는 맥박이 가짜 hc·임시 폴더를 다음 시험까지 끌지 않게
 	m.stLandOn("v1(검증 자리 남음)")
 	stop := m.stLandRemote("v1", cm)
 	for end := time.Now().Add(10 * time.Second); time.Now().Before(end) && recOf(t, s).Inner == nil; {

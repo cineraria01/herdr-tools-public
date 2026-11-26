@@ -35,6 +35,7 @@ fi
 type sfx struct {
 	*fx
 	landlog, hclog string
+	probe          int64 // round가 만드는 M의 rs.probeEvery(0 기본, 음수 매번 — staterec 시험)
 }
 
 // specFx: 켬 표식·검증 스크립트·검증 기계 둘(v1·v2 클론)·가짜 hc
@@ -108,7 +109,7 @@ func (s *sfx) round(batch int) {
 		s.git(s.clone, "update-ref", "-d", r)
 	}
 	m := s.merger()
-	m.batch = batch
+	m.batch, m.rs.probeEvery = batch, s.probe
 	m.round()
 }
 

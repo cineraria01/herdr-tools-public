@@ -1,7 +1,7 @@
 package main
 
 // 병합기 상태 한 장 쓰기(ht-merger-state-record, 2026-11-26 사용자 「구조를 다시 짜기」 — docs/hc-lane/merger-state.md). hc-fill은 이
-// 기록만 읽는다(hc-merger --state). 바퀴 끝에 한 번(stEnd), 단계가 바뀔 때(stPhase), 착지 중에는 stBeatEvery마다(stBeat — 바퀴 일꾼이
+// 기록만 읽는다(hc-merger --state). 바퀴 끝에 한 번(stEnd), 단계가 바뀔 때(stPhase), 착지 중에는 beatEvery마다(stBeat — 바퀴 일꾼이
 // 착지를 기다리며 막혀 있어도). 쓰기 실패는 경고만 — 차례·검증·착지 동작은 바꾸지 않는다(적는 것만 더한다).
 //
 // 「진행」(progress_at을 지금으로): 단계·맨 앞이 바뀜, 바퀴가 일을 함(종료 76), 기다리는 일꾼이 진행 중(probeAt — spec_fresh분 안 갱신,
@@ -20,11 +20,7 @@ import (
 	"herdr-tools/internal/mergerstate"
 )
 
-var (
-	stBeatEvery          = 30 * time.Second // 착지 중 기록 다시 쓰기 간격(시험이 줄인다)
-	stProbeEvery   int64 = 60               // 기다리는 일꾼의 진행을 재는 간격(초) — 바퀴(약 10초)마다 원격을 재지 않게
-	landPhaseLocal       = "land-phase"     // 병합기 기계 착지의 안쪽 단계 파일(<기록 폴더>/…) — HERDR_LAND_PHASE
-)
+const landPhaseLocal = "land-phase" // 병합기 기계 착지의 안쪽 단계 파일(<기록 폴더>/…) — HERDR_LAND_PHASE
 
 // recM: M에 묻는 것 — 이 바퀴가 기다리는 맨 앞 추측(specDecide가 채움 — 기다리는 대상), 기록 상태
 type recM struct {
@@ -42,7 +38,25 @@ type recState struct {
 	queue  []string // 이 바퀴의 줄 차례(pickBatch — 우선 반영), nil이면 앞 기록 것
 	beat   int      // 도는 stBeat의 번호 — 멈추면 늘려 멈춘 뒤의 쓰기를 버린다
 	warned bool
-	loaded bool // 앞 기록을 읽음(stLoad)
+	loaded bool           // 앞 기록을 읽음(stLoad)
+	beats  sync.WaitGroup // 도는 stBeat 고루틴 — 병합기는 기다리지 않고 시험만 끝나기 전에 기다린다(임시 폴더·가짜 hc를 다음 시험까지 끌지 않게)
+	// 간격은 이 M의 칸이다(ht-staterec-test-race — 패키지 변수면 시험이 되돌리는 순간 멈춘 뒤 한 번 더 도는 맥박과 겹쳤다). 0이면 기본
+	beatEvery  time.Duration // 착지 중 기록 다시 쓰기 간격(기본 30초)
+	probeEvery int64         // 기다리는 일꾼의 진행을 재는 간격(초, 기본 60 — 바퀴(약 10초)마다 원격을 재지 않게). 음수면 매번 잰다
+}
+
+func (r *recState) beatIv() time.Duration {
+	if r.beatEvery > 0 {
+		return r.beatEvery
+	}
+	return 30 * time.Second
+}
+
+func (r *recState) probeIv() int64 {
+	if r.probeEvery == 0 {
+		return 60
+	}
+	return r.probeEvery
 }
 
 // stLoad: 앞 기록(앞 바퀴·다시 띄우기 전 병합기)을 처음 한 번 읽어 둔다 — 같은 단계·같은 맨 앞이면 이어 쓴다(잠금을 쥔 채로 부른다)
@@ -167,7 +181,7 @@ func (m *M) stEnd(rc int) {
 	}
 }
 
-// stSpecWait: 맨 앞 추측 검증을 기다리는 바퀴(round — specWaitNote 다음). 기다리는 일꾼(추측·몫 i/K·마무리)과, stProbeEvery마다 그
+// stSpecWait: 맨 앞 추측 검증을 기다리는 바퀴(round — specWaitNote 다음). 기다리는 일꾼(추측·몫 i/K·마무리)과, probeEvery마다 그
 // 일꾼들을 재어 주소·진행·부하 대기를 적는다. 일꾼이 부하가 기준 아래로 내려가길 기다리면 단계 load-wait(정상 대기 — 까닭에 기계·부하·기준)
 func (m *M) stSpecWait() {
 	r := m.wrow
@@ -217,7 +231,7 @@ func (m *M) stSpecWait() {
 	cont := (p.Phase == mergerstate.SpecWait || p.Phase == mergerstate.LoadWait) && p.Front == front
 	phase, adv := mergerstate.SpecWait, false
 	var probed *string
-	if len(ps) > 0 && m.specFreshMin() > 0 && (!cont || time.Now().Unix()-p.Probe >= stProbeEvery) {
+	if len(ps) > 0 && m.specFreshMin() > 0 && (!cont || time.Now().Unix()-p.Probe >= m.rs.probeIv()) {
 		inner := ""
 		for i, x := range ps {
 			pr := m.probeAt("spec", x.mach, x.term, x.key)
@@ -257,7 +271,7 @@ func stInner(r *mergerstate.Rec, line string) bool {
 	return true
 }
 
-// stBeat: 착지를 기다리는 동안 stBeatEvery마다 기록을 다시 쓴다 — step(기록 사본)이 참이면 진행. 돌려준 함수로 멈춘다(멈춘 뒤의 쓰기는
+// stBeat: 착지를 기다리는 동안 beatEvery마다 기록을 다시 쓴다 — step(기록 사본)이 참이면 진행. 돌려준 함수로 멈춘다(멈춘 뒤의 쓰기는
 // 버린다 — 기다리지 않는다)
 func (m *M) stBeat(step func(r *mergerstate.Rec) bool) func() {
 	m.rs.mu.Lock()
@@ -265,8 +279,10 @@ func (m *M) stBeat(step func(r *mergerstate.Rec) bool) func() {
 	id := m.rs.beat
 	m.rs.mu.Unlock()
 	done := make(chan struct{})
-	every := stBeatEvery // 띄울 때 한 번 — 멈춘 뒤에도 도는 고루틴이 전역을 읽지 않게(시험이 되돌릴 때 경합)
+	every := m.rs.beatIv() // 띄울 때 한 번
+	m.rs.beats.Add(1)
 	go func() {
+		defer m.rs.beats.Done()
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
@@ -311,12 +327,12 @@ func (m *M) stLandLocal() (phaseFile string, stop func()) {
 	})
 }
 
-// stLandRemote: 워커에서 착지(runRemote) — 단계 land-on, stProbeEvery마다 그 워커의 착지 터미널·로그 갱신(probeAt land)과 안쪽 단계
+// stLandRemote: 워커에서 착지(runRemote) — 단계 land-on, probeEvery마다 그 워커의 착지 터미널·로그 갱신(probeAt land)과 안쪽 단계
 // 파일(<클론>.land-wt/<차례 12>.phase)을 읽는다
 func (m *M) stLandRemote(mach, cm string) func() {
 	m.stPhase(mergerstate.LandOn, "워커 착지 실행 — "+m.mlab+"("+mach+")",
 		[]mergerstate.Wait{{Machine: mach, Role: "착지 실행", At: time.Now().Unix()}}, true, nil)
-	every := stProbeEvery // 맥박 고루틴은 전역을 읽지 않는다(stBeat)
+	every := m.rs.probeIv() // 띄울 때 한 번
 	return m.stBeat(func(r *mergerstate.Rec) bool {
 		now := time.Now().Unix()
 		if now-r.Probe < every {
