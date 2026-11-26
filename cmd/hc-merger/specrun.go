@@ -136,7 +136,7 @@ func (m *M) specDecide() (specDecision, string) {
 		// 맨 앞은 손잡이 merger_shards대로 여러 기계에 나눠(specshards.go)
 		var more []verified.Verifier
 		if len(st) == 1 {
-			more = m.shardMore(c, busy, v)
+			v, more = m.shardMore(c, busy, v)
 		}
 		r, ok := m.specBuild(st, v, now, more...)
 		if !ok {

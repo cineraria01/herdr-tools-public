@@ -187,11 +187,12 @@ type frontFail struct {
 }
 
 // specFrontRedo: 짓기 전에(뒤 추측보다 먼저 빈 기계를 쓴다) 맨 앞 추측이 실패·모름이면 갈래를 정하고, 한 번 더 확인 또는 손잡이 0의
-// 다시 띄움을 한다
+// 다시 띄움을 한다. 나눔 중인 맨 앞의 몫이 일 없이 바쁨이면 그 몫을 다른 기계에(specshards.go)
 func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now int64) frontFail {
 	if len(st) == 0 || st[0].row == nil {
 		return frontFail{}
 	}
+	m.shardBusyRedo(c, st, busy, now)
 	r, g := st[0].row, st[0].g
 	if r.state == specBusyX { // 맡은 기계가 그새 바빠 검증하지 않음 — 기다림 상한 없이 곧바로 다른 한가한 기계로(verifierpick.go)
 		if m.specBusyRedo(c, r, busy, g.lanes, now) {

@@ -6,7 +6,8 @@ package main
 // 추측 하나를 같은 아이디로 K대에 HERDR_VERIFY_SHARD=i/K 일꾼으로 띄운다. 몫은 조각 줄만 따로 올리고 통과 기록은 쓰지 않는다. 모든 몫이
 // 끝나면(또는 맨 앞 기다림 상한) 한 기계에서 지금 추측 검증을 그대로 한 번(마무리) — 몫들의 조각을 이어 받아 빈틈만 돌고 통과 기록을 쓴다.
 // 틀은 specFx + 조각 셋(p1·p2·p3)을 아는 검증 스크립트: 나눔 i/K면 n번째 조각은 (n−1)%K+1 = i인 몫만 돌고($PARTDIR/gap이면 p3은 어느 몫도
-// 안 돈다 — 나눔이 어긋난 스크립트), $PARTDIR/envfail-<기계>면 시험 줄 없이 실패(환경 실패), $PARTDIR/fail-<조각>-<기계>면 시험 실패.
+// 안 돈다 — 나눔이 어긋난 스크립트), $PARTDIR/envfail-<기계>면 시험 줄 없이 실패(환경 실패 — envfail-<조각>-<기계>면 그 조각에서),
+// $PARTDIR/fail-<조각>-<기계>면 시험 실패.
 // 돈 것은 $HOOKLOG에 「run <조각>@<기계>」
 
 import (
@@ -41,6 +42,7 @@ for p in p1 p2 p3; do
   fi
   echo "run $p@$HC_LANE_MACHINE" >>"$HOOKLOG"
   [ ! -e "$PARTDIR/envfail-$HC_LANE_MACHINE" ] || exit 1
+  [ ! -e "$PARTDIR/envfail-$p-$HC_LANE_MACHINE" ] || exit 1
   if [ -e "$PARTDIR/fail-$p-$HC_LANE_MACHINE" ]; then printf -- '--- FAIL: TestX (0.01s)\nFAIL\texample/%s\t0.1s\n' "$p"; exit 1; fi
   passed="$passed $p"
   [ -z "$HERDR_VERIFY_PARTS" ] || echo "$t$passed" >"$HERDR_VERIFY_PARTS"

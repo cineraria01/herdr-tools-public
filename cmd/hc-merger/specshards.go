@@ -22,10 +22,13 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"herdr-tools/internal/verified"
@@ -64,14 +67,27 @@ func shardBase(name string) string {
 }
 
 // shardEnded: 추측 id의 몫 i가 끝났나(끝 참조 <아이디>-s<i>of<K>)
-func shardEnded(refs map[string]string, id, i string) bool {
+func shardEnded(refs map[string]string, id, i string) bool { return shardEndRef(refs, id, i) != "" }
+
+// shardEndRef: 추측 id의 몫 i의 끝 참조 이름(없으면 빈 값)
+func shardEndRef(refs map[string]string, id, i string) string {
 	p := specShards + id + "-s" + i + "of"
 	for ref := range refs {
 		if strings.HasPrefix(ref, p) {
-			return true
+			return ref
 		}
 	}
-	return false
+	return ""
+}
+
+// shardEndBusy: 몫 끝 참조 ref가 일 없이 끝난 「바쁨」(제목 state=busy)인가 — 원격에서 받아 읽는다(로컬 참조는 남기지 않는다). 못 읽으면 false
+func shardEndBusy(ref string) bool {
+	if fetchr(true, "-q", "origin", "+"+ref+":"+ref) != 0 {
+		return false
+	}
+	defer runQ("update-ref", "-d", ref)
+	s, rc := outQ("log", "-1", "--format=%s", ref)
+	return rc == 0 && strings.HasSuffix(s, " state=busy")
 }
 
 // shardSettle: 맨 앞이 아닌 도는 추측 가운데 몫이 다 끝난 나눔 추측(기준이 바뀌어 길에서 벗어남 등)은 모름 — 몫만으로는 통과가 아니고,
@@ -124,8 +140,50 @@ func (m *M) specDispatch(v verified.Verifier, id, shard string) bool {
 	return true
 }
 
-// shardMore: 맨 앞을 v에 맡기기로 했을 때 나눔에 더 쓸 기계(K−1대까지, 맡길 수 있는 것만 — 고른 기계는 busy에 적는다). K가 1이면 없음
-func (m *M) shardMore(c *specCtx, busy map[string]bool, v verified.Verifier) []verified.Verifier {
+// shardMore: 맨 앞을 v에 맡기기로 했을 때 나눔에 더 쓸 기계(K−1대까지, 맡길 수 있는 것만 — 고른 기계는 busy에 적는다). K가 1이면 없음.
+// 나누게 되면 띄우기 직전에 한 번 더 잰 기계로(shardRecheck — v가 빠지면 남은 첫 기계가 v)
+func (m *M) shardMore(c *specCtx, busy map[string]bool, v verified.Verifier) (verified.Verifier, []verified.Verifier) {
+	more := m.shardPick(c, busy, v)
+	if len(more) == 0 {
+		return v, nil
+	}
+	vs := m.shardRecheck(append([]verified.Verifier{v}, more...))
+	return vs[0], vs[1:]
+}
+
+// shardRecheck: 나눌 기계들을 띄우기 직전에 한 번 더 잰다(probeRemote — 같은 판독의 verifies·gates). 이 바퀴 처음 잰 뒤 다른 병합기가
+// 잡은 기계는 빼고(2026-11-26 22:49 몫 1이 「verifies=1 gates=1 — 바쁨」으로 일 없이 끝남), 하나도 안 남으면 그대로(일꾼이 바쁨을 남기면
+// shardBusyRedo가 다시 맡긴다)
+func (m *M) shardRecheck(vs []verified.Verifier) []verified.Verifier {
+	ok := make([]bool, len(vs))
+	pct := m.idleLoad()
+	var wg sync.WaitGroup
+	for j, v := range vs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			i, got, _ := probeRemote(v.Machine)
+			ok[j] = got && (i.idle(pct) || gateOn(v.Machine) && i.gateFree())
+		}()
+	}
+	wg.Wait()
+	var keep []verified.Verifier
+	for j, v := range vs {
+		if ok[j] {
+			keep = append(keep, v)
+		}
+	}
+	if len(keep) < len(vs) {
+		fmt.Printf("hc-lane merger: 나눌 기계를 띄우기 직전에 다시 쟀다 — %d대 가운데 %d대 한가함\n", len(vs), len(keep))
+	}
+	if len(keep) == 0 {
+		return vs
+	}
+	return keep
+}
+
+// shardPick: shardMore의 고르기 — v 말고 더 쓸 맡길 수 있는 기계(K−1대까지)
+func (m *M) shardPick(c *specCtx, busy map[string]bool, v verified.Verifier) []verified.Verifier {
 	k := m.shardsK()
 	if k <= 1 || v.Machine == "" {
 		return nil
@@ -174,6 +232,22 @@ type shardState struct {
 	k         int
 	parts     [][2]string // 몫 번호 · 기계
 	fin       string
+	busy      map[string][]string // 몫 번호 → 일 없이 바쁨으로 끝난 기계들(「b<i>=<기계>,…」 — shardBusyRedo)
+}
+
+// line: 나눔 상태 한 줄(shardRead가 읽는 꼴)
+func (s shardState) line() string {
+	var f []string
+	for _, p := range s.parts {
+		f = append(f, p[0]+":"+p[1])
+		if b := s.busy[p[0]]; len(b) > 0 {
+			f = append(f, "b"+p[0]+"="+strings.Join(b, ","))
+		}
+	}
+	if s.fin != "" {
+		f = append(f, fmt.Sprintf("fin=%s@%d", s.fin, s.t1))
+	}
+	return fmt.Sprintf("%s %s %d k=%d %s\n", s.id, s.front, s.t0, s.k, strings.Join(f, " "))
 }
 
 func (m *M) shardRead() (shardState, bool) {
@@ -189,11 +263,14 @@ func (m *M) shardRead() (shardState, bool) {
 	s.id, s.front = f[0], f[1]
 	s.t0, _ = strconv.ParseInt(f[2], 10, 64)
 	s.k, _ = strconv.Atoi(strings.TrimPrefix(f[3], "k="))
+	s.busy = map[string][]string{}
 	for _, x := range f[4:] {
 		if fin, ok := strings.CutPrefix(x, "fin="); ok {
 			mach, at, _ := strings.Cut(fin, "@")
 			s.fin = mach
 			s.t1, _ = strconv.ParseInt(at, 10, 64)
+		} else if i, ms, ok := strings.Cut(x, "="); ok && strings.HasPrefix(i, "b") {
+			s.busy[i[1:]] = strings.Split(ms, ",")
 		} else if i, mach, ok := strings.Cut(x, ":"); ok {
 			s.parts = append(s.parts, [2]string{i, mach})
 		}
@@ -233,6 +310,67 @@ func (m *M) shardStep(c *specCtx, st []specStep, busy map[string]bool, now int64
 	fmt.Printf("hc-lane merger: 나눔 %s(%s) — 마무리 %s\n", st[0].g.lanes, why, r.machine) // 나눔 끝 표시는 specRedo가(shardHandoff)
 }
 
+// shardBusyRedo: 나눔 중인 맨 앞의 몫이 일 없이 바쁨(끝 state=busy·통과 조각 없음)으로 끝났으면 그 바퀴에(뒤 추측보다 먼저) 같은 몫
+// (같은 번호·같은 아이디)을 다른 한가한 기계에 다시 맡긴다 — 보통 추측의 바쁨 다시 고름(specBusyRedo)과 같은 상한 busy_max를 몫마다.
+// 그 몫에 바쁨을 낸 기계와 그 추측의 다른 몫이 도는 기계는 빼고, 맡길 기계가 없거나 상한을 넘기거나 다른 몫이 다 끝났으면 지금처럼
+// 마무리가 그 몫을 돈다.
+// 다시 맡기면 바쁨 끝 참조를 지우고(본 값 lease — 마무리가 그 몫을 끝남으로 보지 않게) 나눔 상태의 그 몫 기계를 바꾼다(기록·진행 판정이 새 기계를 본다)
+func (m *M) shardBusyRedo(c *specCtx, st []specStep, busy map[string]bool, now int64) {
+	s, ok := m.shardRead()
+	if !ok || len(st) == 0 || st[0].row == nil || st[0].row.id != s.id || s.fin != "" || st[0].row.state != specRun {
+		return
+	}
+	r := st[0].row
+	run := map[string]bool{}
+	for _, p := range s.parts {
+		if !shardEnded(c.refs, r.id, p[0]) {
+			run[p[1]] = true
+		}
+	}
+	changed := false
+	for j, p := range s.parts {
+		end := shardEndRef(c.refs, r.id, p[0])
+		// 다른 몫이 다 끝났으면 다시 맡겨도 함께 끝날 몫이 없다 — 마무리가 바로 그 몫을 돈다(shardStep)
+		if end == "" || len(run) == 0 || c.refs[specParts+r.id+"-s"+p[0]] != "" || !shardEndBusy(end) {
+			continue
+		}
+		seen := s.busy[p[0]]
+		if !slices.Contains(seen, p[1]) {
+			seen, changed = append(seen, p[1]), true
+			s.busy[p[0]] = seen
+		}
+		if len(seen) > m.busyMax() {
+			fmt.Printf("hc-lane merger: 나눔 몫 %s/%d 이 %d번 바쁨(%s) — 손잡이 busy_max %d를 넘어 다시 맡기지 않는다(마무리가)\n", p[0], s.k, len(seen), strings.Join(seen, "·"), m.busyMax())
+			continue
+		}
+		skip := maps.Clone(run)
+		for _, x := range seen {
+			skip[x] = true
+		}
+		v := m.specPick(c, busy, skip, "", true)
+		if v.Machine == "" {
+			fmt.Printf("hc-lane merger: 나눔 몫 %s/%d 이 %s 에서 바쁨 — 맡길 한가한 기계 없음(마무리가)\n", p[0], s.k, p[1])
+			continue
+		}
+		if runO("push", "-q", "--force-with-lease="+end+":"+c.refs[end], "origin", ":"+end) != 0 {
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 나눔 몫 %s/%d 의 바쁨 끝 참조를 지우지 못했다 — 다음 바퀴에\n", p[0], s.k)
+			continue
+		}
+		delete(c.refs, end)
+		busy[v.Machine], run[v.Machine] = true, true
+		// 못 띄웠어도 그 기계로 적는다 — 몫이 끝나지 않으니 진행 판정(specFresh)이 터미널 없음으로 보고 상한에서 마무리가
+		m.specDispatch(v, r.id, fmt.Sprintf("%s/%d", p[0], s.k))
+		s.parts[j][1], changed = v.Machine, true
+		m.wre = p[1] + "→" + v.Machine // 일지 「바쁨으로 다시 고름(<기계>→<기계>)」(jround.go)
+		fmt.Printf("hc-lane merger: 나눔 몫 %s/%d 이 %s 에서 일 없이 바쁨 — %s 로 다시 맡김\n", p[0], s.k, p[1], v.Machine)
+	}
+	if changed {
+		if err := writeVia(m.mj+"/specshard", s.line()); err != nil {
+			fmt.Fprintf(os.Stderr, "hc-lane merger: 나눔 상태를 적지 못했다(다시 맡긴 몫이 기록에 안 보인다): %v\n", err)
+		}
+	}
+}
+
 // shardHandoff: 추측 r을 다시 띄웠다(specRedo — 마무리·한 번 더 확인·바쁨·상한으로 옮김) — 그 아이디가 나눔 중이었으면 나눔은 여기서
 // 끝나고 그 실행이 이어 맡는다(「fin=<기계>@<초>」, 일지 「마무리 <기계> n초」)
 func (m *M) shardHandoff(r *specRow, now int64) {
@@ -240,12 +378,8 @@ func (m *M) shardHandoff(r *specRow, now int64) {
 	if !ok || s.id != r.id || s.fin != "" {
 		return
 	}
-	var ps []string
-	for _, p := range s.parts {
-		ps = append(ps, p[0]+":"+p[1])
-	}
-	line := fmt.Sprintf("%s %s %d k=%d %s fin=%s@%d\n", s.id, s.front, s.t0, s.k, strings.Join(ps, " "), r.machine, now)
-	if err := writeVia(m.mj+"/specshard", line); err != nil {
+	s.fin, s.t1 = r.machine, now
+	if err := writeVia(m.mj+"/specshard", s.line()); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 나눔 상태를 적지 못했다(일지에 마무리가 빠진다): %v\n", err)
 	}
 }

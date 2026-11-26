@@ -265,8 +265,9 @@ func (m *M) stBeat(step func(r *mergerstate.Rec) bool) func() {
 	id := m.rs.beat
 	m.rs.mu.Unlock()
 	done := make(chan struct{})
+	every := stBeatEvery // 띄울 때 한 번 — 멈춘 뒤에도 도는 고루틴이 전역을 읽지 않게(시험이 되돌릴 때 경합)
 	go func() {
-		t := time.NewTicker(stBeatEvery)
+		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {
@@ -315,9 +316,10 @@ func (m *M) stLandLocal() (phaseFile string, stop func()) {
 func (m *M) stLandRemote(mach, cm string) func() {
 	m.stPhase(mergerstate.LandOn, "워커 착지 실행 — "+m.mlab+"("+mach+")",
 		[]mergerstate.Wait{{Machine: mach, Role: "착지 실행", At: time.Now().Unix()}}, true, nil)
+	every := stProbeEvery // 맥박 고루틴은 전역을 읽지 않는다(stBeat)
 	return m.stBeat(func(r *mergerstate.Rec) bool {
 		now := time.Now().Unix()
-		if now-r.Probe < stProbeEvery {
+		if now-r.Probe < every {
 			return false
 		}
 		r.Probe = now
