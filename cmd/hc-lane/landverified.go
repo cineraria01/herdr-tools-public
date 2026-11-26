@@ -22,8 +22,9 @@ func specTreeTake(merger bool) {
 	}
 	os.Unsetenv("HERDR_SPEC_TREE")
 	os.Unsetenv("HERDR_VERIFIED_TREE")
-	if !merger { // 병합기가 넘긴 맨 앞 추측의 통과 조각(직접 검증 — 검증 스크립트·착지 스크립트에 그대로 물려준다). 병합기 밖에서는 지운다
+	if !merger { // 병합기가 넘긴 맨 앞 추측의 통과 조각·병합 검증 자리(직접 검증 — 검증 스크립트·착지 스크립트에 그대로 물려준다). 병합기 밖에서는 지운다
 		os.Unsetenv("HERDR_VERIFY_PARTS_FROM")
+		os.Unsetenv("HERDR_VERIFY_GATE") // 남기면 레인 검증이 병합 검증 잠금을 쥐어 자리를 빼앗는다(docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」)
 	}
 }
 

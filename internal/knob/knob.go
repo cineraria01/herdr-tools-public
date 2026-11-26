@@ -132,6 +132,10 @@ var Defs = []Def{
 	{Name: "merger_busy_max", Tool: "hc-merger", Default: "2", Min: 0, Max: 20, Unit: "번", Remote: true, Desc: "같은 맨 앞의 바쁨이 이만큼 넘으면 다시 고르지 않음 — 착지 실행 워커의 끊김도 같은 상한(HC_LANE_SPEC_BUSY_MAX)"},
 	// ht-merger-land-offload(2026-11-26): 직접 검증 착지(준비 훅·hc-lane land·착지 스크립트)를 병합기 기계 대신 워커에서
 	{Name: "merger_land_on", Tool: "hc-merger", Default: "auto", List: true, Unit: "기계", Remote: true, Desc: "직접 검증 착지를 돌릴 기계 — auto(검증 기계 목록에서 검증 자리 남은·코어당 부하 가장 낮은 워커, 닿는 워커가 없을 때만 병합기 기계) · local(병합기 기계) · 기계 목록(쉼표, 그 안에서만)(HC_LANE_MERGER_LAND_ON)"},
+	// ht-merger-shards(2026-11-26): 맨 앞 추측 하나를 검증 기계 여럿에 나눠 — 검증 스크립트가 HERDR_VERIFY_SHARD 계약을 따르는 저장소만 켠다
+	{Name: "merger_shards", Tool: "hc-merger", Default: "1", Min: 1, Max: 8, Unit: "몫", Remote: true, Desc: "맨 앞 추측을 이만큼의 서로 다른 검증 기계에 몫(HERDR_VERIFY_SHARD=i/K)으로 나눠 돌리고 한 기계에서 마무리(1이면 끔 — 지금 그대로, docs/hc-lane/merger-spec-verify.md 「나눠 돌리기」, HC_LANE_MERGER_SHARDS)"},
+	// ht-merger-gate-slot(2026-11-26): 병합 검증 우선 자리 — 그 검증 기계에서는 병합 검증이 레인 검증 잠금·부하를 기다리지 않는다
+	{Name: "merger_gate@", Per: "기계", Tool: "hc-merger", Default: "0", Enum: []string{"0", "1"}, Remote: true, Desc: "1이면 그 검증 기계는 레인 검증이 돌거나 부하가 높아도 병합 검증이 안 돌면 병합기가 맡기고(한가한 기계 다음, 코어당 부하 낮은 차례) HERDR_VERIFY_GATE=1을 준다 — 검증 스크립트가 레인 검증과 다른 잠금을 쥔다(docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」)"},
 	{Name: "merger_conflict", Tool: "hc-merger", Default: "agent", Enum: []string{"agent", "event", "reject"}, Remote: true, Desc: "rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT)"},
 	{Name: "merger_resolve_max", Tool: "hc-merger", Default: "3600", Min: 60, Max: 86400, Unit: "초", Remote: true, Desc: "충돌 풀이·풀이 감사 한 단계의 상한(HC_LANE_MERGER_RESOLVE_MAX)"},
 	{Name: "merger_defer_alarm", Tool: "hc-merger", Default: "10", Min: 1, Max: 1000, Unit: "바퀴", Remote: true, Desc: "같은 까닭의 「다음 바퀴에」가 이만큼 이어지면 막힘 사건 한 번(시작 단계는 늘 기본)"},

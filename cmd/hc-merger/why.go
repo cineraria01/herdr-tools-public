@@ -264,14 +264,27 @@ func whySummary(lines []string, n int) string {
 	if len(waits) > n {
 		waits = waits[len(waits)-n:]
 	}
-	rn := 0
+	rn, gn, sn := 0, 0, 0
 	for _, w := range waits {
 		if strings.Contains(w.why, ", 바쁨으로 다시 고름(") {
 			rn++
 		}
+		if strings.Contains(w.why, ", 병합 검증 자리(") {
+			gn++
+		}
+		if strings.Contains(w.why, ", 나눔 ") {
+			sn++
+		}
 	}
 	if len(waits) > 0 {
-		out += fmt.Sprintf(" · 검증 맡김 %d번(바쁨으로 다시 고름 %d)", len(waits), rn)
+		out += fmt.Sprintf(" · 검증 맡김 %d번(바쁨으로 다시 고름 %d", len(waits), rn)
+		if gn > 0 { // 한가한 기계가 아니라 병합 검증 자리로 맡긴 것(ht-merger-gate-slot) — 있을 때만
+			out += fmt.Sprintf(" · 병합 검증 자리 %d", gn)
+		}
+		if sn > 0 { // 맨 앞을 여러 기계에 나눠 돈 것(ht-merger-shards) — 있을 때만
+			out += fmt.Sprintf(" · 나눔 %d", sn)
+		}
+		out += ")"
 	}
 	return out
 }

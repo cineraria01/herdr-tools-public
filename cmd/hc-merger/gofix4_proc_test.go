@@ -151,7 +151,7 @@ func TestGofix4SpecNotRunLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	if r := specRunVerify(f.clone, f.dir+"/spec.log", f.clone, "main", strings.Repeat("a", 40), tree, &specEvidence{}); r != resLost {
+	if r := specRunVerify(f.clone, f.dir+"/spec.log", f.clone, "main", strings.Repeat("a", 40), "", tree, &specEvidence{}); r != resLost {
 		lg, _ := os.ReadFile(f.dir + "/spec.log")
 		t.Fatalf("띄우지 못한 검증은 resLost여야: %v\n%s", r, lg)
 	}

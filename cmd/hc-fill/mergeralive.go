@@ -22,7 +22,7 @@ import (
 )
 
 // maRow: DATA/merger-alive.tsv 한 줄 — 프로젝트 기계 상태(alive|gone|unknown) 그 상태 시작(초) 주소 큐수(?=모름) 가장 오래(초|-)
-// 확인(초) 알림(,dead,unknown,restart, 목록 — 그 상태 흐름에서 이미 한 것) 까닭 가장 오래된 제출의 레인(-)
+// 확인(초) 알림(,dead,unknown,restart, 목록 — 그 상태 흐름에서 이미 한 것) 까닭 가장 오래된 제출의 레인(-) 줄 차례대로 레인(maQLanes)
 type maRow struct {
 	P, M, St        string
 	Since           int64
@@ -30,6 +30,22 @@ type maRow struct {
 	Oldest, Checked int64
 	Alerted, Why    string
 	OldLane         string
+	Lanes           []string // 줄 차례대로(큐 참조 이름 순 — 제출 초), LanesOK=false면 모름(큐 못 읽음·옛 기록)
+	LanesOK         bool
+}
+
+// maPos <기록> <기록 있나> <레인>: 병합기 줄 차례(1부터, 줄에 없으면 0). known=false면 줄을 모름(기록 없음·큐 못 읽음·옛 기록).
+// ponytail: 차례는 제출 초만(stRemote와 같음) — 병합기의 우선은 보지 않는다
+func maPos(x maRow, ok bool, lane string) (pos int, known bool) {
+	if !ok || !x.LanesOK {
+		return 0, false
+	}
+	for i, l := range x.Lanes {
+		if l == lane {
+			return i + 1, true
+		}
+	}
+	return 0, true
 }
 
 func maFile() string { return DATA + "/merger-alive.tsv" }
@@ -81,8 +97,16 @@ func maLoad() map[string]maRow {
 		if al == "-" {
 			al = ""
 		}
-		o[r.F(maProj)] = maRow{r.F(maProj), r.F(maMach), r.F(maState), int64(atoi10(r.F(maSince))), r.F(maAddr), r.F(maQueued),
-			int64(atoi10(r.F(maOldest))), int64(atoi10(r.F(maChecked))), al, r.F(maWhy), dash0(r.F(maOldLane))}
+		x := maRow{r.F(maProj), r.F(maMach), r.F(maState), int64(atoi10(r.F(maSince))), r.F(maAddr), r.F(maQueued),
+			int64(atoi10(r.F(maOldest))), int64(atoi10(r.F(maChecked))), al, r.F(maWhy), dash0(r.F(maOldLane)), nil, false}
+		switch q := r.F(maQLanes); q {
+		case "", "?":
+		case "-":
+			x.LanesOK = true
+		default:
+			x.Lanes, x.LanesOK = strings.Split(q, ","), true
+		}
+		o[r.F(maProj)] = x
 	}
 	return o
 }
@@ -92,7 +116,11 @@ func (x maRow) line() string {
 	if x.Oldest > 0 {
 		o = fmt.Sprint(x.Oldest)
 	}
-	return strings.Join([]string{x.P, x.M, x.St, fmt.Sprint(x.Since), dash(x.Addr), x.K, o, fmt.Sprint(x.Checked), dash(x.Alerted), dash(x.Why), dash(x.OldLane)}, "\t")
+	q := "?"
+	if x.LanesOK {
+		q = dash(strings.Join(x.Lanes, ","))
+	}
+	return strings.Join([]string{x.P, x.M, x.St, fmt.Sprint(x.Since), dash(x.Addr), x.K, o, fmt.Sprint(x.Checked), dash(x.Alerted), dash(x.Why), dash(x.OldLane), q}, "\t")
 }
 
 // maNames: 병합기 터미널 이름(docs/hc-lane/merger.md 「준비·띄우기」)
@@ -125,16 +153,19 @@ func maQueue(p string) (lanes []string, oldest int64, oldLane string, ok bool) {
 	if inlist(p, bad) {
 		return nil, 0, "", false
 	}
+	var refs []string // 줄 차례 = 큐 참조 이름 순(10자리 제출 초 — 다시 선 제출은 새 초로 줄 끝)
 	for _, r := range rows {
-		if r.F(mqProj) != p {
-			continue
+		if r.F(mqProj) == p && mgQueueRe.MatchString(r.F(mqRef)) {
+			refs = append(refs, r.F(mqRef))
 		}
-		if loc := mgQueueRe.FindStringIndex(r.F(mqRef)); loc != nil {
-			lanes = append(lanes, r.F(mqRef)[loc[1]:])
-			s := int64(atoi10(strings.TrimPrefix(r.F(mqRef)[:loc[1]-1], "refs/merge-queue/")))
-			if oldest == 0 || s < oldest {
-				oldest, oldLane = s, lanes[len(lanes)-1]
-			}
+	}
+	sort.Strings(refs)
+	for _, ref := range refs {
+		loc := mgQueueRe.FindStringIndex(ref)
+		lanes = append(lanes, ref[loc[1]:])
+		s := int64(atoi10(strings.TrimPrefix(ref[:loc[1]-1], "refs/merge-queue/")))
+		if oldest == 0 || s < oldest {
+			oldest, oldLane = s, lanes[len(lanes)-1]
 		}
 	}
 	return lanes, oldest, oldLane, true
@@ -175,7 +206,7 @@ func mergerAliveTick() {
 		lanes, oldest, oldLane, qok := maQueue(p)
 		x := maRow{P: p, M: m, Addr: "-", K: "?", Checked: now, Oldest: oldest, OldLane: oldLane}
 		if qok {
-			x.K = fmt.Sprint(len(lanes))
+			x.K, x.Lanes, x.LanesOK = fmt.Sprint(len(lanes)), lanes, true
 		}
 		unkTerm := false
 		for _, t := range TERMS {

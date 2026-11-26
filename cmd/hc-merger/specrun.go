@@ -22,7 +22,7 @@ const (
 )
 
 // specLsPatterns: 바퀴의 ls-remote에 함께 싣는 추측 참조(round.go)
-var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", specParts + "*", verified.Prefix + "*", verified.PreRefs + "*"}
+var specLsPatterns = []string{verified.VerifiersRef, specRefs + "*", specFails + "*", specStarts + "*", specParts + "*", specShards + "*", verified.Prefix + "*", verified.PreRefs + "*"}
 
 // specStartMax: HC_LANE_SPEC_START(초, 기본 300). 띄운 뒤 이만큼 지나도 일꾼의 떴다는 표식이 없으면 모름
 func specStartMax() int64 {
@@ -43,13 +43,15 @@ func specFrontWait() int64 {
 
 // specCtx: 이번 바퀴에 읽은 원격 추측 상태
 type specCtx struct {
-	vers   []verified.Verifier
-	rows   []specRow
-	refs   map[string]string // 추측·결과 참조 → SHA(ls-remote)
-	pre    []preMark         // 미리 줄 표식(specpre.go)
-	preOff bool              // 검증 기계 목록이 미리 줄을 껐다
-	preDel [][2]string       // 치울 표식(참조, 본 값)
-	idle   map[string]int    // 이 바퀴에 잰 검증 기계 한가함(idUnknown·idIdle·idBusy — verifierpick.go), 처음 고를 때 채운다
+	vers    []verified.Verifier
+	rows    []specRow
+	refs    map[string]string  // 추측·결과 참조 → SHA(ls-remote)
+	pre     []preMark          // 미리 줄 표식(specpre.go)
+	preOff  bool               // 검증 기계 목록이 미리 줄을 껐다
+	preDel  [][2]string        // 치울 표식(참조, 본 값)
+	idle    map[string]int     // 이 바퀴에 잰 검증 기계 한가함(idUnknown·idIdle·idBusy·idGate — verifierpick.go), 처음 고를 때 채운다
+	perCore map[string]float64 // 잰 기계의 코어당 부하(병합 검증 자리 차례)
+	gpick   map[string]bool    // 이 바퀴에 병합 검증 자리로 고른 기계 — 추측 기다림 일지 줄의 「병합 검증 자리(<기계>)」
 }
 
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
@@ -75,6 +77,9 @@ func (m *M) specDecide() (specDecision, string) {
 	}
 	groups := m.specGroups()
 	now := time.Now().Unix()
+	if st := specWalk(m.btree, groups, c.rows); len(st) > 0 {
+		shardSettle(c, st[0].row) // 길에서 벗어난 나눔 추측은 몫이 다 끝나면 모름(specshards.go)
+	}
 	busy := specBusy(c.rows)
 	st := specWalk(m.btree, groups, c.rows)
 	if m.specCulpritWhy(c, st) { // 뒤 추측은 반송할 맨 앞을 품었다 — 더 짓지 않고 치운다(미리 줄 추측은 지킨다)
@@ -119,8 +124,13 @@ func (m *M) specDecide() (specDecision, string) {
 		if len(st) == 1 && !disp {
 			v = verified.Verifier{} // 손잡이 front_dispatch 0 — 맨 앞은 병합기가 직접 검증, 짓기만(뒤 추측의 부모)
 		}
-		// 맨 앞 무리도 뒤 무리와 같은 꼴로 검증 기계에 맡긴다(merger-verify-dispatch) — 병합기 기계는 기록을 보고 넣기만
-		r, ok := m.specBuild(st, v, now)
+		// 맨 앞 무리도 뒤 무리와 같은 꼴로 검증 기계에 맡긴다(merger-verify-dispatch) — 병합기 기계는 기록을 보고 넣기만.
+		// 맨 앞은 손잡이 merger_shards대로 여러 기계에 나눠(specshards.go)
+		var more []verified.Verifier
+		if len(st) == 1 {
+			more = m.shardMore(c, busy, v)
+		}
+		r, ok := m.specBuild(st, v, now, more...)
 		if !ok {
 			break
 		}
@@ -143,6 +153,9 @@ func (m *M) specDecide() (specDecision, string) {
 			return d, ""
 		}
 	}
+	if disp {
+		m.shardStep(c, st, busy, now) // 나눔 중인 맨 앞 — 몫이 다 끝났거나 상한이면 마무리(specshards.go)
+	}
 	d, over, stall := m.frontOver(c, st, specFront(st), busy, now, disp) // 맨 앞 기다림 상한(specfront.go)
 	m.vw.why = frontWhy(st, c.rows, over, disp)
 	if over && stall != "" {
@@ -152,6 +165,9 @@ func (m *M) specDecide() (specDecision, string) {
 	switch {
 	case d == specWaitFront:
 		m.wmach = st[0].row.machine
+		if c.gpick[m.wmach] {
+			m.wmach = "*" + m.wmach // 병합 검증 자리로 맡김(jround.go specWaitNote가 같은 기다림 동안 잇는다)
+		}
 	case d == specLand && disp:
 		d = m.specFrontLand(c, st, ff) // 반송·줄이기·직접 검증·기다림(손잡이 front_local 0)
 	}
@@ -234,7 +250,7 @@ func (m *M) specLoad() (*specCtx, bool) {
 		case f[1] == verified.VerifiersRef:
 			vsha = f[0]
 		case strings.HasPrefix(f[1], specRefs), strings.HasPrefix(f[1], specFails), strings.HasPrefix(f[1], specStarts),
-			strings.HasPrefix(f[1], specParts), strings.HasPrefix(f[1], verified.Prefix):
+			strings.HasPrefix(f[1], specParts), strings.HasPrefix(f[1], specShards), strings.HasPrefix(f[1], verified.Prefix):
 			c.refs[f[1]] = f[0]
 		case strings.HasPrefix(f[1], verified.PreRefs):
 			pre[f[1]] = f[0]
@@ -386,7 +402,7 @@ func (m *M) specGroups() []specGroup {
 
 // specBuild: 길의 마지막 자리(줄 없음)의 추측을 임시 작업 트리에서 짓고 push한다. v가 있으면 그 기계에 띄운다(못 띄우면 state=lost).
 // 지을 수 없으면(git 실패·push 거절) ok=false — 이 바퀴는 더 짓지 않는다
-func (m *M) specBuild(st []specStep, v verified.Verifier, now int64) (specRow, bool) {
+func (m *M) specBuild(st []specStep, v verified.Verifier, now int64, more ...verified.Verifier) (specRow, bool) {
 	s, mch := st[len(st)-1], v.Machine
 	pc := m.B // 부모 커밋: 앞으로 나아간 마지막 추측 커밋(없으면 기준)
 	for _, p := range st[:len(st)-1] {
@@ -443,15 +459,20 @@ func (m *M) specBuild(st []specStep, v verified.Verifier, now int64) (specRow, b
 	case "local":
 		r.dispatchX, r.state = true, specLost
 	case "run":
-		m.specLaunch(&r, v, s.g.lanes, now)
+		m.specLaunch(&r, v, s.g.lanes, now, more...)
 	}
 	return r, true
 }
 
-// specLaunch: 원격에 state=run으로 올린 추측 r을 기계 v에 띄운다. 못 띄우면 모름(state=lost)으로 고쳐 둔다(고치기도 못 하면 시간 넘김 뒤 모름)
-func (m *M) specLaunch(r *specRow, v verified.Verifier, lanes string, now int64) {
+// specLaunch: 원격에 state=run으로 올린 추측 r을 기계 v에(more가 있으면 v와 more에 몫으로 나눠 — specshards.go) 띄운다.
+// 못 띄우면 모름(state=lost)으로 고쳐 둔다(고치기도 못 하면 시간 넘김 뒤 모름)
+func (m *M) specLaunch(r *specRow, v verified.Verifier, lanes string, now int64, more ...verified.Verifier) {
 	r.state = specRun
-	if m.specDispatch(v, r.id) {
+	if len(more) > 0 {
+		if m.shardLaunch(r, append([]verified.Verifier{v}, more...), lanes, now) {
+			return
+		}
+	} else if m.specDispatch(v, r.id, "") {
 		fmt.Printf("hc-lane merger: 추측 검증 띄움 — %s → %s (부모 트리 %s)\n", lanes, v.Machine, first8(r.parent))
 		return
 	}
@@ -499,19 +520,6 @@ func (m *M) specStack(pc string, shas []string) (tree string, ok, built bool) {
 	return t, true, true
 }
 
-// specDispatch: 검증 기계에 일꾼을 띄운다(hc run --on, 상한 60초). 일꾼 쪽 손잡이(busy_wait·idle_load)는 env로 넘긴다
-func (m *M) specDispatch(v verified.Verifier, id string) bool {
-	_, rc, e := boundedRun(60*time.Second, "hc", nil, "run", "--bg", "--json", "--no-parent", "--rm", "--on", v.Machine,
-		"--name", "spec-"+id[:8], "--label", "hc-merger-spec=1", "--cwd", v.Path,
-		"env", fmt.Sprintf("HC_LANE_SPEC_BUSY_WAIT=%d", m.busyWait()), fmt.Sprintf("HC_LANE_SPEC_IDLE_LOAD=%d", m.idleLoad()),
-		"hc-lane", "merger", "--spec-verify", id, m.base)
-	if rc != 0 {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: 추측 검증을 %s 에 띄우지 못했다(종료 %d): %s — 그 무리는 착지 때 직접 검증\n", v.Machine, rc, strings.TrimSpace(e))
-		return false
-	}
-	return true
-}
-
 // specClean: 길에 없고 도는 중도 아닌 추측과, 남는 추측 어디에도 안 맞는 결과(spec-fail·verified)를 지운다(본 값 lease, 실패는 다음 바퀴에)
 func (m *M) specClean(c *specCtx, st []specStep) {
 	stale := map[string]bool{}
@@ -539,7 +547,9 @@ func (m *M) specClean(c *specCtx, st []specStep) {
 			del(ref, sha)
 		} else if id, ok := strings.CutPrefix(ref, specStarts); ok && !keepID[id] {
 			del(ref, sha)
-		} else if id, ok := strings.CutPrefix(ref, specParts); ok && !keepID[id] {
+		} else if id, ok := strings.CutPrefix(ref, specParts); ok && !keepID[shardBase(id)] {
+			del(ref, sha)
+		} else if id, ok := strings.CutPrefix(ref, specShards); ok && !keepID[shardBase(id)] {
 			del(ref, sha)
 		} else if t, ok := strings.CutPrefix(ref, verified.Prefix); ok && !keepTree[t] {
 			del(ref, sha)

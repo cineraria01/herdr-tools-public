@@ -40,10 +40,7 @@ func stateMergeJournal(mr map[string]maRow, rows []Row, cwd map[string]string, t
 	}
 	var ls []string
 	bad := ""
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		dir = HOME + "/.local/state"
-	}
+	dir := stateDir()
 	if local > 0 {
 		b, err := os.ReadFile(dir + "/hc-lane/merger-journal.tsv")
 		switch {
@@ -222,22 +219,68 @@ func stateLandOn(g *opsstate.MergeLine, f opsstate.JournalFacts, terms []hcjson.
 // 기다림(-)이면 빈 값(지금 그대로 안 움직임을 본다). 갱신을 못 읽으면 why에 까닭 — 갱신 없음과 같이 안 움직임 쪽(놓치지 않는 쪽)
 // ponytail: 한 기계에 추측 하나(hc-merger spec.go)라 그 기계의 spec 터미널을 다 본다 — 아이디를 specwait에 적으면 하나로
 func stateSpecWait(dir string, terms []hcjson.Terminal, min int, now time.Time) (mach, term string, fresh bool, why string) {
+	if mach, _, _ = specWaitRec(dir, min, now); mach == "" {
+		return
+	}
+	term, fresh, why = stateFresh(mach, "spec", "추측 검증", specIDRe, terms, min)
+	return
+}
+
+// specWaitRec <병합기 기록 폴더> <분> <지금>: specwait(hc-merger jround.go specWaitRead와 같은 꼴 — 첫 줄 「첫 마지막 횟수 [기계[/사슬]]」,
+// 구성원마다 「큐 참조 제출 레인 기록」)의 맡긴 검증 기계·기다림 첫 초·구성원 레인. 기다림 아님·마지막 바퀴가 분 넘음·맡길 기계를 기다림(-)·
+// 손잡이 0이면 빈 값. 읽기만 한다
+func specWaitRec(dir string, min int, now time.Time) (mach string, first int64, lanes []string) {
 	b, err := os.ReadFile(dir + "/specwait")
 	if err != nil || min <= 0 {
 		return
 	}
-	h := strings.Fields(strings.SplitN(string(b), "\n", 2)[0])
+	ls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	h := strings.Fields(ls[0])
 	if len(h) != 4 {
 		return
 	}
-	last, err := strconv.ParseInt(h[1], 10, 64)
-	if err != nil || now.Unix()-last > int64(min)*60 {
-		return
+	first, err1 := strconv.ParseInt(h[0], 10, 64)
+	last, err2 := strconv.ParseInt(h[1], 10, 64)
+	if err1 != nil || err2 != nil || now.Unix()-last > int64(min)*60 {
+		return "", 0, nil
 	}
-	mach, _, _ = strings.Cut(h[3], "/")
-	if mach == "-" {
-		return "", "", false, ""
+	if mach, _, _ = strings.Cut(h[3], "/"); mach == "-" {
+		return "", 0, nil
 	}
-	term, fresh, why = stateFresh(mach, "spec", "추측 검증", specIDRe, terms, min)
-	return
+	for _, l := range ls[1:] {
+		if f := strings.Fields(l); len(f) == 4 {
+			lanes = append(lanes, f[2])
+		}
+	}
+	return mach, first, lanes
+}
+
+func stateDir() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return d
+	}
+	return HOME + "/.local/state"
+}
+
+// mqBatch <병합기 살아 있음 기록> <살아 있는 터미널 주소 → 폴더> <지금>: 이 기계 병합기가 지금 도는 묶음의 구성원 → 단계 덧말 —
+// 추측 검증을 기다리는 묶음(specwait)은 「묶음 검증 중 <기계> n분째」, 착지 중인 맨 앞 레인(stateLanding)은 「착지 중 n분째」.
+// 다른 기계 병합기·살아 있지 않음·클론 모름이면 nil(원격으로 읽지 않는다 — 차례만 보인다)
+// ponytail: 착지는 맨 앞 레인만(착지 로그 이름) — 묶음 착지의 뒤 구성원은 차례만 보인다. 워커 착지(LandOn)도 차례만
+func mqBatch(x maRow, cwd map[string]string, now time.Time) map[string]string {
+	c := cwd[x.Addr]
+	if x.M != LOCAL || x.St != "alive" || c == "" {
+		return nil
+	}
+	o := map[string]string{}
+	if md, ok := mergerGitDir(c); ok {
+		if mach, first, lanes := specWaitRec(md, knobInt("advise_spec_fresh"), now); mach != "" {
+			for _, l := range lanes {
+				o[l] = fmt.Sprintf("묶음 검증 중 %s %d분째", mach, max(0, now.Unix()-first)/60)
+			}
+		}
+	}
+	if ln, at, ok := stateLanding(c, stateDir()+"/hc-lane/merger-logs"); ok && ln != "모름" {
+		o[ln] = fmt.Sprintf("착지 중 %d분째", max(0, int(now.Sub(at).Minutes())))
+	}
+	return o
 }

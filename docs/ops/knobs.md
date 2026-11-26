@@ -95,7 +95,9 @@
 - 손잡이: `merger_batch`(개 — 묶음 크기), `merger_tick`(초 — 빈 바퀴 쉼), `merger_spec_start`·`merger_spec_timeout`·`merger_front_wait`·`merger_pre_max`(초), `merger_pre_rebuild`(번),
   `merger_front_dispatch`·`merger_front_local`(`0`|`1`), `merger_culprit`(`parallel`|`serial` — 묶음 실패 뒤 범인 가리기, [병합기 묶음](../hc-lane/merger-batch.md)), `merger_idle_load`(%), `merger_busy_wait`(초), `merger_busy_max`(번), `merger_conflict`(`agent`|`event`|`reject`), `merger_resolve_max`(초), `merger_resolve_stuck`(분 — 풀이 터미널 멈춤 사건 문턱, 0 끔),
   `merger_spec_fresh`(분 — 맨 앞 기다림 상한을 넘긴 추측이 이만큼 안에 갱신됐으면 옮기거나 직접 검증하지 않고 더 기다림, 0 끔),
-  `merger_land_on`(`auto`|`local`|기계 목록 — 직접 검증 착지를 돌릴 기계, [병합기 「착지 실행 기계」](../hc-lane/merger.md)).
+  `merger_land_on`(`auto`|`local`|기계 목록 — 직접 검증 착지를 돌릴 기계, [병합기 「착지 실행 기계」](../hc-lane/merger.md)),
+  `merger_shards`(몫, 1~8, 기본 1 — 맨 앞 추측을 검증 기계 여럿에 나눠 돌림, [추측 검증 「나눠 돌리기」](../hc-lane/merger-spec-verify.md) — 검증 스크립트가 그 계약을 따르는 저장소만),
+  기계별 묶음 손잡이 `merger_gate@<기계>`(`0`|`1`, 기본 0 — 1이면 그 검증 기계는 레인 검증이 돌아도 병합 검증 자리로 맡김, [추측 검증 「병합 검증 자리」](../hc-lane/merger-spec-verify.md) — 프로젝트별 덮어쓰기가 아니라 기계 이름이고, 원격 참조에 그 이름 그대로 실린다).
   각 손잡이가 덮는 환경 변수는 `knob ls`의 설명 끝 괄호.
 - 프로젝트별 덮어쓰기(merger-knob-per-project, 2026-11-24): 저장소마다 검증 시간이 크게 달라 병합기 손잡이를 저장소 하나에만 다르게 줄 수 있다.
   - 꼴: `hc-fill knob set <병합기 손잡이>@<프로젝트> <값> --why …` — 위 `merger_*` 손잡이만 받고, 프로젝트는 이 기계(지휘 기계)에 설정 `repo` 줄이 있는 이름만 받는다(오타·원격에 올릴 클론이 없는 프로젝트는 거절). 범위·`--for`·`--until`·`--pin`·`--force`는 낱개와 같다.

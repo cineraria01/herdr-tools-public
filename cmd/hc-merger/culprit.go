@@ -177,7 +177,7 @@ func (m *M) culpritRecheck(c *specCtx, pass prefix, e entry, f prefix, busy map[
 	if rowOf(c, specID(pr.tree, g.key)) != nil {
 		return "범인 확인 추측이 이미 있음"
 	}
-	v := m.specPick(c, busy, nil, f.kv["machine"])
+	v := m.specPick(c, busy, nil, f.kv["machine"], true)
 	if v.Machine == "" {
 		return "범인 확인은 앞 착지 뒤 맨 앞 혼자 길(빈 검증 기계 없음)"
 	}

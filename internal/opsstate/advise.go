@@ -326,7 +326,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 					continue
 				}
 			}
-			if l.Open && th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
+			if l.Open && !l.Queued && th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
 				look("lane-long", fmt.Sprintf("레인 %s 같은 단계에 %d분", l.Name, *l.StageAgeS/60), "멈췄으면 자리를 잡은 채 시간이 간다")
 				o[len(o)-1].What = fmt.Sprintf("레인 %s: 같은 단계에 %d분 — %s", l.Name, *l.StageAgeS/60, l.Stage)
 			}

@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,14 @@ func knobLine(r knob.Remote) string {
 			o = append(o, d.Name+"="+v)
 		}
 	}
+	var per []string // 묶음 손잡이(merger_gate@<기계> — 감사 atp3qsv 낮음 3)
+	for n, v := range r {
+		if d, ok := knob.Find(n); ok && d.Tool == "hc-merger" && d.Per != "" && d.Per != knob.PerProject {
+			per = append(per, n+"="+v)
+		}
+	}
+	sort.Strings(per)
+	o = append(o, per...)
 	if len(o) == 0 {
 		return "없음(지금 값 그대로)"
 	}

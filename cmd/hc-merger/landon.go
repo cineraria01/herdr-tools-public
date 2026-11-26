@@ -99,6 +99,7 @@ type landCand struct {
 	i    idleInfo
 	ok   bool
 	note string
+	gate bool // 병합 검증 자리가 빔(merger_gate@<기계> 1 · 도는 병합 검증 0)
 }
 
 // landPick: 이번 착지를 돌릴 기계와 까닭. 빈 Machine이면 병합기 기계(까닭은 localTag로 시작, 고를 것이 없으면 빈 까닭 — 지금 그대로·
@@ -146,6 +147,7 @@ func (m *M) landPick() (verified.Verifier, string, bool) {
 		go func(c *landCand) {
 			defer wg.Done()
 			c.i, c.ok, c.note = probeRemote(c.v.Machine)
+			c.gate = c.ok && gateOn(c.v.Machine) && c.i.gateFree()
 		}(c)
 	}
 	wg.Wait()
@@ -164,13 +166,18 @@ func (m *M) landPick() (verified.Verifier, string, bool) {
 		return verified.Verifier{}, localTag + "닿는 워커 없음(" + strings.Join(notes, " · ") + ")", true
 	}
 	why := "검증 자리 남음"
-	if best.i.verifies > 0 {
+	switch {
+	case best.i.verifies == 0:
+	case best.gate:
+		why = "병합 검증 자리 — 레인 검증과 함께"
+	default:
 		why = "모두 검증 중 — 가장 덜 바쁨"
 	}
 	return best.v, fmt.Sprintf("%s · 코어당 부하 %.2f", why, best.i.load/float64(best.i.cpus)), false
 }
 
-// landBest: 잰 후보 가운데 도는 검증이 없는 기계 먼저, 그 안에서 코어당 부하가 가장 낮은 기계(같으면 목록 차례). 닿은 것이 없으면 nil
+// landBest: 잰 후보 가운데 도는 검증이 없는 기계 먼저, 다음 병합 검증 자리가 빈 기계(추측 검증 고르기와 같은 기준 — verifierpick.go),
+// 그 안에서 코어당 부하가 가장 낮은 기계(같으면 목록 차례). 닿은 것이 없으면 nil
 func landBest(cs []*landCand) *landCand {
 	var ok []*landCand
 	for _, c := range cs {
@@ -182,6 +189,9 @@ func landBest(cs []*landCand) *landCand {
 		x, y := ok[a].i, ok[b].i
 		if (x.verifies == 0) != (y.verifies == 0) {
 			return x.verifies == 0
+		}
+		if ok[a].gate != ok[b].gate {
+			return ok[a].gate
 		}
 		return x.load/float64(x.cpus) < y.load/float64(y.cpus)
 	})
@@ -346,7 +356,7 @@ func (m *M) runRemote(v verified.Verifier) (int, string) {
 	dir := v.Path + ".land-wt"
 	res, lg := dir+"/"+cm[:12]+".rc", dir+"/"+cm[:12]+".log"
 	args := append([]string{"run", "--bg", "--json", "--no-parent", "--rm", "--on", v.Machine, "--name", "land-" + cm[:8],
-		"--label", "hc-merger-land=1", "--cwd", v.Path, "env", "HC_MERGER_LAND_DIR=" + dir, "HC_MERGER_LAND_RESULT=" + res}, env...)
+		"--label", "hc-merger-land=1", "--cwd", v.Path, "env", "HC_MERGER_LAND_DIR=" + dir, "HC_MERGER_LAND_RESULT=" + res}, append(gateEnv(v.Machine), env...)...)
 	args = append(args, "sh", "-c", landWrap, "hc-merger-land", "hc-lane", "merger", "--land-run", m.base, cm)
 	fmt.Fprintf(lf, "hc-lane merger: 착지를 %s(%s)에서 돌린다 — 차례 %s\n", v.Machine, v.Path, first8(cm))
 	if _, rc, e := boundedRun(60*time.Second, "hc", nil, args...); rc != 0 {
@@ -520,7 +530,7 @@ func landRun(a []string) (int, bool) {
 	defer lf.Close()
 	env := append(os.Environ(), "HERDR_MERGER=1")
 	if id := os.Getenv("HC_MERGER_LAND_SPEC"); id != "" {
-		if line, _, ok := specPartsGet(id); ok && len(strings.Fields(line)) >= 2 && os.WriteFile(wt+".parts", []byte(line+"\n"), 0o666) == nil {
+		if line, _, ok := specPartsGet(id, ""); ok && len(strings.Fields(line)) >= 2 && os.WriteFile(wt+".parts", []byte(line+"\n"), 0o666) == nil {
 			env = append(env, "HERDR_VERIFY_PARTS_FROM="+wt+".parts")
 			defer os.Remove(wt + ".parts")
 		}

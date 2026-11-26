@@ -66,15 +66,34 @@ func (m *M) specFreshMin() int { return m.knobInt("spec_fresh", "HC_LANE_SPEC_FR
 // 갱신됐다(hc exec로 verified.FreshSh). 아니면 까닭(갱신 없음·터미널 없음·못 읽음), 손잡이 0이면 빈 까닭
 // ponytail: 상한을 넘긴 바퀴마다 hc get·exec 한 번씩 — 바퀴가 잦아 무거우면 표식 파일에 마지막 확인 시각을 두고 1분에 한 번으로
 func (m *M) specFresh(r *specRow) (bool, string) {
-	min := m.specFreshMin()
-	if min == 0 {
+	if m.specFreshMin() == 0 {
 		return false, ""
 	}
 	if !addrOK(r.machine) || len(r.id) < 8 {
 		return false, "터미널 없음"
 	}
-	id8 := r.id[:8]
-	t, found, err := hcGet(r.machine+"/spec-"+id8, "")
+	if s, ok := m.shardRead(); ok && s.id == r.id && s.fin == "" { // 나눔 중 — 몫 전체로(specshards.go, 감사 atp3qsv 중간 1)
+		why := "몫 터미널 없음"
+		for _, p := range s.parts {
+			key := r.id[:8] + "-s" + p[0]
+			fresh, w := m.freshAt(p[1], "spec-"+r.id[:8]+"-"+p[0], key)
+			if fresh {
+				return true, ""
+			}
+			why = "몫 " + w
+		}
+		return false, why
+	}
+	return m.freshAt(r.machine, "spec-"+r.id[:8], r.id[:8])
+}
+
+// freshAt: 그 기계의 터미널 term이 살아 있고 작업 트리·로그 <클론>.spec-wt/<key>…가 spec_fresh분 안에 갱신됐나(verified.FreshSh)
+func (m *M) freshAt(mach, term, id8 string) (bool, string) {
+	min := m.specFreshMin()
+	if !addrOK(mach) {
+		return false, "터미널 없음"
+	}
+	t, found, err := hcGet(mach+"/"+term, "")
 	switch {
 	case err != nil:
 		return false, "터미널 못 읽음"
@@ -82,7 +101,7 @@ func (m *M) specFresh(r *specRow) (bool, string) {
 		return false, "터미널 없음"
 	}
 	const lim = 30
-	o, rc, e := boundedRun((lim+10)*time.Second, "hc", nil, "exec", "--on", r.machine, "--json", "--timeout", strconv.Itoa(lim),
+	o, rc, e := boundedRun((lim+10)*time.Second, "hc", nil, "exec", "--on", mach, "--json", "--timeout", strconv.Itoa(lim),
 		"--", "sh", "-c", "n=$1; shift; "+verified.FreshSh, "_", strconv.Itoa(min), t.Address, t.Cwd, id8)
 	x, err := hcjson.ParseExec([]byte(o), []byte(e), rc)
 	switch {
@@ -208,7 +227,7 @@ func specRecheckOf(r *specRow) (string, bool) {
 // 그 기계·지금 시각(본문 note)으로 고쳐 쓰고 실패 기록·떴다는 표식을 같은 push로 지운다(본 값 lease — 그 사이 일꾼이 쓴 결과는 지우지 않는다).
 // 띄웠으면 true(r·c·busy를 고친다)
 func (m *M) specRedo(c *specCtx, r *specRow, busy, skip map[string]bool, avoid, note, lanes string, now int64) bool {
-	v := m.specPick(c, busy, skip, avoid)
+	v := m.specPick(c, busy, skip, avoid, true)
 	if v.Machine == "" {
 		return false
 	}
@@ -223,6 +242,11 @@ func (m *M) specRedo(c *specCtx, r *specRow, busy, skip map[string]bool, avoid, 
 	ref := specRefs + r.id
 	args, specs := []string{"push", "-q", "--atomic", "--force-with-lease=" + ref + ":" + r.commit}, []string{cm + ":" + ref}
 	gone := []string{specFails + r.id, specStarts + r.id}
+	for ref := range c.refs { // 나눔 몫의 끝(specshards.go) — 다시 띄운 실행은 몫이 아니다(조각 참조는 이어 쓰게 둔다)
+		if strings.HasPrefix(ref, specShards+r.id+"-s") {
+			gone = append(gone, ref)
+		}
+	}
 	for _, x := range gone {
 		if sha := c.refs[x]; sha != "" {
 			args, specs = append(args, "--force-with-lease="+x+":"+sha), append(specs, ":"+x)
@@ -237,6 +261,7 @@ func (m *M) specRedo(c *specCtx, r *specRow, busy, skip map[string]bool, avoid, 
 	}
 	c.refs[ref] = cm
 	r.commit, r.machine, r.at, r.dispatchX, r.busy = cm, v.Machine, now, false, false
+	m.shardHandoff(r, now) // 나눔 중이던 아이디면 나눔은 여기서 끝(specshards.go)
 	m.specLaunch(r, v, lanes, now)
 	busy[v.Machine] = true // 못 띄웠어도 이 바퀴에는 그 기계를 다시 고르지 않는다
 	return r.state == specRun

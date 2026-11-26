@@ -12,6 +12,10 @@ package main
 //   - 병합기는 맨 앞이 「바쁨」이면 기다림 상한을 기다리지 않고 그 바퀴에 바쁨을 낸 기계들을 뺀 한가한 기계로 다시 띄운다. 같은 제출의
 //     바쁨이 손잡이 busy_max(기본 2)번을 넘거나 남은 한가한 기계가 없으면 손잡이 front_local대로.
 //
+//   - 병합 검증 자리(ht-merger-gate-slot, 2026-11-26 — 「게이트 우선」): 손잡이 merger_gate@<기계> 1인 기계는 한가하지 않아도 그 기계에
+//     병합 검증(--spec-idle의 gates — 추측 일꾼·착지 실행)이 안 돌면 한가한 기계 다음으로(코어당 부하 낮은 차례) 맡기고 HERDR_VERIFY_GATE=1을
+//     준다(검증 스크립트가 레인 검증과 다른 잠금을 쥔다). 그 일꾼은 다른 병합 검증이 돌 때만 바쁨. 계약은 docs/hc-lane/merger-spec-verify.md.
+//
 // 손잡이는 모두 병합기 일지 폴더의 파일(바퀴마다 읽어 바로 먹는다) > 환경 변수 > 기본. 일꾼 쪽 값(busy_wait·idle_load)은 병합기가 띄울 때 넘긴다.
 
 import (
@@ -21,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,13 +37,19 @@ import (
 
 // idleInfo: 한 기계의 한가함 재기
 type idleInfo struct {
-	load     float64
-	cpus     int
-	verifies int // 도는 저장소 검증 나무 수(verifyCount)
+	load       float64
+	cpus       int
+	verifies   int  // 도는 저장소 검증 나무 수(verifyCount) — 병합 검증 포함
+	gates      int  // 그 가운데 병합 검증(추측 일꾼·착지 실행 — ht-merger-gate-slot)
+	gatesKnown bool // gates 칸이 있었다(옛 판 워커의 3칸 꼴은 모름 — 병합 검증 자리로 고르지 않는다)
 }
 
 func (i idleInfo) String() string {
-	return fmt.Sprintf("load=%.2f cpus=%d verifies=%d", i.load, i.cpus, i.verifies)
+	s := fmt.Sprintf("load=%.2f cpus=%d verifies=%d", i.load, i.cpus, i.verifies)
+	if i.gatesKnown {
+		s += fmt.Sprintf(" gates=%d", i.gates)
+	}
+	return s
 }
 
 // idle: 도는 검증이 없고 부하가 코어 수의 pct% 밑
@@ -46,14 +57,18 @@ func (i idleInfo) idle(pct int) bool {
 	return i.verifies == 0 && i.load*100 < float64(pct*i.cpus)
 }
 
-// parseIdle: --spec-idle의 출력 한 줄. 꼴이 다르면 ok=false(모름)
+// gateFree: 병합 검증 자리가 빔 — 도는 병합 검증 0(gates 칸을 모르면 false)
+func (i idleInfo) gateFree() bool { return i.gatesKnown && i.gates == 0 }
+
+// parseIdle: --spec-idle의 출력 한 줄(「load= cpus= verifies=」, 새 판은 「 gates=」를 더). 꼴이 다르면 ok=false(모름).
+// 옛 판 병합기는 4칸 꼴을 모름으로 읽는다 — 섞여 돌 때 고르지 않을 뿐 틀리게 고르지 않는다
 func parseIdle(s string) (idleInfo, bool) {
 	var i idleInfo
 	f := strings.Fields(s)
-	if len(f) != 3 {
+	if len(f) != 3 && len(f) != 4 {
 		return i, false
 	}
-	seen := 0
+	seen := map[string]bool{}
 	for _, kv := range f {
 		k, v, _ := strings.Cut(kv, "=")
 		var err error
@@ -64,15 +79,19 @@ func parseIdle(s string) (idleInfo, bool) {
 			i.cpus, err = strconv.Atoi(v)
 		case "verifies":
 			i.verifies, err = strconv.Atoi(v)
+		case "gates":
+			i.gates, err = strconv.Atoi(v)
+			i.gatesKnown = true
 		default:
 			return i, false
 		}
-		if err != nil {
+		if err != nil || seen[k] {
 			return i, false
 		}
-		seen++
+		seen[k] = true
 	}
-	return i, seen == 3 && i.cpus > 0 && i.load >= 0 && i.verifies >= 0
+	return i, seen["load"] && seen["cpus"] && seen["verifies"] && i.cpus > 0 && i.load >= 0 && i.verifies >= 0 &&
+		i.gates >= 0 && i.gates <= i.verifies
 }
 
 // idleProbe: 이 기계를 잰다(시험이 바꾼다)
@@ -88,7 +107,14 @@ func localIdle() (idleInfo, bool) {
 	if err != nil {
 		return idleInfo{}, false
 	}
-	return idleInfo{load: l, cpus: runtime.NumCPU(), verifies: verifyCount(string(o), os.Getpid())}, true
+	n, g := verifyCount(string(o), os.Getpid())
+	return idleInfo{load: l, cpus: runtime.NumCPU(), verifies: n, gates: g, gatesKnown: true}, true
+}
+
+// gateMark: 병합 검증 나무의 뿌리 — 병합기가 띄운 추측 일꾼(--spec-verify)·착지 실행(--land-run)
+func gateMark(args string) bool {
+	f := strings.Fields(args)
+	return slices.Contains(f, "--spec-verify") || slices.Contains(f, "--land-run")
 }
 
 // verifyMark: 검증 나무의 뿌리 표식 — 명령 줄에 검증 스크립트가 든 것, 또는 검증하는 동안 살아 있는 부모(추측 일꾼 --spec-verify,
@@ -96,18 +122,18 @@ func localIdle() (idleInfo, bool) {
 // 부모로만 잡힌다(감사 atp3g05 중간 1). ponytail: hc-lane land는 rebase·push 동안도 센다 — 짧아서 그대로, 검증 등록부가 생기면 그것으로
 func verifyMark(args string) bool {
 	f := strings.Fields(args)
-	if strings.Contains(args, verified.Script) || slices.Contains(f, "--spec-verify") || slices.Contains(f, "--land-run") {
+	if strings.Contains(args, verified.Script) || gateMark(args) {
 		return true
 	}
 	return len(f) > 1 && filepath.Base(f[0]) == "hc-lane" && f[1] == "land"
 }
 
 // verifyCount: 「pid ppid args」 표에서 도는 검증 나무 수 — 표식 프로세스 가운데 조상에 표식이 없는 것만(껍데기와 그 자식은 하나).
-// 재는 프로세스 self와 그 조상은 빼고 본다(바쁨 기다림 중인 추측 일꾼이 자신을 세지 않게)
-func verifyCount(ps string, self int) int {
+// 재는 프로세스 self와 그 조상은 빼고 본다(바쁨 기다림 중인 추측 일꾼이 자신을 세지 않게). gates = 그 가운데 뿌리가 병합 검증(gateMark)인 것
+func verifyCount(ps string, self int) (n, gates int) {
 	type pr struct {
-		pp   int
-		mark bool
+		pp         int
+		mark, gate bool
 	}
 	t := map[int]pr{}
 	for _, line := range strings.Split(ps, "\n") {
@@ -120,29 +146,32 @@ func verifyCount(ps string, self int) int {
 		if e1 != nil || e2 != nil {
 			continue
 		}
-		t[pid] = pr{pp, verifyMark(strings.Join(f[2:], " "))}
+		args := strings.Join(f[2:], " ")
+		t[pid] = pr{pp, verifyMark(args), gateMark(args)}
 	}
 	mine := map[int]bool{}
 	for p, n := self, 0; p > 1 && n < 256 && !mine[p]; p, n = t[p].pp, n+1 {
 		mine[p] = true
 	}
-	c := 0
 	for pid, x := range t {
 		if !x.mark || mine[pid] {
 			continue
 		}
 		root := true
-		for p, n := x.pp, 0; p > 1 && n < 256; p, n = t[p].pp, n+1 {
+		for p, k := x.pp, 0; p > 1 && k < 256; p, k = t[p].pp, k+1 {
 			if t[p].mark && !mine[p] {
 				root = false
 				break
 			}
 		}
 		if root {
-			c++
+			n++
+			if x.gate {
+				gates++
+			}
 		}
 	}
-	return c
+	return n, gates
 }
 
 // specIdleMain: hc-lane merger --spec-idle — 이 기계의 한가함 한 줄(병합기가 hc exec --on으로 부른다). 못 재면 종료 1
@@ -184,7 +213,19 @@ const (
 	idUnknown = iota
 	idIdle
 	idBusy
+	idGate // 한가하지 않지만 병합 검증 자리가 빔(손잡이 merger_gate@<기계> 1 — 한가한 기계 다음에 고른다)
 )
+
+// gateOn: 손잡이 merger_gate@<기계>가 1(병합 검증 자리를 받은 기계)
+func gateOn(mach string) bool { return rk["merger_gate@"+mach] == "1" }
+
+// gateEnv: 그 기계에 띄우는 병합 검증(추측 일꾼·착지 실행)에 줄 env 인자 — 자리를 받은 기계만 HERDR_VERIFY_GATE=1
+func gateEnv(mach string) []string {
+	if gateOn(mach) {
+		return []string{"HERDR_VERIFY_GATE=1"}
+	}
+	return nil
+}
 
 // probeRemote: 그 기계의 한가함(hc exec --on). hc 실패·시간 넘김·0이 아닌 종료·꼴이 다르면 ok=false(모름)와 그 까닭
 func probeRemote(mach string) (idleInfo, bool, string) {
@@ -213,7 +254,7 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 	if c.idle != nil {
 		return
 	}
-	c.idle = map[string]int{}
+	c.idle, c.perCore = map[string]int{}, map[string]float64{}
 	pct := m.idleLoad()
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -237,12 +278,17 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 			case !ok:
 			case i.idle(pct):
 				st, txt = idIdle, i.String()
+			case gateOn(mach) && i.gateFree():
+				st, txt = idGate, i.String()
 			default:
 				st, txt = idBusy, i.String()
 			}
 			mu.Lock()
 			c.idle[mach] = st
-			notes = append(notes, mach+" "+[...]string{"모름", "한가함", "바쁨"}[st]+"("+txt+")")
+			if ok {
+				c.perCore[mach] = i.load / float64(i.cpus)
+			}
+			notes = append(notes, mach+" "+[...]string{"모름", "한가함", "바쁨", "병합 검증 자리"}[st]+"("+txt+")")
 			mu.Unlock()
 		}(v.Machine)
 	}
@@ -253,8 +299,9 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 }
 
 // specPick: 맡길 한가한 검증 기계 — 목록 차례로, skip(이 제출에 바쁨을 낸 기계)은 빼고, avoid가 아닌 것을 먼저(없으면 avoid).
+// 한가한 기계가 없고 gate면 병합 검증 자리가 빈 기계(idGate)를 코어당 부하 낮은 차례로(같은 avoid 규칙, 고르면 c.gpick에 적는다).
 // 병합기 기계·이 바퀴에 맡긴(또는 추측이 도는) 기계·바쁨·모름인 기계는 고르지 않는다. 없으면 빈 값
-func (m *M) specPick(c *specCtx, busy, skip map[string]bool, avoid string) verified.Verifier {
+func (m *M) specPick(c *specCtx, busy, skip map[string]bool, avoid string, gate bool) verified.Verifier {
 	var cand []verified.Verifier
 	for _, v := range c.vers {
 		if !busy[v.Machine] && v.Machine != m.mme && !skip[v.Machine] {
@@ -265,22 +312,36 @@ func (m *M) specPick(c *specCtx, busy, skip map[string]bool, avoid string) verif
 		return verified.Verifier{}
 	}
 	m.idleProbeAll(c, busy)
-	var same verified.Verifier
-	for _, v := range cand {
-		switch {
-		case c.idle[v.Machine] != idIdle:
-		case v.Machine != avoid:
-			return v
-		default:
-			same = v
+	pick := func(want int) verified.Verifier {
+		var same verified.Verifier
+		for _, v := range cand {
+			switch {
+			case c.idle[v.Machine] != want:
+			case v.Machine != avoid:
+				return v
+			default:
+				same = v
+			}
 		}
+		return same
 	}
-	return same
+	if v := pick(idIdle); v.Machine != "" || !gate {
+		return v
+	}
+	sort.SliceStable(cand, func(a, b int) bool { return c.perCore[cand[a].Machine] < c.perCore[cand[b].Machine] })
+	v := pick(idGate)
+	if v.Machine != "" {
+		if c.gpick == nil {
+			c.gpick = map[string]bool{}
+		}
+		c.gpick[v.Machine] = true
+	}
+	return v
 }
 
-// specFree: 맡길 한가한 검증 기계(목록 차례)
+// specFree: 맡길 한가한 검증 기계(목록 차례), 없으면 병합 검증 자리
 func (m *M) specFree(c *specCtx, busy map[string]bool) verified.Verifier {
-	return m.specPick(c, busy, nil, "")
+	return m.specPick(c, busy, nil, "", true)
 }
 
 // busySeen: 이 맨 앞 추측에 바쁨을 낸 기계들(<일지 폴더>/specbusy — 「<아이디> <기계>…」, 다른 아이디면 빈 값)
@@ -333,12 +394,17 @@ func (m *M) specBusyRedo(c *specCtx, r *specRow, busy map[string]bool, lanes str
 func specBusyWait(lf *os.File) string {
 	max := intSetting("HC_LANE_SPEC_BUSY_WAIT", os.Getenv("HC_LANE_SPEC_BUSY_WAIT"), 30, 0)
 	pct := intSetting("HC_LANE_SPEC_IDLE_LOAD", os.Getenv("HC_LANE_SPEC_IDLE_LOAD"), 50, 1)
+	gate := os.Getenv("HERDR_VERIFY_GATE") == "1" // 병합 검증 자리 — 레인 검증·부하로는 물러나지 않고 다른 병합 검증만 기다린다
 	t0 := time.Now()
 	for {
 		i, ok := idleProbe()
 		waited := int(time.Since(t0).Seconds())
-		if ok && i.idle(pct) {
-			fmt.Fprintf(lf, "hc-lane merger: 검증 자리 기다림 %d초(%s, 기준 부하 %d%%)\n", waited, i, pct)
+		if ok && (i.idle(pct) || gate && i.gateFree()) {
+			what := ""
+			if gate {
+				what = ", 병합 검증 자리"
+			}
+			fmt.Fprintf(lf, "hc-lane merger: 검증 자리 기다림 %d초(%s, 기준 부하 %d%%%s)\n", waited, i, pct, what)
 			return ""
 		}
 		left := time.Duration(max)*time.Second - time.Since(t0)

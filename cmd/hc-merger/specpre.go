@@ -189,7 +189,8 @@ func (m *M) specPre(c *specCtx, busy map[string]bool, now int64) []specStep {
 		// 지은 횟수 상한(처음 + 기준 이동 HC_LANE_PRE_REBUILD번): 제출하지 않을 표식(감사 지적을 고치는 중·정리만 함)이 기준이 움직일
 		// 때마다 전체 검증을 다시 돌리지 않게
 		if row == nil && !running && building && seen[p.mark] < limit {
-			v := m.specFree(c, busy) // 한가한 기계가 없으면 띄우지 않고 다음 바퀴에(레인 검증을 밀어내지 않는다)
+			// 한가한 기계가 없으면 띄우지 않고 다음 바퀴에(레인 검증을 밀어내지 않는다 — 제출 전 미리 검증은 병합 검증 자리를 쓰지 않는다)
+			v := m.specPick(c, busy, nil, "", false)
 			if v.Machine == "" {
 				building = false
 			} else if r, ok := m.specBuild([]specStep{{g: g, parent: m.btree}}, v, now); !ok {

@@ -218,6 +218,7 @@ const (
 	maAlerted = 9
 	maWhy     = 10
 	maOldLane = 11 // 가장 오래된 제출의 레인(advise-merge-stall-age — 옛 기록 10칸은 빈 값)
+	maQLanes  = 12 // 줄 차례대로 레인(쉼표, 빈 줄 -, 큐 못 읽음 ? — ht-fill-submitted-line, 옛 기록 11칸은 빈 값 = 모름)
 )
 
 // 작은 상태 파일들

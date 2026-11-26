@@ -295,11 +295,11 @@ func TestVerifyCount(t *testing.T) {
 		"   60     1 /u/.local/bin/hc-lane report 완료 HEAD", // 검증 아님
 		"   61     1 grep spec-verify",
 	}, "\n")
-	if n := verifyCount(ps, 51); n != 4 {
-		t.Fatalf("검증 %d, want 4(일꾼·착지·껍데기·착지 일꾼)", n)
+	if n, g := verifyCount(ps, 51); n != 4 || g != 2 {
+		t.Fatalf("검증 %d 병합 검증 %d, want 4(일꾼·착지·껍데기·착지 일꾼)·2(일꾼 10·착지 일꾼 40)", n, g)
 	}
-	if n := verifyCount(ps, 999); n != 5 {
-		t.Fatalf("조상 밖에서 재면 50도 센다: %d", n)
+	if n, g := verifyCount(ps, 999); n != 5 || g != 3 {
+		t.Fatalf("조상 밖에서 재면 50도 센다: %d %d", n, g)
 	}
 	if i, ok := localIdle(); !ok || i.cpus <= 0 {
 		t.Fatalf("이 기계 재기: %v %v", i, ok)

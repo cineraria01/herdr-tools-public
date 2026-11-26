@@ -125,10 +125,14 @@ func (m *M) specWaitNote() {
 	}
 	now := time.Now().Unix()
 	first, n, re := now, 0, ""
+	// 「*<기계>」 = 병합 검증 자리로 맡김(specrun.go — 맡긴 바퀴만 안다). 같은 기다림의 다음 바퀴들은 같은 기계면 그 표시를 잇는다
+	wm, gate := strings.CutPrefix(m.wmach, "*")
 	if f, l, k, b, mach, ok := m.specWaitRead(); ok {
 		if sameFront(b, m.b) {
 			first, n = f, k
-			_, re, _ = strings.Cut(mach, "/")
+			var was string
+			was, re, _ = strings.Cut(mach, "/")
+			gate = gate || wm != "" && was == "*"+wm
 		} else {
 			m.specWaitLine(f, l, k, b, mach)
 		}
@@ -143,8 +147,12 @@ func (m *M) specWaitNote() {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d %d %d", first, now, n+1)
-	if m.wmach != "" {
-		sb.WriteString(" " + m.wmach)
+	if wm != "" {
+		sb.WriteString(" ")
+		if gate {
+			sb.WriteString("*")
+		}
+		sb.WriteString(wm)
 		if re != "" {
 			sb.WriteString("/" + re) // 「<기계>/<다시 고른 사슬>」 — 옛 판은 「/」가 없다
 		}
@@ -163,6 +171,7 @@ func (m *M) specWaitEnd() {
 	if f, l, k, b, mach, ok := m.specWaitRead(); ok {
 		m.specWaitLine(f, l, k, b, mach)
 		removeQuiet(m.mj + "/specwait")
+		removeQuiet(m.mj + "/specshard") // 그 기다림의 나눔 상태(일지 줄에 적었다)
 	}
 }
 
@@ -183,20 +192,27 @@ func (m *M) specWaitEarly() {
 func (m *M) specWaitLine(first, last int64, n int, b []entry, mach string) {
 	what := fmt.Sprintf("추측 검증 기다림 %d바퀴", n)
 	mach, re, _ := strings.Cut(mach, "/")
+	mach, gate := strings.CutPrefix(mach, "*")
 	switch mach {
 	case "":
 	case "-":
 		what += ", 맡길 기계를 기다림(직접 검증 안 함)"
 	default:
 		what += fmt.Sprintf(", 검증 맡김(%s) %d초", mach, last-first)
+		if gate { // 한가한 기계가 아니라 병합 검증 자리로 맡김(verifierpick.go) — --why가 따로 센다
+			what += ", 병합 검증 자리(" + mach + ")"
+		}
 	}
 	if re != "" {
 		what += ", 바쁨으로 다시 고름(" + re + ")"
 	}
+	if len(b) > 0 {
+		what += m.shardNote(b[0].s, last) // 나눠 돈 맨 앞 — 「, 나눔 K(<기계>,…), 마무리 <기계> n초」(specshards.go)
+	}
 	m.jmembers(b, jSpecWait, what, "", first, last)
 }
 
-// specWaitRead: 「<처음 초> <마지막 초> <횟수> [<검증 기계|->]」 + 구성원마다 「<큐 참조> <제출 SHA> <레인> <기록 SHA|->」(cur와 같은 꼴).
+// specWaitRead: 「<처음 초> <마지막 초> <횟수> [[*]<검증 기계|->[/<사슬>]]」(* = 병합 검증 자리로 맡김) + 구성원마다 「<큐 참조> <제출 SHA> <레인> <기록 SHA|->」(cur와 같은 꼴).
 // 없으면 ok=false, 깨졌으면 지우고 ok=false(줄 하나가 빠질 뿐)
 func (m *M) specWaitRead() (first, last int64, n int, b []entry, mach string, ok bool) {
 	p := m.mj + "/specwait"

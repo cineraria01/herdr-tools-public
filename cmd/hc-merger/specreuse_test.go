@@ -218,7 +218,7 @@ func TestPartsNotReusedWhenTreeChanges(t *testing.T) {
 	pc := s.git(s.dir, og, "commit-tree", et, "-m", "hc-merger-spec-part id=x", "-m", et+" p1 p2")
 	s.git(s.dir, og, "update-ref", specParts+d[1][1], pc)
 	f := t.TempDir() + "/parts"
-	if p := specPartsSeed(d[1][1], s.specTree(d[1][1]), f, lf); p.line != "" {
+	if p := specPartsSeed(d[1][1], d[1][1], s.specTree(d[1][1]), f, lf); p.line != "" {
 		t.Fatalf("마 다른 트리의 조각을 깔았다: %q", p.line)
 	}
 	if _, err := os.Stat(f); err == nil {

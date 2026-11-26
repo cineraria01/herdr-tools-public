@@ -5,6 +5,8 @@
 # 거의 전부였다), 단계마다 고아 검사. 인자 --cheap-only는 싼 검사까지(.claude/herdr-precheck.sh). 환경 HERDR_VERIFY_ALL·
 # HERDR_VERIFY_JOBS(함께 도는 시험 바이너리 자리 수, 없으면 코어 수, 자리가 모자란 조각 뒤의 들어가는 조각을 먼저 띄운다)·
 # HERDR_VERIFY_NO_LOCK=1(기계 단위 검증 잠금 — 사용자 캐시 herdr-tools/verify.lock, 무거운 단계 앞, 30분 상한 뒤 그대로 진행 — 을 안 본다)·
+# HERDR_VERIFY_GATE=1(병합기가 병합 검증 자리를 받은 기계에 띄운 검증 — 레인 잠금 대신 같은 폴더의 verify-gate.lock을 쥐어 레인 검증과
+# 함께 돌고, 홀로 단계는 조각 뒤로: docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」의 계약)·
 # HERDR_VERIFY_RAMTMP(macOS에서 조각 단계의 TMPDIR을 메모리 디스크로 — 없으면 켬·0 끔·<MB> 크기, 기계 메모리의 1/4을 넘으면 안 켬,
 # 못 만들면 알림 한 줄 뒤 보통 임시 폴더로: 2026-11-24 verify-ramdisk, 디스크의 작은 쓰기가 병목이었다)·
 # HERDR_VERIFY_SCOPE(조각마다 입력 지문과 이 기계의 통과 기록 — 사용자 캐시 herdr-tools/verify-pass: on은 기록과 같은 조각을 건너뜀,

@@ -23,11 +23,21 @@ import (
 )
 
 func specVerifyMain(a []string) int {
+	shard := "" // 나눔 몫 「i/K」(specshards.go)
+	if len(a) == 3 {
+		shard = a[2]
+		a = a[:2]
+		if _, ok := shardArg(shard); !ok {
+			fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-verify — 몫은 <i>/<K>(1 ≤ i ≤ K ≤ 8, K ≥ 2)")
+			return 2
+		}
+	}
 	if len(a) != 2 || len(a[0]) != 40 || strings.Trim(a[0], "0123456789abcdef") != "" || !plain(a[1]) {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-verify <아이디 40자> <기본 브랜치>")
+		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-verify <아이디 40자> <기본 브랜치> [<i>/<K>]")
 		return 2
 	}
 	id, base := a[0], a[1]
+	own := shardOwn(id, shard)
 	if orphansDefer("추측 작업 트리") { // 죽은 앞 일꾼의 준비 훅·검증이 남았으면 그 작업 트리를 지우거나 쓰기 전에(merger R-209)
 		return 75
 	}
@@ -59,6 +69,9 @@ func specVerifyMain(a []string) int {
 	}
 	wtr := top + ".spec-wt"
 	wt := wtr + "/" + id[:8]
+	if own != id {
+		wt = wtr + "/" + own[:8] + own[40:] // 몫마다 따로(같은 기계에 두 몫이 와도 겹치지 않게)
+	}
 	if err := os.MkdirAll(wtr, 0o777); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: --spec-verify — %v\n", err)
 		return 1
@@ -69,6 +82,9 @@ func specVerifyMain(a []string) int {
 	if lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {
 		waited := specBusyWait(lf)
 		lf.Close()
+		if waited != "" && shard != "" {
+			return specShardEnd(r, shard, "busy") // 몫의 바쁨은 그 몫의 끝일 뿐 — spec 참조는 다른 몫이 쓰고 있다
+		}
 		if waited != "" {
 			return specWriteBusy(r, waited)
 		}
@@ -82,7 +98,10 @@ func specVerifyMain(a []string) int {
 	}
 	defer specRmWT(wt)
 	var ev specEvidence
-	res := specRunVerify(wt, lg, top, base, id, tree, &ev)
+	res := specRunVerify(wt, lg, top, base, id, shard, tree, &ev)
+	if shard != "" && (res != resFail || ev.test == "") { // 몫은 시험 실패만 추측 실패 — 그 밖의 끝은 「그 몫은 끝남」(통과 기록은 마무리가)
+		return specShardEnd(r, shard, [...]string{"pass", "env", "lost"}[res])
+	}
 	return specWrite(top, r, res, ev, lg)
 }
 
@@ -95,15 +114,15 @@ const (
 )
 
 // specRunVerify: 준비 훅 → 저장소 검증(시간 상한 HC_LANE_SPEC_TIMEOUT) → 트리·작업 트리가 그대로인지. 실패면 ev에 근거
-func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) (res specResult) {
+func specRunVerify(wt, lg, top, base, id, shard, tree string, ev *specEvidence) (res specResult) {
 	lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666)
 	if err != nil {
 		return resLost
 	}
 	defer lf.Close()
-	var pp *partPub // 통과 조각(specparts.go) — 통과가 아닌 끝에 마지막으로 올린다(다시 맡은 일꾼이 남은 조각만 돈다)
+	var pp *partPub // 통과 조각(specparts.go) — 통과가 아닌 끝에(몫이면 늘) 마지막으로 올린다(다시 맡은·마무리 일꾼이 남은 조각만 돈다)
 	defer func() {
-		if pp != nil && res != resPass {
+		if pp != nil && (res != resPass || shard != "") {
 			pp.push()
 		}
 	}()
@@ -129,10 +148,11 @@ func specRunVerify(wt, lg, top, base, id, tree string, ev *specEvidence) (res sp
 	if fi, err := lf.Stat(); err == nil {
 		off = fi.Size()
 	}
-	pp = specPartsSeed(id, tree, wt+".parts", lf)
+	pp = specPartsSeed(id, shardOwn(id, shard), tree, wt+".parts", lf)
 	c := shellCmd(wt, "bash", verified.Script)
 	c.Stdout, c.Stderr = lf, lf
-	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=", "HERDR_VERIFY_PARTS="+pp.file)
+	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=", "HERDR_VERIFY_PARTS="+pp.file,
+		"HERDR_VERIFY_SHARD="+shard) // 나눔 몫(없으면 빈 값 — 전체)
 	max := time.Duration(specTimeout()) * time.Second
 	stopParts := pp.watch()
 	rc, ran := proc.WaitFor(c, "", max, max <= 0)

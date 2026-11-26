@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/hcjson"
 )
 
 // stIn: 한 줄의 단계를 정하는 재료
@@ -21,6 +23,7 @@ type stIn struct {
 	Last         Row    // last.tsv 줄(레인 상태 sha8 시각 한줄 …) — 없으면 nil
 	Aud          string // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
 	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
+	Batch        string // 병합기가 지금 도는 묶음의 구성원이면 그 덧말(mqBatch — 「묶음 검증 중 <기계> n분째」), 아니면 빈 값
 	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
 	Bg           bool   // 살아 있는 배경 셸을 기다림(hangBgWait)
 }
@@ -40,17 +43,21 @@ func stStage0(in stIn) string {
 		return "되돌려줌"
 	}
 	ls, sha, msg := in.Last.F(lsState), in.Last.F(lsSHA), in.Last.F(lsMsg)
+	bat := ""
+	if in.Batch != "" {
+		bat = " · " + in.Batch
+	}
 	switch {
 	case in.Pos == 1: // 우선·병합기 쉼은 안 보니 「지금 넣는 중」이라 하지 않는다(감사 낮음 1)
-		return "제출됨(병합기 줄 맨 앞)"
+		return "제출됨(병합기 줄 맨 앞" + bat + ")"
 	case in.Pos > 1:
-		return fmt.Sprintf("제출됨(병합기 줄 %d번째)", in.Pos)
+		return fmt.Sprintf("제출됨(병합기 줄 %d번째%s)", in.Pos, bat)
 	case ls == "착지":
 		return "착지 " + sha
 	case ls == "막힘":
 		return "막힘: " + dash(msg)
 	case ls == "제출" && in.Pos < 0:
-		return "제출됨(병합기 줄 모름)"
+		return "제출됨(병합기 줄 모름" + bat + ")"
 	case ls == "제출":
 		return "제출됨(줄에서 빠짐 — 결과 기다림)"
 	case ls == "주차":
@@ -235,8 +242,15 @@ func statusCmd(args []string) {
 	// 터미널·연결은 한 번씩. 못 읽으면 살아 있음을 모르는 채로(끝남이 아니라 모름)
 	var terms []lsTerm
 	termsOK := false
+	// cwd: 살아 있는 터미널 주소 → 폴더(병합기 클론 — mqBatch)
+	cwd := map[string]string{}
 	if out, rc := run("hc", "ls", "--json"); rc == 0 && sub(out) != "" { // 빈 응답은 빈 목록이 아니다(ls와 같음)
 		terms, termsOK = lsTerms(sub(out))
+		if l, err := hcjson.ParseList([]byte(out)); err == nil {
+			for _, t := range l.Terminals {
+				cwd[t.Address] = t.Cwd
+			}
+		}
 	}
 	var conn []string
 	connKnown := false
@@ -248,14 +262,16 @@ func statusCmd(args []string) {
 		ok     bool
 		queue  []string
 		landed []int64
+		bat    map[string]string // 도는 묶음의 구성원 → 덧말(이 기계 병합기 기록 — mqBatch)
 	}
 	rems := map[string]*rem{}
+	mr := maLoad()
 	for _, r := range rows {
 		p := r.F(qProj)
 		if r.F(qState) != "up" || rems[p] != nil {
 			continue
 		}
-		x := &rem{}
+		x := &rem{bat: mqBatch(mr[p], cwd, time.Now())}
 		rems[p] = x
 		if repo := repoOf(p, LOCAL); repo != "" {
 			if out, rc := run("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", "refs/hc-landed/*"); rc == 0 {
@@ -278,6 +294,7 @@ func statusCmd(args []string) {
 				in.Aud = anote(name)
 			}
 			x := rems[r.F(qProj)]
+			in.Batch = x.bat[name]
 			if !x.ok {
 				in.Pos = -1
 			}

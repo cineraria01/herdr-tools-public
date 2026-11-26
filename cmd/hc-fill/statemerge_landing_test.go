@@ -27,7 +27,7 @@ func TestMaQueueOldestLane(t *testing.T) {
 	}
 	// 기록 한 줄에 11칸으로 남고 다시 읽힌다(옛 10칸 기록은 빈 값)
 	x := maRow{P: "app", M: "box", St: "alive", Addr: "t7", K: "2", Oldest: oldest, OldLane: ln}
-	r := Row(lsSplit(x.line(), maOldLane))
+	r := Row(lsSplit(x.line(), maQLanes)) // 12칸(ht-fill-submitted-line — 줄 차례 칸)
 	if r.F(maOldLane) != "ln-a" || dash0(Row(lsSplit("app\tbox\talive\t1\tt7\t1\t5\t6\t-\t-", maOldLane)).F(maOldLane)) != "" {
 		t.Errorf("11칸: %q", x.line())
 	}

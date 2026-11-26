@@ -69,14 +69,20 @@ func stateThresholds() opsstate.Thresholds {
 		PinMin: knobInt("advise_pinned")}
 }
 
-// stateUpLane: 떠 있는(up) 대기열 줄 하나 → 상태 한 장의 레인(stateCollectF의 한 단계). x는 last.tsv 줄(없으면 nil), live는 stLive
-func stateUpLane(r Row, x Row, live string, now time.Time) opsstate.Lane {
+// stateUpLane: 떠 있는(up) 대기열 줄 하나 → 상태 한 장의 레인(stateCollectF의 한 단계). x는 last.tsv 줄(없으면 nil), live는 stLive,
+// ma·maOK는 그 프로젝트 병합기 살아 있음 기록(바퀴가 읽은 큐 — 차례), bat은 도는 묶음 덧말(mqBatch, 아니면 빈 값)
+func stateUpLane(r Row, x Row, live string, ma maRow, maOK bool, bat string, now time.Time) opsstate.Lane {
 	name := r.F(qName)
-	in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: x, Pos: -1, Bg: hangBgWait(name, r.F(qAddr)), Live: live}
+	pos, known := maPos(ma, maOK, name)
+	if !known {
+		pos = -1 // stIn.Pos: −1 = 줄을 못 읽음
+	}
+	in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: x, Pos: pos, Batch: bat, Bg: hangBgWait(name, r.F(qAddr)), Live: live}
 	if r.F(qAudit) == "auto" {
 		in.Aud = anote(name)
 	}
-	ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: live != ""}
+	ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: live != "",
+		Queued: ma.St == "alive" && (pos > 0 || bat != "")}
 	if pr, u := prOf(name); pr != "" { // PR 거울(pr.go)
 		ln.PR = strings.TrimSpace(pr + " " + u)
 	}
@@ -167,6 +173,8 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	}
 	laneOn := map[string]int{}
 	var oldest *opsstate.Waiting
+	mr := maLoad()                         // 병합기 살아 있음 기록 — 레인 차례(줄)와 아래 병합 줄
+	bats := map[string]map[string]string{} // 프로젝트 → 도는 묶음 구성원 덧말(mqBatch, 프로젝트마다 한 번)
 	for _, r := range rows {
 		name, st := r.F(qName), r.F(qState)
 		s.Queue.Counts[st]++
@@ -185,7 +193,12 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		if live != "" && !strings.HasPrefix(live, "?") {
 			laneOn[r.F(qMach)]++
 		}
-		ln := stateUpLane(r, last[name], live, now)
+		p := r.F(qProj)
+		ma, maOK := mr[p]
+		if _, ok := bats[p]; !ok {
+			bats[p] = mqBatch(ma, cwd, now)
+		}
+		ln := stateUpLane(r, last[name], live, ma, maOK, bats[p][name], now)
 		s.Lanes = append(s.Lanes, ln)
 		predQueued(f.Pred, ln, r.F(qProj), true)
 	}
@@ -236,7 +249,6 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 
 	// 병합 줄: run 바퀴의 병합기 살아 있음 기록. 병합기 바퀴 시각·검증 시간·건너뜀은 병합기 기계 일지에만 — 이 기계 병합기면
 	// 로컬 일지에서 읽고(statemerge.go), 다른 기계면 모름
-	mr := maLoad()
 	var ps []string
 	for p := range mr {
 		ps = append(ps, p)

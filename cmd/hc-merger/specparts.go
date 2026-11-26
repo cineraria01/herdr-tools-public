@@ -11,6 +11,7 @@ package main
 //     (부모 없는 커밋, 트리 = 빈 트리, 본문 첫 줄 = 그 줄)에 올린다. 같은 아이디를 다시 맡은 일꾼(다른 기계여도)은 시작 전에 그것을
 //     받아 파일에 깔아 남은 조각만 돈다. 아이디가 다르면(기준·구성원이 바뀜 = 트리가 바뀜) 읽히지 않고, 줄의 트리가 이 추측 트리와
 //     다르면 깔지 않는다 — 트리가 바뀌면 이어 쓰지 않는다.
+//   - 나눔 몫(specshards.go)은 <아이디>-s<i>에 따로 올리고, 받는 쪽은 <아이디>와 그 몫들의 줄을 이어 붙여 한 줄로 읽는다(specPartsGet).
 //   - 참조는 그 추측이 길에서 벗어날 때 spec-fail·spec-run과 함께 치운다(specClean).
 //   - 병합기 기계가 직접 검증(착지)하면 맨 앞 추측의 그 줄을 <일지 폴더>/direct.parts에 적어 착지에 HERDR_VERIFY_PARTS_FROM=<파일>로
 //     넘긴다(ht-merger-direct-parts — 한 기계에서 시험 하나가 흔들린 추측 뒤 맥이 처음부터 다 돌아 main이 1시간 반 섰다). 착지 트리는
@@ -19,6 +20,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -35,15 +37,16 @@ type partPub struct {
 	lf             *os.File
 }
 
-// specPartsSeed: 앞 실행이 남긴 이 아이디의 통과 조각을 받아 파일에 깐다(같은 트리일 때만). 없거나 못 받으면 빈 파일 없이 처음부터
-func specPartsSeed(id, tree, file string, lf *os.File) *partPub {
-	p := &partPub{id: id, tree: tree, file: file, lf: lf}
+// specPartsSeed: 앞 실행(나눔 몫들 포함)이 남긴 이 아이디의 통과 조각을 받아 파일에 깐다(같은 트리일 때만). 올리기는 own 참조에
+// (몫이면 <아이디>-s<i> — specshards.go). 없거나 못 받으면 빈 파일 없이 처음부터
+func specPartsSeed(id, own, tree, file string, lf *os.File) *partPub {
+	p := &partPub{id: own, tree: tree, file: file, lf: lf}
 	os.Remove(file)
-	line, sha, ok := specPartsGet(id)
+	line, shas, ok := specPartsGet(id, tree)
+	p.sha = shas[specParts+own] // 이 값 위로만 고쳐 쓴다(다른 일꾼이 그새 올렸으면 덮지 않는다)
 	if !ok {
 		return p // 없음(또는 원격 실패) — 처음부터 돈다
 	}
-	p.sha = sha // 이 값 위로만 고쳐 쓴다(다른 일꾼이 그새 올렸으면 덮지 않는다)
 	if f := strings.Fields(line); len(f) < 2 || f[0] != tree {
 		fmt.Fprintf(lf, "hc-lane merger: 앞 실행의 통과 조각은 다른 트리 것이다 — 이어 쓰지 않는다\n")
 		return p
@@ -57,19 +60,49 @@ func specPartsSeed(id, tree, file string, lf *os.File) *partPub {
 	return p
 }
 
-// specPartsGet: 원격 spec-part/<아이디>의 줄과 커밋. 없거나 못 받거나 못 읽으면 ok=false(로컬 참조는 남기지 않는다)
-func specPartsGet(id string) (line, sha string, ok bool) {
-	ref := specParts + id
-	if fetchr(true, "-q", "origin", "+"+ref+":"+ref) != 0 {
-		return "", "", false
+// specPartsGet: 원격 spec-part/<아이디>와 나눔 몫들의 spec-part/<아이디>-s<i> 줄을 이어 붙인 한 줄 「<트리> <조각…>」(트리가 tree인
+// 줄만, tree가 빈 값이면 처음 줄의 트리 — 같은 조각 이름은 한 번)과 참조마다의 커밋. 없거나 못 받거나 못 읽으면 ok=false
+// (로컬 참조는 남기지 않는다)
+func specPartsGet(id, tree string) (line string, shas map[string]string, ok bool) {
+	shas = map[string]string{}
+	pat := specParts + id
+	if fetchr(true, "-q", "origin", "+"+pat+"*:"+pat+"*") != 0 {
+		return "", shas, false
 	}
-	defer runQ("update-ref", "-d", ref)
-	sha, rc1 := outQ("rev-parse", "-q", "--verify", ref)
-	body, rc2 := outQ("log", "-1", "--format=%b", ref)
-	if rc1 != 0 || rc2 != 0 {
-		return "", "", false
+	list, rc := outQ("for-each-ref", "--format=%(refname) %(objectname)", specParts)
+	if rc != 0 {
+		return "", shas, false
 	}
-	return partLine(body), sha, true
+	var refs []string
+	for _, l := range strings.Split(list, "\n") {
+		ref, sha, _ := strings.Cut(l, " ")
+		if ref == pat || strings.HasPrefix(ref, pat+"-s") {
+			refs, shas[ref] = append(refs, ref), sha
+		}
+	}
+	for _, ref := range refs {
+		defer runQ("update-ref", "-d", ref)
+	}
+	var have []string
+	for _, ref := range refs { // for-each-ref 차례 — <아이디> 줄이 몫들보다 앞
+		body, rc := outQ("log", "-1", "--format=%b", ref)
+		f := strings.Fields(partLine(body))
+		if rc != 0 || len(f) < 2 || tree != "" && f[0] != tree {
+			continue
+		}
+		if tree == "" {
+			tree = f[0]
+		}
+		for _, x := range f[1:] {
+			if !slices.Contains(have, x) {
+				have = append(have, x)
+			}
+		}
+	}
+	if len(have) == 0 {
+		return "", shas, false
+	}
+	return tree + " " + strings.Join(have, " "), shas, true
 }
 
 // directParts: 병합기 기계가 직접 검증(착지)할 때 맨 앞 추측 id의 통과 조각 줄을 <일지 폴더>/direct.parts에 적고 그 경로
@@ -77,7 +110,7 @@ func specPartsGet(id string) (line, sha string, ok bool) {
 func (m *M) directParts(id string) string {
 	p := m.mj + "/direct.parts"
 	os.Remove(p)
-	line, _, ok := specPartsGet(id)
+	line, _, ok := specPartsGet(id, "")
 	if f := strings.Fields(line); !ok || len(f) < 2 {
 		return ""
 	}

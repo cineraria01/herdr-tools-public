@@ -19,11 +19,12 @@ const (
 	remoteHead = "hc-knobs"
 )
 
-// FormatRemote: 원격 커밋 메시지. 실을 것이 없으면 빈 글(참조를 지움). 「이름@…」 줄은 싣지 않는다 — 프로젝트별 값은 ForProject로 먼저 푼다
+// FormatRemote: 원격 커밋 메시지. 실을 것이 없으면 빈 글(참조를 지움). 「이름@<프로젝트>」 줄은 싣지 않는다 — 프로젝트별 값은 ForProject로 먼저 푼다.
+// 기계별 묶음 손잡이(merger_gate@<기계>)는 그 이름 그대로 싣는다
 func FormatRemote(es map[string]Entry, now time.Time) string {
 	var ns []string
 	for n, e := range es {
-		if d, ok := Find(n); ok && d.Remote && d.Per == "" && e.Live(now) {
+		if d, ok := Find(n); ok && d.Remote && d.Per != PerProject && e.Live(now) {
 			ns = append(ns, n)
 		}
 	}
@@ -82,7 +83,7 @@ func ParseRemote(msg string, now time.Time) Remote {
 			}
 			e.Until = u
 		}
-		if d, ok := Find(e.Name); ok && d.Remote && d.Per == "" && e.Live(now) {
+		if d, ok := Find(e.Name); ok && d.Remote && d.Per != PerProject && e.Live(now) {
 			r[e.Name] = e.Value
 		}
 	}

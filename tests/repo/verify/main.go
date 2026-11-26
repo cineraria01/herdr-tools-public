@@ -10,6 +10,8 @@
 // 무거운 단계 앞에서 기계 단위 검증 잠금(사용자 캐시 폴더 herdr-tools/verify.lock, flock)을 얻는다 — 다른 검증이 쥐고 있으면 기다리고
 // (기다린 초 한 줄, 검증 시간에서 뺀다), 30분을 넘기면 경고 한 줄 뒤 그대로 진행. HERDR_VERIFY_NO_LOCK=1이면 잠금 없이(2026-11-23
 // verify-shard-tune: 조각 자리가 코어 수라 검증 둘이 겹치면 코어의 몇 배로 떠 시간에 민감한 시험이 실패했다).
+// HERDR_VERIFY_GATE=1(병합기가 병합 검증 자리를 받은 기계에 띄운 검증)이면 그 잠금 대신 같은 폴더의 verify-gate.lock(lockFor)을 쥐어
+// 레인 검증과 함께 돌고, 1분 부하를 기다리는 홀로 단계를 조각 뒤로 미룬다(docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」).
 // 무거운 단계: go test -race(Go 계약 시험 전부). TestCotenantGuard는 1분 부하를 재는 시험이라 먼저 홀로 돈다
 // (2026-11-22 verify-go-timeout — 다른 꾸러미와 함께 돌면 10분을 넘겼다). 그다음 조각(go test 여럿)을 함께 돌린다
 // (2026-11-23 verify-shard — 꾸러미 안 시험은 차례로 돌아 검증 전체가 tests/hclane 하나의 시간이었다: 병합기 970초 중 927초):
@@ -307,9 +309,10 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		}
 		runAny = runAny || !sh[i].skip
 	}
+	gate := os.Getenv("HERDR_VERIFY_GATE") == "1"
 	if runAny && os.Getenv("HERDR_VERIFY_NO_LOCK") != "1" {
 		tw := time.Now()
-		release, rc := verifyLock(lockPath(), lockLimit, stop, w)
+		release, rc := verifyLock(lockFor(), lockLimit, stop, w)
 		if rc >= 128 {
 			return rc
 		}
@@ -317,9 +320,14 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		t0 = t0.Add(time.Since(tw)) // 검증 시간에서 잠금 기다림은 뺀다(기다림은 따로 한 줄)
 		vt0 = t0
 	}
-	if aloneLabel := "[홀로] " + strings.Join(alone, " "); sc.skip[0] {
-		fmt.Fprintf(w, "건너뜀 %s — 입력이 통과 기록과 같음\n", aloneLabel)
-	} else {
+	// 홀로 단계(cotenant — 1분 부하가 CPU 수 밑으로 내리길 기다리는 시험). 병합 검증 자리(gate)는 레인 검증과 함께 돌 수 있어 조각 뒤로
+	// 미룬다 — 먼저 돌면 함께 도는 레인 검증의 부하로 calm이 오래 기다린다(그 단계만 차례로, 조각과는 여전히 따로)
+	runAlone := func() int {
+		aloneLabel := "[홀로] " + strings.Join(alone, " ")
+		if sc.skip[0] {
+			fmt.Fprintf(w, "건너뜀 %s — 입력이 통과 기록과 같음\n", aloneLabel)
+			return 0
+		}
 		if s := sc.note(0); s != "" {
 			fmt.Fprintf(w, "%s%s\n", aloneLabel, s)
 		}
@@ -336,6 +344,12 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 			cs = append(cs, retryCand{i: -1, label: aloneLabel, argv: alone, out: out})
 		} else {
 			fail = fail || rc != 0
+		}
+		return 0
+	}
+	if !gate {
+		if rc := runAlone(); rc >= 128 {
+			return rc
 		}
 	}
 	var ram *ramDisk
@@ -368,6 +382,20 @@ func verify(root string, args []string, stop <-chan os.Signal, w *os.File) int {
 		return rc
 	}
 	fail = fail || rc != 0
+	if gate {
+		// 무거운 조각은 레인 검증과 함께 돌았다. 판정을 정하는 시간 시험(홀로 단계)과 혼자 다시 돌기는 레인 잠금을 기다려 쥐고 돈다
+		// (감사 atp3qsv 중간 2 — 레인 검증의 조각과 겹친 채 흔들린 판정이 반송으로 이어지지 않게)
+		if os.Getenv("HERDR_VERIFY_NO_LOCK") != "1" && (!sc.skip[0] || len(cs) > 0) {
+			release, rc := verifyLock(lockPath(), lockLimit, stop, w)
+			if rc >= 128 {
+				return rc
+			}
+			defer release()
+		}
+		if rc := runAlone(); rc >= 128 {
+			return rc
+		}
+	}
 	if len(cs) > 0 && fail {
 		fmt.Fprintln(w, "다시 안 돎: 다시 돌 수 없는 실패가 함께 있다 — 다시 돌려도 결과가 못 바뀐다")
 	} else if len(cs) > 0 { // 다른 조각이 다 끝났다 — 실패한 것을 하나씩 혼자
@@ -408,6 +436,15 @@ func lockPath() string {
 		d = os.TempDir()
 	}
 	return filepath.Join(d, "herdr-tools", "verify.lock")
+}
+
+// lockFor: 이 검증이 쥘 잠금 — HERDR_VERIFY_GATE=1(병합기가 병합 검증 자리를 받은 기계에 띄운 검증)이면 같은 폴더의 병합 검증 잠금
+// verify-gate.lock(기계마다 병합 검증 하나), 아니면 레인 검증 잠금(docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」)
+func lockFor() string {
+	if os.Getenv("HERDR_VERIFY_GATE") == "1" {
+		return filepath.Join(filepath.Dir(lockPath()), "verify-gate.lock")
+	}
+	return lockPath()
 }
 
 // verifyLock: path에 flock(배타)을 얻는다. 다른 검증이 쥐고 있으면 1초마다 다시 보며 limit까지 기다리고, 기다렸으면 그 초를 한 줄로

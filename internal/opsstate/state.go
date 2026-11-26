@@ -131,6 +131,9 @@ type Lane struct {
 	Done      bool   `json:"done"`         // 더 할 일 없음: 마지막 사건이 정리됨·착지이고 터미널이 살아 있지 않다(모으는 쪽이 정한다 — 단계 글과 무관)
 	Open      bool   `json:"open"`         // 터미널이 살아 있다(또는 살아 있는지 모른다) — 단계 글이 착지·끝남이어도 끝난 레인이 아니다
 	PR        string `json:"pr,omitempty"` // PR 거울이 연 PR 「PR #n <주소>」(없으면 칸 없음 — docs/hc-fill/pr.md)
+	// Queued: 병합 줄에서 정상으로 기다림 — 병합기가 살아 있고 그 제출이 줄에 있거나 도는 묶음의 구성원(모으는 쪽이 정한다).
+	// 「같은 단계 오래」를 올리지 않는다(줄이 안 움직이는 것은 병합 줄 항목이 본다)
+	Queued bool `json:"queued"`
 }
 
 type MergeLine struct {

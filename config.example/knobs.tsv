@@ -187,6 +187,11 @@
 # — 직접 검증 착지를 돌릴 기계 — auto(검증 기계 목록에서 검증 자리 남은·코어당 부하 가장 낮은 워커, 닿는 워커가 없을 때만 병합기 기계) · local(병합기 기계) · 기계 목록(쉼표, 그 안에서만)(HC_LANE_MERGER_LAND_ON) (범위 -|이름,이름… 기계)
 # merger_land_on	auto
 # merger_land_on@<프로젝트>	auto
+# — 맨 앞 추측을 이만큼의 서로 다른 검증 기계에 몫(HERDR_VERIFY_SHARD=i/K)으로 나눠 돌리고 한 기계에서 마무리(1이면 끔 — 지금 그대로, docs/hc-lane/merger-spec-verify.md 「나눠 돌리기」, HC_LANE_MERGER_SHARDS) (범위 1~8 몫)
+# merger_shards	1
+# merger_shards@<프로젝트>	1
+# — 1이면 그 검증 기계는 레인 검증이 돌거나 부하가 높아도 병합 검증이 안 돌면 병합기가 맡기고(한가한 기계 다음, 코어당 부하 낮은 차례) HERDR_VERIFY_GATE=1을 준다 — 검증 스크립트가 레인 검증과 다른 잠금을 쥔다(docs/hc-lane/merger-spec-verify.md 「병합 검증 자리」) (범위 0|1)
+# merger_gate@<기계>	<값>
 # — rebase 충돌을 병합 쪽에서 풂·지휘에 사건·반송(HC_LANE_MERGER_CONFLICT) (범위 agent|event|reject)
 # merger_conflict	agent
 # merger_conflict@<프로젝트>	agent

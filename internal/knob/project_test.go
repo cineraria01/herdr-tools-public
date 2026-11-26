@@ -19,6 +19,19 @@ func TestProjectFind(t *testing.T) {
 	}
 }
 
+// 기계별 병합기 손잡이 merger_gate@<기계>(ht-merger-gate-slot): 프로젝트별 덮어쓰기가 아니라 묶음 손잡이 — 원격에 그 이름 그대로 실리고 읽힌다
+func TestGateKnobRemote(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	d, ok := Find("merger_gate@mini-a")
+	if !ok || d.Per != "기계" || d.Check("1") != nil || d.Check("2") == nil {
+		t.Fatalf("merger_gate@mini-a: %+v %v", d, ok)
+	}
+	es := map[string]Entry{"merger_gate@mini-a": {Name: "merger_gate@mini-a", Value: "1"}, "merger_front_wait@app-b": {Name: "merger_front_wait@app-b", Value: "900"}}
+	if r := remoteOf(es, "app-a", now); r["merger_gate@mini-a"] != "1" || r["merger_front_wait@app-b"] != "" {
+		t.Fatalf("원격: %v", r)
+	}
+}
+
 func remoteOf(es map[string]Entry, p string, now time.Time) Remote {
 	return ParseRemote(FormatRemote(ForProject(es, p, now), now), now)
 }
