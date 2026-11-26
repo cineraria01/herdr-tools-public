@@ -247,8 +247,9 @@ func submitConflict(ob, sh string) {
 	eprintf("hc-lane land(제출): 제출 커밋(%s)이 origin/%s 와 충돌한다(충돌 %s) — 큐에 넣지 않았다. git rebase origin/%s 로 양쪽 내용을 살려 풀고(고친 파일을 경로로 git add → git rebase --continue) 푼 파일 둘레의 빌드·시험만 돌린 뒤 같은 줄(hc-lane land %s)을 다시 — 전체 검증은 병합기가 돈다\n",
 		cut(sh, 9), base, j, base, base)
 	if lvd != "" {
-		// rebase하면 승인 커밋이 바뀐다 — 병합기 반송 뒤 다시 맞춤과 같은 길(--verdict 없이 다시 냄, 새 감사 없음)
-		eprintf("hc-lane land(제출): 판정 %s 가 붙은 제출이다 — rebase하면 승인 커밋이 바뀌니 다시 낼 때는 --verdict 없이 hc-lane land %s (병합기 충돌 반송 뒤 다시 맞춤과 같다)\n", lvd, base)
+		// rebase하면 승인 커밋이 바뀐다 — 병합기 반송 뒤 다시 맞춤과 같은 길(--verdict 없이 다시 냄, 새 감사 없음).
+		// 이 줄이 마지막 줄이라 대기열 제출(hc-fill autosubmit)이 넘김 까닭으로 쓴다 — 충돌 파일을 여기에도(ht-autosubmit-rebase)
+		eprintf("hc-lane land(제출): 판정 %s 가 붙은 제출이 origin/%s 와 충돌한다(충돌 %s) — rebase하면 승인 커밋이 바뀌니 다시 낼 때는 --verdict 없이 hc-lane land %s (병합기 충돌 반송 뒤 다시 맞춤과 같다)\n", lvd, base, j, base)
 	}
 	exit(3)
 }
