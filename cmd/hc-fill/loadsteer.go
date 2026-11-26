@@ -31,6 +31,10 @@ type mLoad struct {
 	At    int64
 	Ver   int
 	VerOK bool
+	// Gates: Ver 가운데 병합기 검증(추측 일꾼·착지 실행 — --spec-idle의 gates=, ht-merger-gate-slot). 보이는 글만 — 자리·레인상한에는
+	// 안 든다(병합기 터미널은 hc-lane 라벨 없는 env 터미널이라 countSeats가 안 센다, ht-fill-gate-seat). GatesOK 거짓이면 모름(옛 판 워커)
+	Gates   int
+	GatesOK bool
 }
 
 // Per: 코어당 부하(모름이면 0 — 부르는 쪽은 OK를 먼저 본다)
@@ -50,6 +54,15 @@ func (l mLoad) verPtr() *int {
 	return &v
 }
 
+// gatesPtr: 도는 병합기 검증 수(모름이면 nil)
+func (l mLoad) gatesPtr() *int {
+	if !l.VerOK || !l.GatesOK {
+		return nil
+	}
+	g := l.Gates
+	return &g
+}
+
 // loadSnip: 「load <1분 부하> <코어 수>」 한 줄(리눅스 /proc/loadavg·getconf, macOS sysctl). 실패해도 조각을 실패로 만들지 않는다 —
 // 꼴이 틀린 줄은 loadParse가 모름으로 읽는다. 한 줄이다(끝 줄바꿈 없음) — 혼자 부를 때는 끝 표식 없이 그대로(잘린 출력은 꼴이 틀려 모름).
 // 이어 그 기계의 도는 저장소 검증 수를 병합기 검증 기계 고르기와 같은 명령(hc-lane merger --spec-idle — 「load=… cpus=… verifies=n」)으로
@@ -62,9 +75,15 @@ func loadParse(out string) mLoad {
 	seen := false
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) == 3 && strings.HasPrefix(f[0], "load=") && strings.HasPrefix(f[2], "verifies=") {
+		if (len(f) == 3 || len(f) == 4) && strings.HasPrefix(f[0], "load=") && strings.HasPrefix(f[2], "verifies=") {
 			if v, err := strconv.Atoi(strings.TrimPrefix(f[2], "verifies=")); err == nil && v >= 0 {
 				o.Ver, o.VerOK = v, true
+				// 새 꼴(ht-merger-gate-slot)은 넷째 칸 gates= — 고치기 전엔 4칸 줄을 통째로 버려 새 판 워커의 검증 수가 모름이었다
+				if len(f) == 4 && strings.HasPrefix(f[3], "gates=") {
+					if g, err := strconv.Atoi(strings.TrimPrefix(f[3], "gates=")); err == nil && g >= 0 && g <= v {
+						o.Gates, o.GatesOK = g, true
+					}
+				}
 			}
 			continue
 		}
@@ -212,7 +231,7 @@ func loadLine(name string, l mLoad, used, cp, free int, adj, why string) string 
 	ld := "부하 모름"
 	if l.OK {
 		ld = fmt.Sprintf("부하 %.1f/%d(코어당 %.2f)", l.L1, l.Cores, l.Per())
-		ld += opsstate.VerNote(l.verPtr())
+		ld += opsstate.VerNote(l.verPtr(), l.gatesPtr())
 		if l.At > 0 {
 			ld += " " + stDur(time.Now().Unix()-l.At) + " 전"
 		}
@@ -410,7 +429,7 @@ func steer(lane string, cs []Machine, gate bool) []Machine {
 }
 
 // ---- 상태 파일 <DATA>/load.tsv: 기계 · 1분 부하 · 코어 · 읽은 때 · 쓴 자리 · 상한 · 안 띄운 까닭 · 바쁨 시작 · 치우침 보낸 때 · 도는 검증 수 ·
-// 빈 자리(machRoom, 옛 판은 마지막 두 칸 없음) ----
+// 빈 자리(machRoom) · 그 가운데 병합기 검증 수(옛 판은 끝 칸들 없음 — 모름) ----
 
 type loadRec struct {
 	m              string
@@ -445,6 +464,9 @@ func loadRecs() map[string]loadRec {
 		x.sent, _ = strconv.ParseInt(r.F(loSent), 10, 64)
 		if v, err := strconv.Atoi(r.F(loVer)); err == nil && v >= 0 && x.l.OK { // 칸 없음(옛 판)·「-」은 모름
 			x.l.Ver, x.l.VerOK = v, true
+			if g, err := strconv.Atoi(r.F(loGates)); err == nil && g >= 0 && g <= v {
+				x.l.Gates, x.l.GatesOK = g, true
+			}
 		}
 		if v, err := strconv.Atoi(r.F(loFree)); err == nil && v >= 0 {
 			x.free, x.freeOK = v, true
@@ -503,16 +525,19 @@ func loadEnd(now time.Time) {
 				}
 			}
 		}
-		l1, c, at, ver := "-", "-", "-", "-"
+		l1, c, at, ver, gates := "-", "-", "-", "-", "-"
 		if x.l.OK {
 			l1, c, at = strconv.FormatFloat(x.l.L1, 'f', 2, 64), strconv.Itoa(x.l.Cores), strconv.FormatInt(x.l.At, 10)
 			if x.l.VerOK {
 				ver = strconv.Itoa(x.l.Ver)
 			}
+			if g := x.l.gatesPtr(); g != nil {
+				gates = strconv.Itoa(*g)
+			}
 		}
 		x.free, _ = machRoom(mc, false, 0) // 이 바퀴 띄우기 판정 그대로의 빈 자리 — 상태 한 장 free, advise는 이것만 읽는다
 		x.freeOK = true
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%s\t%d\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent, ver, x.free)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%s\t%d\t%s\n", m, l1, c, at, x.used, x.cp, dash(flat1(x.why)), x.hotSince, x.sent, ver, x.free, gates)
 	}
 	if dry {
 		return

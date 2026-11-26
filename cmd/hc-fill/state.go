@@ -242,6 +242,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 			// ponytail: 「그 바퀴」는 바퀴 끝 5분 안에 읽은 것 — 바퀴가 5분 넘게 걸리면 그 바퀴 값도 모름이 된다
 			if rec.l.OK && rec.l.At+stateLoadFresh >= end {
 				x.Load1, x.Cores, x.LoadPerCore, x.Verifies = ptrF(rec.l.L1), ptrI(rec.l.Cores), ptrF(rec.l.Per()), rec.l.verPtr()
+				x.MergeVerifies = rec.l.gatesPtr()
 			}
 		}
 		s.Machines = append(s.Machines, x)

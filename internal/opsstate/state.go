@@ -63,6 +63,9 @@ type Machine struct {
 	Health      Health   `json:"health"`
 	Steer       string   `json:"steer"`
 	SkipWhy     string   `json:"skip_why"`
+
+	// MergeVerifies: Verifies 가운데 병합기 검증(추측 일꾼·착지 실행) 수 — 자리·레인상한에는 안 든다(ht-fill-gate-seat). 모름 nil
+	MergeVerifies *int `json:"merge_verifies"`
 }
 
 // Health: 빈 글 = 모름(json null)
@@ -393,7 +396,7 @@ func Human(w io.Writer, s State) error {
 				or(hl.Sleep, "모름"), or(hl.Keychain, "모름"), fval(hl.DiskFreeGB, "%.0fGB"), or(hl.Tailscale, "모름"))
 		}
 		p("  %s  %s  에이전트 %s/%s  레인 %s/%s%s  빈 자리 %s%s%s",
-			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), VerNote(m.Verifies), ival(m.Free), ht, steer(m))
+			m.Name, ld, ival(m.Live), ival(m.Seats), ival(m.Lanes), ival(m.LaneCap), VerNote(m.Verifies, m.MergeVerifies), ival(m.Free), ht, steer(m))
 	}
 	if trim && !anyH && len(s.Machines) > 0 {
 		p("  건강 값 없음 — 점검이 아직 안 남김")

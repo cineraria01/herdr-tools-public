@@ -436,7 +436,7 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 		}
 		switch p := *m.LoadPerCore; {
 		case p >= th.SkewHi:
-			hot = append(hot, fmt.Sprintf("%s %.2f(도는 레인 %s%s)", m.Name, p, ival(m.Lanes), VerNote(m.Verifies)))
+			hot = append(hot, fmt.Sprintf("%s %.2f(도는 레인 %s%s)", m.Name, p, ival(m.Lanes), VerNote(m.Verifies, m.MergeVerifies)))
 			hotSet[m.Name] = true
 		case p <= th.SkewLo:
 			cool = append(cool, fmt.Sprintf("%s %.2f", m.Name, p))
@@ -453,10 +453,14 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 }
 
 // VerNote: 도는 저장소 검증이 있으면 「 · 검증 n」 — 레인 0인 바쁜 기계의 까닭(병합기 추측 검증 등, ht-skew-verify-cause).
+// 그 가운데 병합기 검증(g)이 있으면 「 · 검증 n(병합 g)」 — 병합 검증은 자리·레인상한에 안 든다(ht-fill-gate-seat).
 // 모름(nil)·0은 빈 글: 모름을 0으로 적지 않고, 0이면 지금 글 그대로
-func VerNote(v *int) string {
+func VerNote(v, g *int) string {
 	if v == nil || *v <= 0 {
 		return ""
+	}
+	if g != nil && *g > 0 {
+		return fmt.Sprintf(" · 검증 %d(병합 %d)", *v, *g)
 	}
 	return fmt.Sprintf(" · 검증 %d", *v)
 }

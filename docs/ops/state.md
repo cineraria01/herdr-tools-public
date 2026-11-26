@@ -106,6 +106,7 @@
 | `machines[].seats` | 자리 상한 |
 | `machines[].lanes` | hc-fill이 띄운 레인 수 |
 | `machines[].verifies` | 도는 저장소 검증 수(레인·추측·착지 검증 합친 검증 나무 수, `hc-lane merger --spec-idle`과 같은 셈, 부하와 같은 때 읽음) |
+| `machines[].merge_verifies` | 그 가운데 병합기 검증(추측 일꾼·착지 실행, `--spec-idle`의 `gates=`) 수 — 자리·레인 상한에는 안 든다. 옛 판 워커·모름이면 `null` |
 | `machines[].lane_cap` | hc-fill 레인 상한 |
 | `machines[].free` | 마지막 바퀴의 띄우기가 판정한 보통 레인 빈 자리(연결·유형 모를 터미널·멈춤·자리·레인상한을 띄우기와 같은 함수로, `load.tsv`) — 옛 기록이면 모름. `hc-fill advise`의 빈 자리는 이 값만 읽는다 |
 | `machines[].health` | 건강 |

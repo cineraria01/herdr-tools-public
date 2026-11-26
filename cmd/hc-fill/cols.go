@@ -259,6 +259,7 @@ const (
 	loSent  = 9
 	loVer   = 10 // 도는 저장소 검증 수(「-」 모름) — 옛 판 줄에는 없어 loNF는 그대로
 	loFree  = 11 // 그 바퀴 띄우기가 판정한 빈 자리(machRoom) — 옛 판 줄에는 없음(모름)
+	loGates = 12 // 도는 검증 가운데 병합기 검증 수(「-」 모름) — 옛 판 줄에는 없음(모름)
 	loNF    = 9
 
 	// 묶인 기계 pinned.tsv 「레인 줄ID 처음 본 초 까닭」(pinned.go)
