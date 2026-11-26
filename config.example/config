@@ -30,6 +30,10 @@ sweep.lsof_secs    60
 sweep.disk_free_gb 10
 # 여유가 위 문턱 아래면 Go 빌드 캐시(GOCACHE·~/.cache/go-build·~/Library/Caches/go-build)에서 이 시간 넘게 안 쓴 항목만 지움(없으면 6, 0이면 끔)
 sweep.gocache_hours 6
+# 작업별 임시 폴더(hc-lane 레인·감사, 병합기 일꾼의 TMPDIR — docs/hc-sweep/job-tmp.md): 뿌리(~는 그 기계 집, 42자 이하, off면 끔 — 지금 그대로),
+# 주인 터미널이 없는 폴더를 지우기 전 유예(분, 없으면 10)
+jobtmp.root        ~/.hctmp.noindex
+jobtmp.grace_min   10
 # hc-sweep Tailscale 점검: 꺼져 있으면(Tailscale is stopped.) 한 시간에 다시 켤 횟수(없으면 3, 0이면 다시 켜지 않고 hc-tailscale 알림만)
 sweep.tailscale_up_per_hour 3
 

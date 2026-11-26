@@ -74,7 +74,7 @@ type oaRead struct {
 
 var oaReads = map[string]oaRead{
 	"ls":       {flags: []string{"--json"}},
-	"status":   {flags: []string{"--mine"}, vals: []string{"--owner"}},
+	"status":   {flags: []string{"--mine", "--all"}, vals: []string{"--owner"}},
 	"state":    {flags: []string{"--json", "--all"}},
 	"advise":   {flags: []string{"--json"}},
 	"journal":  {flags: []string{"--json"}, vals: []string{"--by", "--since"}},

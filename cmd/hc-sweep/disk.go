@@ -14,20 +14,27 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/jobtmp"
 )
 
 const gb = 1e9
 
 var hexDir = regexp.MustCompile(`^[0-9a-f]{2}$`)
 
+// tmpDir: 사용자 임시 폴더. TMPDIR이 작업별 임시 폴더(표식 .hc-job — 레인 안에서 부름)면 그 바깥 운영체제 자리
 func tmpDir(r runner) string {
-	if t := os.Getenv("TMPDIR"); t != "" {
+	t := os.Getenv("TMPDIR")
+	job := t != "" && lexists(filepath.Join(t, jobtmp.Marker))
+	if t != "" && !job {
 		return t
 	}
 	// launchd 작업에는 TMPDIR가 없을 수 있다. go는 터미널의 TMPDIR(= 이 값)를 쓴다
 	if res := r(10*time.Second, nil, "getconf", "DARWIN_USER_TEMP_DIR"); res.err == nil && res.rc == 0 &&
 		strings.HasPrefix(strings.TrimSpace(res.out), "/") {
 		return strings.TrimSpace(res.out)
+	}
+	if job {
+		return "/tmp"
 	}
 	return os.TempDir()
 }
@@ -287,7 +294,11 @@ func diskAlert(free, used, limitGB float64, state, base, gc string, dry bool, la
 		return p
 	}
 	var sizes []string
-	for _, p := range []string{base, filepath.Join(home, "Library/Caches/go-build"), filepath.Join(home, ".cache/go-build")} {
+	paths := []string{base, filepath.Join(home, "Library/Caches/go-build"), filepath.Join(home, ".cache/go-build")}
+	if jobRootDir != "" { // 작업별 임시 폴더 뿌리(살아 있는 작업 것만 있어야 한다 — docs/hc-sweep/job-tmp.md)
+		paths = append(paths, jobRootDir)
+	}
+	for _, p := range paths {
 		sizes = append(sizes, short(strings.TrimRight(p, "/"))+" "+du(p, r))
 	}
 	total := used + free

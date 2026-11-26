@@ -1,0 +1,44 @@
+# 작업별 임시 폴더 (hc가 띄운 작업마다 자기 TMPDIR, 끝나면 통째로 지움)
+
+- 까닭(2026-11-26 실측): 워커 임시 폴더에 48시간 넘은 항목이 수천~1만7천 개 쌓였다(`audit-*`·`tmp.*`·`com.google.Chrome.*`·`release-macos-test-*` …). 이름으로 찌꺼기를 알아맞히는 쓸기(`go-build*`·`Test*`)는 새 도구가 새 이름을 쓸 때마다 다시 샌다.
+- 방식: CI 실행기의 「작업별 임시 폴더」 — 띄울 때 그 작업 전용 폴더를 주고, 끝나면 통째로 지운다. 누구 것인지를 이름이 아니라 **자리**(폴더 안 표식)로 안다.
+
+## 자리
+- 뿌리: 설정 `jobtmp.root`(기본 `~/.hctmp.noindex`, `~`는 그 기계 집), 작업 폴더는 `<뿌리>/<6글자>`(`mktemp -d`).
+- 집 아래인 까닭: macOS는 `/tmp`(사흘 안 쓴 것)와 `/var/folders/…/T`(부팅·사흘)를 스스로 비운다 — 오래 도는 레인의 파일이 사라질 수 있다. 집 아래는 비우지 않으니 지우는 것은 이 구조뿐이다.
+- `.noindex`로 끝나 Spotlight가 색인하지 않는다. Time Machine 제외는 감싸개가 하지 않는다(`tmutil addexclusion`이 한 번에 11초 — 실측, 띄우기를 막는다). 로컬 스냅숏이 문제 되면 기계마다 손으로 한 번 `tmutil addexclusion ~/.hctmp.noindex`.
+- 길이: macOS 유닉스 소켓 경로 상한 104바이트(`sun_path`, NUL 포함). 지금 기본 TMPDIR `/var/folders/xx/<30>/T/`가 49자이니 작업 폴더도 49자를 넘지 않게 뿌리는 42자 이하만 쓴다(넘으면 감싸지 않고 기본 TMPDIR로 돌며 한 줄 알림).
+  가장 긴 알려진 소켓 꼴 `com.google.Chrome.XXXXXX/SingletonSocket`(40자)을 더해도 49+1+40 = 90 < 104. 실측 `/Users/<이름>/.jtprobe/x5NgXe/com.google.Chrome.L6EhZS/SingletonSocket` 73자.
+
+## 띄울 때 준다 (얹기 — 새 실행 길 없음)
+- 감싸개 `internal/jobtmp`(POSIX sh 한 조각): 뿌리를 만들고 `mktemp -d`, 표식 `.hc-job` 세 줄 `<터미널 주소>`·`<작업 이름>`·`<유닉스 초>`(주소는 그 터미널의 `$HC_TERMINAL_ID`, 감싸개는 한 줄·역슬래시 없음 — hc run 인자를 한 줄로 적는 기록이 안 깨지게), 그다음 `TMPDIR`을 그 폴더로.
+  macOS에서는 `MAC_CHROMIUM_TMPDIR`도 같게 — Chrome은 macOS에서 `TMPDIR`을 보지 않는다(실측: `TMPDIR`만 주면 `SingletonSocket`이 `/var/folders/…/T/com.google.Chrome.*`에 생김).
+  Go는 `GOTMPDIR`이 없으면 `TMPDIR`을 따른다 — `GOTMPDIR`은 건드리지 않는다(누가 일부러 정한 값).
+- `$HC_TERMINAL_ID`가 없으면(hc 터미널 밖) 감싸지 않은 것과 같다 — 주인을 모르는 폴더는 만들지 않는다.
+- 쓰는 곳: hc-lane이 띄우는 레인·`--read` 감사(hc-fill이 띄우는 것도 이 길)는 `exec` 꼴(에이전트가 그대로 터미널의 프로그램), 병합기 추측 일꾼·몫·워커 착지는 `run` 꼴(명령이 끝나거나 HUP·TERM·INT를 받으면 폴더를 지우고 끝).
+- 이미 TMPDIR을 따로 잡는 것(검증 프로그램의 실행별 램 디스크)은 그대로 — 그 바깥 껍질만 작업 폴더다.
+- Windows(cwd가 `C:\…` 꼴)는 감싸지 않는다.
+
+## 끝나면 지운다 (세 길)
+1. `run` 꼴 감싸개: 명령이 끝나면·신호를 받으면 제 폴더를 지운다(병합기 일꾼은 `--rm` 터미널이라 이것이 닫는 길).
+2. hc-sweep이 끝난 터미널을 닫으면(`닫힘`) 그 주소·이름이 표식에 적힌 폴더를 지운다.
+3. 놓친 것(hc-lane이 닫은 감사·충돌·KILL·재부팅): hc-sweep 바퀴마다 표식의 주인(주소와 이름이 같은 터미널)이 이번 `hc ls`에 살아 있지 않고(없거나 `finished`) 표식 시각이 유예 `jobtmp.grace_min`분(기본 10)보다 오래면 지운다.
+   lsof·이름 맞추기를 쓰지 않는다. `hc ls`를 못 읽은 바퀴는 아무것도 지우지 않는다. 표식을 못 읽는 폴더는 남긴다(모름은 지움이 아니다).
+- 안전띠 ①(2026-11-27 지휘): `hc ls`가 성공해도 이 기계 터미널을 다 담았다고 볼 수 없으면 못 읽음과 같이 아무것도 지우지 않는다 — 오류·부분 칸(`error`·`errors`·`partial`·`truncated`), `terminals`가 목록이 아님, 주소·`state`가 글이 아닌 줄, **이 기계 줄(주소에 `/` 없음)이 하나도 없음**.
+  「다 담음」의 근거는 마지막 것이다: 지킴이(`hc-launchd-guard`)로 도는 hc-sweep은 제 터미널(`hc-sweep`)이 늘 이 기계 줄에 있으니, 이 기계 줄이 통째로 빠진 목록은 잘린 것으로 본다.
+- 안전띠 ②(같은 날 지휘): 닫는 길·고아 길 모두, 폴더 자신이나 맨 위 항목 가운데 유예 안에 바뀐 것이 있으면 그 바퀴는 미룬다(`작업 임시 미룸` 한 줄, 안쪽 전체는 훑지 않는다 — 싸게).
+- 배경 실행이 남아 hc-sweep이 안 닫은 터미널은 살아 있으니 그 폴더도 그대로다.
+- 유예: hc ls를 읽은 뒤 막 생긴 작업 폴더를 고아로 보지 않게.
+- hc-sweep을 레인 안에서 부르면(TMPDIR에 표식) 임시 쓸기는 그 바깥 운영체제 자리(`getconf DARWIN_USER_TEMP_DIR`)를 본다.
+
+## 이미 쌓인 것 한 번 치우기
+- `hc-sweep --tmp-backlog <시간> [--dry-run]`: 사용자 임시 폴더(작업 폴더가 아닌 `getconf DARWIN_USER_TEMP_DIR`) 맨 위 내 항목 가운데 안쪽 모두가 그 시간 넘게 안 바뀌었고 lsof로 아무도 열지 않은 것.
+  `--dry-run`은 종류(이름 꼴 — 보이기 전용, 지울지는 이름으로 정하지 않는다)별 개수·크기와 남긴 것(열린 것·새 것)·뺀 것 수만 보인다. 운영체제 것(`com.apple.*`·`TemporaryItems`·`Cleanup At Startup`·`xcrun_db`·`.AddressBookLocks`·`.LINKS`·`.screen`)은 뺀다. 지휘가 기계마다 dry-run을 보고 돌린다.
+  lsof를 못 읽으면 하나도 안 지우고 종료 1. 지우면 closed.log 「임시 찌꺼기 한 번 치우기」 한 줄.
+- 지금의 `go-build*`·`Test*` 쓸기는 그대로(hc가 띄우지 않은 세션 몫) — 이름 꼴을 더하지 않는다.
+
+## 보이기·되돌리기
+- `hc-disk-low` 글에 뿌리 크기를 함께 적는다.
+- 되돌리기: 설정 `jobtmp.root off` — 감싸지 않고 쓸지도 않는다(지금 그대로). 남은 폴더는 손으로 지운다.
+- 합격 기준(착지 뒤 지휘가 잰다): 일주일 뒤 워커 사용자 임시 폴더에 48시간 넘은 hc 작업 찌꺼기 거의 0, 뿌리에는 살아 있는 작업 것만, 레인 도중 임시 파일이 사라져 실패한 일 0.
+- 시험: `internal/jobtmp`(감싸개·run 꼴 지움·TERM·길이 계산·끄기·한 줄·dash 문법), `tests/hclane/jobtmp_test.go`(레인·`--read`·off), `cmd/hc-merger/jobtmp_test.go`(추측 일꾼·몫·워커 착지·off), `tests/util/hcsweepjobtmp_test.go`(닫으면 지움·고아·hc ls 실패·안전띠 둘·배경 실행·off·한 번 치우기).

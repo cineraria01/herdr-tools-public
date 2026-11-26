@@ -363,7 +363,7 @@ func (m *M) runRemote(v verified.Verifier) (int, string) {
 	args := append([]string{"run", "--bg", "--json", "--no-parent", "--rm", "--on", v.Machine, "--name", "land-" + cm[:8],
 		"--label", "hc-merger-land=1", "--cwd", v.Path, "env", "HC_MERGER_LAND_DIR=" + dir, "HC_MERGER_LAND_RESULT=" + res,
 		"HERDR_LAND_PHASE=" + dir + "/" + cm[:12] + ".phase"}, append(gateEnv(v.Machine), env...)...)
-	args = append(args, "sh", "-c", landWrap, "hc-merger-land", "hc-lane", "merger", "--land-run", m.base, cm)
+	args = append(args, jobWrap("land-"+cm[:8], v.Path, []string{"sh", "-c", landWrap, "hc-merger-land", "hc-lane", "merger", "--land-run", m.base, cm})...)
 	fmt.Fprintf(lf, "hc-lane merger: 착지를 %s(%s)에서 돌린다 — 차례 %s\n", v.Machine, v.Path, first8(cm))
 	if _, rc, e := boundedRun(60*time.Second, "hc", nil, args...); rc != 0 {
 		fmt.Fprintf(lf, "hc-lane merger: 워커에 착지를 띄우지 못했다(종료 %d): %s\n", rc, strings.TrimSpace(e))

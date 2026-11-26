@@ -212,7 +212,9 @@ func TestWorkerBusyLeavesBusy(t *testing.T) {
 	s.sub(1000000001, "a", false)
 	s.round(1)
 	d := s.dispatched()
-	if len(d) != 1 || d[0][0] != "v1" || !strings.Contains(strings.Join(s.lines(s.hclog), " "), "env HC_LANE_SPEC_BUSY_WAIT=0 HC_LANE_SPEC_IDLE_LOAD=50 hc-lane") {
+	// env 손잡이 뒤 작업별 임시 폴더 감싸개(sh -c … run) 다음 일꾼 명령(jobtmp_test.go)
+	if l := strings.Join(s.lines(s.hclog), " "); len(d) != 1 || d[0][0] != "v1" ||
+		!strings.Contains(l, "env HC_LANE_SPEC_BUSY_WAIT=0 HC_LANE_SPEC_IDLE_LOAD=50 sh -c ") || !strings.Contains(l, " run hc-lane merger --spec-verify ") {
 		t.Fatalf("v1에 띄우며 손잡이 busy_wait를 넘긴다: %v %v", d, s.lines(s.hclog))
 	}
 	idleProbe = func() (idleInfo, bool) { return idleInfo{load: 0.5, cpus: 8, verifies: 1}, true }

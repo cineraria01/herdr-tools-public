@@ -19,6 +19,7 @@ import (
 //     병합기 쪽 길은 같다). --cwd가 없으면 hc 자신의 실패. get <기계>/land-…은 fakeHcIdle(없으면 not_found = 끝남)
 //   - LANDRUN_OLD=<폴더 이름>: 그 기계 hc-lane은 --land-run을 모르는 옛 판(「알 수 없는 인자」 종료 1, 결과 파일 없음)
 //   - LAND_STEAL=1: 워커 착지가 push 직전에 차례 참조가 지워진다(병합기가 그 실행을 끊긴 것으로 보고 치운 것과 같다)
+//   - LAND_TMPDIR_OUT=<파일>: --land-run이 본 TMPDIR을 그 파일에(작업별 임시 폴더 — jobtmp_test.go)
 //   - LAND_VANISH=<폴더 이름>: 그 기계의 land 터미널이 결과 없이 사라진다(밖에서 SIGTERM — ht-land-offload-lost). LAND_VANISH_AFTER=1이면
 //     착지(push)까지 한 뒤 결과 파일 없이 사라진다
 func landFx(t *testing.T) (*sfx, func() []string) {
@@ -39,6 +40,7 @@ if [ "$1" = merger ] && [ "$2" = --land-run ]; then
   shift 2
   b=$(basename "$(pwd)")
   echo "$b" >>%q
+  [ -z "$LAND_TMPDIR_OUT" ] || echo "$TMPDIR" >"$LAND_TMPDIR_OUT"
   if [ "$LANDRUN_OLD" = "$b" ]; then echo "hc-lane merger: 알 수 없는 인자 --land-run" >&2; exit 1; fi
   HC_MERGER_TEST_HELPER=landrun HC_MERGER_TEST_ARGS="$*" exec %q
 fi

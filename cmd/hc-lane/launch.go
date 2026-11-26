@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/jobtmp"
 )
 
 func init() { register("launch", launchMain, nil) }
@@ -94,6 +95,8 @@ func launchMain(args []string) int {
 		wfrom = resumeFrom() // --resume: 주차한 가지를 받아 그 참조에서 시작(launchresume.go)
 	}
 	rest = placeBrief(rest)
+	// 작업별 임시 폴더(docs/hc-sweep/job-tmp.md): 레인·감사 안의 TMPDIR을 그 작업 것으로 — 에이전트가 그대로 터미널의 프로그램(exec 꼴), 지우기는 hc-sweep
+	rest = jobtmp.Wrap(cfg(jobtmp.Key, jobtmp.Default), name, cwd, false, rest)
 	envs := laneEnvs(tid)
 	// 다른 기계 레인은 맥 Herdr 창의 그 기계 공간에 탭으로(hc run --label herdr.space=<id>)
 	if on != "" {

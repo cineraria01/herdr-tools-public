@@ -21,10 +21,10 @@ import (
 // asubAud: status 감사 비고(anote) — 대기열이 레인 대신 제출한 차수
 const asubAud = "감사 통과 — 대기열이 제출함"
 
-// stStage: 단계 한 마디. 대기열이 제출한 레인은 병합기 줄·착지 단계 뒤에도 「대기열이 제출함」을 붙인다
+// stStage: 단계 한 마디. 대기열이 제출한 레인은 병합기 줄 단계 뒤에도 「대기열이 제출함」을 붙인다(착지했으면 안 붙인다 — 끝났다)
 func stStage(in stIn) string {
 	s := stStage0(in)
-	if in.Aud == asubAud && s != asubAud {
+	if in.Aud == asubAud && s != asubAud && !strings.HasPrefix(s, "착지") {
 		s += " · 대기열이 제출함"
 	}
 	return s

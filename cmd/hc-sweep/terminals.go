@@ -100,6 +100,9 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			failed++
 		}
 		fmt.Println(res+":", line)
+		if strings.HasPrefix(res, "닫힘") {
+			jobDrop(str(t, "address"), str(t, "name"))
+		}
 		if wtRepo != "" && strings.HasPrefix(res, "닫힘") {
 			ok, msg := laneClean(wtRepo, wtBranch, run)
 			fail := ""

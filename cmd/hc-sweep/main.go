@@ -333,6 +333,7 @@ func sweepMain(args []string) int {
 	self := fs.Bool("self-test", false, "가짜 기록으로 규칙 판정 확인")
 	minAge := fs.Float64("min-age", 10, "고아·색인 최소 나이(분, 기본 10)")
 	only := fs.String("only-under", "", "이 폴더 아래 작업 트리만(시험용)")
+	backlog := fs.Float64("tmp-backlog", 0, "이미 쌓인 임시 찌꺼기 한 번 치우기: 이 시간 넘게 안 바뀌고 아무도 안 연 맨 위 항목(--dry-run이면 종류별 개수·크기만)")
 	health := fs.Bool("health", false, "이 기계의 마지막 건강 점검 결과(잠자기 끔·키체인)만 찍고 끝(재지 않음, 0 좋음·1 나쁨·3 모름)")
 	for _, a := range args { // 위치 인자를 받지 않으니 끝표시 「--」도 사용 오류(셸 판 argparse와 같게, R-39 — flag가 삼켜 0으로 돌았다)
 		if a == "--" {
@@ -370,7 +371,11 @@ func sweepMain(args []string) int {
 		}
 		defer lk.Close()
 	}
+	if *backlog > 0 { // 쓸기 바퀴와 따로 — 지휘가 기계마다 dry-run을 보고 돌린다(docs/hc-sweep/job-tmp.md)
+		return backlogRun(*backlog, *dry, run)
+	}
 	// 색인·디스크 쓸기·Tailscale·건강 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
+	jobRootDir = jobRoot() // 작업별 임시 폴더(jobtmp.go): 디스크 부족 글의 크기, 닫은 터미널 것은 닫자마자, 주인 없는 것은 hc ls 뒤 바퀴가
 	sweepIndex(*dry, *minAge*60)
 	if err := diskRun(*dry, run); err != nil {
 		fmt.Println("디스크 쓸기 실패:", err)
@@ -386,6 +391,7 @@ func sweepMain(args []string) int {
 	terms := ls["terminals"]
 	lim = limitsFrom(kv) // 닫는 문턱 손잡이(knobs.go)
 	failed := sweepTerminals(terms, *dry)
+	jobOrphans(ls, *dry)
 	if _, err := sweepOrphans(terms, *dry, *minAge*60, *only); err != nil {
 		return 1 // 셸 판처럼 고아 판정 실패(ps 등)는 종료 코드에(B23). 줄은 sweepOrphans가 찍었다
 	}

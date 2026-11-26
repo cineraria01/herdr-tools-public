@@ -63,17 +63,19 @@ func lcFetch(p string, quiet bool) int {
 
 // since <선행>: 줄 ID에 기록한 접수 초. ID가 없는 옛 줄만 10칸의 분 시각(이 기계 현지 시각)으로 복원한다
 func since(lane string) (string, bool) {
-	sa := ""
 	for _, r := range qRows() {
-		if r.F(qName) != lane {
-			continue
+		if r.F(qName) == lane {
+			return sinceOf(r)
 		}
-		if x := r.F(qRID); sinceIDRe.MatchString(x) {
-			sa = strings.SplitN(x[1:], "-", 2)[0]
-		} else {
-			sa = r.F(qAdded)
-		}
-		break
+	}
+	return "", false
+}
+
+// sinceOf <대기열 줄>: since의 한 줄 판(status는 줄마다 대기열을 다시 읽지 않는다)
+func sinceOf(r Row) (string, bool) {
+	sa := r.F(qAdded)
+	if x := r.F(qRID); sinceIDRe.MatchString(x) {
+		sa = strings.SplitN(x[1:], "-", 2)[0]
 	}
 	if isDigits(sa) {
 		return sa, true

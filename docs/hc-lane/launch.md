@@ -30,6 +30,7 @@ hc-lane fetch --on <기계> --repo <그 기계 저장소> [<참조…>]         
   마감까지 못 보면 오류 출력 한 줄과 사건 `막힘` 「첫 턴 없음 <주소>」(원격은 `@<기계>`, 레인 이름·주인 지휘 `--to`) 하나, `start` `noturn`. hc-fill 대기열에는 첫 status에서 주소와 `start` `ok`를 돌려주고 따로 감시하며, 진단은 상태 폴더의 `hc-lane/watch.log`에 남긴다.
   사건을 못 적으면 진단 한 줄만 남긴다.
   `jq`가 없으면 건너뛴다.
+- 작업별 임시 폴더: 실행 명령은 레인 환경(`env …`) 뒤 감싸개(`sh -c <jobtmp> jobtmp <뿌리> <레인> exec …`)를 거쳐 그 레인 전용 `TMPDIR`을 받는다(설정 `jobtmp.root`, `off`면 그대로 — docs/hc-sweep/job-tmp.md). 병합기 일꾼·워커 착지도 같은 감싸개(`run` 꼴)다.
 - 다른 기계 레인(`--on`, `--read` 감사·hc-fill 원격 띄우기 포함)은 `hc run --label herdr.space=<id>`로 맥 Herdr 창의 **그 기계 공간**(이름 = 기계 이름, 기계마다 하나)에 탭으로 보인다.
   창에 그 기계의 `<기계>` 공간이 있으면 그 id(창이 보이는 `<기계>/` 접두는 뗀다), 없으면 고정 id `lanes`로 붙이고 창이 만든 공간에 기계 이름을 붙인다(`space.rename`).
   창(herdr-app)이 없으면 띄우기는 그대로 성공하고 알림 한 줄. 로컬 레인은 hc-fill이 `herdr-balance --add`(지휘 옆 분할)로 붙인다.

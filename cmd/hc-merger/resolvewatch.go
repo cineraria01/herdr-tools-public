@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/jobtmp"
 	"herdr-tools/internal/trustq"
 )
 
@@ -111,21 +112,35 @@ func (m *M) rtrust(r *rstate, t hcjson.Terminal) {
 	fmt.Printf("hc-lane merger: 풀이 터미널 신뢰 질문 넘김(%s)\n", r.addr)
 }
 
-// autoTrust: 설정 lane.auto_trust(on·off, 기본 on) — hc-lane과 같은 길(곁의 herdr-tools-config, 없으면 PATH, 그것도 없으면 기본)
+// autoTrust: 설정 lane.auto_trust(on·off, 기본 on)
 func autoTrust() (string, bool) {
+	if v, ok := confGet("lane.auto_trust", "on"); ok && (v == "on" || v == "off") {
+		return v, true
+	}
+	return "", false
+}
+
+// confGet: 설정 값 — hc-lane과 같은 길(곁의 herdr-tools-config, 없으면 PATH, 그것도 없으면 기본). 못 읽으면 ok false
+func confGet(key, def string) (string, bool) {
 	c := filepath.Join(filepath.Dir(gSelf), "herdr-tools-config")
 	if st, err := os.Stat(c); err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
 		p, err := exec.LookPath("herdr-tools-config")
 		if err != nil {
-			return "on", true
+			return def, true
 		}
 		c = p
 	}
-	o, rc, _ := boundedRun(hcLook, c, nil, "get", "lane.auto_trust", "on")
-	if v := strings.TrimSpace(o); rc == 0 && (v == "on" || v == "off") {
-		return v, true
+	o, rc, _ := boundedRun(hcLook, c, nil, "get", key, def)
+	return strings.TrimSpace(o), rc == 0
+}
+
+// jobWrap: 병합기가 워커에 띄우는 명령에 작업별 임시 폴더(run 꼴 — 끝나면 지움, docs/hc-sweep/job-tmp.md). 설정을 못 읽으면 감싸지 않는다
+func jobWrap(name, cwd string, argv []string) []string {
+	root, ok := confGet(jobtmp.Key, jobtmp.Default)
+	if !ok {
+		return argv
 	}
-	return "", false
+	return jobtmp.Wrap(root, name, cwd, true, argv)
 }
 
 func readS(p string) string { b, _ := os.ReadFile(p); return string(b) }

@@ -24,6 +24,7 @@ type stIn struct {
 	Batch        string // 병합기가 지금 도는 묶음의 구성원이면 그 덧말(mqBatch — 「묶음 검증 중 <기계> n분째」), 아니면 빈 값
 	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
 	Bg           bool   // 살아 있는 배경 셸을 기다림(hangBgWait)
+	Land         string // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
 }
 
 // stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
@@ -53,6 +54,8 @@ func stStage0(in stIn) string {
 		return "제출됨(병합기 줄 맨 앞" + bat + ")"
 	case in.Pos > 1:
 		return fmt.Sprintf("제출됨(병합기 줄 %d번째%s)", in.Pos, bat)
+	case in.Land != "": // 착지 표식이 사건보다 앞선다 — 대기열이 제출한 레인엔 착지 사건이 오지 않는다
+		return "착지 " + in.Land
 	case ls == "착지":
 		return "착지 " + sha
 	case ls == "막힘":
@@ -212,19 +215,23 @@ func stLine(c ...string) string {
 
 func init() { register("status", statusCmd) }
 
-// status [--owner <주인>|--mine]
+// status [--owner <주인>|--mine] [--all] — 기본은 끝난 지 state_done분 넘은 줄(착지·되돌려줌)을 빼고 개수 한 줄(status_done.go)
 func statusCmd(args []string) {
-	owner := ""
-	switch {
-	case len(args) == 0:
-	case len(args) == 2 && args[0] == "--owner" && args[1] != "":
-		owner = args[1]
-	case len(args) == 1 && args[0] == "--mine":
-		if owner = os.Getenv("HC_TERMINAL_ID"); owner == "" {
-			die("--mine: 이 터미널 주소($HC_TERMINAL_ID)가 없다 — --owner <주소>로")
+	owner, all := "", false
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--all" && !all:
+			all = true
+		case a == "--owner" && owner == "" && i+1 < len(args) && args[i+1] != "":
+			i++
+			owner = args[i]
+		case a == "--mine" && owner == "":
+			if owner = os.Getenv("HC_TERMINAL_ID"); owner == "" {
+				die("--mine: 이 터미널 주소($HC_TERMINAL_ID)가 없다 — --owner <주소>로")
+			}
+		default:
+			usage()
 		}
-	default:
-		usage()
 	}
 	var rows []Row
 	for _, l := range readLines(Q) {
@@ -256,6 +263,7 @@ func statusCmd(args []string) {
 		ok     bool
 		queue  []string
 		landed []int64
+		marks  map[string]stMark // 레인마다 가장 늦은 착지 표식(stMarks — 끝난 줄 가리기)
 		bat    map[string]string // 도는 묶음의 구성원 → 덧말(이 기계 병합기 기록 — mqBatch)
 	}
 	rems := map[string]*rem{}
@@ -271,12 +279,28 @@ func statusCmd(args []string) {
 			if out, rc := run("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", "refs/hc-landed/*"); rc == 0 {
 				x.ok = true
 				x.queue, x.landed = stRemote(out)
+				x.marks = stMarks(out)
 			}
 		}
 	}
 	now := time.Now()
+	led := stLedTimes()
+	doneMin, hidden := knobInt("state_done"), 0
+	// show: 끝난 줄(end 초 — 0은 모름)은 넣은 뒤를 끝난 때까지, 오래 끝났으면 기본 표에서 뺀다(살아 있거나 모르는 터미널은 안 뺌 —
+	// opsstate.Finished와 같다)
+	show := func(r Row, done bool, end int64, live, stage, est string) {
+		if done && !all && live == "" && stOld(end, r.F(qAdded), doneMin, now) {
+			hidden++
+			return
+		}
+		t := now
+		if end > 0 {
+			t = time.Unix(end, 0)
+		}
+		fmt.Println(stLine(r.F(qName), dash(r.F(qMach)), stAge(r.F(qAdded), t), stage, est))
+	}
 	for _, r := range rows {
-		name, m, addr := r.F(qName), r.F(qMach), r.F(qAddr)
+		name, addr := r.F(qName), r.F(qAddr)
 		in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: lsFirst(DATA+"/last.tsv", name)}
 		if in.State == "wait" {
 			in.Pin, _ = pinOf(name, r.F(qRID))
@@ -298,6 +322,8 @@ func statusCmd(args []string) {
 					break
 				}
 			}
+			var end int64
+			in.Land, end = stEnd(r, in.Pos, x.marks)
 			stage := stStage(in)
 			if pr, _ := prOf(name); pr != "" { // PR 거울(pr.go) — PR이 없으면 줄이 전과 같다
 				stage += " · " + pr
@@ -305,7 +331,7 @@ func statusCmd(args []string) {
 			if h := prHumanNote(name); h != "" { // 사람 리뷰(prhuman.go) — 꺼져 있으면 줄이 전과 같다
 				stage += " · " + h
 			}
-			fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, stEstimate(in.Pos, x.landed)))
+			show(r, in.Land != "", end, in.Live, stage, stEstimate(in.Pos, x.landed))
 			continue
 		}
 		stage := stStage(in)
@@ -315,7 +341,14 @@ func statusCmd(args []string) {
 		if l, why := laneWeight(r); in.State == "wait" && (l || r.F(qWeight) == "normal") { // 무게(weight.go) — 추정 보통은 지금 줄 그대로
 			stage += " · " + why
 		}
-		fmt.Println(stLine(name, dash(m), stAge(r.F(qAdded), now), stage, ""))
+		var end int64
+		if in.State == "sent" {
+			end = stSentAt(r, led)
+		}
+		show(r, in.State == "sent", end, "", stage, "")
+	}
+	if hidden > 0 {
+		fmt.Printf("끝난 레인 %d개 숨김(--all로 모두)\n", hidden)
 	}
 	maPrint()
 	statusTick()

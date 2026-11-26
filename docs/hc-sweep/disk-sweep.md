@@ -6,7 +6,8 @@
   후보만 묻는 꼴(`+D <후보>`)은 쓰지 않는다(2026-11-25 ht-sweep-lsof 실측): `-b`와 함께 못 쓰고(lsof 사용 오류), 후보만·cwd만 물어도 전체를 묻는 것과 걸린 시간이 같다 — lsof는 이름을 주어도 내 프로세스의 모든 fd를 커널에 묻고 그 뒤에 맞추므로 비용은 출력이 아니라 열거에 있다. `--dry-run`은 「후보 n개 lsof x초」를, 실패는 걸린 시간과 상한을 찍는다 — 느린 기계에서 값을 정할 근거.
   건너뜀이 `sweep.tmp_skip_alert`바퀴(기본 3, 0이면 끔) 잇달면 `hc-lane report 중간 --name hc-sweep-tmp-skip` 사건 한 번 — 그 기계의 임시 폴더 정리가 꺼진 셈이라는 것을 지휘가 알게, 판단(lsof 손보기·손으로 지우기)은 지휘가 한다.
   표식 `<상태>/hc-sweep/tmp-skip`(횟수·처음 시각·보냄)으로 되풀이하지 않고, 키 `hc-sweep-tmp-skip:<처음 시각>`이라 보내다 끊겨 다시 보내도 한 건, lsof가 되면 표식을 지워 새로 센다.
-  홈 볼륨 여유가 `sweep.disk_free_gb`(기본 10) 아래면 `hc-lane report 중간 --name hc-disk-low` 사건 한 번(볼륨 사용률과 임시 폴더·`~/Library/Caches/go-build`·`~/.cache/go-build` 크기 함께, 아래 Go 캐시 정리를 한 뒤의 여유로 판정하고 그 바퀴에 지운 개수·크기를 글에 붙인다.
+  hc가 띄운 작업의 임시 파일은 이름이 아니라 자리로 지운다 — 작업별 임시 폴더(docs/hc-sweep/job-tmp.md), 이 이름 꼴 쓸기는 hc가 띄우지 않은 세션 몫이다(꼴을 더하지 않는다).
+  홈 볼륨 여유가 `sweep.disk_free_gb`(기본 10) 아래면 `hc-lane report 중간 --name hc-disk-low` 사건 한 번(볼륨 사용률과 임시 폴더·`~/Library/Caches/go-build`·`~/.cache/go-build`·작업 임시 폴더 뿌리 크기 함께, 아래 Go 캐시 정리를 한 뒤의 여유로 판정하고 그 바퀴에 지운 개수·크기를 글에 붙인다.
   watch 줄 끝 괄호에 기계 이름), 여유가 문턱의 1.5배를 넘으면 다시 알릴 수 있게 된다.
   표식 `<상태>/hc-sweep/disk-low`를 「대기」로 먼저 쓰고 `--key hc-disk-low:<표식 시각>`으로 보낸 뒤 「보냄」으로 바꾼다 — 보내다 끊기거나 실패하면 다음 바퀴가 같은 키로 다시(hc-lane이 같은 키는 한 번만 적는다).
   검증이 ENOSPC로 멈췄다(2026-11-21 워커 맥 여유 1GB).

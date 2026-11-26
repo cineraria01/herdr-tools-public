@@ -131,7 +131,7 @@ func (m *M) specDispatch(v verified.Verifier, id, shard string) bool {
 	args := []string{"run", "--bg", "--json", "--no-parent", "--rm", "--on", v.Machine,
 		"--name", name, "--label", "hc-merger-spec=1", "--cwd", v.Path,
 		"env", fmt.Sprintf("HC_LANE_SPEC_BUSY_WAIT=%d", m.busyWait()), fmt.Sprintf("HC_LANE_SPEC_IDLE_LOAD=%d", m.idleLoad())}
-	args = append(append(args, gateEnv(v.Machine)...), tail...)
+	args = append(append(args, gateEnv(v.Machine)...), jobWrap(name, v.Path, tail)...)
 	_, rc, e := boundedRun(60*time.Second, "hc", nil, args...)
 	if rc != 0 {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 추측 검증을 %s 에 띄우지 못했다(종료 %d): %s — 그 무리는 착지 때 직접 검증\n", v.Machine, rc, strings.TrimSpace(e))
