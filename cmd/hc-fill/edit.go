@@ -142,7 +142,7 @@ func editCmd(args []string) {
 				die("%s: 지시문에 「## 이어서:」(--then으로 붙인 일)가 있다 — 바꾸면 그 일을 잃는다. 새 지시문에 그 절까지 넣어 rm --force 뒤 다시 add", name)
 			}
 			bf = DATA + "/briefs/added/" + name + ".md"
-			if os.MkdirAll(DATA+"/briefs/added", 0o755) != nil || writeAtomic(bf, string(bt)) != nil {
+			if os.MkdirAll(DATA+"/briefs/added", 0o755) != nil || carryWrite(bf, name, prj, bt) != nil { // .qa 자료 싣기(carry.go)
 				DRC = 1
 				die("지시문을 복사하지 못했다: %s → %s", brief, bf)
 			}

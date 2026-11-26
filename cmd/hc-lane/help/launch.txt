@@ -26,6 +26,8 @@
   --brief       지시문에 착지·정리 절차(--read는 판정 알림)를 붙인 실행용 사본을 대상 기계에 두고, 실행 명령의 {brief}
                 자리에 그 경로를 넣는다. 사본 자리: 설정 lane.brief_dir(그 기계 경로, ~ 는 그 기계 집)/<레인>-run.md,
                 없으면 지시문과 같은 폴더의 <이름>-run.md. -- 뒤 명령이 없으면 설정 lane.run 틀(셸 문법)
+  --carry       이 기계 tar 묶음을 작업 트리를 만든 직후(설정 훅 뒤·임대 전) 그 안에 푼다(--on이면 hc exec -i). 못 풀면 작업 트리를
+                되돌리고 종료 1. 쓰기 레인만(hc-fill이 지시문의 지휘 기계 .qa 자료를 싣는다)
   설정 lane.notify no면 hc run --no-notify(hc가 지휘 입력에 종료·막힘을 넣지 않음 — 지휘가 hc-lane wait를 늘 걸 때만)
   HC_LANE_FILL=1(hc-fill)이면 hc run --no-parent(대기열 레인·감사 줄은 부른 터미널이 끝나도 함께 꺼지지 않게)
   띄운 뒤       화면에 Claude 폴더 신뢰 질문(「❯ No, exit」·「Yes, I trust this folder」)이 보이면 그 터미널에만 신뢰를 고른다

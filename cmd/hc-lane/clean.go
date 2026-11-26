@@ -202,8 +202,12 @@ func cleanMain(args []string) int {
 		termGate("")
 	}
 	arch, btip, subm := mergedCheck(blk, reg, br, P) // 1) 기준에 들어갔나·표식이 쥐었나·보관할 것
-	delOnly := wtLeftovers(reg, dir, common, P)      // 2) 지울 폴더에 남길 변경이 없나
-	archivePush(arch)                                // 2.5) --archive
+	// 1.5) 바뀌지 않은 실은 파일(--carry)은 레인 산출물이 아니다 — 거둔다(carry.go)
+	if reg && dir && !carryDrop(P) {
+		stop("실어 보낸 자료를 거두지 못했다: " + wt)
+	}
+	delOnly := wtLeftovers(reg, dir, common, P) // 2) 지울 폴더에 남길 변경이 없나
+	archivePush(arch)                           // 2.5) --archive
 	if dir {
 		qaMove(wl, reg) // 2.7) 무시된 보관물 .qa
 	}

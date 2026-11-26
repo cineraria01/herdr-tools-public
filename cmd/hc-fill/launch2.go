@@ -80,6 +80,14 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 			rd = "--read"
 		}
 	}
+	// 지시문의 .qa/… 자료를 작업 트리에 실을 묶음(carry.go) — 쓰기 레인·지휘가 쓴 지시문만. 상한을 넘으면 막힘 사건 뒤 띄우지 않음
+	cf, cok := "", true
+	if rd == "" && dash(dest) == "-" {
+		if body, cf, cok = lcCarry(lane, proj, body, dash(owner)); !cok {
+			return 2
+		}
+		defer os.Remove(cf) // 빈 이름이면 아무 일 없음
+	}
 	sa := []string{"--print-steps"}
 	if rd != "" {
 		sa = append(sa, rd)
@@ -183,6 +191,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	}
 	if on != "" {
 		la = append(la, "--on", on)
+	}
+	if cf != "" {
+		la = append(la, "--carry", cf)
 	}
 	la = append(append(la, "--name", lane, "--repo", repo, "--"), args...)
 	env := []string{"HC_LANE_COORD=" + wco, "HC_LANE_OWNER=" + own, "HC_LANE_FILL=1", "HERDR_LAND_PRIORITY=" + strconv.Itoa(wcnt(lane))}

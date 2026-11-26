@@ -13,8 +13,9 @@ if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; i=0; while [ "$i" -lt "$(
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_COORD:-없음}" >>"$T_LOG/coord.log"   # 띄울 때 넘긴 지휘(watch 대상)
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_FILL:-없음}" >>"$T_LOG/fill.log"   # hc-fill 레인 표시(lanes.tsv 넷째 칸 fill)
 [ "${1-}" = --print-steps ] || [ "${2-}" = --print-steps ] || [ "${3-}" = --print-steps ] || echo "${HC_LANE_OWNER:-없음}" >>"$T_LOG/owner.log"   # 레인 주인(lanes.tsv 셋째 칸)
-on= name=
-while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
+on= name= carry=
+while [ $# -gt 0 ]; do case $1 in --on) on=$2; shift 2 ;; --name) name=$2; shift 2 ;; --carry) carry=$2; shift 2 ;; --print-steps) steps=1; shift ;; --) break ;; *) shift ;; esac; done
+[ -z "$carry" ] || { mkdir -p "$T_LOG/carried-$name" && tar -xf "$carry" -C "$T_LOG/carried-$name"; } || exit 1   # 실어 보낸 묶음을 「작업 트리」 대신 여기에 푼다
 if [ -n "${steps-}" ]; then echo "### 착지 STEPS $name ${on:-local}"; exit 0; fi
 echo "$name ${HERDR_LAND_PRIORITY:-없음}" >>"$T_LOG/landprio.log"   # 착지 줄 우선(그 레인을 기다리는 줄 수)
 echo "$name ${HC_LANE_PRIORITY:-없음}" >>"$T_LOG/laneprio.log"   # 제출 우선(대기열 줄의 우선)

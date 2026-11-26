@@ -170,6 +170,7 @@ func addCmd(args []string) {
 	bf := DATA + "/briefs/added/" + name + ".md"
 	tmp := bf + ".tmp." + strconv.Itoa(os.Getpid())
 	b, err := os.ReadFile(brief)
+	b, ext := carryPrep(name, prj, b, map[string]bool{}, true) // 지휘 기계 경로를 레인 작업 트리 .qa/… 로(carry.go)
 	if err != nil || os.MkdirAll(filepath.Dir(bf), 0o755) != nil || os.WriteFile(tmp, b, 0o644) != nil || len(b) == 0 {
 		os.Remove(tmp)
 		die("지시문을 복사하지 못했다: %s → %s", brief, bf)
@@ -189,6 +190,7 @@ func addCmd(args []string) {
 		os.Remove(tmp)
 		exit(1)
 	}
+	carryKeep(name, ext, true)
 	say("더함 %s (%s%s)", name, prj, addNote(after, only, coord, prio, early, aud, onl, prof, wt, ovk))
 	dupWarn(name, prj, bf)
 	siblingNote(name, prj, coord, time.Now())
@@ -347,12 +349,14 @@ func thenLocked(tl, pre, prj, brief string) {
 	}
 	old, err1 := os.ReadFile(pb)
 	add, err2 := os.ReadFile(brief)
+	add, ext := carryPrep(pre, prj, add, carryTaken(pre), true) // 사본 폴더는 선행 레인 것(carry.go)
 	mid := fmt.Sprintf("\n## 이어서: %s (hc-fill add --then, %s)\n위 일을 끝내 커밋한 뒤 같은 작업 트리에서 이어서 한다. 이 절의 커밋 제목 머리는 `%s:`으로 쓴다(이 이름을 --after로 기다리는 레인이 풀리게).\n위 일의 완료 보고·착지는 하지 않는다 — 이 절까지 끝낸 뒤 한 번만 report 완료.\n",
 		tl, nowMin(), tl)
 	if err1 != nil || err2 != nil || writeAtomic(pb, string(old)+mid+string(add)) != nil {
 		DRC = 1 // 검사 거절(2)이 아니라 쓰기 실패 — 셸 판과 같은 1(Fable L3)
 		die("선행 지시문에 붙이지 못했다: %s", pb)
 	}
+	carryKeep(pre, ext, false)
 	say("이어 붙임 %s → %s (새 레인 없음, 선행 지시문 %s)", tl, pre, pb)
 }
 

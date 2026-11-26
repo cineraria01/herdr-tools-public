@@ -40,6 +40,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 다른 프로젝트 선행](docs/hc-fill/after-other-project.md)
 - [hc-fill: 자동 감사](docs/hc-fill/audit.md)
 - [hc-fill: 지시문 복사](docs/hc-fill/brief-copy.md)
+- [hc-fill: .qa 자료 싣기](docs/hc-fill/carry.md)
 - [hc-fill: 설정](docs/hc-fill/config.md)
 - [hc-fill: 선행 사슬](docs/hc-fill/dep-chain.md)
 - [hc-fill: 먼저 띄움](docs/hc-fill/early.md)

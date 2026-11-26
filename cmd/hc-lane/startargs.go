@@ -30,7 +30,7 @@ func valS(args []string) string {
 }
 
 // startKnown: 띄우기·clean·gc·fetch가 받는 인자(모르는 인자 권함용)
-var startKnown = []string{"--on", "--branch", "--name", "--repo", "--brief", "--start-wait", "--min-age", "--verdict", "--read", "--direct",
+var startKnown = []string{"--on", "--branch", "--name", "--repo", "--brief", "--carry", "--start-wait", "--min-age", "--verdict", "--read", "--direct",
 	"--resume", "--dry-run", "--print-steps", "--integ", "--remote-branches", "--archive"}
 
 // parseStart: 옵션을 전역에 읽고, 남은 것(-- 뒤 실행 명령, fetch의 참조)을 돌려준다
@@ -58,6 +58,10 @@ func parseStart(cmd string, args []string) []string {
 			continue
 		case "--brief":
 			brief = valS(args)
+			args = args[2:]
+			continue
+		case "--carry":
+			carry = valS(args)
 			args = args[2:]
 			continue
 		case "--start-wait":
@@ -131,6 +135,9 @@ func checkArgs(cmd string, rest []string) {
 	}
 	if !(launch && !read) && resume {
 		die("--resume은 쓰기 레인을 띄울 때만 쓴다")
+	}
+	if !(launch && !read) && carry != "" {
+		die("--carry는 쓰기 레인을 띄울 때만 쓴다(작업 트리에 푼다)")
 	}
 	if read && direct {
 		argFail(2, "--read와 --direct는 함께 쓰지 않는다(--direct는 쓰기 레인만)")

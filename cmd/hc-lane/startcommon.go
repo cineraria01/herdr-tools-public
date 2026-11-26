@@ -24,6 +24,7 @@ import (
 
 var (
 	branch, name, brief, swarg, integ, minage         string
+	carry                                             string // --carry <이 기계 tar>: 작업 트리를 만든 직후 그 안에 푼다(hc-fill — 지휘 기계 .qa 자료)
 	read, direct, resume, archive, dry, steps, rbFlag bool
 	cmdName                                           string
 	top, wt, rx, undo                                 string

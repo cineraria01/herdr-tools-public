@@ -122,6 +122,11 @@ func gcDirKept(ps [][2]string) bool {
 		gcKeepf(wt, "진행 중 "+strings.Join(strings.Fields(ip), " "))
 		return true
 	}
+	if !carryDrop("") { // 바뀌지 않은 실은 파일(--carry)은 레인 산출물이 아니다(carry.go)
+		gcKeepf(wt, "실어 보낸 자료를 거두지 못함")
+		gcErr = true
+		return true
+	}
 	st, r := xout("git", "--no-optional-locks", "-c", "core.quotePath=false", "-C", wt, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
 	if r != 0 {
 		gcKeepf(wt, "git status 실패")

@@ -326,6 +326,9 @@ func launchDry(nn, envs, rest []string, wfrom string) {
 		}
 		fmt.Printf("[dry-run] git -C %s worktree add %s-b %s %s %s\n", q(repo), tk, branch, q(wt), wfrom)
 		fmt.Printf("[dry-run] (%s 에 .claude/herdr-setup.sh 가 있으면) 워크트리에서 bash .claude/herdr-setup.sh\n", blab)
+		if carry != "" {
+			fmt.Printf("[dry-run] 실어 보낼 묶음 %s 를 %s%s 에 풂(tar -xf)\n", carry, onc(), q(wt))
+		}
 		fmt.Printf("[dry-run] 임대 잡기 refs/hc-lanes/%s (없을 때만 — 이미 있으면 종료 10, 원격 없음이면 임대 없이)\n", name)
 	}
 	line := "[dry-run] hc run --bg --json"
@@ -487,6 +490,7 @@ func recordLane(tid string, fill bool) {
 func launchRun(nn, envs, rest []string, wfrom, tid string, fill bool) (code int, ok bool) {
 	if !read {
 		makeWorktree(wfrom)
+		carryIn()
 		lsha, rc := takeLease()
 		if rc != 0 {
 			return rc, false
