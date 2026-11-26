@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,10 +105,34 @@ func (s *sx) gofix4() {
 		p.Kill()
 	}
 	s.ok("나무 모음 도중 SIGKILL: 저장소 최종 파일은 옛 값 그대로", s.is(rf, "old big\n"))
+	s.waitOrphansGone(c.Process.Pid)
 	jp := M + "/.local/state/herdr-sync/repo-journal.tsv"
 	s.run()
-	r1 := s.r.RC
+	s.ok("SIGKILL 뒤 첫 실행 종료 0", s.r.RC == 0)
 	s.run()
-	s.ok("SIGKILL 뒤 다음 실행 두 번 종료 0, 일지 없음, 원격에 새 값", r1 == 0 && s.r.RC == 0 && !ct.Exists(jp) &&
+	s.ok("SIGKILL 뒤 둘째 실행도 종료 0, 일지 없음, 원격에 새 값", s.r.RC == 0 && !ct.Exists(jp) &&
 		s.corigin("show", "main:skills/claude/beta/big.md") == strings.TrimSuffix(nb, "\n") && s.is(rf, nb))
+}
+
+// waitOrphansGone: 죽인 실행(pid)이 고아 기록에 적은 자식 무리의 우두머리가 다 사라질 때까지(좀비가 거둬질 때까지) 기다린다 — 여기
+// 무리는 우두머리 하나뿐이다(받는 tar, 가짜 tar의 sleep — 그 진짜 tar·head는 이미 끝남).
+// 가짜 tar(sleep)를 끄면 받는 tar는 EOF로 저절로 끝나지만, 그 사이(끝나는 중·launchd가 아직 안 거둔 좀비 — 무리 kill은 EPERM)에
+// 다음 실행이 돌면 그 무리를 소유를 모르는 채 남은 것으로 세어 75로 미뤘다(2026-11-26 ht-flaky-contract-shards, 다시 돌기 14번).
+// 실제 다음 실행은 몇 분 뒤라 무리가 이미 없다 — 시간 대신 그 조건을 기다린다
+func (s *sx) waitOrphansGone(pid int) {
+	d := proc.RecordDir()
+	es, _ := os.ReadDir(d)
+	for _, e := range es {
+		f := strings.Split(ct.Read(filepath.Join(d, e.Name())), "\t")
+		pg, _ := strconv.Atoi(e.Name())
+		if pg <= 1 || len(f) < 3 || f[2] != strconv.Itoa(pid) {
+			continue
+		}
+		for i := 0; proc.Alive(pg); i++ {
+			if i == 600 {
+				s.t.Fatalf("죽인 실행의 자식 무리 %d가 60초 지나도 남았다", pg)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }

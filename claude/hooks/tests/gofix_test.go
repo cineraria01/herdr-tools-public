@@ -260,16 +260,17 @@ func TestLoopNoQuestionTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := []byte(`{"tool_name":"AskUserQuestion","tool_input":{}}`)
-	env := func(sleep string) []string {
+	env := func(sleep, limit string) []string {
 		return envWith(nil, "HOME="+filepath.Join(T, "home"), "PATH="+filepath.Join(T, "bin")+":/usr/bin:/bin",
-			"HC_TERMINAL_ID=audit-term", "HERDR_TIMEOUT_REMOTE=1", "FAKE_SLEEP="+sleep)
+			"HC_TERMINAL_ID=audit-term", "HERDR_TIMEOUT_REMOTE="+limit, "FAKE_SLEEP="+sleep)
 	}
+	// 대조의 상한은 넉넉히(60초) — 1초면 부하에서 bash 띄우기만으로 넘겨 「즉시」가 시간 넘김으로 막혔다(2026-11-24 지휘 맥, 부하 8)
 	t.Run("대조: 즉시 답하면 허용", func(t *testing.T) {
-		rc, _, errOut := runHook(t, "loop-no-question", in, env("0"), "")
+		rc, _, errOut := runHook(t, "loop-no-question", in, env("0", "60"), "")
 		checkRC(t, rc, 0, errOut, "")
 	})
 	t.Run("늦으면 시간 넘김으로 막음", func(t *testing.T) {
-		rc, _, errOut := runHook(t, "loop-no-question", in, env("3"), "")
+		rc, _, errOut := runHook(t, "loop-no-question", in, env("3", "1"), "")
 		if rc != 2 || !strings.Contains(errOut, "시간 안에 답하지 않아") {
 			t.Errorf("rc=%d(want 2·시간 넘김 진단) err=[%s]", rc, errOut)
 		}

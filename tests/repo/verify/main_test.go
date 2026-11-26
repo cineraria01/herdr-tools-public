@@ -318,12 +318,15 @@ func TestPlan(t *testing.T) {
 		!strings.HasPrefix(calls, want) || strings.Index(out, "기다렸다") > strings.Index(out, "TestCotenantGuard") {
 		t.Errorf("잠금을 쥔 동안: 기다린 초 한 줄 뒤 무거운 단계여야 rc=%d\n%s\n%s", rc, calls, out)
 	}
+	// 안 기다림은 시간(옛 5초 상한 — 부하에서 가짜 검증 한 바퀴가 넘겨 흔들렸다, 2026-11-26 ht-flaky-contract-shards)이 아니라
+	// 쥔 잠금에 한 번도 막히지 않았음(lockBlocked 고리)으로 본다 — 막히면 잠금을 놓아 시험이 멈추지 않게
 	held = hold(t, lockPath())
 	defer held.Close()
+	blocked := false
+	lockBlocked = func() { blocked = true; held.Close() }
 	t.Setenv("HERDR_VERIFY_NO_LOCK", "1")
-	t0 := time.Now()
-	if rc, out, _ = run(); rc != 0 || strings.Contains(out, "잠금") || time.Since(t0) > 5*time.Second {
-		t.Errorf("HERDR_VERIFY_NO_LOCK=1: 잠금을 안 보고 바로 돈다 rc=%d %v\n%s", rc, time.Since(t0), out)
+	if rc, out, _ = run(); rc != 0 || strings.Contains(out, "잠금") || blocked {
+		t.Errorf("HERDR_VERIFY_NO_LOCK=1: 잠금을 안 보고 바로 돈다 rc=%d 막힘=%v\n%s", rc, blocked, out)
 	}
 }
 
@@ -435,34 +438,74 @@ func TestRunShards(t *testing.T) {
 	heavy := []shard{{argv: []string{"sleep", "2"}, w: 2}, {argv: []string{"sleep", "2"}}}
 	// 들어가는 조각을 먼저: 둘째(자리 2)가 못 들어가도 셋째(자리 1)는 첫째와 함께 — 2+2초(앞에 막히면 2+2+2초)
 	ahead := []shard{{argv: []string{"sleep", "2"}}, {argv: []string{"sleep", "2"}, w: 2}, {argv: []string{"sleep", "2"}}}
+	// 함께 돎·차례는 벽시계 상한이 아니라 「끝」 줄의 +시작~+끝초(같은 시계)로 본다 — 옛 상한(3.5·5.8초)은 부하 15~62에서 조각 끝마다의
+	// 고아 검사(ps)가 밀려 흔들렸다(2026-11-26 ht-flaky-contract-shards). b가 a 끝 뒤에 띄워졌으면 반올림해도 시작 ≥ 끝이다
+	with := func(a, b span1) bool { return a.s < b.e && b.s < a.e }
+	after := func(b, a span1) bool { return b.s >= a.e }
 	for _, c := range []struct {
-		sh        []shard
-		n, lo, hi int
-	}{{two, 2, 0, 3500}, {two, 1, 4000, 60000}, {heavy, 2, 4000, 60000}, {heavy, 3, 0, 3500}, {ahead, 2, 4000, 5800}} {
+		sh   []shard
+		n    int
+		want func(v []span1) bool
+	}{
+		{two, 2, func(v []span1) bool { return with(v[0], v[1]) }},
+		{two, 1, func(v []span1) bool { return after(v[1], v[0]) }},
+		{two, 4, func(v []span1) bool { return with(v[0], v[1]) }},
+		{heavy, 2, func(v []span1) bool { return after(v[1], v[0]) }},
+		{heavy, 3, func(v []span1) bool { return with(v[0], v[1]) }},
+		{ahead, 2, func(v []span1) bool { return with(v[0], v[2]) && after(v[1], v[0]) && after(v[1], v[2]) }},
+	} {
 		f, read := outFile(t)
-		t0 := time.Now()
 		rc := runShards(R, c.sh, nil, c.n, make(chan os.Signal), f)
-		if ms := int(time.Since(t0).Milliseconds()); rc != 0 || ms < c.lo || ms > c.hi {
-			t.Errorf("n=%d: 통과·%d~%dms여야 rc=%d %dms\n%s", c.n, c.lo, c.hi, rc, ms, read())
+		out := read()
+		v := spans(out, len(c.sh))
+		if rc != 0 || v == nil || !c.want(v) {
+			t.Errorf("n=%d: 통과·함께 돎/차례가 맞아야 rc=%d %v\n%s", c.n, rc, v, out)
+			continue
+		}
+		// 빈 자리·초: 쥔 자리·초는 조각마다 자리 × (끝−시작)의 합이다(자리 2는 두 몫) — 단계 초에 든 고아 검사 시간은 빈 몫이라 상한을 두지 않는다
+		m := idleRe.FindStringSubmatch(out)
+		var held float64
+		for _, x := range v {
+			held += float64(x.w) * (x.e - x.s)
+		}
+		if m == nil {
+			t.Errorf("n=%d: 조각 단계 빈 자리·초 줄이 없다\n%s", c.n, out)
+		} else if h, _ := strconv.ParseFloat(m[1], 64); h < held-1 || h > held+1 {
+			t.Errorf("n=%d: 쥔 자리·초 %v가 조각 자리×초 합 %.1f와 달라\n%s", c.n, h, held, out)
+		} else if p, _ := strconv.Atoi(m[2]); c.n == 4 && p < 49 { // 자리 4에 한 자리씩 둘이면 적어도 절반이 빈다
+			t.Errorf("n=4: 빈 몫이 절반 넘어야 %d%%\n%s", p, out)
 		}
 	}
-	// 빈 자리·초: 자리 4에 2초짜리 둘(자리 1씩)이면 절반이 빈다, 자리 3에 heavy(2+1)면 거의 안 빈다
-	idle := regexp.MustCompile(`(?m)^조각 단계 [0-9.]+초 · \+[0-9.]+~\+[0-9.]+초 — 자리 [0-9]+, 쥔 자리·초 [0-9]+, 빈 자리·초 [0-9]+ \(([0-9]+)%\)$`)
-	for _, c := range []struct {
-		sh     []shard
-		n      int
-		lo, hi int
-	}{{two, 4, 40, 60}, {heavy, 3, 0, 15}} {
-		f, read := outFile(t)
-		runShards(R, c.sh, nil, c.n, make(chan os.Signal), f)
-		p := -1
-		if m := idle.FindStringSubmatch(read()); m != nil {
-			p, _ = strconv.Atoi(m[1])
+}
+
+var (
+	endRe  = regexp.MustCompile(`(?m)^-- \[([0-9]+)/[0-9]+\] .* 끝 [0-9]+초 종료 [0-9]+ · \+([0-9.]+)~\+([0-9.]+)초 자리 ([0-9]+)$`)
+	idleRe = regexp.MustCompile(`(?m)^조각 단계 [0-9.]+초 · \+[0-9.]+~\+[0-9.]+초 — 자리 [0-9]+, 쥔 자리·초 ([0-9]+), 빈 자리·초 -?[0-9]+ \(-?([0-9]+)%\)$`)
+)
+
+// span1: 조각 하나의 「끝」 줄 — +시작·+끝초와 자리
+type span1 struct {
+	s, e float64
+	w    int
+}
+
+// spans: runShards 출력의 「끝」 줄을 조각 차례로. n개가 다 없으면 nil
+func spans(out string, n int) []span1 {
+	v, got := make([]span1, n), 0
+	for _, m := range endRe.FindAllStringSubmatch(out, -1) {
+		i, _ := strconv.Atoi(m[1])
+		if i < 1 || i > n {
+			return nil
 		}
-		if p < c.lo || p > c.hi {
-			t.Errorf("n=%d: 빈 몫 %d~%d%%여야\n%s", c.n, c.lo, c.hi, read())
-		}
+		s, _ := strconv.ParseFloat(m[2], 64)
+		e, _ := strconv.ParseFloat(m[3], 64)
+		w, _ := strconv.Atoi(m[4])
+		v[i-1], got = span1{s, e, w}, got+1
 	}
+	if got != n {
+		return nil
+	}
+	return v
 }
 
 // 끊기면(TERM) 도는 조각 무리를 모두 끄고 143

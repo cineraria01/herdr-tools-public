@@ -50,8 +50,9 @@ func TestPipelineDeadline(t *testing.T) {
 	pipeMax = 300 * time.Millisecond
 	defer func() { pipeMax = old }()
 	start := time.Now()
-	p, c := pipeline([]byte("a\n"), exec.Command("sleep", "8"), exec.Command("cat"), nil)
-	if took := time.Since(start); took > 5*time.Second {
+	// 기다림과 끔의 간격을 크게(생산자 60초 · 상한 30초) — 옛 8초·5초는 부하에서 끄고 거두는 시간이 상한을 넘겨 흔들렸다(2026-11-26 ht-flaky-contract-shards)
+	p, c := pipeline([]byte("a\n"), exec.Command("sleep", "60"), exec.Command("cat"), nil)
+	if took := time.Since(start); took > 30*time.Second {
 		t.Errorf("기한을 넘겨 %v 기다렸다", took)
 	}
 	if p != 124 || c != 124 {
