@@ -164,8 +164,8 @@ func Remove(dir, tree, was string, stderr io.Writer) bool {
 	return gitx.Run(dir, nil, stderr, "push", "-q", "--force-with-lease="+Prefix+tree+":"+was, "origin", ":"+Prefix+tree) == 0
 }
 
-// FreshSh: 추측 검증(또는 워커 착지)이 진행 중인가(ht-spec-overrun — hc-fill advise_spec_fresh와 병합기 맨 앞 기다림 상한이 같은 판정을
-// 쓴다). sh 본문 조각이고, 앞에서 n(분)과 k(폴더 종류 — spec 기본, 워커 착지는 land: hc-merger landon.go <클론>.land-wt/<차례 12>)를
+// FreshSh: 추측 검증(또는 워커 착지)이 진행 중인가(ht-spec-overrun — 병합기 맨 앞 기다림 상한과 병합기 상태 기록의 진행 시각이 같은
+// 판정을 쓴다. 병합기만 부른다 — ht-merger-state-record부터 hc-fill은 병합기 기록만 읽는다, 지킴 cmd/hc-fill staterec_test.go). sh 본문 조각이고, 앞에서 n(분)과 k(폴더 종류 — spec 기본, 워커 착지는 land: hc-merger landon.go <클론>.land-wt/<차례 12>)를
 // 정한 뒤 인자 「주소 클론 아이디8」 셋씩: <클론>.<k>-wt/<아이디8>로 시작하는 로그(<…>.log)나 작업 트리(node_modules·.git 빼고)에 n분
 // 안에 쓴 파일이 있으면 그 주소 한 줄. 없는 경로의 find 오류는 「갱신 없음」 — 끝까지 오면 종료 0이라, 종료가 0이 아니면 그 기계에서
 // 못 돌았다(모름). <클론>은 일꾼처럼 git 최상위(링크를 푼 경로, hc-merger specverify.go top)와 터미널 폴더 그대로 둘 다(워커 착지

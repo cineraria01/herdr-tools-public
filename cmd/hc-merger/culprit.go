@@ -256,6 +256,9 @@ func (m *M) prefixWait(c *specCtx, ps []prefix, front *specRow, now int64) (spec
 		return specLand, false
 	}
 	m.wmach = strings.Join(ms, "·")
+	for _, r := range run {
+		m.wpre = append(m.wpre, *r) // 상태 한 장의 기다리는 대상(staterec.go)
+	}
 	fmt.Printf("hc-lane merger: 앞 무리 추측 도는 중(%s) — 결과를 기다린다\n", m.wmach)
 	return specWaitFront, true
 }

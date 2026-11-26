@@ -132,16 +132,13 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	t0 := time.Now()
 	var terms []lsTerm
 	termsOK := false
-	cwd := map[string]string{}   // 살아 있는 터미널 주소 → 폴더(병합기 클론을 찾는다 — statemerge.go stateLanding)
-	var hterms []hcjson.Terminal // 같은 표(추측 검증 터미널 spec-<아이디8>을 찾는다 — statemerge.go stateSpecWait)
+	var hterms []hcjson.Terminal // 같은 표(병합기 기록의 기다리는 대상 주소가 살아 있나 — mergerrec.go stateRec)
+	htermsOK := false
 	hc.Calls++
 	if out, rc := run("hc", "ls", "--json"); rc == 0 && sub(out) != "" {
 		terms, termsOK = lsTerms(sub(out))
 		if l, err := hcjson.ParseList([]byte(out)); err == nil {
-			hterms = l.Terminals
-			for _, t := range l.Terminals {
-				cwd[t.Address] = t.Cwd
-			}
+			hterms, htermsOK = l.Terminals, true
 		}
 	}
 	var conn []string
@@ -196,7 +193,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		p := r.F(qProj)
 		ma, maOK := mr[p]
 		if _, ok := bats[p]; !ok {
-			bats[p] = mqBatch(ma, cwd, now)
+			bats[p] = mqBatch(ma, now)
 		}
 		ln := stateUpLane(r, last[name], live, ma, maOK, bats[p][name], now)
 		s.Lanes = append(s.Lanes, ln)
@@ -248,14 +245,14 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		s.Machines = append(s.Machines, x)
 	}
 
-	// 병합 줄: run 바퀴의 병합기 살아 있음 기록. 병합기 바퀴 시각·검증 시간·건너뜀은 병합기 기계 일지에만 — 이 기계 병합기면
-	// 로컬 일지에서 읽고(statemerge.go), 다른 기계면 모름
+	// 병합 줄: run 바퀴의 병합기 살아 있음 기록과 그 줄에 받아 둔 병합기 기록 한 장(지금 상태 — mergerrec.go). 검증 시간·건너뜀
+	// 이력은 병합기 기계 일지에만 — 이 기계 병합기면 로컬 일지에서 읽고(statemerge.go), 다른 기계면 모름
 	var ps []string
 	for p := range mr {
 		ps = append(ps, p)
 	}
 	sort.Strings(ps)
-	mj := stateMergeJournal(mr, rows, cwd, hterms)
+	mj := stateMergeJournal(mr, rows, hterms, htermsOK)
 	for _, p := range ps {
 		x := mr[p]
 		g := opsstate.MergeLine{Project: p, Merger: x.St}

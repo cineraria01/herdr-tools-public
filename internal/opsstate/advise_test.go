@@ -212,7 +212,7 @@ func TestAdviseNoPlaceholders(t *testing.T) {
 	s := fake()
 	s.Lanes = append(s.Lanes, Lane{Name: "aud", Machine: "a", Stage: "감사 대기(자리 없음 40분)", StageAgeS: ip(60)},
 		Lane{Name: "blk", Machine: "a", Stage: "작업 중(blocked)"}, Lane{Name: "dn", Machine: "a", Stage: "작업 중(done)"})
-	s.Merge = append(s.Merge, MergeLine{Project: "q", Length: ip(1), Merger: "gone"}, MergeLine{Project: "r", Length: ip(2), Merger: "alive", LastRoundAgeS: ip(3600)})
+	s.Merge = append(s.Merge, MergeLine{Project: "q", Length: ip(1), Merger: "gone"}, MergeLine{Project: "r", Length: ip(2), Merger: "alive", LastRoundAgeS: ip(3600), Phase: "round"})
 	s.Watch = []Watch{{Owner: "t2", Alive: bp(false), Need: true}}
 	f := Facts{Addr: map[string]string{"aud": "a/t1", "blk": "a/t2", "dn": "a/t3", "lane-stuck": "a/t4"},
 		Waits: []Wait{{Lane: "rj", Project: "p", AgeS: ip(60), Reject: "가지가 이미 있음"},

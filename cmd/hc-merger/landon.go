@@ -295,6 +295,7 @@ func (m *M) landExec() int {
 	}
 	fmt.Printf("hc-lane merger: 착지 실행 — %s(%s)\n", mach, why)
 	m.jround(jLandOn, mach+"("+why+")", "")
+	m.stLandOn(mach + "(" + why + ")") // 상태 한 장의 마지막 착지 실행 결정(staterec.go)
 	if ev {
 		m.landEvent(why)
 	}
@@ -358,15 +359,19 @@ func (m *M) runRemote(v verified.Verifier) (int, string) {
 	// 추측 일꾼과 같은 꼴(hc run --bg --rm — hc exec는 600초가 상한이라 긴 착지를 못 기다린다). 결과는 그 기계 파일 <클론>.land-wt/<차례 12>.rc
 	dir := v.Path + ".land-wt"
 	res, lg := dir+"/"+cm[:12]+".rc", dir+"/"+cm[:12]+".log"
+	// HERDR_LAND_PHASE: 착지 안쪽 단계 한 줄(착지 스크립트가 덮어씀 — 병합기가 진행을 잴 때 함께 읽는다, staterec.go)
 	args := append([]string{"run", "--bg", "--json", "--no-parent", "--rm", "--on", v.Machine, "--name", "land-" + cm[:8],
-		"--label", "hc-merger-land=1", "--cwd", v.Path, "env", "HC_MERGER_LAND_DIR=" + dir, "HC_MERGER_LAND_RESULT=" + res}, append(gateEnv(v.Machine), env...)...)
+		"--label", "hc-merger-land=1", "--cwd", v.Path, "env", "HC_MERGER_LAND_DIR=" + dir, "HC_MERGER_LAND_RESULT=" + res,
+		"HERDR_LAND_PHASE=" + dir + "/" + cm[:12] + ".phase"}, append(gateEnv(v.Machine), env...)...)
 	args = append(args, "sh", "-c", landWrap, "hc-merger-land", "hc-lane", "merger", "--land-run", m.base, cm)
 	fmt.Fprintf(lf, "hc-lane merger: 착지를 %s(%s)에서 돌린다 — 차례 %s\n", v.Machine, v.Path, first8(cm))
 	if _, rc, e := boundedRun(60*time.Second, "hc", nil, args...); rc != 0 {
 		fmt.Fprintf(lf, "hc-lane merger: 워커에 착지를 띄우지 못했다(종료 %d): %s\n", rc, strings.TrimSpace(e))
 		return 0, "못 띄움"
 	}
+	stop := m.stLandRemote(v.Machine, cm) // 기다리는 동안 상태 한 장을 이어 씀(staterec.go)
 	rc, lost := landAwait(v.Machine, cm, res)
+	stop()
 	landLogTail(lf, v.Machine, lg)
 	if lost == "" {
 		m.unclaim(cm) // 실패로 끝난 실행의 차례 — 못 지우면 다음 바퀴 landPrep이 끝남을 보고 치운다

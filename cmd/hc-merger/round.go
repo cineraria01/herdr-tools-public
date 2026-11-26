@@ -49,6 +49,7 @@ type M struct {
 	capTo                           int    // 추측 실패로 줄일 묶음 크기(0이면 하나 빼기 — 앞 무리로 범인을 가르면 그 앞, culprit.go)
 	steady                                 // 맨 앞을 흔들지 않기(frontsteady.go)
 	landOff                                // 착지 실행 기계(landon.go)
+	recM                                   // 상태 한 장(staterec.go)
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -225,6 +226,7 @@ func (m *M) pickBatch() bool {
 		m.mer = true
 		return false
 	}
+	m.stQueue(q)                  // 상태 한 장의 줄 차례(staterec.go)
 	sus := m.suspect(q)           // 앞 무리로 가린 범인은 혼자(culprit.go)
 	defer m.freezeOrder(&q, &n)() // 도는 맨 앞 무리는 그대로 — 고른 뒤 일지(frontsteady.go A)
 	m.b = nil
@@ -435,6 +437,7 @@ func (m *M) round() {
 	var sd specDecision
 	if sd, m.stree = m.spec(); sd == specWaitFront {
 		m.specWaitNote()
+		m.stSpecWait() // 상태 한 장 — 기다리는 일꾼·진행(staterec.go)
 		m.fin()
 		m.mq, m.mer = "", true
 		return

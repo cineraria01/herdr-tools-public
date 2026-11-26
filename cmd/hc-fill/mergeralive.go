@@ -10,8 +10,9 @@ package main
 // 손잡이는 상태 폴더(DATA)의 표식 파일 하나씩(2026-11-24 지휘 — 공통 손잡이 저장으로 옮길 때까지 가장 단순한 꼴): merger_dead·
 // merger_unknown(내용 = 분, 없으면 기본, 0이면 끔), merger_restart(있으면 켬). 바퀴마다 읽으니 바로 먹는다.
 // 다시 띄우기: hc-fill merger restart <프로젝트>(지휘가 한 명령으로), merger_restart가 있으면 알릴 때 스스로 한 번(기본 끔 — 왜 죽었는지
-// 모르고 다시 띄우면 같은 실패를 되풀이할 수 있다). 기록 DATA/merger-alive.tsv — status·ls가 읽는다.
-// ponytail: 멈춰 선(살아 있는데 바퀴를 안 도는) 병합기는 못 잰다 — 바퀴 시각은 병합기 기계에만 있어 바퀴마다 원격 읽기가 는다
+// 모르고 다시 띄우면 같은 실패를 되풀이할 수 있다). 기록 DATA/merger-alive.tsv — status·ls·state가 읽는다. 살아 있는 병합기는 그
+// 바퀴에 병합기 기록 한 장(hc-merger --state — 병합기마다 onm 한 번)도 같은 줄에 받아 둔다(ht-merger-state-record, mergerrec.go) —
+// 살아 있는데 바퀴를 안 도는 병합기는 그 기록의 진행 시각으로 advise merge-stall이 잰다
 
 import (
 	"fmt"
@@ -32,6 +33,7 @@ type maRow struct {
 	OldLane         string
 	Lanes           []string // 줄 차례대로(큐 참조 이름 순 — 제출 초), LanesOK=false면 모름(큐 못 읽음·옛 기록)
 	LanesOK         bool
+	Rec, RecWhy     string // 병합기 기록 한 장(JSON 그대로 — mergerrec.go maReadRec)과 못 읽은 까닭. 살아 있지 않으면 둘 다 빈 값
 }
 
 // maPos <기록> <기록 있나> <레인>: 병합기 줄 차례(1부터, 줄에 없으면 0). known=false면 줄을 모름(기록 없음·큐 못 읽음·옛 기록).
@@ -98,7 +100,8 @@ func maLoad() map[string]maRow {
 			al = ""
 		}
 		x := maRow{r.F(maProj), r.F(maMach), r.F(maState), int64(atoi10(r.F(maSince))), r.F(maAddr), r.F(maQueued),
-			int64(atoi10(r.F(maOldest))), int64(atoi10(r.F(maChecked))), al, r.F(maWhy), dash0(r.F(maOldLane)), nil, false}
+			int64(atoi10(r.F(maOldest))), int64(atoi10(r.F(maChecked))), al, r.F(maWhy), dash0(r.F(maOldLane)), nil, false,
+			dash0(r.F(maRec)), dash0(r.F(maRecWhy))}
 		switch q := r.F(maQLanes); q {
 		case "", "?":
 		case "-":
@@ -120,7 +123,8 @@ func (x maRow) line() string {
 	if x.LanesOK {
 		q = dash(strings.Join(x.Lanes, ","))
 	}
-	return strings.Join([]string{x.P, x.M, x.St, fmt.Sprint(x.Since), dash(x.Addr), x.K, o, fmt.Sprint(x.Checked), dash(x.Alerted), dash(x.Why), dash(x.OldLane), q}, "\t")
+	return strings.Join([]string{x.P, x.M, x.St, fmt.Sprint(x.Since), dash(x.Addr), x.K, o, fmt.Sprint(x.Checked), dash(x.Alerted), dash(x.Why), dash(x.OldLane), q,
+		dash(x.Rec), dash(x.RecWhy)}, "\t")
 }
 
 // maNames: 병합기 터미널 이름(docs/hc-lane/merger.md 「준비·띄우기」)
@@ -208,19 +212,20 @@ func mergerAliveTick() {
 		if qok {
 			x.K, x.Lanes, x.LanesOK = fmt.Sprint(len(lanes)), lanes, true
 		}
-		unkTerm := false
+		unkTerm, clone := false, ""
 		for _, t := range TERMS {
 			if t.M != m {
 				continue
 			}
 			if has(maNames(p), t.Name) {
-				x.Addr = t.Addr
+				x.Addr, clone = t.Addr, t.Cwd
 			}
 			unkTerm = unkTerm || t.Cwd == "-" // hcjson 모름 항목(살아 있되 칸을 못 읽음 — 병합기일 수 있다)
 		}
 		switch {
 		case x.Addr != "-":
 			x.St = "alive"
+			x.Rec, x.RecWhy = maReadRec(m, clone) // 병합기가 쓴 상태 한 장(mergerrec.go)
 		case m != LOCAL && !connHas(m):
 			x.St, x.Why = "unknown", "기계 연결 안 됨"
 		case unkTerm:
@@ -325,12 +330,6 @@ func maLines() []string {
 	}
 	sort.Strings(ps)
 	now := nowUnix()
-	locals := 0
-	for _, x := range rs {
-		if x.M == LOCAL {
-			locals++
-		}
-	}
 	var o []string
 	for _, p := range ps {
 		x := rs[p]
@@ -345,12 +344,7 @@ func maLines() []string {
 		if x.Oldest > 0 {
 			l += "(가장 오래 " + stDur(now-x.Oldest) + ")"
 		}
-		l += " · 확인 " + stDur(now-x.Checked) + " 전"
-		if x.M == LOCAL { // 착지 실행 기계(landon.go)
-			if w := maLandOn(p, locals); w != "" {
-				l += " · 착지 실행: " + w
-			}
-		}
+		l += " · 확인 " + stDur(now-x.Checked) + " 전" + maRecLine(x, now) // 병합기 기록의 단계·착지 실행(mergerrec.go)
 		o = append(o, l)
 	}
 	return o

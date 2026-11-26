@@ -20,7 +20,7 @@ package main
 //     다른 기계에 맨 앞 제출마다 한 번 더 맡긴다(workerRedo — 통과한 조각은 이어 쓴다, specparts.go). 맡길 기계가 없을 때만 손잡이대로.
 
 //   - 맨 앞 추측이 기다림 상한을 넘겨도 진행 중이면(specFresh — spec-<아이디 8> 터미널 살아 있음 + 로그·작업 트리가 손잡이 spec_fresh분
-//     안에 갱신, hc-fill advise_spec_fresh와 같은 verified.FreshSh) 직접 검증을 새로 시작하지 않고 merger_spec_timeout까지 더 기다린다
+//     안에 갱신, verified.FreshSh — 상태 기록의 진행 시각과 같은 잼, staterec.go) 직접 검증을 새로 시작하지 않고 merger_spec_timeout까지 더 기다린다
 //     (ht-spec-overrun — 1471초째 도는 추측을 두고 맥에서 처음부터 전체 직접 검증을 시작해 23~34분 걸렸다). 멈췄으면 지금처럼.
 
 import (
@@ -89,28 +89,59 @@ func (m *M) specFresh(r *specRow) (bool, string) {
 
 // freshAt: 그 기계의 터미널 term이 살아 있고 작업 트리·로그 <클론>.spec-wt/<key>…가 spec_fresh분 안에 갱신됐나(verified.FreshSh)
 func (m *M) freshAt(mach, term, id8 string) (bool, string) {
+	p := m.probeAt("spec", mach, term, id8)
+	return p.fresh, p.why
+}
+
+// probe: 일꾼 하나를 잰 결과 — 진행 중인가·아니면 까닭, 그 터미널 주소(hc get — 못 찾으면 빈 값), 부하 대기 줄(일꾼이 쓴 <key>.wait),
+// 안쪽 단계 줄(검증 스크립트가 HERDR_LAND_PHASE = <key>.phase에 쓴 것). 없으면 빈 값
+type probe struct {
+	fresh       bool
+	why, addr   string
+	wait, inner string
+}
+
+// probeAt <spec|land> <기계> <터미널 이름> <key>: freshAt의 몸통 — 병합기 기록(staterec.go)도 같은 한 번으로 주소·부하 대기 줄을 받는다
+func (m *M) probeAt(kind, mach, term, key string) probe {
 	min := m.specFreshMin()
 	if !addrOK(mach) {
-		return false, "터미널 없음"
+		return probe{why: "터미널 없음"}
 	}
 	t, found, err := hcGet(mach+"/"+term, "")
 	switch {
 	case err != nil:
-		return false, "터미널 못 읽음"
+		return probe{why: "터미널 못 읽음"}
 	case !found || t.State != "live" || t.Cwd == "":
-		return false, "터미널 없음"
+		return probe{why: "터미널 없음"}
+	}
+	p := probe{addr: t.Address}
+	if !strings.Contains(p.addr, "/") {
+		p.addr = mach + "/" + p.addr
 	}
 	const lim = 30
+	// 부하 대기 줄(일꾼 specBusyWait — 기다리는 동안만 있다)을 「WAIT\t<줄>」, 안쪽 단계 줄을 「PHASE\t<줄>」로 먼저, 그 뒤 FreshSh(진행 중이면 주소 한 줄)
+	wait := `c=$(cd "$2" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || c=$2; for x in wait:WAIT phase:PHASE; do ` +
+		`for f in "$c.$k-wt/$3.${x%%:*}" "$2.$k-wt/$3.${x%%:*}"; do if [ -s "$f" ]; then printf '%s\t' "${x#*:}"; head -n1 "$f"; echo; break; fi; done; done; `
 	o, rc, e := boundedRun((lim+10)*time.Second, "hc", nil, "exec", "--on", mach, "--json", "--timeout", strconv.Itoa(lim),
-		"--", "sh", "-c", "n=$1; shift; "+verified.FreshSh, "_", strconv.Itoa(min), t.Address, t.Cwd, id8)
+		"--", "sh", "-c", "n=$1; shift; k="+kind+"; "+wait+verified.FreshSh, "_", strconv.Itoa(min), t.Address, t.Cwd, key)
 	x, err := hcjson.ParseExec([]byte(o), []byte(e), rc)
-	switch {
-	case err != nil || x.Code != 0 || x.TimedOut:
-		return false, "갱신 못 읽음"
-	case strings.TrimSpace(string(x.Stdout)) == "":
-		return false, "갱신 없음"
+	if err != nil || x.Code != 0 || x.TimedOut {
+		p.why = "갱신 못 읽음"
+		return p
 	}
-	return true, ""
+	for _, l := range strings.Split(string(x.Stdout), "\n") {
+		if w, ok := strings.CutPrefix(l, "WAIT\t"); ok {
+			p.wait = strings.TrimSpace(w)
+		} else if w, ok := strings.CutPrefix(l, "PHASE\t"); ok {
+			p.inner = strings.TrimSpace(w)
+		} else if strings.TrimSpace(l) != "" {
+			p.fresh = true
+		}
+	}
+	if !p.fresh {
+		p.why = "갱신 없음"
+	}
+	return p
 }
 
 // overWait: 상한을 넘긴 맨 앞이 진행 중이라 더 기다린다 — 화면에 바퀴마다, 일지에 맨 앞 제출마다 한 줄(<일지 폴더>/overwait에 그 SHA)

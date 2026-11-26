@@ -83,6 +83,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane logs (도구 기록 모으기)](docs/hc-lane/logs.md)
 - [hc-lane 병합기: 묶음](docs/hc-lane/merger-batch.md)
 - [hc-lane 병합기: 추측 검증 (병합기 병렬 검증)](docs/hc-lane/merger-spec-verify.md)
+- [병합기 상태 한 장 (merger-state)](docs/hc-lane/merger-state.md)
 - [hc-lane 병합기 (제출·merger, 최소판)](docs/hc-lane/merger.md)
 - [hc-lane park (주차)](docs/hc-lane/park.md)
 - [hc-lane rerere (같은 충돌 다시 풀기)](docs/hc-lane/rerere.md)

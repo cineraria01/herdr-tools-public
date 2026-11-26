@@ -17,6 +17,7 @@
 
 - `hc-merger --why 20` — 최근 착지 20번의 검증 길 요약 한 줄(건너뜀·직접 검증 까닭·착지 시간 중앙). `hc-lane merger --why 20`과 같다.
 - `hc-merger status`(= `hc-lane merger status` = `hc-fill merger status`) — `--repo` 없이 설정의 모든 병합기 한 줄씩(살아 있음·큐 k건), 종료 0.
+- `hc-merger --state <클론>` — 그 클론 병합기가 쓴 상태 한 장(단계·마지막 진행·기다리는 대상 주소·안쪽 단계, JSON) 그대로. 종료 0 · 기록 없음(옛 판 병합기) 3 · 못 읽음 1. hc-fill이 이 기계·다른 기계 모두 이것으로 읽는다(docs/hc-lane/merger-state.md).
 - `hc-fill status` · `hc-fill state --json` — 큐에 기다리는 제출, 병합기 살아 있음.
 - `hc-lane stats --since 1d` — 제출 → 착지 시간. `hc-lane logs` — 병합기 로그의 실패 줄.
 - 원격 큐: `git ls-remote origin 'refs/merge-queue/*'`.

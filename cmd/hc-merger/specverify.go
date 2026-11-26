@@ -81,7 +81,7 @@ func specVerifyMain(a []string) int {
 	lg := wt + ".log"
 	// 검증 자리를 busy_wait초 안에 못 얻으면 검증하지 않고 「바쁨」(verifierpick.go) — 병합기가 곧바로 다른 한가한 기계로 다시 고른다
 	if lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {
-		waited := specBusyWait(lf)
+		waited := specBusyWait(lf, wt+".wait")
 		lf.Close()
 		if waited != "" && shard != "" {
 			return specShardEnd(r, shard, "busy") // 몫의 바쁨은 그 몫의 끝일 뿐 — spec 참조는 다른 몫이 쓰고 있다
@@ -153,7 +153,9 @@ func specRunVerify(wt, lg, top, base, id, shard, tree string, ev *specEvidence) 
 	c := shellCmd(wt, "bash", verified.Script)
 	c.Stdout, c.Stderr = lf, lf
 	c.Env = append(env, "HC_LANE=spec-"+id[:8], "HERDR_SPEC_VERIFY=1", "HERDR_VERIFIED_TREE=", "HERDR_VERIFY_PARTS="+pp.file,
-		"HERDR_VERIFY_SHARD="+shard) // 나눔 몫(없으면 빈 값 — 전체)
+		"HERDR_VERIFY_SHARD="+shard,     // 나눔 몫(없으면 빈 값 — 전체)
+		"HERDR_LAND_PHASE="+wt+".phase") // 안쪽 단계 한 줄(착지와 같은 계약 — 예: 부하 기다림. 병합기가 진행을 잴 때 읽는다, staterec.go)
+	defer os.Remove(wt + ".phase")
 	max := time.Duration(specTimeout()) * time.Second
 	stopParts := pp.watch()
 	rc, ran := proc.WaitFor(c, "", max, max <= 0)

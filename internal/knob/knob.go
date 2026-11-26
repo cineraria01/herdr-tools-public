@@ -75,7 +75,6 @@ var Defs = []Def{
 	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	// 지금 손댈 것(2026-11-24 ops-advise, docs/ops/advise.md). 풀 수 있는 대기·사슬의 문턱은 놀고 있음 알림과 같은 idle
 	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔)"},
-	{Name: "advise_spec_fresh", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "병합기가 기다리는 추측 검증(spec-<아이디 8> 터미널)·워커 착지(land-<차례 8>)가 살아 있고 그 로그·작업 트리가 이만큼 안에 갱신됐으면 병합 줄 안 움직임이 아님(0이면 끔 — 추측 기다림·워커 착지를 따로 보지 않음)"},
 	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
 	{Name: "advise_pinned", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "--only로 묶인 기계가 모두 상한·멈춤이라 이만큼 못 뜬 대기 줄이 있고 다른 기계에 빈 자리가 있으면 주인 지휘에 손댈 것(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},

@@ -175,7 +175,7 @@ func (m *M) specDecide() (specDecision, string) {
 	m.wmach = ""
 	switch {
 	case d == specWaitFront:
-		m.wmach = st[0].row.machine
+		m.wmach, m.wrow = st[0].row.machine, *st[0].row
 		if c.gpick[m.wmach] {
 			m.wmach = "*" + m.wmach // 병합 검증 자리로 맡김(jround.go specWaitNote가 같은 기다림 동안 잇는다)
 		}

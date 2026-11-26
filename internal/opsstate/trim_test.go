@@ -187,7 +187,7 @@ func TestTrimJSONHidden(t *testing.T) {
 	}
 }
 
-// ⑤ 병합기 일지(이 기계): 마지막 줄 시각·마지막 착지의 착지 시간·최근 착지 수·건너뜀·맡김. 다른 레인(keep false)·「이미 … 에 있음」은 안 센다
+// ⑤ 병합기 일지(이 기계, 이력): 마지막 착지의 착지 시간·최근 착지 수·건너뜀·맡김. 다른 레인(keep false)·「이미 … 에 있음」은 안 센다
 func TestMergeJournal(t *testing.T) {
 	row := func(at, lane, t0, t1, res, cand, why string) string {
 		return strings.Join([]string{at, "1795000000-" + lane, lane, "id", "-", "-", "1", t0, t1, res, cand, why}, "\t")
@@ -202,10 +202,10 @@ func TestMergeJournal(t *testing.T) {
 		"broken",
 	}
 	f := MergeJournal(ls, 20, func(l string) bool { return l != "other" })
-	if f.LastAt.Format("15:04") != "10:45" || f.VerifyS == nil || *f.VerifyS != 60 || f.Lands != 2 || f.Skipped != 1 || f.Delegated != 1 {
+	if f.VerifyS == nil || *f.VerifyS != 60 || f.Lands != 2 || f.Skipped != 1 || f.Delegated != 1 {
 		t.Errorf("%+v %v", f, f.VerifyS)
 	}
-	if e := MergeJournal(nil, 20, func(string) bool { return true }); !e.LastAt.IsZero() || e.VerifyS != nil || e.Lands != 0 {
+	if e := MergeJournal(nil, 20, func(string) bool { return true }); e.VerifyS != nil || e.Lands != 0 {
 		t.Errorf("빈 일지: %+v", e)
 	}
 }

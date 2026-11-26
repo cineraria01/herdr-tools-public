@@ -102,12 +102,14 @@ func (m *M) runCandidate() int {
 		return 75
 	}
 	defer lf.Close()
+	pf, stop := m.stLandLocal() // 착지하는 동안 상태 한 장을 이어 씀(staterec.go)
+	defer stop()
 	if rc, _ := setupHook(m.mwt, m.top, m.base, lf, m.mj+"/child", false); rc != 0 {
 		return rc
 	}
 	c := exec.Command(gSelf, "land", m.base)
 	c.Dir, c.Stdout, c.Stderr = m.mwt, lf, lf
-	c.Env = append(append(os.Environ(), "HERDR_MERGER=1"), m.landEnv(lf, m.ex, "HERDR_VERIFY_PARTS_FROM="+m.sparts)...)
+	c.Env = append(append(os.Environ(), "HERDR_MERGER=1", "HERDR_LAND_PHASE="+pf), m.landEnv(lf, m.ex, "HERDR_VERIFY_PARTS_FROM="+m.sparts)...)
 	// 착지에도 상한(재감사 3바퀴 merger/R-3M07 — 검증·착지 훅이 끝나지 않으면 일꾼·상주가 사건 없이 끝없이 기다렸다). 넘으면 무리째 거두고
 	// 124(모름 — 일시 실패, judge가 원격부터 본다). keep: 이 일꾼이 죽으면 상한을 걸 쪽이 없지만 그 착지는 끝까지 가게 둔다(다음 바퀴가
 	// 기다리다 상한을 넘기면 쉰 바퀴로 센다 — childWait)

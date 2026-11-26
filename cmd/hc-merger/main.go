@@ -22,6 +22,7 @@ import (
 
 	"herdr-tools/internal/gitx"
 	"herdr-tools/internal/lockx"
+	"herdr-tools/internal/mergerstate"
 	"herdr-tools/internal/oplog"
 	"herdr-tools/internal/proc"
 	"herdr-tools/internal/selfexec"
@@ -61,6 +62,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--land-run" { // 착지 실행 워커 쪽(landon.go — 병합기가 hc exec --on으로)
 		os.Exit(landRunMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--state" { // 상태 한 장 읽기(staterec.go — hc-fill이 이 기계·다른 기계 모두 이것으로)
+		os.Exit(stateMain(os.Args[2:]))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--why" { // 일지의 검증 길 요약(why.go)
 		os.Exit(whyMain(os.Args[2:]))
@@ -538,17 +542,20 @@ func roundMain(a []string) {
 			m.deferred = why
 			m.deferNote()
 		}
+		m.stPhase(mergerstate.PrevLand, "앞 실행 착지 기다림 — "+why, nil, !count, nil) // 상한 안에서 도는 착지 자식 = 진행
 		os.Exit(75)
 	}
 	m.round()
 	m.deferNote()
+	rc := 0
 	switch {
 	case m.mq != "":
-		os.Exit(76)
+		rc = 76
 	case m.mer:
-		os.Exit(75)
+		rc = 75
 	}
-	os.Exit(0)
+	m.stEnd(rc)
+	os.Exit(rc)
 }
 
 // parentAlive: 상주 부모가 아직 이 일꾼의 부모인가(죽으면 init·launchd 아래로 옮겨진다)

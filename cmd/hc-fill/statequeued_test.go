@@ -41,10 +41,10 @@ func sqWr(t *testing.T, p, s string) {
 	}
 }
 
-// sqMA: 병합기 살아 있음 기록(상태 큐수 줄)
-func sqMA(t *testing.T, st, k, lanes string) {
+// sqMA: 병합기 살아 있음 기록(상태 큐수 줄 [병합기 기록 JSON])
+func sqMA(t *testing.T, st, k, lanes string, rec ...string) {
 	now := itoa(time.Now().Unix())
-	sqWr(t, DATA+"/merger-alive.tsv", strings.Join([]string{"app", "m", st, now, "t9", k, "-", now, "-", "-", "-", lanes}, "\t")+"\n")
+	sqWr(t, DATA+"/merger-alive.tsv", strings.Join(append([]string{"app", "m", st, now, "t9", k, "-", now, "-", "-", "-", lanes}, rec...), "\t")+"\n")
 }
 
 // sqLane: 상태 한 장의 lane-a와 손댈 것에 lane-long:lane-a가 있나
@@ -63,21 +63,19 @@ func sqLane(t *testing.T) (stage string, queued, long bool) {
 }
 
 func TestStateSubmittedQueued(t *testing.T) {
-	clone := sqFx(t)
+	sqFx(t)
 	now := time.Now()
-	sqWr(t, clone+"/.git/hc-merger/specwait", itoa(now.Add(-12*time.Minute).Unix())+" "+itoa(now.Add(-30*time.Second).Unix())+" 9 w\n"+
-		"refs/merge-queue/1795500000-ln-x "+strings.Repeat("a", 40)+" ln-x -\n"+
-		"refs/merge-queue/1795509999-lane-a "+strings.Repeat("b", 40)+" lane-a -\n")
+	// 병합기 기록(ht-merger-state-record — 옛 재료는 클론의 specwait): 맨 앞 추측을 w에 맡겨 12분째 기다림, 구성원 ln-x·lane-a
+	rec := `{"v":1,"at":` + itoa(now.Unix()) + `,"progress_at":` + itoa(now.Add(-30*time.Second).Unix()) + `,"machine":"m","phase":"spec-wait","phase_since":` +
+		itoa(now.Add(-12*time.Minute).Unix()) + `,"members":["ln-x","lane-a"],"waits":[{"machine":"w","addr":"w/t3","role":"추측","at":0}]}`
 
 	// ① 큐에 있고 도는 추측 묶음의 구성원 → 차례·묶음 검증 중, lane-long 없음
-	sqMA(t, "alive", "2", "ln-x,lane-a")
+	sqMA(t, "alive", "2", "ln-x,lane-a", rec, "-")
 	if st, q, long := sqLane(t); st != "제출됨(병합기 줄 2번째 · 묶음 검증 중 w 12분째)" || !q || long {
 		t.Errorf("① 묶음 구성원: %q queued=%v long=%v", st, q, long)
 	}
-	if err := os.Remove(clone + "/.git/hc-merger/specwait"); err != nil {
-		t.Fatal(err)
-	}
-	// 큐에만 있음(묶음 아님) → 차례, lane-long 없음
+	// 큐에만 있음(묶음 아님 — 병합기가 쉼) → 차례, lane-long 없음
+	sqMA(t, "alive", "2", "ln-x,lane-a", `{"v":1,"phase":"idle"}`, "-")
 	if st, q, long := sqLane(t); st != "제출됨(병합기 줄 2번째)" || !q || long {
 		t.Errorf("큐에만 있음: %q queued=%v long=%v", st, q, long)
 	}

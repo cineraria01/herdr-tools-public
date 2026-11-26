@@ -152,26 +152,33 @@ type MergeLine struct {
 	// 줄에 선 가장 오래된 제출(병합기 살아 있음 기록 — 큐 참조 이름의 초)의 나이와 레인. 모르면 nil·빈 값
 	OldestAgeS *int   `json:"oldest_age_s"`
 	OldestLane string `json:"oldest_lane"`
-	// 이 기계 병합기가 지금 착지 중인 맨 앞 레인과 그 착지 나이(착지 자식 기록이 살아 있음 — hc-fill statemerge.go stateLanding, 또는
-	// 워커 착지가 살아서 갱신 중 — 아래 LandOn). 착지 중이 아니거나 다른 기계 병합기면 빈 값·nil, 착지 중인데 레인을 못 찾으면 「모름」
+	// 병합기 기록(internal/mergerstate — 병합기가 쓴 상태 한 장, docs/hc-lane/merger-state.md)에서: 착지 단계(병합기 기계·워커)면 맨 앞
+	// 레인과 그 단계 나이. 착지 단계가 아니거나 기록 모름이면 빈 값·nil
 	Landing     string `json:"landing"`
 	LandingAgeS *int   `json:"landing_age_s"`
-	// 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중(클론의 <git-path hc-merger>/specwait 마지막 기다림 바퀴가 advise_spec_fresh분 안 — hc-fill
-	// statemerge.go stateSpecWait)이면 맡긴 검증 기계, 그 기계에 살아 있는 spec-<아이디 8> 터미널 주소(없으면 빈 값), 그 추측 로그·작업 트리에
-	// advise_spec_fresh분 안에 쓴 파일이 있나. 기다림 아님·다른 기계 병합기·손잡이 0이면 빈 값
-	SpecMachine string `json:"spec_machine"`
-	SpecTerm    string `json:"spec_term"`
-	SpecFresh   bool   `json:"spec_fresh"`
-	SpecWhy     string `json:"spec_why"` // 그 기계에서 갱신을 못 읽은 까닭(읽었으면 빈 값) — 갱신 없음과 가른다
-	// 이 기계 병합기가 맨 앞 착지를 워커에서 돌리는 중(일지 마지막 줄이 워커 「착지 실행」 — hc-fill statemerge.go stateLandOn)이면 그
-	// 워커, 그 결정부터의 나이, 그 기계에 살아 있는 land-<차례 8> 터미널 주소(없으면 빈 값), 그 착지 로그·작업 트리에 advise_spec_fresh분
-	// 안에 쓴 파일이 있나(있으면 Landing·LandingAgeS도 채운다), 못 읽은 까닭. 워커 착지 아님·다른 기계 병합기·손잡이 0이면 빈 값
-	LandOn      string `json:"land_on"`
-	LandOnAgeS  *int   `json:"land_on_age_s"`
-	LandOnTerm  string `json:"land_on_term"`
-	LandOnFresh bool   `json:"land_on_fresh"`
-	LandOnWhy   string `json:"land_on_why"`
-	Why         string `json:"why"`
+	// 단계(idle·round·spec-wait·land·land-on·prev-land)·까닭 한 줄·단계 나이·기록 나이. 기록 모름이면 빈 값·nil(까닭은 Why).
+	// LastRoundAgeS(json 이름은 그대로 — 글은 「마지막 진행 N분 전」)는 기록의 마지막 진행 시각부터(바퀴가 도는 시각도 일지 줄 시각도 아님)
+	Phase     string `json:"phase"`
+	PhaseWhy  string `json:"phase_why"`
+	PhaseAgeS *int   `json:"phase_age_s"`
+	RecAgeS   *int   `json:"rec_age_s"`
+	// 기다리는 대상(기록의 주소 — 살아 있는지는 이번 hc ls로), 착지 안쪽 단계 한 줄과 그 나이(착지 스크립트가 안 쓰면 빈 값)
+	Waits     []MergeWait `json:"waits"`
+	Inner     string      `json:"inner"`
+	InnerAgeS *int        `json:"inner_age_s"`
+	// 워커 착지 단계면 그 워커(기다리는 대상의 기계), 아니면 빈 값
+	LandOn string `json:"land_on"`
+	Why    string `json:"why"`
+}
+
+// MergeWait: 병합기가 기다리는 대상 — 기계·주소(병합기가 못 찾았으면 빈 값)·역할(병합기가 쓴 글)·띄운 나이, 살아 있나(live·gone·?
+// — 이번 hc ls에서 그 주소, 못 읽으면 ?)
+type MergeWait struct {
+	Machine string `json:"machine"`
+	Addr    string `json:"addr"`
+	Role    string `json:"role"`
+	AgeS    *int   `json:"age_s"`
+	Live    string `json:"live"`
 }
 
 // Deploy: Version 빈 글 = 모름(json null)
@@ -440,8 +447,21 @@ func Human(w io.Writer, s State) error {
 	}
 	sec("병합 줄", len(s.Merge))
 	for _, m := range s.Merge {
-		t := fmt.Sprintf("  %s  줄 %s · 병합기 %s · 마지막 바퀴 %s 전 · 최근 검증 %s · 건너뜀 %s",
-			m.Project, ival(m.Length), m.Merger, age(m.LastRoundAgeS), fval(m.RecentVerifyS, "%.0f초"), fval(pct(m.SkipRatio), "%.0f%%"))
+		last := "마지막 진행 모름"
+		if m.LastRoundAgeS != nil {
+			last = "마지막 진행 " + age(m.LastRoundAgeS) + " 전"
+		}
+		t := fmt.Sprintf("  %s  줄 %s · 병합기 %s · %s · 최근 검증 %s · 건너뜀 %s",
+			m.Project, ival(m.Length), m.Merger, last, fval(m.RecentVerifyS, "%.0f초"), fval(pct(m.SkipRatio), "%.0f%%"))
+		if m.Phase != "" {
+			t += " · " + or(m.PhaseWhy, m.Phase) + " " + age(m.PhaseAgeS) + "째"
+		}
+		if m.Inner != "" {
+			t += " · 안쪽 단계 " + m.Inner + " " + age(m.InnerAgeS) + "째"
+		}
+		for _, w := range m.Waits {
+			t += " · 기다림 " + w.Role + " " + or(w.Addr, w.Machine) + "(" + w.Live + ")"
+		}
 		if m.Lands != nil {
 			t += fmt.Sprintf("(최근 착지 %d번 중 %s번) · 검증 맡김 %s번", *m.Lands, ival(m.Skipped), ival(m.Delegated))
 		}

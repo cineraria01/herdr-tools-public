@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"herdr-tools/internal/hcjson"
 )
 
 // stIn: 한 줄의 단계를 정하는 재료
@@ -245,15 +243,8 @@ func statusCmd(args []string) {
 	// 터미널·연결은 한 번씩. 못 읽으면 살아 있음을 모르는 채로(끝남이 아니라 모름)
 	var terms []lsTerm
 	termsOK := false
-	// cwd: 살아 있는 터미널 주소 → 폴더(병합기 클론 — mqBatch)
-	cwd := map[string]string{}
 	if out, rc := run("hc", "ls", "--json"); rc == 0 && sub(out) != "" { // 빈 응답은 빈 목록이 아니다(ls와 같음)
 		terms, termsOK = lsTerms(sub(out))
-		if l, err := hcjson.ParseList([]byte(out)); err == nil {
-			for _, t := range l.Terminals {
-				cwd[t.Address] = t.Cwd
-			}
-		}
 	}
 	var conn []string
 	connKnown := false
@@ -274,7 +265,7 @@ func statusCmd(args []string) {
 		if r.F(qState) != "up" || rems[p] != nil {
 			continue
 		}
-		x := &rem{bat: mqBatch(mr[p], cwd, time.Now())}
+		x := &rem{bat: mqBatch(mr[p], time.Now())}
 		rems[p] = x
 		if repo := repoOf(p, LOCAL); repo != "" {
 			if out, rc := run("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", "refs/hc-landed/*"); rc == 0 {

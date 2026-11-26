@@ -219,6 +219,8 @@ const (
 	maWhy     = 10
 	maOldLane = 11 // 가장 오래된 제출의 레인(advise-merge-stall-age — 옛 기록 10칸은 빈 값)
 	maQLanes  = 12 // 줄 차례대로 레인(쉼표, 빈 줄 -, 큐 못 읽음 ? — ht-fill-submitted-line, 옛 기록 11칸은 빈 값 = 모름)
+	maRec     = 13 // 병합기 기록 한 장(internal/mergerstate JSON 그대로, 없으면 - — ht-merger-state-record)
+	maRecWhy  = 14 // 그 기록을 못 읽은 까닭(읽었으면 -)
 )
 
 // 작은 상태 파일들

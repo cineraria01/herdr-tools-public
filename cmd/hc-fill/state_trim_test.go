@@ -33,10 +33,16 @@ func jrow(at time.Time, lane, res, cand, why string, sec int) string {
 	return strings.Join([]string{u(at), "1795000000-" + lane, lane, "id", "-", "-", "1", u(at.Add(-time.Duration(sec) * time.Second)), u(at), res, cand, why}, "\t")
 }
 
-// ⑤ 이 기계 병합기: 일지가 있으면 마지막 바퀴(일지 마지막 줄) 나이·최근 착지 시간을 채우고 「아직 안 모음」 까닭은 없다
+// ⑤ 이 기계 병합기: 일지가 있으면 최근 착지 시간(이력)을 채우고 「아직 안 모음」 까닭은 없다. 마지막 바퀴는 일지 마지막 줄이 아니라
+// 병합기 기록의 마지막 진행 시각(ht-merger-state-record — 일지 마지막 줄 2분 전, 기록 진행 40분 전 → 40분)
 func TestStateMergeLocalJournal(t *testing.T) {
 	jf := stMerge(t, "m")
 	now := time.Now()
+	n := now.Unix()
+	if err := os.WriteFile(DATA+"/merger-alive.tsv", []byte(strings.Join([]string{"app", "m", "alive", itoa(n - 600), "-", "1", "-", itoa(n - 30), "-", "-", "-", "-",
+		`{"v":1,"at":` + itoa(n) + `,"progress_at":` + itoa(n-2400) + `,"phase":"round","phase_since":` + itoa(n-2400) + `}`, "-"}, "\t")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ls := jrow(now.Add(-20*time.Minute), "lane-a", "착지", "c1", "착지, 검증 건너뜀(추측 abcd1234 · w)", 300) + "\n" +
 		jrow(now.Add(-2*time.Minute), "lane-a", "추측 기다림", "-", "추측 검증 기다림 2바퀴, 검증 맡김(w) 60초 — 구성원 lane-a", 60) + "\n"
 	if err := os.WriteFile(jf, []byte(ls), 0o644); err != nil {
@@ -47,7 +53,7 @@ func TestStateMergeLocalJournal(t *testing.T) {
 		t.Fatalf("병합 줄: %+v", s.Merge)
 	}
 	g := s.Merge[0]
-	if g.LastRoundAgeS == nil || *g.LastRoundAgeS < 100 || *g.LastRoundAgeS > 200 || g.RecentVerifyS == nil || *g.RecentVerifyS != 300 ||
+	if g.LastRoundAgeS == nil || *g.LastRoundAgeS < 2390 || *g.LastRoundAgeS > 2410 || g.RecentVerifyS == nil || *g.RecentVerifyS != 300 ||
 		g.SkipRatio == nil || *g.SkipRatio != 1 || strings.Contains(g.Why, "아직 안 모음") {
 		t.Errorf("이 기계 병합기 일지: %+v", g)
 	}

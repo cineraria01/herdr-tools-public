@@ -390,15 +390,21 @@ func (m *M) specBusyRedo(c *specCtx, r *specRow, busy map[string]bool, lanes str
 }
 
 // specBusyWait: 일꾼 — 검증 전에 이 기계가 한가해지길 HC_LANE_SPEC_BUSY_WAIT초(병합기 손잡이 busy_wait가 넘긴 값, 기본 30)까지 본다.
-// 한가하면 ""(로그에 기다린 초 한 줄), 끝내 바쁘거나 못 재면 기다린 것 한 줄(「바쁨」 결과의 본문)
-func specBusyWait(lf *os.File) string {
+// 한가하면 ""(로그에 기다린 초 한 줄), 끝내 바쁘거나 못 재면 기다린 것 한 줄(「바쁨」 결과의 본문).
+// 기다리는 동안 waitf에 「부하 대기 — <기계> <잰 값> · 기준 부하 <pct>%」 한 줄을 잴 때마다 덮어쓰고 끝나면 지운다(ht-merger-state-record —
+// 기다리는 동안 로그가 조용해 병합기·hc-fill이 멈춤으로 봤다. 병합기가 진행을 잴 때 이 줄을 읽어 기록 단계 load-wait로 — staterec.go)
+func specBusyWait(lf *os.File, waitf string) string {
 	max := intSetting("HC_LANE_SPEC_BUSY_WAIT", os.Getenv("HC_LANE_SPEC_BUSY_WAIT"), 30, 0)
 	pct := intSetting("HC_LANE_SPEC_IDLE_LOAD", os.Getenv("HC_LANE_SPEC_IDLE_LOAD"), 50, 1)
 	gate := os.Getenv("HERDR_VERIFY_GATE") == "1" // 병합 검증 자리 — 레인 검증·부하로는 물러나지 않고 다른 병합 검증만 기다린다
 	t0 := time.Now()
+	defer os.Remove(waitf)
 	for {
 		i, ok := idleProbe()
 		waited := int(time.Since(t0).Seconds())
+		if err := os.WriteFile(waitf, []byte(fmt.Sprintf("부하 대기 — %s %s · 기준 부하 %d%%\n", machine(), i, pct)), 0o666); err != nil {
+			fmt.Fprintf(lf, "hc-lane merger: 부하 대기 표시를 쓰지 못했다: %v\n", err)
+		}
 		if ok && (i.idle(pct) || gate && i.gateFree()) {
 			what := ""
 			if gate {

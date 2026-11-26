@@ -33,9 +33,10 @@
 - 바퀴가 남긴 기록을 다시 쓴다(원격을 더 부르지 않는다). 나이는 `sources[]`의 `tick` 줄(마지막 바퀴가 끝난 뒤 초).
   - 기계 부하·코어·쓴 자리·안 띄운 까닭: `<DATA>/load.tsv`([부하](../hc-fill/load-steer.md)). 자리 상한·레인 상한은 설정 `machine` 줄과 `seats@` 손잡이.
   - 병합기 살아 있음·줄 길이: `<DATA>/merger-alive.tsv`(hc-fill 바퀴가 적는다). 바퀴가 읽은 큐의 레인도 줄 차례대로 적어(12칸), 제출한 레인의 단계가 「제출됨(병합기 줄 n번째)」다 — 큐를 못 읽었거나 옛 기록이면 「줄 모름」.
-    이 기계 병합기가 그 제출을 추측 검증 묶음(클론의 `<git-path hc-merger>/specwait` 구성원)에 넣었거나 착지 중이면 「· 묶음 검증 중 <기계> n분째」·「· 착지 중 n분째」를 붙인다(`hc-fill status`도 같은 덧말).
-  - 병합기 바퀴·검증·건너뜀·맡김: 병합기가 이 기계에 있는 프로젝트만 이 기계 병합기 일지 `<XDG_STATE_HOME, 없으면 ~/.local/state>/hc-lane/merger-journal.tsv`(읽기만).
-    마지막 바퀴는 일지 마지막 줄(병합기는 검증했거나 줄을 붙잡은 바퀴만 적는다), 최근 착지 20번(후보 SHA로 묶고 「이미 … 에 있음」 정리는 뺌 — `hc-lane merger --why`와 같은 셈)의 수·검증 건너뜀 수와 마지막 착지의 착지 시간(시작 → 끝, 검증 포함), 최근 20번의 검증 맡김(추측 기다림).
+    살아 있는 병합기는 같은 줄에 [병합기 상태 한 장](../hc-lane/merger-state.md)(13칸, 못 읽은 까닭 14칸 — run 바퀴가 `hc-merger --state`로 이 기계·다른 기계 모두 같은 길로 받음)을 둔다. 지금 단계·마지막 진행·기다리는 대상(주소)·착지 안쪽 단계는 이것만 읽는다.
+    그 기록의 단계가 추측 검증 기다림(부하 대기 포함)이면 구성원에 「· 묶음 검증 중 <기계,…> n분째」, 착지면 맨 앞 레인에 「· 착지 중 n분째[ — <안쪽 단계> m분째]」를 붙인다(`hc-fill status`도 같은 덧말).
+  - 병합기 검증·건너뜀·맡김(이력): 병합기가 이 기계에 있는 프로젝트만 이 기계 병합기 일지 `<XDG_STATE_HOME, 없으면 ~/.local/state>/hc-lane/merger-journal.tsv`(읽기만).
+    최근 착지 20번(후보 SHA로 묶고 「이미 … 에 있음」 정리는 뺌 — `hc-lane merger --why`와 같은 셈)의 수·검증 건너뜀 수와 마지막 착지의 착지 시간(시작 → 끝, 검증 포함), 최근 20번의 검증 맡김(추측 기다림). 일지는 지금 상태 판정에 쓰지 않는다.
     이 기계 병합기 프로젝트가 둘 이상이면 일지 줄을 대기열의 레인 → 프로젝트로 가른다(대기열에서 정리된 레인 줄은 빠진다).
   - 레인 마지막 사건·최근 사건: `<DATA>/last.tsv`([마지막 보고](../hc-fill/last-report.md)). 그 사건 시각부터 지금까지가 `stage_age_s`다.
   - 대기 까닭: 띄우기 거절 기록 · `overlap.tsv` 겹침 · `need.tsv` 능력 · `pinned.tsv` 묶인 기계([묶인 기계](../hc-fill/pinned.md)) · 대기열의 선행 칸 · 그 밖은 「자리·차례」(기계별 까닭은 `machines[].skip_why`).
@@ -53,8 +54,8 @@
 - `hc machine ls`를 못 읽으면 이 기계 말고는 모두 `연결 모름`. `hc ls`를 못 읽으면 레인 단계가 「모름(hc ls 못 읽음)」이고 `lanes`·`watch[].alive`는 `null`.
 - 아직 모으는 곳이 없는 칸은 `null`이다:
   - `machines[].health` 넷(잠자기·키체인·디스크·Tailscale) — 기계 건강 점검이 기록을 남기면 채운다.
-  - `merge[].last_round_age_s`·`recent_verify_s`·`skip_ratio`·`lands`·`skipped`·`delegated` — 병합기가 다른 기계에 있으면 그 기계 일지에만 있다(원격으로 읽지 않는다, `merge[].why`에 적힌다).
-    이 기계 병합기라도 일지가 없거나 못 읽으면 모두 모름, 일지에 그 프로젝트 줄이 없으면 마지막 바퀴는 모름(셈은 0).
+  - `merge[].recent_verify_s`·`skip_ratio`·`lands`·`skipped`·`delegated`(이력 — 일지 통계) — 병합기가 다른 기계에 있으면 그 기계 일지에만 있다(원격으로 읽지 않는다, `merge[].why`에 적힌다). 이 기계 병합기라도 일지가 없거나 못 읽으면 모두 모름.
+  - `merge[].last_round_age_s`·`phase…`·`waits`·`inner` — 병합기 기록(run 바퀴가 `hc-merger --state`로 이 기계·다른 기계 모두 같은 길로 받아 둔 것)이 없으면 모름. 옛 판 병합기면 `why`에 「모름(옛 판 병합기 — 다시 띄우면 기록)」.
 - `stage_age_s`는 마지막 사건 시각(`last.tsv`는 시:분만)에서 잰다. 하루 넘게 머문 단계는 하루 미만으로 읽힌다.
 
 ## 상태 지문
@@ -136,7 +137,7 @@
 | `merge[].project` | 프로젝트 |
 | `merge[].length` | 줄 길이 |
 | `merge[].merger` | 병합기 `alive` · `gone` · `unknown` |
-| `merge[].last_round_age_s` | 병합기 마지막 바퀴 나이(초, 일지 마지막 줄) |
+| `merge[].last_round_age_s` | 「마지막 진행」 나이(초 — 이름은 옛 것 그대로) — 병합기 기록의 마지막 진행 시각(`progress_at`)부터. 바퀴가 도는 시각(몇 초마다)도 일지 줄 시각도 아니다. 기록 모름이면 null |
 | `merge[].recent_verify_s` | 마지막 착지의 착지 시간(초, 검증 포함) |
 | `merge[].skip_ratio` | 최근 착지의 검증 건너뜀 비율(0~1) |
 | `merge[].lands` | 최근 착지 수(20번까지) |
@@ -144,17 +145,16 @@
 | `merge[].delegated` | 최근 검증 맡김 수(20번까지) |
 | `merge[].oldest_age_s` | 줄에 선 가장 오래된 제출의 나이(초, 큐 참조 이름의 초 — `hc-fill status`의 「가장 오래」와 같은 출처) |
 | `merge[].oldest_lane` | 그 제출의 레인 |
-| `merge[].landing` | 이 기계 병합기가 지금 착지 중인 맨 앞 레인(착지 자식 기록 `child`가 살아 있음 — 레인은 그 병합기 pid의 착지 로그 이름, 못 찾으면 「모름」. 또는 워커 착지가 살아서 갱신 중 — 아래 `land_on_fresh`, 레인은 그 일지 줄. 다른 기계 병합기·착지 중 아님은 빈 값) |
-| `merge[].landing_age_s` | 그 착지의 나이(초, 착지 로그 이름의 시각 = 바퀴 시작 — 없으면 자식 기록 시각) |
-| `merge[].spec_machine` | 이 기계 병합기가 맨 앞 추측 검증을 기다리는 중이면 맡긴 검증 기계(클론 `<git-path hc-merger>/specwait`의 마지막 기다림 바퀴가 `advise_spec_fresh`분 안). 기다림 아님·다른 기계 병합기·손잡이 0이면 빈 값 |
-| `merge[].spec_term` | 그 기계에 살아 있는 추측 검증 터미널 `spec-<아이디 8>`의 주소(`hc ls`), 없으면 빈 값 |
-| `merge[].spec_fresh` | 그 추측 로그 `<클론>.spec-wt/<아이디 8>.log`나 작업 트리(`node_modules`·`.git` 빼고)에 `advise_spec_fresh`분 안에 쓴 파일이 있다(그 기계에서 `find -mmin`). `<클론>`은 일꾼처럼 터미널 폴더의 git 최상위(링크를 푼 경로) |
-| `merge[].spec_why` | 그 기계에서 갱신을 못 읽은 까닭(`hc exec` 실패 등), 읽었으면 빈 값 — advise 근거는 「갱신 없음」과 이것을 가른다 |
-| `merge[].land_on` | 이 기계 병합기가 맨 앞 착지를 워커에서 돌리는 중이면 그 워커(병합기 일지에서 이 프로젝트의 마지막 줄이 워커 「착지 실행」 결정 — 병합기 기계에서 돌림·끊김 줄은 아님). 아니면·다른 기계 병합기·손잡이 `advise_spec_fresh` 0이면 빈 값 |
-| `merge[].land_on_age_s` | 그 결정부터의 나이(초, 일지 줄 시각) |
-| `merge[].land_on_term` | 그 기계에 살아 있는 착지 터미널 `land-<차례 8>`의 주소(`hc ls`), 없으면 빈 값 |
-| `merge[].land_on_fresh` | 그 착지 로그 `<클론>.land-wt/<차례 12>.log`나 작업 트리(`node_modules`·`.git` 빼고)에 `advise_spec_fresh`분 안에 쓴 파일이 있다(추측과 같은 판정 `verified.FreshSh`). 참이면 `landing`·`landing_age_s`도 그 레인·나이로 채운다 |
-| `merge[].land_on_why` | 그 기계에서 갱신을 못 읽은 까닭, 읽었으면 빈 값 |
+| `merge[].landing` | 병합기 기록의 단계가 착지(`land` 병합기 기계 · `land-on` 워커)면 맨 앞 레인(기록 `members` 첫째). 아니면·기록 모름이면 빈 값 |
+| `merge[].landing_age_s` | 그 착지 단계의 나이(초, 기록 `phase_since`부터) |
+| `merge[].phase` | 병합기 기록의 단계(`idle`·`round`·`spec-wait`·`land`·`land-on`·`prev-land` — [병합기 상태 한 장](../hc-lane/merger-state.md)). 기록 모름이면 빈 값(까닭은 `why` — 옛 판 병합기면 「모름(옛 판 병합기 — 다시 띄우면 기록)」) |
+| `merge[].phase_why` | 그 단계의 까닭 한 줄(병합기가 쓴 글) |
+| `merge[].phase_age_s` | 그 단계의 나이(초) |
+| `merge[].rec_age_s` | 기록 나이(초, 병합기가 마지막으로 쓴 때 — 착지 중에도 30초마다 쓴다) |
+| `merge[].waits` | 병합기가 기다리는 대상들 — `machine`·`addr`(터미널 주소, 병합기가 못 찾았으면 빈 값)·`role`(추측·몫 i/K·마무리·착지 실행 등 병합기가 쓴 글)·`age_s`(띄운 뒤 나이)·`live`(이번 `hc ls`에서 그 주소가 살아 있으면 `live`, 없으면 `gone`, `hc ls`를 못 읽으면 `?`) |
+| `merge[].inner` | 착지 안쪽 단계 한 줄(착지 스크립트가 `HERDR_LAND_PHASE` 파일에 쓴 것 — 예 공개 선점 기다림), 안 쓰면 빈 값 |
+| `merge[].inner_age_s` | 그 줄을 병합기가 처음 본 뒤 나이(초) |
+| `merge[].land_on` | 단계가 워커 착지(`land-on`)면 그 워커, 아니면 빈 값 |
 | `merge[].why` | 모르는 칸의 까닭 |
 | `deploy` | 배포(기계마다) |
 | `deploy[].machine` | 기계 |

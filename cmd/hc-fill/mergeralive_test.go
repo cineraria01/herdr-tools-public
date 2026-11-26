@@ -31,7 +31,10 @@ func maFx(t *testing.T, queue string, lsAll string) (events func() string, hcCal
 		"*\" ls-remote \"*) echo x >>\"$d/lsr.log\"; [ -f \"$d/mqbad\" ] && exit 128; cat \"$d/mq.txt\"; [ -s \"$d/mq.txt\" ] || exit 2;;\n"+
 		"esac\nexit 0\n")
 	wr("hc-lane", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'"+DATA+"/ev.log'\n")
-	wr("hc", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'"+DATA+"/hc.log'\ncase \"$1\" in ls) cat '"+DATA+"/lsall.json';; run) echo m2/t9;; esac\n")
+	wr("hc", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'"+DATA+"/hc.log'\ncase \"$1\" in ls) cat '"+DATA+"/lsall.json';; run) echo m2/t9;;\n"+
+		"exec) shift 4; exec \"$@\";; esac\n") // hc exec --on <기계> -- …: 이 기계에서 그대로(병합기 기록 읽기 — maReadRec)
+	// 병합기 기록 읽기(hc-merger --state <클론>): DATA/state-<클론 이름>.json이 있으면 그것, 없으면 기록 없음(종료 3)
+	wr("hc-merger", "#!/bin/sh\nf='"+DATA+"'/state-$(basename \"$2\").json\n[ \"$1\" = --state ] || exit 2\n[ -f \"$f\" ] || exit 3\ncat \"$f\"\n")
 	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
 	rd := func(f string) func() string {
 		return func() string { b, _ := os.ReadFile(DATA + "/" + f); return string(b) }
