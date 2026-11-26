@@ -22,7 +22,11 @@ import (
 func (m *M) stack() bool {
 	// 뒤 제출이 더 새 기준에서 되돌린 변경을 옛 트리에 얹으면 빈 커밋으로 사라진다 — 첫 후보를 이번 기준으로 맞춘다.
 	// 충돌하면 원래 제출 하나로 착지의 rerere 절차를 탄다
-	if inLog(m.mwt, m.lgf, "rebase", "-q", "--reapply-cherry-picks", m.B) != 0 {
+	if inLog(m.mwt, m.lgf, m.frontArgs()...) != 0 {
+		if m.rewrote { // 쌓인 맨 앞의 자기 커밋이 기준과 부딪힘 — 원본 제출로 돌아가면 선행 커밋까지 다시 얹으니 검증 전에 그 제출만 반송
+			m.stackFail(m.stackConflictWhy(m.b[0]))
+			return false
+		}
 		m.jround(jFront, "맨 앞 "+m.b[0].l+" 를 기준 위로 다시 얹으면 충돌 — 착지 없이 묶음 크기 1로", ", 로그 "+m.lgf)
 		m.writeCap(1)
 		m.fin()
@@ -40,8 +44,15 @@ func (m *M) stack() bool {
 		m.defer_("승인 구성원의 후보 트리 대조 실패")
 		return false
 	}
+	if front == apDiffer && m.rewrote { // 원본 제출로 돌아가 착지가 판정을 보게 할 수 없다(선행 커밋까지 얹힘) — 다시 감사로
+		m.stackFail("쌓인 제출(선행 " + m.stk[m.b[0].s].pred + " 위)의 자기 커밋을 기준 위에 얹은 결과가 승인 변경과 다름 — 다시 감사")
+		return false
+	}
 	for i := 1; front == apOK && i < len(m.b); i++ { // 맨 앞이 다르면 뒤를 얹지 않는다 — 아래에서 원본 제출 하나로 줄인다
-		mf, rc := out("merge-base", m.b[i].s, m.B)
+		if !m.predKept(i, k) { // 선행을 못 얹었으면 쌓인 뒤도 이번 묶음에서 뺀다(stack.go)
+			continue
+		}
+		mf, rc := m.forkOf(m.b[i].s, m.B)
 		if rc != 0 {
 			dieGit(rc, "merger: git merge-base 실패(%s)", m.b[i].l)
 		}
@@ -82,7 +93,7 @@ func (m *M) stack() bool {
 	}
 	if len(k) < len(m.b) {
 		// 하나만 남으면 혼자 착지와 같게 원본 제출 그대로 — 승인 착지는 HEAD가 제출 SHA(HERDR_LAND_SHA)여야 한다
-		if len(k) == 1 && inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br, m.C0) != 0 {
+		if len(k) == 1 && !m.rewrote && inLog(m.mwt, m.lgf, "checkout", "-q", "-B", m.br, m.C0) != 0 {
 			m.defer_("후보 가지를 원본 제출로 되돌리지 못했다")
 			return false
 		}
@@ -154,7 +165,7 @@ func (m *M) landEnv(lf *os.File, ex, parts string) []string {
 	// 혼자면 착지가 그 제출의 승인 patch-id를 대조한다. 묶음 HEAD는 어느 한 승인 변경도 아니라 묶음 전체에 대한 판정은 넘기지 않는다 —
 	// 판정이 붙은 구성원은 filterBatch(approved)가 하나씩 확인해야만 묶음에 들었다
 	v, p := m.bv, m.bp
-	if len(m.b) > 1 {
+	if len(m.b) > 1 || m.rewrote { // 다시 쓰인 선행 위 쌓인 맨 앞도 HEAD가 원본이 아니다 — 묶음처럼(stack.go)
 		v, p = "", ""
 		lease := false
 		for _, e := range m.b {

@@ -17,6 +17,7 @@ import (
 // stIn: 한 줄의 단계를 정하는 재료
 type stIn struct {
 	State, Early string // 대기열 6칸(wait|up|sent)·14칸
+	Lane         string // 레인 이름(쌓아 띄움 덧말 — stack.go)
 	Live         string // 살아 있는 터미널 상태(없으면 빈 값), 기계가 연결 안 됨이면 "?"
 	Last         Row    // last.tsv 줄(레인 상태 sha8 시각 한줄 …) — 없으면 nil
 	Aud          string // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
@@ -306,7 +307,7 @@ func statusCmd(args []string) {
 	ovs := readRows(DATA + "/overlap.tsv")
 	for _, r := range rows {
 		name, addr := r.F(qName), r.F(qAddr)
-		in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: lsFirst(DATA+"/last.tsv", name)}
+		in := stIn{State: r.F(qState), Early: r.F(qEarly), Lane: name, Last: lsFirst(DATA+"/last.tsv", name)}
 		if in.State == "wait" {
 			in.Pin, _ = pinOf(name, r.F(qRID))
 			in.Ovl = ovWaitNote(name, ovs)

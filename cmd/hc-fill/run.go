@@ -147,6 +147,8 @@ func runRound() {
 	lowsTick() // 감사 통과 차수의 [낮음] 후속 레인(lows.go)
 	tickMark("stall")
 	stallTick()
+	tickMark("stack")
+	stackTick() // 병합기가 주차한 쌓인 제출 다시 쌓기(restack.go) — 다시 맞춤·반송 다시 띄움 앞
 	tickMark("reland")
 	relandTick() // 병합기 rebase 충돌 반송 → 다시 맞춤 줄(이 바퀴에 띄울 수 있게 orderRows 앞)
 	tickMark("pr")

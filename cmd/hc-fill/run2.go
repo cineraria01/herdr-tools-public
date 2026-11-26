@@ -325,8 +325,9 @@ func waitRow(r Row) {
 			return
 		}
 	}
+	STACK, STREF = "", ""
 	if after != "-" {
-		if ar := afterOK(name, prj, after); ar != 0 {
+		if ar := afterOK(name, prj, after); ar != 0 && (ar != 1 || !stackPick(r, dash(ef))) { // 쌓아 띄움이면 이어 띄운다(stack.go)
 			if ar == 1 && dash(ef) == "-" {
 				ELIST += "," + name + "=" + bBranch
 			}
@@ -355,9 +356,15 @@ func waitRow(r Row) {
 		}
 		BOUNCE = true
 	}
+	if STACK != "" { // 쌓아 띄움 절이 먼저 띄움 절 자리에 — 주차 이어 가기 절(origin/<기본> rebase)은 대신한다
+		ESEC = stackSec(name, dash(ef), bBranch)
+		if RESUME {
+			RSEC = ""
+		}
+	}
 	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
-	RESUME, RSEC, BOUNCE = false, "", false
+	RESUME, RSEC, BOUNCE, ESEC, STACK, STREF = false, "", false, "", "", ""
 	if placed || GOTADDR {
 		ovlPlaced(name, prj, SB, after, dash(ak))
 	}

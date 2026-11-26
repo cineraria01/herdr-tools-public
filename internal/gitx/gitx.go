@@ -59,18 +59,21 @@ func Probe(out string, rc int, absent ...int) State {
 // 따로 확인, 다르면 1) 「-」. 0이 아니면 모름 —
 // 상한에 걸렸으면 proc.TimeoutCode(부르는 쪽이 「다시」로 읽게, gofix M01), 빈·잘린·여러 줄 patch-id면 1.
 // 감사 승인의 판정이다 — hc-lane land(승인 착지·제출)와 병합기 묶음(구성원별 승인 확인)이 같은 이 함수를 쓴다
-func PatchID(stderr io.Writer, a, b string) (string, int) {
-	d, rc := Out("", stderr, "--literal-pathspecs", "diff", "-U0", "--binary", a, b, "--")
+func PatchID(stderr io.Writer, a, b string) (string, int) { return PatchIDIn("", stderr, a, b) }
+
+// PatchIDIn: PatchID를 저장소 dir에서(빈 값이면 지금 폴더) — hc-fill 다시 쌓기(stack)가 프로젝트 저장소에서 쓴다
+func PatchIDIn(dir string, stderr io.Writer, a, b string) (string, int) {
+	d, rc := Out(dir, stderr, "--literal-pathspecs", "diff", "-U0", "--binary", a, b, "--")
 	if rc != 0 {
 		return "", rc
 	}
 	if d == "" {
 		// 빈 diff는 두 트리가 같다고 따로 확인했을 때만 「변경 없음」(merger/R-202: diff가 빈 출력·0을 주자 실제 변경을 「-」로 읽었다)
-		ta, rc := Tree("", a, stderr)
+		ta, rc := Tree(dir, a, stderr)
 		if rc != 0 {
 			return "", rc
 		}
-		tb, rc := Tree("", b, stderr)
+		tb, rc := Tree(dir, b, stderr)
 		if rc != 0 {
 			return "", rc
 		}

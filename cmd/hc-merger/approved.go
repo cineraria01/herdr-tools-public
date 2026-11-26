@@ -24,7 +24,7 @@ func (m *M) approved(e entry) int {
 	if e.v == "" {
 		return apOK
 	}
-	mb, rc := out("merge-base", e.s, m.B)
+	mb, rc := m.forkOf(e.s, m.B) // 쌓인 제출은 P(stack.go)
 	got := ""
 	if rc == 0 {
 		got, rc = gitx.PatchID(os.Stderr, mb, e.s)
@@ -49,7 +49,7 @@ func (m *M) applied(e entry, prev, got string) int {
 	if e.v == "" {
 		return apOK
 	}
-	mb, rc := out("merge-base", e.s, m.B)
+	mb, rc := m.forkOf(e.s, m.B)
 	if rc != 0 {
 		return apUnknown
 	}

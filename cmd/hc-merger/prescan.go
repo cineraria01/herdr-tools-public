@@ -80,6 +80,9 @@ func (m *M) prescan() {
 		if _, err := os.Stat(m.mj + "/fail/" + mn); err == nil {
 			continue // 돌려보내기를 다시 하는 중(fretry)
 		}
+		if _, ok := m.stk[ms]; ok {
+			continue // 쌓인 제출 — 기준과 견주면 선행 커밋까지 부딪혀 보인다(차례에 자기 커밋만 얹는다, stack.go)
+		}
 		ln := ""
 		if len(mn) > 11 && digits.MatchString(mn[:10]) && mn[10] == '-' {
 			ln = mn[11:]

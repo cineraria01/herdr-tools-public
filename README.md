@@ -70,6 +70,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 줄 ID·채택·끊긴 기계](docs/hc-fill/row-id.md)
 - [hc-fill: 늘 돌리기](docs/hc-fill/service.md)
 - [hc-fill: 자리 세기](docs/hc-fill/slots.md)
+- [hc-fill: 쌓아 띄움 (쌓은 PR)](docs/hc-fill/stack.md)
 - [hc-fill: --then (같은 일의 앞뒤 단계는 한 레인)](docs/hc-fill/then.md)
 - [hc-fill: 기계 닿지 않음](docs/hc-fill/unreach.md)
 - [hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)](docs/hc-fill/usage.md)

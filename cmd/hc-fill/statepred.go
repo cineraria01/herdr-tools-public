@@ -24,7 +24,7 @@ func predQueued(p map[string]opsstate.Lane, l opsstate.Lane, proj string, up boo
 // predWaitLane: 대기·되돌려줌 줄의 단계(나이 = 넣은 뒤)
 func predWaitLane(r Row, now time.Time) opsstate.Lane {
 	pin, _ := pinOf(r.F(qName), r.F(qRID))
-	l := opsstate.Lane{Name: r.F(qName), Stage: stStage(stIn{State: r.F(qState), Early: r.F(qEarly), Pin: pin})}
+	l := opsstate.Lane{Name: r.F(qName), Stage: stStage(stIn{State: r.F(qState), Early: r.F(qEarly), Lane: r.F(qName), Pin: pin})}
 	if a, ok := stateAddedAge(r.F(qAdded), now); ok {
 		l.StageAgeS = ptrI(a)
 	}

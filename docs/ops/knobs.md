@@ -62,6 +62,7 @@
 - 병합기 살아 있음(hc-fill, merger-alive): `merger_dead`·`merger_unknown`(분, 0 끔), `merger_restart`(`0`|`1`).
   옛 표식 파일 `<hc-fill 상태 폴더>/merger_dead`·`merger_unknown`·`merger_restart`는 손잡이가 없을 때 그대로 먹고, `knob ls`에 출처 `설정`으로 보인다.
 - 목록 손잡이 `auto_submit`(프로젝트 이름을 쉼표로, `-` = 끔)과 그 시간 상한 `auto_submit_max`(초) — [자동 감사](../hc-fill/audit.md) 「대기열이 제출」.
+- 목록 손잡이 `stack`(쌓아 띄움을 켤 프로젝트, `-` = 끔)과 사슬 깊이 `stack_depth`(겹, 1~5, 기본 2) — [쌓아 띄움](../hc-fill/stack.md).
 - 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초)·`pr_inbox`(완료 없는 레인의 PR, 0·1), 사람 리뷰의 `pr_human`(읽을 작성자 목록, `me` = gh 로그인, `-` = 끔)·`pr_human_block`(착지를 막는 글 종류)·`pr_human_approve`(재승인 기다림, 0·1) — [PR 거울](../hc-fill/pr.md).
 - 지휘 알림 묶기 `coord_digest`(분, 0~120, 기본 0 = 하나씩 — 읽는 도구 hc-lane watch, 보낼 때마다 이 저장 파일을 읽는다) — [watch](../hc-lane/watch.md) 「지휘 알림 묶기」. 주기 전이라도 보내는 개수 `coord_digest_max`(개, 기본 20).
 - 상수에서 올린 정책(ht-config-knobs, 2026-11-26 — 기본은 그때 값 그대로): `light_guess`(0·1, 기본 1 — 무게 안 정한 레인을 지시문 「파일:」 줄로 가벼움 추정, [부하](../hc-fill/load-steer.md)), `hang_shell_grace`(초, 기본 180 — [멈춘 레인](../hc-fill/hang.md)의 셸 기다림), `unsure_warn`(바퀴, 기본 5 — 띄움 미확정 막힘 사건), `orphan_alarm`(바퀴, 기본 10 — 남은 무리로 건너뛴 바퀴 막힘 사건), `pr_open_max`(분, 기본 15 — 착지 뒤 OPEN인 PR 닫기), 병합기 `merger_defer_alarm`(바퀴, 기본 10 — 같은 까닭으로 쉰 바퀴 막힘 사건).

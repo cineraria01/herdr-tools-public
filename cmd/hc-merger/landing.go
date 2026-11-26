@@ -40,5 +40,9 @@ func (m *M) landUnmark() {
 	}
 	if len(args) > 3 && run(args...) != 0 {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: 남은 착지 중 표식을 지우지 못했다(git push) — 다음 바퀴에")
+		return
+	}
+	for _, a := range args[3:] { // 지웠다 — 이 바퀴 목록에서도(쌓인 제출이 선행을 「착지 중」으로 읽어 한 바퀴 늦게 주차하지 않게, stack.go)
+		m.qs = dropRefs(m.qs, a[1:])
 	}
 }

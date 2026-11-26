@@ -27,6 +27,9 @@ func stStage(in stIn) string {
 	if in.Aud == asubAud && s != asubAud && !strings.HasPrefix(s, "착지") {
 		s += " · 대기열이 제출함"
 	}
+	if in.Early == "stacked" && in.Lane != "" && !strings.HasPrefix(s, "착지") { // stack.go
+		s += " · " + stackNote(in.Lane)
+	}
 	return s
 }
 

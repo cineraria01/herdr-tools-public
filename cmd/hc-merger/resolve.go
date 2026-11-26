@@ -441,7 +441,7 @@ func (m *M) resubmit(r *rstate) bool {
 	var kv []string
 	for _, f := range strings.Fields(line) {
 		switch k, _, _ := strings.Cut(f, "="); k {
-		case "orig", "verdict", "patch", "resolved_from":
+		case "orig", "verdict", "patch", "resolved_from", "stack": // 풀이는 기준 위라 쌓임이 아니다(P가 조상이 아닐 수 있다)
 			continue
 		}
 		kv = append(kv, f)

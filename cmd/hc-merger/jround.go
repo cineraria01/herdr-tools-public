@@ -42,6 +42,9 @@ func (m *M) jmembers(b []entry, result, what, tail string, t0, t1 int64) {
 	labs := make([]string, len(b))
 	for i, e := range b {
 		labs[i] = e.l
+		if t := m.stackTag(e.s); t != "" {
+			labs[i] += "(" + t + ")"
+		}
 	}
 	why := what + " — 구성원 " + strings.Join(labs, "+") + tail
 	for _, e := range b {

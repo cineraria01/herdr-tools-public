@@ -10,6 +10,7 @@ import (
 
 type meta struct {
 	base, info, owner, ownerRun, host, term, born, id, job, jobref, verdict, patch string
+	pred, pp, sbad                                                                 string // 쌓인 제출(stack=<선행>@<P>)의 선행·P, 꼴이 틀리면 반송 까닭(stack.go)
 }
 
 var (
@@ -59,6 +60,11 @@ func readMeta(rec, sub string) (meta, bool) {
 			jobs = append(jobs, v)
 		case "fork":
 			fork = first8(v)
+		case "stack":
+			mt.pred, mt.pp, _ = strings.Cut(v, "@")
+			if !laneOK(mt.pred) || !sha40.MatchString(mt.pp) {
+				mt.sbad = "쌓임 기록 꼴(stack=" + v + ")"
+			}
 		}
 	}
 	if !verdictChars.MatchString(mt.verdict) {

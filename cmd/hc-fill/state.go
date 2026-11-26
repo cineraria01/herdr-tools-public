@@ -77,7 +77,7 @@ func stateUpLane(r Row, x Row, live string, ma maRow, maOK bool, bat string, now
 	if !known {
 		pos = -1 // stIn.Pos: −1 = 줄을 못 읽음
 	}
-	in := stIn{State: r.F(qState), Early: r.F(qEarly), Last: x, Pos: pos, Batch: bat, Bg: hangBgWait(name, r.F(qAddr)), Live: live}
+	in := stIn{State: r.F(qState), Early: r.F(qEarly), Lane: name, Last: x, Pos: pos, Batch: bat, Bg: hangBgWait(name, r.F(qAddr)), Live: live}
 	if r.F(qAudit) == "auto" {
 		in.Aud = anote(name)
 	}

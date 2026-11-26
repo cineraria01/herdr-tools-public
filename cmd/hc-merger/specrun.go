@@ -517,7 +517,7 @@ func (m *M) specStack(pc string, shas []string) (tree string, ok, built bool) {
 	}
 	cur := pc
 	for _, s := range shas {
-		mf, rc := out("merge-base", s, pc)
+		mf, rc := m.forkOf(s, pc) // 쌓인 제출은 P 뒤 커밋만(stack.go)
 		if rc != 0 {
 			return "", false, false
 		}

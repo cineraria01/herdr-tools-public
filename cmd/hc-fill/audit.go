@@ -422,7 +422,7 @@ func abrief(aid, lane, m, sha40, p string) bool {
 		return false
 	}
 	branch := strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "origin/")
-	t = strings.ReplaceAll(t, "origin/{base}", ref)
+	t = strings.ReplaceAll(t, "origin/{base}", stackRef(lane, ref)) // 쌓아 띄운 레인은 선행 커밋 P부터(stack.go)
 	t = strings.ReplaceAll(t, "{base}", branch)
 	t = strings.ReplaceAll(t, "{brief}", "~/.local/share/hc-fill/runs/"+lane+"-run.md")
 	t = strings.ReplaceAll(t, "{report}", "~/.local/share/hc-fill/reports/audit-"+aid+".md")

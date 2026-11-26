@@ -50,6 +50,7 @@ type M struct {
 	steady                                 // 맨 앞을 흔들지 않기(frontsteady.go)
 	landOff                                // 착지 실행 기계(landon.go)
 	recM                                   // 상태 한 장(staterec.go)
+	stackM                                 // 쌓인 제출(stack.go)
 }
 
 const mhook = "기본 브랜치에 없는 전용 착지 스크립트(.claude/herdr-land.sh)를 들이는 제출 — 병합기는 제출 트리 속 착지 코드를 실행하지 않는다(그 스크립트는 레인이 직접 착지해 먼저 넣는다)"
@@ -109,7 +110,7 @@ func (m *M) keep(idx ...int) {
 	for _, i := range idx {
 		nb = append(nb, m.b[i])
 	}
-	m.b = nb
+	m.b = m.stackKeep(nb) // 선행이 빠지면 쌓인 뒤도(stack.go)
 }
 
 // jwrite: 일지(cur) — 후보 가지·기준·후보 첫 커밋 한 줄, 담긴 제출마다 한 줄
@@ -212,7 +213,7 @@ func (m *M) queue() (q [][2]string, ok bool) {
 		}
 		return q[i][0]+" "+q[i][1] < q[j][0]+" "+q[j][1]
 	})
-	return q, true
+	return m.stackOrder(q) // 쌓인 제출은 선행 바로 뒤로·선행이 빠졌으면 주차(stack.go)
 }
 
 // pickBatch: 큐 앞에서 묶음 크기만큼 담는다. 계속하면 true, 이 바퀴를 여기서 끝내면 false
@@ -267,9 +268,7 @@ func (m *M) pickBatch() bool {
 			m.mer, m.mq = true, ""
 			return false
 		}
-		// 다른 기본 브랜치로 낸 제출은 그 브랜치의 병합기 몫
-		if mt.base != "" && mt.base != m.base {
-			fmt.Fprintf(os.Stderr, "hc-lane merger: %s 건너뜀 — 기본 브랜치 %s 로 낸 제출(이 병합기는 %s)\n", ln, mt.base, m.base)
+		if m.stackSkip(mt, ln, ms) { // 다른 기본 브랜치로 낸 제출·선행이 묶음에 없는 쌓인 제출(stack.go)
 			continue
 		}
 		if m.reserved(ln) {
@@ -430,7 +429,7 @@ func (m *M) round() {
 	if rc := run("worktree", "add", "-q", "-f", "-B", m.br, m.mwt, m.C0); rc != 0 {
 		dieGit(rc, "merger: 후보 작업 트리를 만들지 못했다(%s)", m.br)
 	}
-	if len(m.b) > 1 && !m.stack() {
+	if (m.stackSolo() || len(m.b) > 1) && !m.stack() {
 		return
 	}
 	// 추측 병렬 검증(specrun.go) — 맨 앞 추측이 검증 기계에서 도는 중이면 착지하지 않고 쉰다

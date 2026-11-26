@@ -326,6 +326,9 @@ func (m *M) doneAll(C, why string) bool {
 			// 묶음 착지는 묶음 전체 판정 없이 들어갔다 — 그 구성원의 승인 확인(approved)을 병합기 일지(제출 ID 칸 + 이 까닭)에 남긴다
 			w += fmt.Sprintf(", 승인 확인 판정 %s patch-id %s", e.v, e.p)
 		}
+		if t := m.stackTag(e.s); t != "" {
+			w += ", " + t
+		}
 		if m.done(e.q, e.s, e.l, e.m, C, w, false) != 0 {
 			return false
 		}

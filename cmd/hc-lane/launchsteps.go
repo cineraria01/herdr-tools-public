@@ -261,6 +261,9 @@ func laneEnvs(tid string) []string {
 		}
 		envs = append([]string{"HC_LANE_JOB=" + jb}, envs...)
 	}
+	if pred, p := stackEnv(); p != "" { // 쌓아 띄움 — 레인의 land·verdict가 범위 P..HEAD로(stack.go)
+		envs = append([]string{"HC_LANE_STACK=" + pred + "@" + p}, envs...)
+	}
 	if p := os.Getenv("HERDR_LAND_PRIORITY"); p != "" {
 		envs = append([]string{"HERDR_LAND_PRIORITY=" + p}, envs...)
 	}

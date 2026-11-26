@@ -46,6 +46,8 @@ var Defs = []Def{
 	{Name: "ack_max", Tool: "hc-fill", Default: "30", Min: 1, Max: 1440, Unit: "분", Desc: "판정 수거 기다림 상한(넘으면 주인 지휘에 한 번)"},
 	{Name: "early_wait", Tool: "hc-fill", Default: "5", Min: 1, Max: 48, Unit: "시간", Desc: "먼저 띄운 레인이 선행을 기다리는 기한"},
 	{Name: "auto_submit", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "감사 통과 뒤 쉬는 레인 대신 대기열이 제출할 프로젝트(쉼표, - = 끔)"},
+	{Name: "stack", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "쌓아 띄움 — 선행이 감사 통과로 제출되면 착지를 기다리지 않고 그 커밋 위에서 뒤 레인을 띄울 프로젝트(쉼표, - = 끔 — docs/hc-fill/stack.md)"},
+	{Name: "stack_depth", Tool: "hc-fill", Default: "2", Min: 1, Max: 5, Unit: "겹", Desc: "쌓아 띄움 사슬 깊이 — 아직 안 든 조상 수 상한(병합기 묶음 기본 3이 앞·뒤·그 뒤 한 묶음)"},
 	{Name: "auto_submit_max", Tool: "hc-fill", Default: "120", Min: 10, Max: 600, Unit: "초", Desc: "대기열 제출 한 번의 시간 상한(넘으면 에이전트에 넘김)"},
 	{Name: "pr", Tool: "hc-fill", Default: "-", List: true, Unit: "프로젝트", Desc: "PR 거울을 켤 프로젝트(쉼표, - = 끔 — docs/hc-fill/pr.md)"},
 	{Name: "pr_max", Tool: "hc-fill", Default: "20", Min: 1, Max: 200, Unit: "번", Desc: "PR 거울의 바퀴당 gh 호출 상한(넘으면 다음 바퀴에)"},

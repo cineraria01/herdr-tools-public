@@ -109,11 +109,12 @@ func stepIDs(st []specStep) map[string]bool {
 // sideStep: 짓기 고리 — 길의 마지막 자리가 옆으로 뺄 범인이면 추측 대신 실패 자리(sideVirtual)를 두고 true. 맨 앞이면 옆으로 뺌 일지
 func (m *M) sideStep(c *specCtx, st []specStep) bool {
 	last := st[len(st)-1]
-	if !m.sideGroup(last.g) {
+	side := m.sideGroup(last.g)
+	if !side && !m.stackOrphan(st) { // 선행이 길에서 빠진 쌓인 제출도 그 제출 없이(stack.go)
 		return false
 	}
 	c.rows = append(c.rows, sideVirtual(last))
-	if len(st) == 1 {
+	if side && len(st) == 1 {
 		_, why := m.suspectRec()
 		m.sideNote(last.g, why)
 	}

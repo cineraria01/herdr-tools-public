@@ -200,7 +200,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	// 제출 우선: 대기열 줄의 우선을 레인 환경 HC_LANE_PRIORITY로(2026-11-22 fill-prio-pass — 긴급 줄이 보통으로 제출돼 큐 뒤에 섰다).
 	// 레인이 land 줄에 따로 주면 그 값. 감사 줄(--read)은 착지하지 않으니 넘기지 않는다
 	if rd == "" {
-		env = append(env, "HC_LANE_PRIORITY="+plabel(PRIO))
+		env = append(append(env, "HC_LANE_PRIORITY="+plabel(PRIO)), stackEnvs()...)
 	}
 	out, lr := Cmd{Name: "hc-lane", Args: la, Err: errMerge, Env: env}.Run()
 	out = sub(out)
@@ -468,10 +468,14 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			if BOUNCE {
 				pe = "-" // 반송됨 표시를 지운다(떠 있는 줄)
 			}
+			if STACK != "" {
+				pe = "stacked" // 쌓아 띄움(stack.go)
+			}
 			if tryput(lane, RID, m, pe, LAUTO, ADDR, START_RUN) != 0 {
 				die("실행 기록 저장 실패")
 			}
 			if qset(true, RID, lane, "up", m, ADDR, stuck, pe, LAUTO) == 0 {
+				stackSave(lane, RID)
 				if after != "" {
 					say("먼저 띄움 %s → %s %s (%s, 선행 %s)", lane, m, ADDR, repo, after)
 				} else {

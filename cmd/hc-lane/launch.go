@@ -94,6 +94,7 @@ func launchMain(args []string) int {
 	if resume {
 		wfrom = resumeFrom() // --resume: 주차한 가지를 받아 그 참조에서 시작(launchresume.go)
 	}
+	wfrom = stackFrom(wfrom) // 쌓아 띄움: 선행 제출 P에서(stack.go)
 	rest = placeBrief(rest)
 	// 작업별 임시 폴더(docs/hc-sweep/job-tmp.md): 레인·감사 안의 TMPDIR을 그 작업 것으로 — 에이전트가 그대로 터미널의 프로그램(exec 꼴), 지우기는 hc-sweep
 	rest = jobtmp.Wrap(cfg(jobtmp.Key, jobtmp.Default), name, cwd, false, rest)

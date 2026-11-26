@@ -237,7 +237,7 @@ func lverdictStart() {
 			eprintf("hc-lane land: 승인 커밋이 아니다 — 판정 %s %s, HEAD %s. 착지하지 않았다. 지금 커밋으로 hc-lane report 완료 %s 를 부르고 기다린다\n", lvd, cut(lvs, 8), cut(h, 8), cut(h, 8))
 			exit(2)
 		}
-		mb, rc := gitOut("merge-base", lvs, bref)
+		mb, rc := forkOf(lvs, bref) // 쌓인 레인은 선행 커밋 P부터(stack.go)
 		if rc != 0 {
 			die("land --verdict: %s 와의 갈림점을 못 찾았다 — 착지하지 않았다", blab)
 		}
