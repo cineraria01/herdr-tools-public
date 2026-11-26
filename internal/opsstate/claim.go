@@ -13,7 +13,7 @@ import (
 
 // claimActs: 손댈 것에 손댄 조치로 보는 일지 동작(지휘·사람이 친 조치 명령). 운영 에이전트의 「하려던 것」·「거절」 등은 조치가 아니다
 var claimActs = map[string]bool{"knob set": true, "knob unset": true, "edit": true, "rm": true, "requeue": true, "retry": true,
-	"prio": true, "nudge": true, "merger restart": true, "human-ok": true}
+	"prio": true, "nudge": true, "merger restart": true, "human-ok": true, "withdraw": true}
 
 // itemSubjects: 항목이 겨냥하는 대상 — 열쇠 이름(레인·프로젝트·기계·지휘), 굶는 감사는 그 레인의 기계도(자리 손잡이가 겨냥)
 func itemSubjects(it Item, mach map[string]string) []string {

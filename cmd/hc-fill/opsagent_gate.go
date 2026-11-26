@@ -63,7 +63,7 @@ func oaTerm(a string) string { return a[strings.LastIndexByte(a, '/')+1:] }
 
 // oaDry: --dry-run을 실제로 받는 명령(takeDry가 인자 어디서든 떼어 미리 보기로 끝냄 · run은 바퀴 미리 보기). 다른 명령은 그 글자를
 // 값으로 읽어 본 동작을 하니(감사 atozu10 중간 — nudge <레인> --dry-run이 글을 보냄) 읽기로 보지 않는다
-var oaDry = map[string]bool{"prio": true, "rm": true, "knob": true, "machine": true, "machines": true, "run": true}
+var oaDry = map[string]bool{"prio": true, "rm": true, "knob": true, "machine": true, "machines": true, "run": true, "withdraw": true}
 
 // oaRead: 읽는 꼴 — 하위 명령(sub, 있으면 첫 인자)과 받는 인자(flags 값 없음 · vals 값 하나). 여기 없는 인자가 하나라도 있으면
 // 쓰기로 본다(허용 목록 — 쓰기 인자 목록을 두면 새 쓰기 인자 machine --rename이 읽기로 샜다, ops-gate-tighten)
@@ -119,6 +119,8 @@ func oaHandoff(cmd string, args []string) string {
 	switch {
 	case cmd == "rm":
 		return "레인 지우기는 사람이 정한다"
+	case cmd == "withdraw":
+		return "병합 줄에서 거두기는 그 레인의 주인 지휘가 정한다(병합기·운영 에이전트는 스스로 거두지 않는다)"
 	case cmd == "agent":
 		return "운영 에이전트 안에서 운영 에이전트를 띄우지 않는다"
 	case cmd == "run" || cmd == "watch" || strings.HasPrefix(cmd, "_"):

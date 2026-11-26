@@ -400,7 +400,7 @@ func (r *prRun) mergerEvents() {
 			}
 		case ev.State == "착지":
 			r.landed(e, ev, key, mg[ev.Machine])
-		case ev.State == "막힘" && mg[ev.Machine] && strings.Contains(ev.Msg, "제출 ID"):
+		case ev.State == "막힘" && bounceFrom(mg, ev.Machine, ev.Msg) && strings.Contains(ev.Msg, "제출 ID"): // 지휘가 거둠도 반송처럼
 			if r.status(e, key+":st", e.Head, "failure", "verify", ev.Msg) {
 				r.comment(e, key, "돌려보냄 — "+ev.Msg+prRelands(lane))
 			}

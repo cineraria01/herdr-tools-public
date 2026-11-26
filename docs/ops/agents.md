@@ -74,6 +74,7 @@ herdr-tools로 <할 일>을 해라. 먼저 쓸 도구의 `<도구> --skill`을 �
 | `hc-fill machine <기계> --seats <n>\|--pause\|--resume --dry-run` | 바뀔 손잡이(조정 기록도 안 남김) |
 | `hc-fill run --dry-run` | 한 바퀴에 띄울 것(전부터 있음) |
 | `hc-fill requeue <레인> --why <까닭> --dry-run` | 검증 실패 반송을 옮길 새 큐 이름·제출·감사 판정(검사는 실제와 같다, [다시 넣기](../hc-fill/requeue.md)) |
+| `hc-fill withdraw <레인> --why <까닭> --dry-run [--json]` | 거둘 큐 표식 → 반송 참조·제출·기록(주인 확인·「이미 착지·반송됨」 검사는 실제와 같다, [거두기](../hc-fill/withdraw.md)). `--json`은 한 줄 객체(칸은 그 문서) |
 | `hc-lane --dry-run …` · `hc-lane clean --dry-run` · `hc-lane gc --dry-run` | 띄우기·정리 미리 보기(전부터 있음) |
 | `herdr-sync --check` · `herdr-sync --at <커밋> --check` | 맞출 것·되돌릴 것(전부터 있음) |
 | `hc-sweep --dry-run` | 닫을 것·지울 것(전부터 있음) |

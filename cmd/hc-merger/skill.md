@@ -28,6 +28,7 @@
 - 묶음 크기·검증 손잡이는 `hc-fill knob ls`의 병합기 줄(원격 손잡이 — 다음 바퀴에 먹는다). 바꾸면 `hc-fill knob set … --why …`, 되돌리기 `hc-fill knob unset …`.
 - 제출 하나의 우선: `hc-fill prio <레인> 높음 --why …`(큐 메타를 함께 고친다).
 - 직접 검증 착지를 돌릴 기계: 손잡이 `merger_land_on@<프로젝트>` — `auto`(기본, 검증 자리 남은·덜 바쁜 워커) · `local`(병합기 기계) · 기계 목록. 지금 맨 앞만 특정 워커에서: `hc-fill knob set merger_land_on@<프로젝트> <기계> --for 60 --why …`.
+- 깨질 것을 아는 제출을 큐에서 빼기: 주인 지휘가 `hc-fill withdraw <레인> --why <까닭>`(반송과 같은 흔적, 착지 중이면 그 착지 결과를 버린다 — docs/hc-fill/withdraw.md). 병합기는 스스로 거두지 않는다.
 - 큐에서 빼기·순서 바꾸기를 원격 참조로 손으로 하지 않는다 — 명령으로 안 되면 사람에게.
 
 ## 사건을 받으면

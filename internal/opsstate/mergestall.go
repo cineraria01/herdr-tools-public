@@ -2,7 +2,42 @@ package opsstate
 
 // 병합 줄의 「안 움직임」·「느림」(advise.go에서 나눔 — 줄 수 예산, docs/ops/advise.md merge-stall·merge-slow)
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
+
+// WithdrawFails: 같은 제출이 든 묶음이 이만큼 실패하면 「거둘 수 있음」(두 번 넘게 — ht-merger-withdraw)
+const WithdrawFails = 3
+
+// mergeLineItems: 살아 있는 병합기의 줄이 찬 병합 줄 항목 — 안 움직임·느림, 그리고 제출마다 거둘 수 있음
+func mergeLineItems(m MergeLine, th Thresholds) []Item {
+	var o []Item
+	if it, ok := mergeStall(m, th); ok {
+		o = append(o, it)
+	}
+	return append(o, withdrawItems(m)...)
+}
+
+// withdrawItems: 줄에 선 제출 가운데 그 제출이 든 묶음이 WithdrawFails번 넘게 실패한 것(병합기 기록 fails) — 레인 항목이라 주인 지휘에게
+// 간다. 판단은 주인 지휘다(먼저 든 변경과 부딪힌 진짜 실패인지 — 흔들림이면 그대로 둔다). 병합기·운영 에이전트는 스스로 거두지 않는다
+func withdrawItems(m MergeLine) []Item {
+	var ls []string
+	for l, n := range m.Fails {
+		if n >= WithdrawFails {
+			ls = append(ls, l)
+		}
+	}
+	sort.Strings(ls)
+	o := make([]Item, 0, len(ls))
+	for _, l := range ls {
+		o = append(o, Item{Key: "withdraw:" + l, Kind: "withdraw", What: fmt.Sprintf("거둘 수 있음: %s(%s 병합 줄)", l, m.Project),
+			Evidence: fmt.Sprintf("그 제출이 든 묶음이 %d번 실패(병합기 기록)", m.Fails[l]),
+			Cost:     "깨질 제출이 줄에 남으면 묶음·검증 바퀴마다 다시 실패하고 뒤 제출이 그만큼 기다린다",
+			Next:     []string{"hc-fill withdraw " + l + " --why '<까닭>' --dry-run"}, Sure: SureJudge})
+	}
+	return o
+}
 
 // mergeStall: 줄이 찬 병합 줄의 「안 움직임」·「느림」. 재료는 병합기가 쓴 상태 한 장(hc-fill이 MergeLine에 옮김 — docs/hc-lane/merger-state.md)
 // 뿐이다(ht-merger-state-record — 밖에서 이름·일지로 짐작하던 것을 다섯 번 고쳤다). 시계는 가장 오래된 제출의 나이, 병합기의 마지막 진행

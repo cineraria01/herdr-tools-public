@@ -26,8 +26,11 @@ var (
 	relandFailWhy = regexp.MustCompile(`^병합기: (착지 실패\(종료 .*?) — 원본 `)
 )
 
-// bounceWhy <사건 글>: 반송 까닭 한 마디
+// bounceWhy <사건 글>: 반송 까닭 한 마디(지휘가 거둔 것은 「지휘가 거둠: <까닭>」 — withdraw.go)
 func bounceWhy(msg string) string {
+	if m := wdEvRe.FindStringSubmatch(msg); m != nil {
+		return m[1]
+	}
 	if m := relandFailWhy.FindStringSubmatch(msg); m != nil {
 		return m[1]
 	}
@@ -180,7 +183,10 @@ func bounceNotes(m, lane string) string {
 
 // bounceSecText: 반송 절 — 끝 줄바꿈 하나
 func bounceSecText(lane, n, mach, why, lg, ev, fails, notes string) string {
-	if fails == "" {
+	switch {
+	case fails == "" && wdEvRe.MatchString(ev):
+		fails = "(병합기 로그 없음 — 지휘가 거뒀다. 위 사건 글의 까닭을 고친다)"
+	case fails == "":
 		fails = "(로그를 못 읽음 — 위 로그 경로를 hc file read --on " + mach + " 로 본다)"
 	}
 	if notes == "" {

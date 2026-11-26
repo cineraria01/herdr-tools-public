@@ -172,6 +172,8 @@ type MergeLine struct {
 	// 워커 착지 단계면 그 워커(기다리는 대상의 기계), 아니면 빈 값
 	LandOn string `json:"land_on"`
 	Why    string `json:"why"`
+	// 병합기 기록의 fails: 레인 → 지금 줄에 선 그 제출이 든 묶음이 실패한 바퀴 수(1 이상만, 기록 모름이면 빈 값) — 「거둘 수 있음」 재료
+	Fails map[string]int `json:"fails"`
 }
 
 // MergeWait: 병합기가 기다리는 대상 — 기계·주소(병합기가 못 찾았으면 빈 값)·역할(병합기가 쓴 글)·띄운 나이, 살아 있나(live·gone·?

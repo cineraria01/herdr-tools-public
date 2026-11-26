@@ -85,7 +85,7 @@ func stateRec(g *opsstate.MergeLine, x maRow, terms []hcjson.Terminal, termsOK b
 		}
 		return ptrI(int(max(0, n-t)))
 	}
-	g.Phase, g.PhaseWhy, g.PhaseAgeS, g.RecAgeS, g.LastRoundAgeS = r.Phase, r.Why, ago(r.Since), ago(r.At), ago(r.Progress)
+	g.Phase, g.PhaseWhy, g.PhaseAgeS, g.RecAgeS, g.LastRoundAgeS, g.Fails = r.Phase, r.Why, ago(r.Since), ago(r.At), ago(r.Progress), r.Fails
 	live := map[string]bool{}
 	for _, t := range terms {
 		if t.State == "live" {

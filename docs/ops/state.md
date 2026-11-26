@@ -158,6 +158,7 @@
 | `merge[].inner_age_s` | 그 줄을 병합기가 처음 본 뒤 나이(초) |
 | `merge[].land_on` | 단계가 워커 착지(`land-on`)면 그 워커, 아니면 빈 값 |
 | `merge[].why` | 모르는 칸의 까닭 |
+| `merge[].fails` | 레인 → 지금 줄에 선 그 제출이 든 묶음이 실패한 바퀴 수(병합기 기록 `fails`, 1 이상만). 기록 모름이면 null. 3 이상이면 advise 「거둘 수 있음」(`withdraw`) |
 | `deploy` | 배포(기계마다) |
 | `deploy[].machine` | 기계 |
 | `deploy[].version` | 깔린 판 |

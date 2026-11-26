@@ -4,14 +4,17 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"herdr-tools/internal/events"
+	"herdr-tools/internal/gitx"
 )
 
 // 사건 줄과 같은 다듬기(internal/events)
@@ -192,6 +195,9 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 	return 0
 }
 
+// verifyFail: 검증 실패 반송의 까닭(hc-fill requeue가 다시 넣는 꼴 — cmd/hc-fill/requeue.go rqVerifyFail과 같은 머리)
+var verifyFail = regexp.MustCompile(`^착지 실패\(종료 1[,)]`)
+
 // fail <큐> <제출 SHA> <레인> <기록 SHA|-> <로그|-> <까닭>: 큐 표식을 refs/merge-failed/<이름>, 기록을 refs/merge-failed-meta/<이름>으로
 // 한 번의 원자 push로 옮기고(lane 가지는 둠) 막힘 사건. 옮기기 전에 할 일을 fail/<이름>에 적어 원격을 못 보면 다음 바퀴에 다시 —
 // 그동안 그 제출만 건너뛴다. false = 아직 못 옮김
@@ -208,6 +214,8 @@ func (m *M) fail(q, s, ln, rec, lg, why string) bool {
 		}
 		mt = meta{}
 	}
+	_, perr := os.Stat(m.mj + "/fail/" + n)
+	retry := perr == nil // 앞서 이 반송을 시도함(fretry·같은 바퀴 다시) — 그 시도가 이미 옮겼을 수 있다
 	pending := strings.Join([]string{q, s, ln, dashIf(rec), dashIf(lg), flat(why)}, "\n") + "\n"
 	if err := writeVia(m.mj+"/fail/"+n, pending); err != nil {
 		die("merger: 돌려보낼 일을 적지 못했다")
@@ -217,6 +225,9 @@ func (m *M) fail(q, s, ln, rec, lg, why string) bool {
 		logTail = ", 로그 " + lg
 	}
 	ob := fmt.Sprintf("병합기: %s — 원본 %s, 기준 %s, %s%s, %s 로 옮김(lane/%s 는 그대로)%s", why, first8(s), first8(dashIf(m.B)), mt.key(n), mt.infoTail(), fr, ln, logTail)
+	if verifyFail.MatchString(why) { // 검증 실패 반송만 — 다시 넣는 길(작업 중 발견해 함께 고침: 길을 몰라 원격 lane 가지를 손으로 지우려 했다)
+		ob += " — 거짓 실패(부하·흔들림)면 주인 지휘가 hc-fill requeue " + ln + " --why <까닭>, 진짜 실패면 고쳐 다시 제출"
+	}
 	// 옮길 제출 객체가 이 클론에 아직 없으면(큐를 받기 전에 반송 — 이름 꼴) 그 큐 참조를 받는다
 	if runQ("cat-file", "-e", s+"^{commit}") != 0 && fetchr(true, "-q", "origin", "+"+q+":refs/hc-merger/q/"+n) != 0 {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 실패한 제출 %s 를 받지 못했다(git fetch) — 다음 바퀴에 다시\n", q)
@@ -227,14 +238,18 @@ func (m *M) fail(q, s, ln, rec, lg, why string) bool {
 	if rec != "" {
 		p = append(p, rec+":"+fm, ":"+qm, "--force-with-lease="+fm+":", "--force-with-lease="+qm+":"+rec)
 	}
-	if runQ(append([]string{"push", "-q", "--atomic", "--porcelain", "origin"}, p...)...) != 0 {
+	var po bytes.Buffer
+	if gitx.Run("", &po, nil, append([]string{"push", "-q", "--atomic", "--porcelain", "origin"}, p...)...) != 0 {
 		rb, rc := lsRemote("origin", q, qm, fr, fm)
 		if rc != 0 {
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 실패한 제출을 옮겼는지 확인하지 못했다(%s) — 다음 바퀴에 다시\n", q)
 			return false
 		}
+		// 처음 시도인데 서버가 거절했으면(--porcelain 「!」 줄) 응답 끊김이 아니다 — 같은 이름으로 옮겨진 것은 지휘가 거둔 것(hc-fill withdraw).
+		// 다시 하는 시도면 앞 시도가 옮긴 것이다(그때는 거절이 당연하다)
+		rejected := strings.HasPrefix(po.String(), "!") || strings.Contains(po.String(), "\n!")
 		switch {
-		case refsha(rb, fr) == s && refsha(rb, fm) == rec: // 응답만 끊김
+		case refsha(rb, fr) == s && refsha(rb, fm) == rec && (!rejected || retry): // 응답만 끊김·앞 시도가 옮김
 		case refsha(rb, q) == s && refsha(rb, qm) == rec:
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 실패한 제출 %s 를 %s 로 옮기지 못했다 — 다음 바퀴에 다시\n", q, fr)
 			return false

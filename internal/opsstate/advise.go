@@ -43,7 +43,7 @@ type Item struct {
 
 // laneKinds: 열쇠 이름이 레인인 항목 종류(그 레인 주인 지휘에게 보낸다)
 var laneKinds = map[string]bool{"chain": true, "rejected": true, "free-wait": true, "pinned": true, "audit-starve": true,
-	"lane-error": true, "lane-blocked": true, "lane-done": true, "lane-escalated": true, "lane-long": true}
+	"lane-error": true, "lane-blocked": true, "lane-done": true, "lane-escalated": true, "lane-long": true, "withdraw": true}
 
 // Lane: 레인 항목이면 그 레인 이름, 아니면 빈 값
 func (i Item) Lane() string {
@@ -349,7 +349,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			}
 			add(it)
 		case m.Length != nil && *m.Length > 0:
-			if it, ok := mergeStall(m, th); ok {
+			for _, it := range mergeLineItems(m, th) {
 				add(it)
 			}
 		}

@@ -8,6 +8,7 @@ package main
 // 나눔이면 몫 하나라도), 병합기 기계 착지 자식이 살아 있음, 착지 안쪽 단계 줄이 바뀜. 같은 단계로 바퀴만 돈 것·기록만 다시 쓴 것은 아니다.
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,9 +35,10 @@ type recState struct {
 	mu     sync.Mutex
 	prev   mergerstate.Rec // 마지막으로 쓴 것(앞 바퀴·앞 병합기 — stLoad)
 	cur    mergerstate.Rec
-	set    bool     // 이 바퀴에 단계를 정함
-	queue  []string // 이 바퀴의 줄 차례(pickBatch — 우선 반영), nil이면 앞 기록 것
-	beat   int      // 도는 stBeat의 번호 — 멈추면 늘려 멈춘 뒤의 쓰기를 버린다
+	set    bool           // 이 바퀴에 단계를 정함
+	queue  []string       // 이 바퀴의 줄 차례(pickBatch — 우선 반영), nil이면 앞 기록 것
+	fails  map[string]int // 이 바퀴 줄에 선 제출마다 그 제출이 든 묶음 실패 수(jFails)
+	beat   int            // 도는 stBeat의 번호 — 멈추면 늘려 멈춘 뒤의 쓰기를 버린다
 	warned bool
 	loaded bool           // 앞 기록을 읽음(stLoad)
 	beats  sync.WaitGroup // 도는 stBeat 고루틴 — 병합기는 기다리지 않고 시험만 끝나기 전에 기다린다(임시 폴더·가짜 hc를 다음 시험까지 끌지 않게)
@@ -82,6 +84,39 @@ func (m *M) stQueue(q [][2]string) {
 		}
 		m.rs.queue = append(m.rs.queue, n)
 	}
+	m.rs.fails = jFails(q)
+}
+
+// jFails: 줄에 선 제출(큐 이름)마다 병합기 일지의 「묶음 실패」 줄 수 — 레인 → 수(1 이상만, 없으면 nil). 바퀴 일지는 구성원마다 한 줄이라
+// 그 제출이 든 묶음이 실패한 바퀴 수다(같은 레인의 다시 낸 제출은 새 큐 이름이라 따로 센다). 못 읽으면 nil(알림을 안 낼 뿐)
+// ponytail: 바퀴마다 일지 전체를 훑는다(jonce와 같음) — 일지가 커서 무거우면 끝에서 거꾸로 줄에 선 가장 오래된 제출 시각까지만
+func jFails(q [][2]string) map[string]int {
+	lane := map[string]string{}
+	for _, e := range q {
+		if n := strings.TrimPrefix(e[0], "refs/merge-queue/"); len(n) > 11 && n[10] == '-' {
+			lane[n] = n[11:]
+		}
+	}
+	f, err := os.Open(gEvdir + "/merger-journal.tsv")
+	if err != nil || len(lane) == 0 {
+		return nil
+	}
+	defer f.Close()
+	var o map[string]int
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		if c := strings.Split(sc.Text(), "\t"); len(c) >= 10 && c[9] == jBatchFail && lane[c[1]] != "" {
+			if o == nil {
+				o = map[string]int{}
+			}
+			o[lane[c[1]]]++
+		}
+	}
+	if sc.Err() != nil {
+		return nil
+	}
+	return o
 }
 
 // stLandOn: 착지 실행 결정(「<기계>(<까닭>)」) — 이력으로 다음 기록들에 이어 싣는다
@@ -100,9 +135,9 @@ func (m *M) stPhase(phase, why string, waits []mergerstate.Wait, adv bool, probe
 	m.stLoad()
 	now := time.Now().Unix()
 	p := m.rs.prev
-	r := mergerstate.Rec{Phase: phase, Why: why, Queue: m.rs.queue, Waits: waits, LandOn: p.LandOn, Since: now, Progress: now, Probe: p.Probe}
+	r := mergerstate.Rec{Phase: phase, Why: why, Queue: m.rs.queue, Waits: waits, LandOn: p.LandOn, Since: now, Progress: now, Probe: p.Probe, Fails: m.rs.fails}
 	if r.Queue == nil {
-		r.Queue = p.Queue
+		r.Queue, r.Fails = p.Queue, p.Fails
 	}
 	for _, e := range m.b {
 		r.Members = append(r.Members, e.l)

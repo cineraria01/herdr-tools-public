@@ -95,6 +95,12 @@ func (m *M) judge() {
 		m.fin()
 		return
 	}
+	if w := m.gone(); w != "" { // 착지 중에 지휘가 거둔(hc-fill withdraw) 구성원 — 이 실패로 아무도 반송·줄이지 않는다(ht-merger-withdraw)
+		fmt.Fprintf(os.Stderr, "hc-lane merger: 착지 중에 큐에서 빠진 구성원(%s) — 후보를 버리고 다음 바퀴에\n", w)
+		m.jround(jLease, "착지 중에 큐에서 빠진 구성원 "+w+"(지휘가 거둠·다시 제출) — 후보를 버리고 다음 바퀴에", m.runTail())
+		m.fin()
+		return
+	}
 	if m.trans() && m.try(m.b[0].q, m.b[0].l) {
 		// 일시 실패(기다림 상한·push 거절 횟수·원격 받기 실패)는 큐에 그대로 두고 쉰다(3번 넘으면 돌려보냄)
 		fmt.Fprintf(os.Stderr, "hc-lane merger: %s 일시 실패(종료 %s, 로그 %s) — 큐에 두고 다음 바퀴에\n", m.b[0].l, m.lr, m.lgf)
@@ -445,6 +451,26 @@ func (m *M) trans() bool {
 		}
 	}
 	return false
+}
+
+// gone: 착지가 넣지 못한 뒤 — 큐 표식이 더는 그 제출이 아닌 구성원(지휘가 거둠 hc-fill withdraw·다시 제출) 레인들(「+」로).
+// 원격을 못 읽으면 빈 값 — 지금 판정 그대로(반송 push가 큐 lease로 다시 가린다)
+func (m *M) gone() string {
+	args := []string{"origin"}
+	for _, e := range m.b {
+		args = append(args, e.q)
+	}
+	rb, rc := lsRemote(args...)
+	if rc != 0 {
+		return ""
+	}
+	var o []string
+	for _, e := range m.b {
+		if refsha(rb, e.q) != e.s {
+			o = append(o, e.l)
+		}
+	}
+	return strings.Join(o, "+")
 }
 
 // try: 그 제출의 일시 실패를 하나 세어 3번까지면 true(큐에 두고 쉼), 넘으면 false(돌려보냄)

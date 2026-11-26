@@ -409,7 +409,7 @@ func oaScoped(items []opsstate.Item) []opsstate.Item {
 	scope := conf("ops_agent_scope")
 	var o []opsstate.Item
 	for _, it := range items {
-		if it.Kind == "unknown" {
+		if it.Kind == "unknown" || it.Kind == "withdraw" { // 거둘 수 있음은 주인 지휘가 정한다(운영 에이전트는 거두지 않는다)
 			continue
 		}
 		if p := oaProject(it); scope == "" || scope == "-" || p == "" || inlist(p, scope) {

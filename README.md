@@ -73,6 +73,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: --then (같은 일의 앞뒤 단계는 한 레인)](docs/hc-fill/then.md)
 - [hc-fill: 기계 닿지 않음](docs/hc-fill/unreach.md)
 - [hc-fill (빈 자리에 기다리는 레인을 바로 띄우기, 맥)](docs/hc-fill/usage.md)
+- [hc-fill: 병합 줄에서 거두기 (withdraw)](docs/hc-fill/withdraw.md)
 - [hc-job-server (자동 루프를 Herdr 터미널 하나로 지키는 감독)](docs/hc-job-server/usage.md)
 - [hc-lane 사건 (report·events·wait — 레인이 적고 지휘는 그것만 읽는다)](docs/hc-lane/events.md)
 - [hc-lane gc (끝난 레인 정리)](docs/hc-lane/gc.md)

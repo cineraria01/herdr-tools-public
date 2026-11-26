@@ -64,6 +64,8 @@ type Rec struct {
 	// Agents: 병합기가 띄워 지금 맡긴 에이전트(충돌 풀이·풀이 감사 — 주소·이름) — hc-fill 자리 셈이 대기열 쪽 도구가 띄운 것으로 센다
 	// (ht-seat-working-only). 옛 기록에는 없다(빈 목록)
 	Agents []Wait `json:"agents,omitempty"`
+	// Fails: 레인 → 지금 줄에 선 그 제출이 든 묶음이 실패한 바퀴 수(병합기 일지 「묶음 실패」, 1 이상만). 거둘 수 있음 알림의 재료(ht-merger-withdraw)
+	Fails map[string]int `json:"fails,omitempty"`
 }
 
 // Landing: 착지 단계인가(병합기 기계·워커)

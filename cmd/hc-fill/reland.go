@@ -189,11 +189,11 @@ func relandTick() {
 	mg := mgSet() // 이름 바꾼 기계의 옛 이름도(rename.go)
 	for _, e := range EV {
 		r := splitRow(e)
-		if r.F(evState) != "막힘" || !mg[r.F(evMach)] || r.F(evTime) < since {
+		if r.F(evState) != "막힘" || !bounceFrom(mg, r.F(evMach), r.F(evMsg)) || r.F(evTime) < since {
 			continue
 		}
 		mm, qm := relandRe.FindStringSubmatch(r.F(evMsg)), relandQRe.FindStringSubmatch(r.F(evMsg))
-		if mm == nil && relandFailRe.MatchString(r.F(evMsg)) {
+		if mm == nil && (relandFailRe.MatchString(r.F(evMsg)) || wdEvRe.MatchString(r.F(evMsg))) { // 지휘가 거둠(withdraw.go)도
 			mm = []string{"", ""} // 충돌 아닌 반송 — 충돌 파일 칸이 빈 값(bounce.go)
 		}
 		if mm == nil || qm == nil || seen[qm[1]] {
@@ -392,6 +392,9 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		switch a, st := relandLive(lane, p, n); st {
 		case "살아 있음":
 			msg := relandSendMsg(files, n)
+			if m := wdEvRe.FindStringSubmatch(r.F(evMsg)); m != nil { // 지휘가 거둠 — 병합기 로그가 아니라 그 까닭을
+				msg = fmt.Sprintf("%s(refs/merge-failed/%s) — origin/main으로 rebase하고 그 까닭을 고쳐 커밋한 뒤 hc-lane land main 다시", m[1], n)
+			}
 			if rule != "" { // hc send 글은 한 줄 — 규칙 줄마다 「 / 」
 				var ls []string
 				for _, l := range lines(rule) {
