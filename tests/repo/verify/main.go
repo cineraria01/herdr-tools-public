@@ -509,12 +509,22 @@ func b2i(b bool) int {
 	return 0
 }
 
+// ctlVar: 이 검증 실행을 조종하는 변수(HERDR_VERIFY_*·HERDR_SPEC_*·HERDR_VERIFIED_TREE)인가 — 자식(시험)에게 물려주지 않는다(start).
+// 시험이 검증 도구 자신을 시험하면 그 값을 보고 다른 동작을 한다(2026-11-26 ht-verify-env-scrub — 병합 검증 자리 기계의
+// HERDR_VERIFY_GATE=1이 이 꾸러미 시험에 새 그 기계에서만 거짓 실패, 앞서 HERDR_VERIFY_PARTS는 픽스처 verify()가 이 실행의 조각 파일을
+// 덮어쓸 뻔했다 — parts.go). 자식이 일부러 받는 것은 childKeep, 검증이 정해 주는 것(TMPDIR·HERDR_VERIFY_BOOT_TMPDIR)은 start의 env 인자
+func ctlVar(k string) bool {
+	return !childKeep[k] && (strings.HasPrefix(k, "HERDR_VERIFY_") || strings.HasPrefix(k, "HERDR_SPEC_") || k == "HERDR_VERIFIED_TREE")
+}
+
+// childKeep: 자식이 일부러 받는 조종 변수 — HERDR_VERIFY_NO_LINT는 tests/repo의 개인 값 검사가 읽는다(공개 사본에서 건너뛰기, secrets_test.go)
+var childKeep = map[string]bool{"HERDR_VERIFY_NO_LINT": true}
+
 // start: 새 무리로 띄운다(출력은 out 파일 — *os.File이라 그대로 물려준다: 복사 고루틴이 출력을 붙든 자손을 기다리지 않게)
 func start(root string, argv, env []string, out *os.File) (*exec.Cmd, error) {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir, c.Stdout, c.Stderr = root, out, out
-	// 조각 파일(HERDR_VERIFY_PARTS)은 이 실행 몫 — 자식 go test가 픽스처로 verify()를 부르며 덮어쓰지 않게 물리지 않는다(parts.go)
-	c.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "HERDR_VERIFY_PARTS=") })
+	c.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { k, _, _ := strings.Cut(kv, "="); return ctlVar(k) })
 	c.Env = append(c.Env, env...)
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return c, c.Start()

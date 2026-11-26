@@ -41,6 +41,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// 시험의 verify()는 바깥(이 시험을 띄운 사람·도구)의 조종 변수를 보지 않는다 — 검증 안에서는 start가 이미 뺀다(childenv_test.go)
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); ctlVar(k) {
+			os.Unsetenv(k)
+		}
+	}
 	// 시험의 verify()는 진짜 hdiutil·diskutil을 부르지 않는다 — 메모리 디스크 시험(ramtmp_test.go)은 가짜 명령을 PATH 앞에 두고 켠다
 	os.Setenv("HERDR_VERIFY_RAMTMP", "0")
 	// 범위 지문은 끄고, 통과 기록은 진짜 사용자 캐시가 아니라 임시 폴더에 — 범위 시험(scope_run_test.go)이 켠다

@@ -53,7 +53,7 @@ func specFx(t *testing.T) *sfx {
 	os.WriteFile(gSelf, []byte(strings.Replace(string(old), "#!/bin/sh\n", "#!/bin/sh\n"+fakeSpecLand, 1)), 0o777)
 	bin := f.dir + "/bin"
 	os.MkdirAll(bin, 0o777)
-	os.WriteFile(bin+"/hc", []byte("#!/bin/sh\n"+fakeHcIdle+"[ \"$1\" = run ] && echo \"$*\" >>"+s.hclog+"\nexit ${HC_RC:-0}\n"), 0o777)
+	os.WriteFile(bin+"/hc", []byte("#!/bin/sh\n"+fakeHcIdle+"case \"$1\" in run|kill) echo \"$*\" >>"+s.hclog+";; esac\nexit ${HC_RC:-0}\n"), 0o777)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("IDLEDIR", f.dir+"/idle")
 	os.MkdirAll(f.dir+"/idle", 0o777)

@@ -47,6 +47,7 @@ type M struct {
 	wre                             string // 이 바퀴에 맨 앞을 바쁨으로 다시 고름 「<바쁨 기계>→<새 기계>」(verifierpick.go) — 추측 기다림 일지 줄
 	cwhy, clog                      string // 맨 앞 혼자 추측의 시험 실패로 반송할 까닭·로그(<기계>:<경로>) — specCulpritWhy
 	capTo                           int    // 추측 실패로 줄일 묶음 크기(0이면 하나 빼기 — 앞 무리로 범인을 가르면 그 앞, culprit.go)
+	steady                                 // 맨 앞을 흔들지 않기(frontsteady.go)
 	landOff                                // 착지 실행 기계(landon.go)
 }
 
@@ -224,7 +225,8 @@ func (m *M) pickBatch() bool {
 		m.mer = true
 		return false
 	}
-	sus := m.suspect(q) // 앞 무리로 가린 범인은 혼자(culprit.go)
+	sus := m.suspect(q)           // 앞 무리로 가린 범인은 혼자(culprit.go)
+	defer m.freezeOrder(&q, &n)() // 도는 맨 앞 무리는 그대로 — 고른 뒤 일지(frontsteady.go A)
 	m.b = nil
 	for _, e := range q {
 		mq, ms := e[0], e[1]
@@ -297,7 +299,7 @@ func (m *M) pickBatch() bool {
 
 // round: 한 바퀴(bash mround)
 func (m *M) round() {
-	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.sfront, m.capTo = "", false, "", 0, 0, time.Now().Unix(), nil, 0
+	m.mq, m.mer, m.mbn, m.ls0, m.ls1, m.r0, m.sfront, m.capTo, m.gpartial = "", false, "", 0, 0, time.Now().Unix(), nil, 0, false
 	defer m.specWaitEarly()
 	m.flush()
 	// 병합기 클론은 병합기만 쓴다 — 앞 실행이 남긴 멈춘 rebase는 풀고, 그래도 깨끗하지 않으면 멈춘다(모르는 변경을 지우지 않음)
@@ -589,12 +591,4 @@ func (m *M) filterBatch() bool {
 		m.keep(k...)
 	}
 	return true
-}
-
-func shas(b []entry) []string {
-	s := make([]string, len(b))
-	for i, e := range b {
-		s[i] = e.s
-	}
-	return s
 }

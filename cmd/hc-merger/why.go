@@ -198,8 +198,16 @@ func whySummary(lines []string, n int) string {
 	type wait struct{ t0, why string }
 	var waits []wait // 검증 맡김이 적힌 추측 기다림(한 번의 기다림 = 구성원마다 같은 줄 — 시작·까닭으로 하나)
 	wseen := map[wait]bool{}
+	steady := map[string]int{} // 얼림·옆으로 뺌·미리 줄 끝냄(frontsteady.go) — 한 번 = 구성원마다 같은 줄, 시작·까닭으로 하나
 	for _, l := range lines {
 		f := strings.Split(l, "\t")
+		if len(f) >= 12 && (f[9] == jFreeze || f[9] == jSide || f[9] == jPreKill) {
+			if w := (wait{f[7], f[11]}); !wseen[w] {
+				wseen[w] = true
+				steady[f[9]]++
+			}
+			continue
+		}
 		if len(f) >= 12 && f[9] == jSpecWait && strings.Contains(f[11], ", 검증 맡김(") {
 			if w := (wait{f[7], f[11]}); !wseen[w] {
 				wseen[w] = true
@@ -285,6 +293,11 @@ func whySummary(lines []string, n int) string {
 			out += fmt.Sprintf(" · 나눔 %d", sn)
 		}
 		out += ")"
+	}
+	for _, k := range []string{jFreeze, jSide, jPreKill} { // 있을 때만(ht-merger-front-steady)
+		if steady[k] > 0 {
+			out += fmt.Sprintf(" · %s %d", k, steady[k])
+		}
 	}
 	return out
 }

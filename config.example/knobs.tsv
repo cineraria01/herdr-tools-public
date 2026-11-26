@@ -175,6 +175,12 @@
 # — 묶음 실패 뒤 범인 가리기 — parallel(앞 무리 k−1…1을 한가한 검증 기계에 함께, 모자라면 이분 차례) · serial(마지막 빼고 다시, HC_LANE_MERGER_CULPRIT) (범위 parallel|serial)
 # merger_culprit	parallel
 # merger_culprit@<프로젝트>	parallel
+# — 맨 앞 무리를 기다리는 동안 그 구성원을 바꾸지 않음 — 새 제출·끼어든 제출은 다음 무리로(0이면 바퀴마다 줄 차례로 다시 고름, HC_LANE_MERGER_FRONT_FREEZE) (범위 0|1)
+# merger_front_freeze	1
+# merger_front_freeze@<프로젝트>	1
+# — 착지 스크립트 저장소 — 추측 시험 실패면 직접 검증 없이 줄여 범인을 가르고, 범인은 옆으로 빼 혼자 착지 스크립트로(뒤 무리는 그 없이 추측). 0이면 추측 실패를 다른 기계에 한 번 더 뒤 묶음째 직접 검증(HC_LANE_MERGER_ASIDE) (범위 0|1)
+# merger_aside	1
+# merger_aside@<프로젝트>	1
 # — 검증 기계 한가함 = 1분 부하가 코어 수의 이만큼 밑(HC_LANE_SPEC_IDLE_LOAD) (범위 1~10000 %)
 # merger_idle_load	50
 # merger_idle_load@<프로젝트>	50

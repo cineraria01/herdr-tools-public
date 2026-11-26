@@ -227,10 +227,12 @@ func TestPartsNotReusedWhenTreeChanges(t *testing.T) {
 }
 
 // 바 맨 앞 추측이 시험 실패(test=1)로 끝나 병합기 기계가 직접 검증(착지 스크립트 저장소 — 다시 맡긴 기계에서도 실패)하면, 그 추측의
-// 통과 조각 줄을 HERDR_VERIFY_PARTS_FROM 파일로 넘긴다(쓸지는 검증 스크립트가). 조각이 없으면 넘기지 않는다
+// 통과 조각 줄을 HERDR_VERIFY_PARTS_FROM 파일로 넘긴다(쓸지는 검증 스크립트가). 조각이 없으면 넘기지 않는다.
+// 다른 기계에 한 번 더 맡기는 길은 손잡이 aside 0(옛 길) — 기본은 시험 실패면 곧바로 옆으로 빼 직접 검증(frontsteady_test.go ⑤)
 func TestDirectVerifyGetsSpecParts(t *testing.T) {
 	for _, drop := range []bool{false, true} {
 		t.Run(map[bool]string{false: "조각있음", true: "조각없음"}[drop], func(t *testing.T) {
+			t.Setenv("HC_LANE_MERGER_ASIDE", "0")
 			s, _, pd := partsFx(t, true)
 			for _, f := range []string{"fail-v1", "fail-v2", "testfail"} {
 				os.WriteFile(pd+"/"+f, nil, 0o666)
@@ -267,6 +269,30 @@ func TestDirectVerifyGetsSpecParts(t *testing.T) {
 				t.Fatalf("직접 검증에 넘긴 조각 %q (조각 없음 %v)", got, drop)
 			}
 		})
+	}
+}
+
+// 바-2 기본 길(옆으로 뺌): 착지 스크립트 저장소의 맨 앞 혼자 추측이 시험 실패면 다른 기계에 다시 맡기지 않고 곧바로 직접 검증 — 그 실패한
+// 추측의 통과 조각을 넘긴다
+func TestAsideDirectVerifyGetsSpecParts(t *testing.T) {
+	s, _, pd := partsFx(t, true)
+	for _, f := range []string{"fail-v1", "testfail"} {
+		os.WriteFile(pd+"/"+f, nil, 0o666)
+	}
+	s.sub(1000000001, "a", false)
+	s.round(1)
+	d := s.dispatched()
+	if len(d) != 1 || s.verifyOn(d[0]) != 0 || !s.has(specFails+d[0][1]) {
+		t.Fatalf("v1 추측 실패 기록: %v", d)
+	}
+	want := s.specTree(d[0][1]) + " p1"
+	if got := s.partOf(d[0][1]); got != want {
+		t.Fatalf("원격 조각 %q, 바람 %q", got, want)
+	}
+	s.round(1)
+	b, _ := os.ReadFile(s.landlog + ".parts")
+	if got := strings.Join(s.lines(s.landlog), " "); got != "verify|a" || len(s.dispatched()) != 1 || strings.TrimSpace(string(b)) != "a|"+want {
+		t.Fatalf("곧바로 직접 검증·조각 넘김: 착지 %q 띄움 %v 조각 %q", got, s.dispatched(), b)
 	}
 }
 

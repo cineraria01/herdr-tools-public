@@ -21,6 +21,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -56,9 +57,10 @@ func (m *M) culpritPar() bool {
 	}
 }
 
-// parCap: 이 바퀴가 앞 무리를 함께 가르는 바퀴인가
+// parCap: 이 바퀴가 앞 무리를 함께 가르는 바퀴인가. 착지 스크립트 저장소는 옆으로 빼기(손잡이 aside)가 켜졌을 때만 — 추측 실패를
+// 반송 근거가 아니라 차례 근거로 쓴다(범인은 반송하지 않고 혼자 착지 검증으로, frontsteady.go B)
 func (m *M) parCap(disp bool) bool {
-	return disp && m.hb == "" && len(m.b) >= 2 && m.capN() > 0 && m.culpritPar()
+	return disp && (m.hb == "" || m.sideline()) && len(m.b) >= 2 && m.capN() > 0 && m.culpritPar()
 }
 
 func rowOf(c *specCtx, id string) *specRow {
@@ -145,7 +147,7 @@ func (m *M) culpritJump(c *specCtx, ps []prefix, busy map[string]bool, now int64
 	}
 	f := ps[hi-1]
 	m.capTo, m.clog = hi-1, f.kv["machine"]+":"+f.kv["log"]
-	m.markSuspect(m.b[hi-1]) // 범인 후보 — 앞 hi−1이 착지하면 혼자 묶인다(다시 묶음 사슬을 타지 않게, 감사 낮음 1)
+	m.markSuspect(m.b[hi-1], f.test) // 범인 후보 — 앞 hi−1이 착지하면 혼자 묶인다(다시 묶음 사슬을 타지 않게, 감사 낮음 1)
 	m.cwhy = fmt.Sprintf("묶음 %d 추측 검증 — 앞 %d 시험 실패(%s, 첫 실패 「%s」), 그 앞은 아직 — 앞 %d로 줄여 다시", n, hi, f.kv["machine"], f.test, hi-1)
 	fmt.Printf("hc-lane merger: %s\n", m.cwhy)
 	return specShrink, true
@@ -157,13 +159,19 @@ func (m *M) culpritFound(c *specCtx, ps []prefix, lo int, busy map[string]bool, 
 	m.clog = f.kv["machine"] + ":" + f.kv["log"]
 	if lo == 0 { // 맨 앞 — 혼자로 줄이면 지금의 맨 앞 혼자 길(앞 1 추측 = 맨 앞 혼자 추측, specCulpritWhy)
 		m.capTo = 1
+		if s, _ := m.suspectRec(); s != "" && slices.Contains(shas(m.b), s) {
+			removeQuiet(m.mj + "/suspect") // 앞서 적은 이 묶음의 범인 「후보」는 확정이 아니다 — 옆으로 빼지 않게(감사 atp3xrb 낮음 1)
+		}
 		m.cwhy = fmt.Sprintf("묶음 %d 추측 검증 — 앞 1 시험 실패(%s, 첫 실패 「%s」) — 범인 맨 앞 %s, 혼자로 줄여 다시", len(ps), f.kv["machine"], f.test, e.l)
 		fmt.Printf("hc-lane merger: %s\n", m.cwhy)
 		return
 	}
 	m.capTo = lo
-	m.markSuspect(e)
-	chk := m.culpritRecheck(c, ps[lo-1], e, f, busy, now)
+	m.markSuspect(e, f.test)
+	chk := "옆으로 뺌 — 앞 착지 뒤 혼자 착지 검증" // 착지 스크립트 저장소: 확인 추측 없이 착지 스크립트가 판정(frontsteady.go B)
+	if m.hb == "" {
+		chk = m.culpritRecheck(c, ps[lo-1], e, f, busy, now)
+	}
 	m.cwhy = fmt.Sprintf("묶음 %d 추측 검증 — 앞 %d 통과(%s)·앞 %d 시험 실패(%s, 첫 실패 「%s」) — 앞 %d 착지 · 범인 %s, %s",
 		len(ps), lo, ps[lo-1].mach, lo+1, f.kv["machine"], f.test, lo, e.l, chk)
 	fmt.Printf("hc-lane merger: %s\n", m.cwhy)
@@ -204,7 +212,7 @@ func (m *M) prefixDispatch(c *specCtx, ps []prefix, busy map[string]bool, now in
 		if rowOf(c, p.id) != nil {
 			continue
 		}
-		v := m.specFree(c, busy)
+		v := m.frontFree(c, busy, nil) // 범인 가르기는 뒤 무리·미리 줄보다 먼저(frontsteady.go C)
 		if v.Machine == "" {
 			break
 		}
@@ -289,6 +297,9 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64, disp bool) {
 		return
 	}
 	v := m.specFree(c, busy)
+	if v.Machine == "" && disp {
+		v = m.preempt(c, busy, nil) // 맨 앞 혼자는 미리 줄보다 먼저(frontsteady.go C)
+	}
 	if v.Machine == "" {
 		return
 	}
@@ -311,19 +322,29 @@ func (m *M) specSolo(c *specCtx, busy map[string]bool, now int64, disp bool) {
 	}
 }
 
-func (m *M) markSuspect(e entry) {
-	if err := writeVia(m.mj+"/suspect", e.s+"\n"); err != nil {
+// markSuspect: 범인 표식 — 첫 줄 제출 SHA, 둘째 줄 그 근거(추측 실패의 첫 시험 줄 — 옆으로 뺌 일지에)
+func (m *M) markSuspect(e entry, why string) {
+	if err := writeVia(m.mj+"/suspect", e.s+"\n"+why+"\n"); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-lane merger: 범인 표식을 적지 못했다(범인이 다음 묶음에 다시 묶일 수 있다): %v\n", err)
 	}
 }
 
-// suspect: 범인 표식(<일지 폴더>/suspect)의 제출 SHA — 큐에서 혼자 묶인다(pickBatch·specGroups). 큐에 없으면 표식을 지우고 빈 값
-func (m *M) suspect(q [][2]string) string {
+// suspectRec: 범인 표식의 제출 SHA와 근거(없으면 빈 값)
+func (m *M) suspectRec() (string, string) {
 	b, err := os.ReadFile(m.mj + "/suspect")
 	if err != nil {
+		return "", ""
+	}
+	s, why, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	return strings.TrimSpace(s), strings.TrimSpace(why)
+}
+
+// suspect: 범인 표식(<일지 폴더>/suspect)의 제출 SHA — 큐에서 혼자 묶인다(pickBatch·specGroups). 큐에 없으면 표식을 지우고 빈 값
+func (m *M) suspect(q [][2]string) string {
+	s, _ := m.suspectRec()
+	if s == "" {
 		return ""
 	}
-	s := strings.TrimSpace(string(b))
 	for _, e := range q {
 		if e[1] == s {
 			return s

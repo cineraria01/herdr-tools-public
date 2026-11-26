@@ -57,6 +57,7 @@ type specCtx struct {
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
 func (m *M) spec() (specDecision, string) {
 	d, t := m.specDecide()
+	m.freezeAt(d) // 기다리는 맨 앞 무리는 얼리고, 그 밖(착지·줄이기·반송)은 풀어 다음 바퀴는 줄 차례대로(frontsteady.go A)
 	m.sparts = ""
 	if d == specLand && m.sfid != "" { // 병합기 기계가 직접 검증 — 맨 앞 추측의 통과 조각을 넘긴다(쓸지는 검증 스크립트가)
 		m.sparts = m.directParts(m.sfid)
@@ -65,7 +66,7 @@ func (m *M) spec() (specDecision, string) {
 }
 
 func (m *M) specDecide() (specDecision, string) {
-	m.vw, m.wre, m.sfid, m.vers = vwhy{why: "모름"}, "", "", nil
+	m.vw, m.wre, m.sfid, m.vers, m.sided = vwhy{why: "모름"}, "", "", nil, false
 	c, ok := m.specLoad()
 	if ok {
 		m.vers = c.vers // 착지 실행 기계 후보(landon.go)
@@ -78,7 +79,8 @@ func (m *M) specDecide() (specDecision, string) {
 	groups := m.specGroups()
 	now := time.Now().Unix()
 	if st := specWalk(m.btree, groups, c.rows); len(st) > 0 {
-		shardSettle(c, st[0].row) // 길에서 벗어난 나눔 추측은 몫이 다 끝나면 모름(specshards.go)
+		shardSettle(c, st[0].row)          // 길에서 벗어난 나눔 추측은 몫이 다 끝나면 모름(specshards.go)
+		m.offPathKill(c, m.keepIDs(c, st)) // 길에서 벗어난 도는 추측은 이 바퀴에 끝낸다(frontsteady.go C)
 	}
 	busy := specBusy(c.rows)
 	st := specWalk(m.btree, groups, c.rows)
@@ -117,7 +119,13 @@ func (m *M) specDecide() (specDecision, string) {
 		if last.row != nil {
 			break
 		}
+		if m.sideStep(c, st) { // 옆으로 뺄 범인 — 추측하지 않고 그 자리를 실패로, 뒤 무리는 그 제출 없이(frontsteady.go B)
+			continue
+		}
 		v := m.specFree(c, busy) // 실제로 한가한 기계(verifierpick.go — 이 바퀴 처음 고를 때 후보를 함께 잰다)
+		if v.Machine == "" && len(st) == 1 && disp {
+			v = m.preempt(c, busy, st) // 맨 앞이 먼저 — 미리 줄 추측을 끝내고 그 기계(frontsteady.go C)
+		}
 		if v.Machine == "" {
 			break
 		}
@@ -145,7 +153,7 @@ func (m *M) specDecide() (specDecision, string) {
 	// 진짜 줄 추측을 다 챙긴 뒤 남은 빈 검증 기계에 미리 줄(specpre.go). 맨 앞 혼자 추측은 길 밖이어도 지킨다 — 묶음이 검증 기계에서
 	// 실패해 줄이는 바퀴(specShrink)는 혼자 추측이 끝난 뒤라, 치우면 범인 반송 근거를 잃고 다시 돌린다
 	m.specClean(c, append(append(append(st[:len(st):len(st)], m.specPre(c, busy, now)...), m.soloKeep(c)...), prefixKeep(c, ps)...))
-	if st[0].row != nil {
+	if st[0].row != nil && st[0].row.commit != "" { // 옆으로 뺀 자리(원격 추측 없음)는 넘길 조각도 없다
 		m.sfid = st[0].row.id
 	}
 	if par {
@@ -160,6 +168,9 @@ func (m *M) specDecide() (specDecision, string) {
 	m.vw.why = frontWhy(st, c.rows, over, disp)
 	if over && stall != "" {
 		m.vw.why += "·" + stall // 상한에서 직접 검증한 까닭(갱신 없음·터미널 없음·못 읽음)
+	}
+	if m.sided {
+		m.vw.why = "옆으로 뺌"
 	}
 	m.wmach = ""
 	switch {
@@ -335,6 +346,7 @@ func (m *M) specIdle() {
 		}
 		keep = m.specPre(c, specBusy(c.rows), time.Now().Unix())
 	}
+	m.offPathKill(c, stepIDs(keep)) // 줄이 비었다 — 미리 줄 말고 도는 추측은 쓸 데가 없다(frontsteady.go C)
 	m.specClean(c, keep)
 }
 
@@ -342,6 +354,7 @@ func (m *M) specIdle() {
 // 제출 기록을 못 읽는 것에서 멈춘다
 func (m *M) specGroups() []specGroup {
 	gs := []specGroup{newGroup(m.b)}
+	m.gpartial = true // 끝까지 셌을 때만 거짓
 	n := m.batch
 	if k := m.capN(); k > 0 && k < n {
 		n = k
@@ -376,11 +389,13 @@ func (m *M) specGroups() []specGroup {
 			ln = mn[11:]
 		}
 		if !laneOK(ln) || m.reserved(ln) {
-			break
+			flush()
+			return gs
 		}
 		mt, ok := readMeta(refsha(m.qs, "refs/merge-queue-meta/"+mn), ms)
 		if !ok {
-			break
+			flush()
+			return gs
 		}
 		if mt.base != "" && mt.base != m.base {
 			continue
@@ -397,6 +412,7 @@ func (m *M) specGroups() []specGroup {
 		}
 	}
 	flush()
+	m.gpartial = false
 	return gs
 }
 

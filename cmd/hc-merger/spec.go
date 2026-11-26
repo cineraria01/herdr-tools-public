@@ -31,8 +31,8 @@ package main
 //     띄운 지 HC_LANE_SPEC_FRONT_WAIT(기본 600초)를 넘기면 모름, specrun.go specFrontWait) ·
 //     그 밖(실패·충돌·모름·줄 없음)이면 specfront.go specFrontLand(혼자 시험 실패는 다른 기계에서 한 번 더 확인 뒤 반송, 묶음 시험 실패는
 //     줄여서 다시, 바쁨은 곧바로 다른 한가한 기계로(verifierpick.go), 모름·맡길 한가한 기계 없음은 손잡이 front_local — 기본은 착지(병합기 기계 검증), 0이면 기다림·사건 한 번).
-//  4. 따라간 길에 없는 추측(착지했거나 반송됐거나 main이 움직임)은 도는 중이 아니면 참조 셋을 지운다(본 값 lease). 도는 중이면 그 기계가
-//     끝낼 때까지 둔다(그 기계는 그동안 바쁨 — 검증 기계 일꾼은 결과를 쓰기 전에 spec 참조가 아직 있는지 본다).
+//  4. 따라간 길에 없는 추측(착지했거나 반송됐거나 main이 움직임)은 참조 셋을 지운다(본 값 lease). 도는 중이면 벗어난 그 바퀴 처음에 그
+//     터미널을 정확한 주소로 끝내고 지운다(frontsteady.go C — 검증 기계 일꾼은 결과를 쓰기 전에 spec 참조가 아직 있는지 본다).
 //  5. 미리 줄(specpre.go): 위를 다 챙긴 뒤 빈 검증 기계가 남으면, 완료 보고한 레인 표식(refs/merge-pre/*)마다 「기준 + 그 커밋」 추측을
 //     같은 꼴로 띄우고 4의 치우기에서 길처럼 지킨다(큐가 빈 바퀴에도). 같은 sha가 혼자 제출되면 그 추측이 곧 맨 앞 무리다.
 //
@@ -73,6 +73,7 @@ type specRow struct {
 	state               specState
 	conflict, dispatchX bool   // 제목의 state=conflict · state=lost(띄우기 실패)
 	busy                bool   // 제목의 state=busy(그 기계 일꾼이 바빠 검증하지 않음)
+	gone                bool   // 이 바퀴에 끝내고 참조를 지움(frontsteady.go specKill) — 길은 없는 것으로 본다
 	lost                string // 모름의 까닭(시간 넘김·안 뜸·못 띄움·준비 실패 — 일지 「직접 검증(추측 <까닭>)」, 모르면 빈 값)
 }
 
@@ -92,6 +93,15 @@ func newGroup(es []entry) specGroup {
 	}
 	g.key, g.lanes = strings.Join(g.shas, "+"), strings.Join(ls, "+")
 	return g
+}
+
+// shas: 구성원의 제출 SHA(차례대로)
+func shas(b []entry) []string {
+	s := make([]string, len(b))
+	for i, e := range b {
+		s[i] = e.s
+	}
+	return s
 }
 
 func specID(parent, key string) string {
@@ -188,6 +198,9 @@ func specWalk(base string, groups []specGroup, rows []specRow) []specStep {
 	cur := base
 	for _, g := range groups {
 		r := by[specID(cur, g.key)]
+		if r != nil && r.gone {
+			r = nil
+		}
 		st = append(st, specStep{g: g, parent: cur, row: r})
 		if r == nil {
 			break

@@ -330,7 +330,7 @@ func TestParEnvFailNotCulprit(t *testing.T) {
 	if b, _ := os.ReadFile(s.clone + "/.git/hc-merger/cap"); strings.TrimSpace(string(b)) != "2" {
 		t.Fatalf("앞 3 시험 실패 — 앞 2로 줄임: %q\n%s", b, jdump())
 	}
-	if b, _ := os.ReadFile(s.clone + "/.git/hc-merger/suspect"); strings.TrimSpace(string(b)) != sh[2] {
+	if b, _ := os.ReadFile(s.clone + "/.git/hc-merger/suspect"); strings.Split(string(b), "\n")[0] != sh[2] { // 첫 줄 SHA, 둘째 줄 근거
 		t.Fatalf("낮음 1: 앞 3의 3번째(c)를 범인 후보로 표식: %q", b)
 	}
 }

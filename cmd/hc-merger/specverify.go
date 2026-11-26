@@ -77,6 +77,7 @@ func specVerifyMain(a []string) int {
 		return 1
 	}
 	specRmWT(wt)
+	specSweep(wtr) // 끝낸 앞 일꾼(hc kill — defer가 안 돎)이 남긴 작업 트리(frontsteady.go)
 	lg := wt + ".log"
 	// 검증 자리를 busy_wait초 안에 못 얻으면 검증하지 않고 「바쁨」(verifierpick.go) — 병합기가 곧바로 다른 한가한 기계로 다시 고른다
 	if lf, err := os.OpenFile(lg, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o666); err == nil {

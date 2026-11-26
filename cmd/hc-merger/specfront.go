@@ -171,6 +171,18 @@ func (m *M) specFrontRedo(c *specCtx, st []specStep, busy map[string]bool, now i
 		return frontFail{} // 통과·도는 중·충돌
 	}
 	if m.hb != "" { // 착지 스크립트 저장소 — 추측 실패는 반송·한 번 더 확인의 근거가 아니다(착지 스크립트가 스스로 검증한다)
+		if r.commit == "" {
+			return frontFail{kind: ffUnknown} // 옆으로 뺀 자리(sideVirtual) — 추측 없이 착지 스크립트로
+		}
+		if r.state == specFail && m.sideline() { // 시험 실패는 차례 근거(frontsteady.go B) — 묶음은 줄여 범인 가르기, 혼자는 옆으로 빼 착지 스크립트로
+			if kv, test, ok := m.specFailRec(c, r.id); ok && kv["test"] == "1" && test != "" && kv["exit"] != "" {
+				if len(g.shas) > 1 {
+					return frontFail{kind: ffShrink, kv: kv, test: test}
+				}
+				m.sideNote(g, test)
+				return frontFail{kind: ffUnknown}
+			}
+		}
 		if r.state == specFail {
 			fmt.Printf("hc-lane merger: 맨 앞 %s 추측 실패 — 착지 스크립트 저장소라 반송 근거로 쓰지 않는다(착지 스크립트가 검증한다)\n", g.lanes)
 		}
