@@ -183,14 +183,16 @@ func macrow() {
 	rows = LOCAL + ": " + s + "\n"
 }
 
-// ready <저장소>: git·main·깨끗함 확인 뒤 pull --ff-only. git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다
+// ready <저장소>: git·main·깨끗함 확인 뒤 origin/main으로 앞당김(ffMain). git 조회가 실패하거나 시간을 넘기면(124 — 모름) 깨끗함·main으로 읽지 않고 멈춘다
 // (gofix-ops B01·O-01·K-01: 실패한 status의 빈 출력을 깨끗함으로 읽어 커밋 안 된 내용을 맥·기계에 깔았다)
 func ready(r string) {
 	if msg := readyState(r); msg != "" {
 		die("%s", msg)
 	}
-	if why := pullFF(r); why != "" { // 잠금 경합은 몇 번 다시(gitpull.go)
-		die("git pull --ff-only 실패: %s (지난번 push 못 한 커밋이 있으면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main) — git: %s", r, why)
+	if why, diverged := ffMain(r); diverged { // fetch + merge --ff-only, 잠금 경합은 몇 번 다시(gitpull.go)
+		die("main 앞당김 실패 — 로컬 main에 origin/main에 없는 커밋이 있다: %s (지난번 push 못 한 커밋이면 거기서 git pull --rebase 뒤 HERDR_LAND=1 git push origin HEAD:main) — git: %s", r, why)
+	} else if why != "" {
+		die("main 앞당김 실패: %s — git: %s", r, why)
 	}
 }
 

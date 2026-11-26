@@ -21,7 +21,7 @@ herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합
   둘 다 git·main 브랜치·깨끗함이어야 한다.
   개인 저장소(`sync.list`)가 없으면 종료 2, 아무것도 쓰지 않는다.
 - 대상 이름: `all`(모든 기계) · `macos`(uname이 Darwin) · `local`(맥만) · 기계 이름을 쉼표로. 옛 이름 `all9`·`mac7`·`mac-only`가 보이면 새 이름을 알리고 종료 2(옛 판은 그것을 기계 이름으로 읽어 아무 데도 안 깔고 「같음」으로 보였다).
-- 순서: 두 저장소 `git pull --ff-only` → `sync.list` 읽기(`sync-lint` — 걷힌 셸 판 줄·틀린 바이너리 줄·딸린 줄 빠짐이면 종료 2) → `--pull` 처리 → 개인 설정 `sync.prebuild`(있으면 `sh -c`로, 예: 맥 지침에서 Codex 공통 구역 다시 만들기. 실패하면 멈춤) → 맥 ↔ 두 저장소 → 공개 내보내기(곁 `~/.local/bin/herdr-tools-publish`) → 기계 조회 → 릴리스 → 맥 바이너리 → 기계마다 파일 → 바이너리 → 설정(`~/.local/bin/herdr-settings-merge`) → 지울 것 → 마지막에 기계마다 한 줄 `같음` / `다름 (묶음…)` / `충돌 n건`. 저장소에서 지침 본문을 깔았으면 prebuild와 맥 ↔ 저장소를 한 번 더 돈다.
+- 순서: 두 저장소 main 앞당김(fetch + `merge --ff-only`) → `sync.list` 읽기(`sync-lint` — 걷힌 셸 판 줄·틀린 바이너리 줄·딸린 줄 빠짐이면 종료 2) → `--pull` 처리 → 개인 설정 `sync.prebuild`(있으면 `sh -c`로, 예: 맥 지침에서 Codex 공통 구역 다시 만들기. 실패하면 멈춤) → 맥 ↔ 두 저장소 → 공개 내보내기(곁 `~/.local/bin/herdr-tools-publish`) → 기계 조회 → 릴리스 → 맥 바이너리 → 기계마다 파일 → 바이너리 → 설정(`~/.local/bin/herdr-settings-merge`) → 지울 것 → 마지막에 기계마다 한 줄 `같음` / `다름 (묶음…)` / `충돌 n건`. 저장소에서 지침 본문을 깔았으면 prebuild와 맥 ↔ 저장소를 한 번 더 돈다.
 - sh를 못 띄우는 기계(Windows 등, hc 오류 `spawn_failed`·`cannot start `)는 `<기계>: 건너뜀 (sh 없음 — Windows 등)`, uname이 Darwin·Linux가 아닌 기계(Git sh의 `MINGW64_NT-…`·`MSYS_NT-…` 등)는 `<기계>: 건너뜀 (OS <uname>)` 한 줄만 찍고 아무것도 쓰지 않는다(`--take`·`--pull`로 집어도).
   둘 다 종료 코드에 넣지 않는다.
   진짜 연결 실패·시간 초과는 지금처럼 `다름 (연결)`·종료 1이다.
@@ -33,7 +33,9 @@ herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합
   그 뒤로는 짓기·릴리스 이름·맥과 기계에 까는 판·`같음/다름`·배포 기록이 모두 그 커밋이다(기계는 맥에 깐 소스와 그 커밋의 릴리스를 받는다).
   끝 요약 뒤에 기본 가지가 그새 움직였으면 `배포한 판 <커밋> — 기본 가지는 그새 <커밋>로 움직였다(다음 배포에)` 한 줄(실패 아님, 종료 코드 그대로), 다시 보지 못하면 `… 움직였는지 모름` 한 줄.
   어느 기계가 그 판을 못 깔면(릴리스 없음·그 기계 소스가 다름 등) 그 기계 줄이 `다름 (바이너리) — 못 받은 판: <도구> 바이너리를 깔지 못했다: <까닭>`이고 종료 1이다.
-- 첫 `git pull --ff-only`가 같은 체크아웃의 다른 git(대기열 바퀴의 fetch 등)과 잠금(`.lock`·`cannot lock ref`)으로 부딪히면 짧게 몇 번(최대 5번) 다시 하고, 그래도 안 되거나 진짜 갈라짐이면 git이 낸 까닭 한 줄을 붙여 멈춘다(2026-11-24 deploy-log-rollback).
+- 첫 앞당김은 `git pull`이 아니라 `git fetch origin main` → `git merge --ff-only origin/main`이다(2026-11-26 ht-sync-pull-race — pull은 같은 체크아웃이 함께 쓰는 FETCH_HEAD를 다시 읽어, 대기열 바퀴·hc-lane의 다른 fetch가 그 사이 고쳐 쓰면 `Cannot fast-forward to multiple branches` 등으로 실패했다).
+  fetch의 참조 잠금 경합은 1·2·4초 쉬며 다시(hc-lane fetch와 같은 도우미), merge의 잠금(`.lock`)은 짧게 몇 번(최대 5번) 다시 한다.
+  그래도 안 되면 `main 앞당김 실패: <저장소> — git: <까닭 한 줄>`로 멈추고, push 못 한 커밋을 어떻게 올리는지 안내는 진짜 갈라짐(로컬 main에 origin/main에 없는 커밋)일 때만 붙는다.
 - 다른 herdr-sync가 돌고 있으면 바로 끝난다(종료 75).
   맥이 아닌 곳(`~/Applications/Herdr.app`·`/Applications/Herdr.app`이 없거나 `hc machine ls`에 기계가 없는 곳)에서는 종료 2.
 - 설정은 대상 기계의 `herdr-settings-merge`가 `~/.local/share/herdr-sync/keys.json`(개인 저장소 `settings/keys.json`을 깐 것)과 `HERDR_MACHINE`으로 판정한다.
