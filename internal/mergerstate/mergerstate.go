@@ -27,10 +27,12 @@ const (
 	PrevLand = "prev-land" // 앞 병합기 실행이 남긴 착지 자식이 아직 돎
 )
 
-// Wait: 기다리는 대상 하나 — 기계, 터미널 주소(못 찾았으면 빈 값), 역할(사람이 읽는 글), 띄운 시각
+// Wait: 기다리는 대상 하나 — 기계, 터미널 주소(못 찾았으면 빈 값), 역할(사람이 읽는 글), 띄운 시각.
+// Name: 띄울 때 준 터미널 이름(Rec.Agents만 — 읽는 쪽이 주소와 함께 맞춘다, 이름 꼴은 몰라도 된다)
 type Wait struct {
 	Machine string `json:"machine"`
 	Addr    string `json:"addr"`
+	Name    string `json:"name,omitempty"`
 	Role    string `json:"role"`
 	At      int64  `json:"at"`
 }
@@ -59,6 +61,9 @@ type Rec struct {
 	Waits    []Wait   `json:"waits"`
 	Inner    *Inner   `json:"inner,omitempty"`
 	LandOn   string   `json:"land_on"` // 마지막 착지 실행 결정 「<기계>(<까닭>)」(이력)
+	// Agents: 병합기가 띄워 지금 맡긴 에이전트(충돌 풀이·풀이 감사 — 주소·이름) — hc-fill 자리 셈이 대기열 쪽 도구가 띄운 것으로 센다
+	// (ht-seat-working-only). 옛 기록에는 없다(빈 목록)
+	Agents []Wait `json:"agents,omitempty"`
 }
 
 // Landing: 착지 단계인가(병합기 기계·워커)

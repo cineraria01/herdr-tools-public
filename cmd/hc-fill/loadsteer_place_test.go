@@ -19,14 +19,14 @@ import (
 func lpFix(t *testing.T) (reround func()) {
 	t.Helper()
 	reround = knobFix(t)
-	oc, ocn, ost, oag, orsv, orows := CONN, NOW, stuck, AGUNK, RSV, ROWS
+	oc, ocn, ost, oag, orows := CONN, NOW, stuck, AGUNK, ROWS
 	t.Cleanup(func() {
-		CONN, NOW, stuck, AGUNK, RSV, ROWS = oc, ocn, ost, oag, orsv, orows
+		CONN, NOW, stuck, AGUNK, ROWS = oc, ocn, ost, oag, orows
 		LOADS, MWHY, PADDED, SEATS, NOWL, OREC = nil, nil, "", nil, nil, nil
 	})
 	Q, AT = DATA+"/queue.tsv", DATA+"/audit.tsv"
 	LOCAL, CONN, stuck, NEED, AK, OFF = "a", []string{"b"}, "-", "", "-", ""
-	SEATS, NOW, NOWL, AGUNK, RSV, ROWS, OREC = nil, nil, nil, nil, map[string]string{}, nil, nil
+	SEATS, NOW, NOWL, AGUNK, ROWS, OREC = nil, nil, nil, nil, nil, nil
 	confLines = []string{"local a", "machine a 3 -", "machine b 3 -", "repo p a /r/a", "repo p b /r/b"}
 	MWHY, PADDED = map[string]string{}, time.Now().Format("2006-01-02T15:04")
 	return reround

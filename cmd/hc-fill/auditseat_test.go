@@ -2,10 +2,8 @@ package main
 
 import (
 	"os"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // fill-audit-seat(2026-11-24): 완료를 적고 자동 감사를 기다리는 레인의 자리는 그 감사가 뜰 때까지 감사 몫으로 잡아 둔다 —
@@ -23,7 +21,7 @@ func asSetup(t *testing.T, cap string, laAuto bool) *asT {
 	HOME = d
 	OWNF, OWND = d+"/own.tsv", d+"/own"
 	LOCAL, dry, P, CONN, AGENT, EVBAD = "here", true, "", nil, "claude-code", false
-	AGUNK, SEATS, NOW, NOWL, ROWS, OREC, ALLM, AUDN, AWT, HELD = nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
+	AGUNK, SEATS, NOW, NOWL, ROWS, OREC, HELD = nil, nil, nil, nil, nil, nil, nil
 	AK, AUD, NEED, RESUME, EARLYF, HOLD = "-", d+"/audit.md", "", false, "", 60
 	RID, stuck, SB = "r1", "-", d+"/brief.md"
 	confLines = []string{"machine here " + cap + " -", "repo p here " + d + "/r"}
@@ -62,18 +60,27 @@ func asSetup(t *testing.T, cap string, laAuto bool) *asT {
 	return &asT{t, d}
 }
 
-// round: 한 바퀴의 자리 셈과, 차례대로 lc(긴급 대기 레인) → audit-a1 놓기. 돌려줌: lc 놓임, 감사 놓임
+// round: 한 바퀴의 자리 셈과, 바퀴 차례(orderRows — 자동 감사 줄이 맨 앞)대로 기다리는 줄 놓기. 돌려줌: lc 놓임, 감사 놓임
 func (x *asT) round() (lc, au bool) {
-	auditSeats()
+	aseatSweep()
+	orderRows()
 	countSeats()
 	NOW, NOWL, OFF = nil, nil, ""
-	AK, RID = "-", "q3"
-	place("lc", "p", x.d+"/brief.md", "-", "-", "t9", "")
-	lc = placed
-	if qrow("audit-a1") != nil {
-		AK, RID = "audit=la", "q4"
-		place("audit-a1", "p", x.d+"/brief.md", "here", "-", "t9", "")
-		au = placed
+	for _, r := range ROWS {
+		if r.F(qState) != "wait" {
+			continue
+		}
+		AK, RID = "-", r.F(qRID)
+		if strings.HasPrefix(r.F(qAudit), "audit=") {
+			AK = r.F(qAudit)
+		}
+		place(r.F(qName), "p", x.d+"/brief.md", dash(r.F(qOnly)), "-", "t9", "")
+		switch r.F(qName) {
+		case "lc":
+			lc = placed
+		case "audit-a1":
+			au = placed
+		}
 	}
 	AK = "-"
 	return
@@ -139,31 +146,14 @@ func TestAuditSeatFullAlertsOnce(t *testing.T) {
 	}
 }
 
-// ④ 자동 감사가 꺼진 레인(--no-audit) 완료 → 지금 그대로: 감사 몫으로 잡지 않는다(쉰 지 hold 넘으면 자리 빔 → lc가 뜬다)
-// ⑥ 감사 포기(지휘로 넘김) 뒤 감사 몫이 풀려 지금 규칙으로 — 같은 조건에서 lc가 뜬다
+// ④ 자동 감사가 꺼진 레인(--no-audit) 완료 → 쉬는 레인은 자리를 안 쓴다(쉰 시간과 상관없이, ht-seat-working-only) — lc가 바로 뜬다.
+// 대조: 감사를 기다리면 감사 줄이 차례 맨 앞이라 그 자리를 감사가 먼저 쓴다(감사 몫 예약 없이)
 func TestAuditSeatReleases(t *testing.T) {
-	old := strconv.FormatInt(time.Now().Add(-2*time.Hour).Unix(), 10)
-	for _, c := range []struct {
-		name string
-		auto bool
-		st   string
-	}{{"no-audit", false, ""}, {"포기", true, "escalate:noverdict"}, {"넘김 끝", true, "coord"}} {
-		t.Run(c.name, func(t *testing.T) {
-			x := asSetup(t, "2", c.auto)
-			if c.auto {
-				rows := readRows(AT)
-				rows[0] = rows[0].Set(atState, c.st)
-				rejW(t, AT, rowsText(rows))
-			}
-			rejW(t, DATA+"/held.tsv", "h/a\t"+old+"\n")
-			if lc, _ := x.round(); !lc {
-				t.Fatalf("lc 안 놓임 — %s 뒤에도 la 자리를 잡아 둠", c.name)
-			}
-		})
+	x := asSetup(t, "2", false)
+	if lc, _ := x.round(); !lc {
+		t.Fatal("lc 안 놓임 — 쉬는 no-audit 레인 la가 자리를 씀")
 	}
-	// 대조: 같은 조건(쉰 지 hold 넘음)이어도 감사를 기다리는 동안은 잡아 둔다
-	x := asSetup(t, "2", true)
-	rejW(t, DATA+"/held.tsv", "h/a\t"+old+"\n")
+	x = asSetup(t, "2", true)
 	if lc, au := x.round(); lc || !au {
 		t.Fatalf("감사 기다림: lc %v·감사 %v, 바람 lc 안 놓임·감사 놓임", lc, au)
 	}

@@ -169,7 +169,7 @@ func idleTick() {
 		if !hasRepo {
 			continue
 		}
-		fr, _ := machRoom(mc, false, 0) // 띄우기와 같은 셈 — 연결 안 됨·멈춤(hc-fill machine --pause)·레인상한 참이면 0이라 알리지 않는다
+		fr, _ := machRoom(mc, false) // 띄우기와 같은 셈 — 연결 안 됨·멈춤(hc-fill machine --pause)·레인상한 참이면 0이라 알리지 않는다
 		if fr <= 0 {
 			continue
 		}

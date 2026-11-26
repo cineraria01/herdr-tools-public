@@ -152,21 +152,15 @@ func runRound() {
 	tickMark("pr")
 	prTick() // PR 거울(pr.go — 손잡이 pr, 꺼져 있으면 아무것도 안 함). 사건·감사·다시 맞춤 뒤
 	tickMark("order")
-	auditSeats()
+	aseatSweep()
 	orderRows()
 	NOW, NOWL, OFF, FETCHED, FETCHBAD = nil, nil, "", "", ""
-	ALLM = nil
-	for _, m := range machines() {
-		if m.All == "all" {
-			ALLM = append(ALLM, m.Name)
-		}
-	}
 	h := conf("hold")
 	if h == "" {
 		h = "60"
 	}
 	if !isDigits(h) {
-		say("알림: 설정 hold는 분(숫자)이다, 쉰 레인도 셈: %s", h)
+		say("알림: 설정 hold는 분(숫자)이다, 쉰 앞 레인 멈춤 판정 끔: %s", h)
 		h = "0"
 	}
 	HOLD = atoi10(h)
@@ -265,56 +259,6 @@ func readTables() {
 	LSSNAP = true // 띄우기 전까지 「표에 없음 = 터미널 없음」(lsGone, tick.go)
 }
 
-// auditSeats: 자리에서 뺄 자동 감사 레인 이름(AUDN)과, 감사 줄이 자리를 쥔 동안의 쓰기 레인 주소(AWT)
-func auditSeats() {
-	AUDN, AWT, RSVW, RSV = nil, nil, map[string]string{}, map[string]string{}
-	if AUD == "" || !isFile(Q) {
-		return
-	}
-	rows := qRows()
-	hold := ","
-	wl := map[string]string{} // 쓰기 레인 → 아직 안 뜬(wait) 감사 줄
-	for _, r := range rows {
-		if !strings.HasPrefix(r.F(qAudit), "audit=") {
-			continue
-		}
-		AUDN = append(AUDN, r.F(qName))
-		switch r.F(qState) {
-		case "wait":
-			if strings.Contains(","+r.F(qStuck)+",", ","+r.F(qOnly)+"=") {
-				continue
-			}
-			wl[strings.TrimPrefix(r.F(qAudit), "audit=")] = r.F(qName)
-		case "up":
-			if s := alive(r.F(qAddr)); s == "gone" || s == "done" || s == "idle" {
-				continue
-			}
-		default:
-			continue
-		}
-		hold += strings.TrimPrefix(r.F(qAudit), "audit=") + ","
-	}
-	w := map[string]bool{}
-	for _, a := range readRows(AT) {
-		if a.NF() >= atNF && (a.F(atState) == "queued" || a.F(atState) == "opening") {
-			w[a.F(atLane)] = true
-		}
-	}
-	for _, r := range rows {
-		if r.F(qState) == "up" && r.F(qAudit) == "auto" && w[r.F(qName)] && strings.Contains(hold, ","+r.F(qName)+",") {
-			AWT = append(AWT, r.F(qAddr))
-			if an, ok := wl[r.F(qName)]; ok {
-				RSVW[r.F(qAddr)] = an
-			}
-		}
-	}
-	wait := map[string]bool{}
-	for _, an := range wl {
-		wait[an] = true
-	}
-	aseatPrune(wait)
-}
-
 var talRe = regexp.MustCompile(`^## 이어서: ([a-z0-9_-]+) `)
 
 // orderRows: 기다리는 줄 수(WC)와 이번 바퀴 줄 차례(ROWS — 우선순위, 기다리는 줄 수, 넣은 차례)
@@ -370,6 +314,7 @@ func orderRows() {
 		k := r.F(qName)
 		if strings.HasPrefix(r.F(qAudit), "audit=") {
 			k = r.F(qAudit)[6:]
+			p = -1 // 자동 감사 줄은 차례 맨 앞 — 같은 바퀴의 대기 레인(긴급 포함)보다 먼저 빈 자리를 쓴다(감사 몫 예약 대신, slots.md)
 		}
 		os_ = append(os_, ord{p, WC[k], i, r})
 	}
@@ -391,7 +336,8 @@ func orderRows() {
 // AGUNK: 이번 바퀴 목록에 유형(agent) 모를 터미널이 있는 기계 — 새 일을 놓지 않는다(countSeats가 채움)
 var AGUNK []string
 
-// countSeats: 자리를 차지한 에이전트(SEATS)와 쉬기 시작한 때(held.tsv)
+// countSeats: 자리를 쓰는 에이전트(SEATS) — 대기열이 띄운 것 가운데 지금 일하는 것(docs/hc-fill/slots.md, 2026-11-27 사용자 결정
+// 「일하는 것만 센다」) — 와 쉬기 시작한 때(held.tsv). 쉬는 레인·사람이 연 세션은 자리를 안 쓴다. ROWS(orderRows)를 읽는다
 func countSeats() {
 	lk := os.Getenv("XDG_STATE_HOME")
 	if lk == "" {
@@ -413,84 +359,44 @@ func countSeats() {
 			HELD[r.F(hdAddr)] = r.F(hdSince)
 		}
 	}
-	HNEW, HNOW, SEATS, AGUNK = nil, nowUnix(), nil, nil
+	ours := fillTerms()
+	HNEW, HNOW, SEATS, AGUNK, SREST, SOUT = nil, nowUnix(), nil, nil, nil, nil
 	for _, t := range TERMS {
-		tm, ta, tn, ts, tc := t.M, t.Addr, t.Name, t.Status, t.Cwd
-		pre := fmt.Sprintf("자리 %s %s %s: ", tm, ta, tn)
-		if t.Agent == "-" { // agent 칸 없음·null — 유형 모름: 레인 라벨이면 자리를 지키고, 그 기계에는 이번 바퀴 새 일을 놓지 않는다(재감사2 fill/R-203)
+		tm, ta, ts := t.M, t.Addr, t.Status
+		pre := fmt.Sprintf("자리 %s %s %s: ", tm, ta, t.Name)
+		rest := ts == "done" || ts == "idle"
+		if t.Agent == AGENT && rest { // 쉬기 시작한 때 — 선행 판정(쉰 앞 레인, overlap2.go predState)이 읽는다
+			hs := HELD[ta]
+			if !isDigits(hs) {
+				hs = strconv.FormatInt(HNOW, 10)
+			}
+			HNEW = append(HNEW, ta+"\t"+hs)
+		}
+		mine := ours[ta+"\t"+t.Name]
+		switch {
+		case t.Agent == "-": // agent 칸 없음·null — 유형 모름: 그 기계에는 이번 바퀴 새 일을 놓지 않는다(재감사2 fill/R-203)
 			AGUNK = append(AGUNK, tm)
-			if has(LANEADDR, ta) {
-				say("%s유형 모름(hc-lane 레인) → 셈, 이 기계에 새 일 안 놓음", pre)
+			if mine {
+				say("%s유형 모름(대기열이 띄움) → 셈, 이 기계에 새 일 안 놓음", pre)
 				SEATS = append(SEATS, tm)
 			} else {
 				say("%s유형 모름 → 이 기계에 새 일 안 놓음", pre)
 			}
-			continue
-		}
-		if t.Agent != AGENT { // 상태 모르는 hc-lane 레인(띄운 직후·훅 안 보냄)은 살아 있는 에이전트로 셈
-			if ts == "-" && has(LANEADDR, ta) && laneEnded(t) {
-				say("%s%s, 끝난 레인(hc keep이 셸로 바꿈) → 안 셈", pre, t.Agent)
-			} else if ts == "-" && has(LANEADDR, ta) {
-				say("%s%s, 상태 모름(hc-lane 레인) → 셈", pre, t.Agent)
-				SEATS = append(SEATS, tm)
+		case !mine: // 사람이 연 세션·지휘 세션·손으로 띄운 레인·루프 — 상태를 보내는 에이전트만 알리고 센다(셸·병합기 검증 터미널은 말없이)
+			if ts != "-" {
+				say("%s%s, 대기열 밖 → 안 셈", pre, ts)
+				SOUT = append(SOUT, tm)
 			}
-			continue
-		}
-		if ts != "done" && ts != "idle" {
+		case rest:
+			say("%s%s, 쉼 → 안 셈", pre, ts)
+			SREST = append(SREST, tm)
+		case ts == "-" && laneEnded(t):
+			say("%s%s, 끝난 레인(hc keep이 셸로 바꿈) → 안 셈", pre, t.Agent)
+		case ts == "-":
+			say("%s%s, 상태 모름(뜨는 중) → 셈", pre, t.Agent)
 			SEATS = append(SEATS, tm)
-			continue
-		}
-		hs := HELD[ta]
-		if !isDigits(hs) {
-			hs = strconv.FormatInt(HNOW, 10)
-		}
-		HNEW = append(HNEW, ta+"\t"+hs)
-		hsn, _ := strconv.ParseInt(hs, 10, 64)
-		switch {
-		case has(AUDN, tn):
-			say("%s%s, 자동 감사 레인 → 안 셈", pre, ts)
-			continue
-		case has(AWT, ta):
-			if an, ok := RSVW[ta]; ok { // 감사가 아직 안 떴다 — 그 감사 몫으로 잡아 둔다(다른 줄이 못 가져감)
-				RSV[an] = tm
-				say("%s%s, 자동 감사 기다림(자리는 감사 줄이) → 안 셈, %s 몫으로 잡아 둠", pre, ts, an)
-			} else {
-				say("%s%s, 자동 감사 기다림(자리는 감사 줄이) → 안 셈", pre, ts)
-			}
-			continue
-		case has(ALLM, tm):
-			SEATS = append(SEATS, tm)
-			continue
-		}
-		if !strings.Contains(tc, ".wt/") {
-			say("%s%s, 읽기 전용(작업 트리 아님) → 안 셈", pre, ts)
-			continue
-		}
-		if LKIND[ta+"\t"+tn] {
-			say("%s%s, 읽기 레인(레인 기록) → 안 셈", pre, ts)
-			continue
-		}
-		tw := "작업 트리 확인 못 함"
-		switch wtThere(tm, tc) {
-		case "yes":
-			if detachedClean(tm, tc) {
-				say("%s%s, 읽기 전용(분리·깨끗) → 안 셈", pre, ts)
-				continue
-			}
-			tw = "작업 트리 있음"
-		case "no":
-			say("%s%s, 작업 트리 없음 → 안 셈", pre, ts)
-			continue
-		}
-		switch {
-		case submitted(tn, ta):
-			say("%s%s, 제출함(병합기 큐 — 레인은 끝) → 안 셈", pre, ts)
-		case laneLanded(tn, tc):
-			say("%s%s, 착지함(%s) → 안 셈", pre, ts, strings.SplitN(LHIT, " ", 2)[0])
-		case HOLD != 0 && HNOW-hsn >= int64(HOLD*60):
-			say("%s%s, 쉰 지 %d분(hold %d) → 안 셈", pre, ts, (HNOW-hsn)/60, HOLD)
 		default:
-			say("%s%s, %s → 셈", pre, ts, tw)
+			say("%s%s → 셈", pre, ts)
 			SEATS = append(SEATS, tm)
 		}
 	}

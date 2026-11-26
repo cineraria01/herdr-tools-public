@@ -292,7 +292,7 @@ func secD2(k *K) {
 	k.dBack(2, 660)
 	k.run("run")
 	k.check("놀고 있음: idle분 넘으면 사건 한 번 — 기계·자리 수·분, 레인 이름 hc-fill-idle, 터미널 밖으로",
-		nrl() == 1 && hasF(RL, "report 중간 - box-1 자리 2개 11분째 빔") && hasF(RL, "here 자리 4개 11분째 빔") &&
+		nrl() == 1 && hasF(RL, "report 중간 - box-1 자리 2개 11분째 빔") && hasF(RL, "here 자리 5개 11분째 빔") &&
 			hasF(RL, "대기열에 띄울 것 없음 --name hc-fill-idle") && hasF(RL, "(터미널 없음)"), read(RL))
 	k.check("놀고 있음: 대기 줄이 없으면 모든 지휘(--to 없음)", !hasF(RL, "--to"))
 	k.run("run")
@@ -304,7 +304,7 @@ func secD2(k *K) {
 	k.dBack(3, 7300)
 	k.run("run")
 	k.check("놀고 있음(대기열 빔): 2시간 뒤에도 안 보냄", nrl() == 1, read(RL), read(IT))
-	k.lj("box-1/x1:claude-code:a", "box-1/x2:claude-code:b")
+	k.ljq("box-1/x1:claude-code:a", "box-1/x2:claude-code:b")
 	k.run("run")
 	k.check("놀고 있음: 자리가 차면 그 기계 기록을 지움(다시 비면 처음부터)", !hasE(IT, "^box-1\t") && hasE(IT, "^box-2\t"))
 	k.lj()
@@ -329,7 +329,7 @@ func secD2(k *K) {
 	k.fresh()
 	k.run("run")
 	k.dBack(2, 660)
-	k.lj("box-1/y1:claude-code:a")
+	k.ljq("box-1/y1:claude-code:a")
 	rm(RL)
 	k.run("run")
 	k.check("놀고 있음: 빈 자리 수가 줄면(레인이 뜸) 처음부터 다시 셈 — 그 바퀴엔 알리지 않음",

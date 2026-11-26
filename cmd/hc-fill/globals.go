@@ -52,8 +52,6 @@ var (
 	OWNF, OWND          string // DATA/own.tsv·DATA/own
 	OREC                []Row  // 쓰기 소유 실행 기록 「레인 프로젝트 기계 주소 시작UTC 지시문사본 ,선행, 겹침칸」
 	OSEED               bool
-	AUDN                []string // 자동 감사 줄 이름
-	AWT                 []string // 자동 감사 기다림(자리는 감사 줄이) 쓰기 레인 주소
 	TAL                 map[string]string
 	WC                  map[string]int // 줄마다 그 줄을 --after로 기다리는 줄 수
 	ROWS                []Row          // 이번 바퀴 대기열 줄(정렬)
@@ -61,19 +59,19 @@ var (
 	OFF                 string         // 이번 바퀴에 연결 안 됨으로 알린 기계(「,<기계>」)
 	FETCHED, FETCHBAD   string         // 「,<프로젝트>」
 	FR, FB              string         // fetch_proj: local 저장소·기본 가지
-	ALLM                []string       // 셈 all 기계
 	HOLD                int
 	LKIND               map[string]bool // 「주소<TAB>이름」 → 레인 기록이 read
 	HELD                map[string]string
 	HNEW                []string // 「주소<TAB>쉬기 시작 초」 (held.tsv에 쓸 차례대로)
 	HNOW                int64
 	SEATS               []string
-	ASEC                string // 자동 감사 쓰기 레인의 run 지시문 끝 절
-	OVM                 string // 설정 overlap: block|warn|off
-	OWN                 []Row  // 쓰기 소유 키 「프로젝트 레인 R|M 키」
-	OVWAIT              []Row  // 이번 바퀴 겹침 대기 「레인 앞레인 키|단독 기계제한 프로젝트」
-	QEDGES              []Row  // 「레인 ,선행,」
-	THENMAP             []Row  // 「이어 붙인 이름 받은 줄」
+	SREST, SOUT         []string // 자리에 안 드는 것(기계 줄 「쉼 n · 대기열 밖 m」): 쉬는 대기열 터미널, 대기열 밖 에이전트(상태를 보냄)
+	ASEC                string   // 자동 감사 쓰기 레인의 run 지시문 끝 절
+	OVM                 string   // 설정 overlap: block|warn|off
+	OWN                 []Row    // 쓰기 소유 키 「프로젝트 레인 R|M 키」
+	OVWAIT              []Row    // 이번 바퀴 겹침 대기 「레인 앞레인 키|단독 기계제한 프로젝트」
+	QEDGES              []Row    // 「레인 ,선행,」
+	THENMAP             []Row    // 「이어 붙인 이름 받은 줄」
 	NDOLD               []string
 	NDNOW               []string // 「레인<TAB>능력<TAB>보냄1|0」
 	ELIST               string   // 「,<레인>=<기본 가지>」
@@ -113,7 +111,6 @@ var (
 // 조회가 남기는 값(셸 판과 같은 뜻)
 var (
 	PRUN, PNAME string // pget
-	LHIT        string // lane_landed
 	LMS, LMFROM string // lmark
 	hit         string // landing_hit
 	bBranch     string // after_ok가 둔 기본 가지(셸 판 b)

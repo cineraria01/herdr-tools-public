@@ -232,6 +232,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		}
 		if rec, ok := recs[m]; ok {
 			x.Live, x.SkipWhy = ptrI(rec.used), rec.why
+			x.Resting, x.Outside = ptrN(rec.rest), ptrN(rec.out) // 자리에 안 드는 것(쉬는 대기열 터미널·대기열 밖 에이전트)
 			if rec.freeOK {
 				x.Free = ptrI(rec.free) // advise의 빈 자리 — 그 바퀴 띄우기 판정(machRoom) 그대로
 			}

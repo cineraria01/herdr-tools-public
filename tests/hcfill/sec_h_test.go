@@ -52,17 +52,9 @@ func secH(k *K) {
 	k.run("rm", "10")
 	k.check("숫자 이름: rm 10은 010을 남김", k.rc == 0 && k.where("010") == "wait - -" && k.where("10") == "", read(Q))
 
-	// 자리·레인 기록은 주소+이름으로(주소는 재사용된다): lanes.tsv의 옛 read 줄이 같은 주소의 새 쓰기 레인을 안 세게
+	// 자리는 대기열 기록의 주소+이름으로 안다(주소는 재사용된다) — 대기열 주소에 다른 이름 터미널은 그 레인이 아니다
 	k.fresh()
-	k.lj("box-1/k1:claude-code:k1:done:"+W+"/app.wt/k1", "box-1/k2:claude-code:k2:idle:"+W+"/app.wt/k2")
-	write(k.t, k.LT, "box-1/k1\taudit-old\tt0\tread\nbox-1/k2\tk2\tt0\tfill\n")
-	k.add("fd")
-	k.run("run")
-	k.check("자리: 레인 기록 read가 같은 주소의 다른 이름이면(주소 재사용) 읽기 레인으로 안 봄 → 셈(box-1 가득 → box-2)",
-		k.where("fd") == "up box-2 box-2/fd" && strings.Contains(k.out, "자리 box-1 box-1/k1 k1: done, 작업 트리 있음 → 셈"))
-	rm(k.LT)
-	k.fresh()
-	k.lj("box-1/a:claude-code:a", "box-1/b:claude-code:b", "box-2/a:claude-code:a2", "box-2/b:claude-code:b2")
+	k.ljq("box-1/a:claude-code:a", "box-1/b:claude-code:b", "box-2/a:claude-code:a2", "box-2/b:claude-code:b2")
 	k.add("s1")
 	k.add("s2")
 	k.run("run")

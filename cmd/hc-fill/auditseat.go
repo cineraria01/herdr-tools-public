@@ -6,22 +6,21 @@ import (
 	"strings"
 )
 
-// 감사 몫 자리(fill-audit-seat, 2026-11-24): 완료를 적고 아직 안 뜬(wait) 자동 감사를 기다리는 쓰기 레인의 자리는
-// 그 감사 줄 몫으로 잡아 둔다 — 같은 바퀴의 다른 대기 레인이 먼저 가져가 감사가 굶지 않게. 감사가 뜨면 감사 터미널이 센다.
-var (
-	RSVW map[string]string // 쓰기 레인 주소 → 그 레인을 기다리는 wait 감사 줄 이름(auditSeats)
-	RSV  map[string]string // 감사 줄 이름 → 잡아 둔 기계(countSeats, 감사가 뜨면 지움)
-)
+// 감사 자리 없음(fill-audit-seat, 2026-11-24): 자동 감사가 기계 자리가 차서 못 뜬 바퀴를 세어 오래되면 지휘에 한 번 알린다.
+// 2026-11-27 ht-seat-working-only부터 쉬는 레인은 자리를 안 쓰므로 감사 몫 예약(RSV·rsvOn)은 걷었고, 감사 줄은 바퀴 차례 맨 앞(orderRows)이다
 
-// rsvOn: 그 기계에 감사 몫으로 잡아 둔 자리 수. not은 빼고 센다(제 몫을 쓰려는 감사 줄)
-func rsvOn(m, not string) int {
-	n := 0
-	for a, rm := range RSV {
-		if rm == m && a != not {
-			n++
+// aseatSweep: 바퀴마다(orderRows 앞) 이제 wait가 아닌 감사 줄의 자리 없음 기록을 지운다
+func aseatSweep() {
+	if AUD == "" || !isFile(Q) {
+		return
+	}
+	wait := map[string]bool{}
+	for _, r := range qRows() {
+		if strings.HasPrefix(r.F(qAudit), "audit=") && r.F(qState) == "wait" {
+			wait[r.F(qName)] = true
 		}
 	}
-	return n
+	aseatPrune(wait)
 }
 
 // aseat.tsv: 「감사 줄 이름 · 자리 없음 바퀴 수 · 처음 자리 없음 초 · 알림(0|1)」

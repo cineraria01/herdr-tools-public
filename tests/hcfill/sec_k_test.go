@@ -467,16 +467,7 @@ func secKReadFail(k *K) {
 		k.kUnsure("h3", "box-1") && !in(k.bQline("h3"), "box-1=box-1/h3"), k.where("h3"), read(k.DATA+"/try.tsv"), k.out)
 	k.kAdopt("h3")
 	k.check("hc get 실패 뒤 다음 바퀴(조회 됨): box-1 터미널을 채택(착수 한 번)", k.where("h3") == "up box-1 box-1/h3" && k.kStarts("h3") == 1, k.where("h3"), k.out)
-	// E05(아스트라): 원격 작업 트리 검사가 「no」를 찍고 실패 종료 — 작업 트리 없음으로 안 세지 않는다(모름 → 셈)
-	W := k.W
-	mkdirs(k.t, W+"/app", W+"/app.wt/k1", W+"/app.wt/k2")
-	k.fresh()
-	k.lj("box-1/k1:claude-code:k1:idle:"+W+"/app.wt/k1", "box-1/k2:claude-code:k2:idle:"+W+"/app.wt/k2")
-	k.add("h5")
-	k.runE([]string{"HC_FAKE_EXEC_NO=app.wt/k"}, "run")
-	k.check("작업 트리 검사가 실패 종료: 출력(no)을 믿지 않고 셈(box-1 꽉 참 → box-2)", k.where("h5") == "up box-2 box-2/h5" &&
-		in(k.out, "자리 box-1 box-1/k1 k1: idle, 작업 트리 확인 못 함 → 셈"), k.where("h5"), k.out)
-	k.lj()
+	// E05(아스트라)의 원격 작업 트리 검사는 자리 셈에서 걷었다(ht-seat-working-only — 쉬는 레인은 작업 트리와 상관없이 안 셈)
 }
 
 // F01(아스트라)·F2(Fable): hc-lane 띄우기가 상한을 넘으면 첫 기계에서 이미 시작했을 수 있다 — 같은 바퀴에 다른 기계로 또 띄우지 않는다.

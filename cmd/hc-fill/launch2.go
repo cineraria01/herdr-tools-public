@@ -377,9 +377,7 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		} else if failed {
 			rejFail(lane, LFWHY, owner, reply)
 		}
-		if isa && len(NOW) > n0 { // 감사가 떴다(또는 미확정으로 그 기계 자리를 찼다) — 잡아 둔 몫을 놓는다(겹쳐 세지 않음)
-			delete(RSV, lane)
-		} else if isa && full != "" && !placed && !bad && !failed {
+		if isa && len(NOW) == n0 && full != "" && !placed && !bad && !failed { // 감사가 자리 없어 못 뜸
 			aseatWait(lane, full)
 		}
 	}()

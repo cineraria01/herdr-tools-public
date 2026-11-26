@@ -218,84 +218,53 @@ func afterOK(lane, p, list string) int {
 	return ok
 }
 
-// lane_landed <레인 이름> <cwd>: cwd의 <저장소>.wt/… 앞 폴더 이름과 repo 줄 경로의 이름이 같은 프로젝트에서 착지했으면 참(LHIT=커밋 줄).
-// 이름이 레인 꼴이 아니거나 프로젝트를 못 찾거나 fetch 실패면 거짓(판정 못 함 = 셈)
-func laneLanded(name, cwd string) bool {
-	LHIT = ""
-	if !okname(name) {
-		return false
-	}
-	lp := cwd
-	if i := strings.Index(lp, ".wt/"); i >= 0 {
-		lp = lp[:i]
-	}
-	lp = lp[strings.LastIndexByte(lp, '/')+1:]
-	pj := ""
-	for _, l := range confLines {
-		f := fields(l)
-		if len(f) == 0 || f[0] != "repo" {
-			continue
+// agentsOn: 그 기계 자리를 쓰는 에이전트 수 — 대기열이 띄워 지금 일하는 것(countSeats)과 이번 바퀴에 띄운 것
+func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) }
+
+// fillTerms: 대기열이 띄운 터미널 「주소<TAB>이름」 — 띄울 때 도구가 적은 기록만 본다(이름·폴더로 짐작하지 않는다, slots.md):
+// 떠 있는(up) 줄의 주소(쓰기 레인·감사 줄), 줄 남긴것의 <기계>=<주소>, 미확정 시도가 받은 주소, 도는 운영 에이전트 실행 주소,
+// 병합기 기록의 agents(충돌 풀이·풀이 감사)
+func fillTerms() map[string]bool {
+	k := map[string]bool{}
+	for _, r := range ROWS {
+		n := r.F(qName)
+		if r.F(qState) == "up" && r.F(qAddr) != "" {
+			k[r.F(qAddr)+"\t"+n] = true
 		}
-		x := strings.TrimRight(restAfter(l, 3), "/")
-		x = x[strings.LastIndexByte(x, '/')+1:]
-		if x == lp {
-			pj = F1(f, 1)
-			break
+		for _, s := range strings.Split(r.F(qStuck), ",") {
+			if i := strings.IndexByte(s, '='); i > 0 {
+				k[s[i+1:]+"\t"+n] = true
+			}
 		}
 	}
-	if pj == "" || fetchProj(pj) != 0 {
-		return false
-	}
-	h, ok := landed(name)
-	LHIT = h
-	return ok && LHIT != ""
-}
-
-// submitted <레인 이름> <주소>: 그 터미널이 이번 실행에 그 이름으로 적은 마지막 사건이 「제출」이면 참.
-// 사건을 못 읽었거나(EVBAD) 그 기계 사건이 없으면 거짓(지금처럼 판정)
-func submitted(name, addr string) bool {
-	return !EVBAD && lcCut(joblast(name, addr, ""), evState) == "제출"
-}
-
-// wt_there <기계> <폴더> → yes|no|? (확인 못 하면 ?)
-func wtThere(m, dir string) string {
-	if m == LOCAL {
-		if isDir(dir) {
-			return "yes"
+	for _, r := range readRows(DATA + "/try.tsv") {
+		if r.F(trAddr) == "?" && dash(r.F(trGot)) != "-" {
+			k[r.F(trGot)+"\t"+r.F(trName)] = true
 		}
-		return "no"
 	}
-	if !connHas(m) {
-		return "?"
+	switch st, err := oaLoad(); {
+	case err != nil:
+		say("경고: %v — 운영 에이전트를 자리로 세지 못함", err)
+	case st.Run != nil && st.Run.Addr != "":
+		k[st.Run.Addr+"\t"+oaName] = true
 	}
-	v, rc := run("hc", "exec", "--on", m, "--", "sh", "-c", `[ -d "$1" ] && echo yes || echo no`, "_", dir)
-	if rc != 0 { // 실패·시간 넘김의 출력은 믿지 않는다 — 모름(자리를 계속 센다, gofix-fill E05)
-		return "?"
+	for _, x := range maLoad() { // 병합기가 띄운 에이전트(충돌 풀이·풀이 감사) — 병합기 기록 한 장의 agents(주소·이름)
+		if r, ok := maRecOf(x); ok {
+			for _, a := range r.Agents {
+				if a.Addr != "" && a.Name != "" {
+					k[recAddr(a.Addr, r.Machine)+"\t"+a.Name] = true
+				}
+			}
+		}
 	}
-	switch v = sub(v); v {
-	case "yes", "no":
-		return v
-	}
-	return "?"
+	return k
 }
-
-// detachedClean: 그 기계 작업 트리 dir가 분리 HEAD이고 변경 0(추적 안 된 파일 포함)이고 HEAD가 어느 가지(로컬·원격)에든 들었나 —
-// 감사 스크립트가 `git worktree add --detach`로 직접 만든 읽기 전용 작업 트리(2026-11-23 fable-audit 여섯이 다섯 시간 자리를 셌다).
-// 가지 위·git 실패·시간 넘김은 false(지금처럼 센다)
-func detachedClean(m, dir string) bool {
-	v, rc := onm(nil, m, `git -C "$d" symbolic-ref -q HEAD >/dev/null; [ $? = 1 ] || exit 0
-s=$(git -C "$d" status --porcelain --untracked-files=all) && [ -z "$s" ] || exit 0
-u=$(git -C "$d" rev-list -n 1 HEAD --not --branches --remotes) && [ -z "$u" ] && echo CLEAN`, dir)
-	return rc == 0 && sub(v) == "CLEAN"
-}
-
-func agentsOn(m string) int { return cnt(SEATS, m) + cnt(NOW, m) + rsvOn(m, "") }
 
 // machRoom: 그 기계에 지금 띄울 수 있는 수와 못 띄우는 까닭(연결 안 됨·유형 모를 터미널·멈춤(조정)·자리 참·레인상한 참, 상한 글이
 // 숫자가 아니면 까닭 없이 0). 띄우기(placeCands)·바퀴 기록(load.tsv 빈 자리 → 상태 한 장 free → advise)·치우침·빈 자리 알림(gc)이
 // 모두 이 함수로 센다 — 따로 세면 advise 「빈 자리 1」이 띄우기의 「레인상한 참」과 어긋났다(ht-advise-slot-cap).
-// 자동 감사 줄(isa)은 멈춤·레인상한을 안 보고, own은 그 줄이 제 몫으로 잡아 둔 자리(쓴 자리에서 뺀다)
-func machRoom(mc Machine, isa bool, own int) (int, string) {
+// 자동 감사 줄(isa)은 멈춤·레인상한을 안 본다
+func machRoom(mc Machine, isa bool) (int, string) {
 	m := mc.Name
 	switch {
 	case m != LOCAL && !connHas(m):
@@ -309,7 +278,7 @@ func machRoom(mc Machine, isa bool, own int) (int, string) {
 	if err != nil {
 		return 0, ""
 	}
-	n := c - (agentsOn(m) - own)
+	n := c - agentsOn(m)
 	if n <= 0 {
 		return 0, "자리 참"
 	}

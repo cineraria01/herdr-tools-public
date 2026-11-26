@@ -44,7 +44,7 @@
 | `launchd/com.herdr-tools.hc-fill.plist:14` | 바퀴 주기 `--every 60`초(바퀴가 끝난 뒤 60초 쉼) | plist(다시 띄움) | ㉯ | fill-tick-cost(「쉼 = 주기 − 바퀴 시간」) |
 | `cmd/hc-fill/runcmd.go:61` | 바퀴 상한 20분 | 환경 `HC_FILL_ROUND_TIMEOUT`(watch 시작 때) | ㉮ 울타리 | — |
 | `cmd/hc-fill/launch2.go:339` | **기계 고르기 = 설정 `machine` 줄 차례에서 처음 자리가 남는 기계** | 설정 줄 순서 | ㉰ | fill-load-steer(코어당 부하 낮은 곳 먼저) |
-| 설정 `machine <기계> <상한> <레인상한> <셈>` | 기계별 자리 상한·hc-fill 레인 상한·done/idle 셈 | 설정 | ㉯ | fill-load-steer(`machine --seats/--pause/--for`) |
+| 설정 `machine <기계> <상한> <레인상한>` | 기계별 자리 상한(대기열이 띄운 일하는 에이전트)·hc-fill 레인 상한(옛 다섯째 셈 칸은 읽고 버림) | 설정 | ㉯ | fill-load-steer(`machine --seats/--pause/--for`) |
 | `machine-has` | 기계 능력(「필요:」 줄 레인의 갈 곳) | 설정 | ㉮(사실 기록) | — |
 | `repo <프로젝트> <기계> <경로>` | 프로젝트가 뜰 수 있는 기계 | 설정 | ㉮(사실) | — |
 | `cmd/hc-fill/run.go:142` `hold` | 쉰 쓰기 레인 자리를 안 세기까지 60분 | 설정 | ㉯ | — |

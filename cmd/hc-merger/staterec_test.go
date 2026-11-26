@@ -197,6 +197,36 @@ func TestStateRecLandRemoteBeat(t *testing.T) {
 	}
 }
 
+// 기록의 agents(ht-seat-working-only, 감사 atp4gp8-irb1dx 중간): 푸는 중인 풀이가 띄운 에이전트 — 단계 resolve는 merge-<레인>, audit는
+// audit-merge-<레인>, 주소가 없거나(못 띄움 -)·상태가 깨진 것은 뺀다. hc-fill 자리 셈이 이 주소+이름으로 「병합기가 띄운 것」을 안다
+func TestStateRecAgents(t *testing.T) {
+	mj := t.TempDir()
+	m := &M{mj: mj, mme: "mm"}
+	if a := m.stAgents(); len(a) != 0 {
+		t.Fatalf("풀이 없음: %+v", a)
+	}
+	sha := strings.Repeat("a", 40)
+	for _, x := range []struct{ n, ln, phase, addr string }{{"1-la", "la", "resolve", "t3"}, {"2-lb", "lb", "audit", "w1/t9"}, {"3-lc", "lc", "resolve", "-"}, {"4-ld", "ld", "resolve", ""}} {
+		d := mj + "/resolve/" + x.n
+		os.MkdirAll(d, 0o777)
+		r := &rstate{dir: d, q: "refs/merge-queue/" + x.n, s: sha, ln: x.ln, wt: "/w", phase: x.phase, addr: x.addr, t0: 5}
+		if err := r.save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.MkdirAll(mj+"/resolve/9-bad", 0o777) // st 없음 — 깨짐
+	a := m.stAgents()
+	if len(a) != 2 || a[0].Name != "merge-la" || a[0].Addr != "t3" || a[0].Machine != "mm" || a[1].Name != "audit-merge-lb" || a[1].Addr != "w1/t9" {
+		t.Fatalf("agents: %+v", a)
+	}
+	if err := mergerstate.Write(mj, mergerstate.Rec{Phase: mergerstate.Round, Agents: a}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := mergerstate.Read(mj); err != nil || len(r.Agents) != 2 || r.Agents[1].Name != "audit-merge-lb" {
+		t.Fatalf("기록 왕복: %+v %v", r.Agents, err)
+	}
+}
+
 // 읽는 명령: hc-merger --state <클론> — 기록 그대로(0), 없음 3(옛 판 병합기), 깨짐 1
 func TestStateMain(t *testing.T) {
 	d := t.TempDir()

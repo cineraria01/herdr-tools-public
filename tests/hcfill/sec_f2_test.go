@@ -201,7 +201,7 @@ func secF2(k *K) {
 	write(k.t, k.HELD, fmt.Sprintf("box-1/o1\t%d\n", nowS()-7200))
 	k.fOadd("o2", "파일: bin/tool")
 	k.run("run")
-	k.check("겹침 block: 자리의 hold 만료(쉰 지 오래 — 자리는 안 셈)와 쓰기 소유는 따로 — 소유는 그대로라 대기", strings.Contains(k.out, "자리 box-1 box-1/o1 o1: idle, 쉰 지") && k.fWait("o2"))
+	k.check("겹침 block: 자리(쉬는 레인은 안 셈)와 쓰기 소유는 따로 — 소유는 그대로라 대기", strings.Contains(k.out, "자리 box-1 box-1/o1 o1: idle, 쉼 → 안 셈") && k.fWait("o2"))
 	k.fOfresh("block")
 	k.fOadd("o1", "파일: bin/tool")
 	k.fOadd("o3", "파일: lib/b.sh")

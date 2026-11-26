@@ -448,7 +448,7 @@ func secE2(k *K) {
 	k.lj("box-1/l1:claude-code:l1:done:/", "box-1/audit-"+L1+":claude-code:audit-"+L1+":working:/")
 	k.run("run")
 	k.check("레인상한 1에서 감사를 기다리는 동안 다른 쓰기 줄은 대기", k.where("l2") == "wait - -")
-	// 그 기계에서 상태가 안 잡혀 남긴(stuck) 감사 줄은 자리를 쥔 것으로 보지 않음 — 레인을 다시 셈
+	// 그 기계에서 상태가 안 잡혀 남긴(stuck) 감사 줄 — 감사를 기다리는 레인은 쉬는 동안 그대로 안 셈(ht-seat-working-only: 쉬는 레인은 감사 상태와 상관없이 안 셈)
 	k.afresh()
 	mkdirs(k.t, k.W+"/app.wt/q1")
 	k.add("q1", "--only", "box-1")
@@ -459,8 +459,8 @@ func secE2(k *K) {
 	QA := k.aidof("q1")
 	k.runE([]string{"HC_FAKE_NOSTATUS=box-1/audit-" + QA}, "run")
 	k.run("run")
-	k.check("stuck 감사 줄(그 레인 기계에 못 뜸): 감사 기다리는 레인을 다시 자리로 셈",
-		k.where("audit-"+QA) == "wait - -" && strings.Contains(k.out, "자리 box-1 box-1/q1 q1: done, 작업 트리 있음 → 셈"), read(k.Q))
+	k.check("stuck 감사 줄(그 레인 기계에 못 뜸): 감사는 대기로, 감사 기다리는 레인은 쉬므로 안 셈",
+		k.where("audit-"+QA) == "wait - -" && strings.Contains(k.out, "자리 box-1 box-1/q1 q1: done, 쉼 → 안 셈"), read(k.Q))
 	k.check("자동 감사는 어떤 터미널도 끄지 않음(hc kill 없음)", !hasE(k.T+"/hc.log", "^kill"))
 
 	// add·받은편지 이름 규칙(감사 줄 이름 자리·커밋 종류)

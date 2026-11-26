@@ -20,7 +20,7 @@ func TestSlotCapOneCount(t *testing.T) {
 	if len(NOW) != 0 || MWHY["b"] != "레인상한 참" {
 		t.Fatalf("띄우기: NOW %q 까닭 %q", NOW, MWHY["b"])
 	}
-	if n, why := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, false, 0); n != 0 || why != "레인상한 참" {
+	if n, why := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, false); n != 0 || why != "레인상한 참" {
 		t.Fatalf("machRoom: %d %q", n, why)
 	}
 	loadEnd(time.Now())
@@ -33,12 +33,12 @@ func TestSlotCapOneCount(t *testing.T) {
 
 	// 레인 하나 빠지면 빈 자리 1(자리 5−2=3, 레인상한 2−1=1 가운데 작은 것)
 	NOWL = []string{"b"}
-	if n, why := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, false, 0); n != 1 || why != "" {
+	if n, why := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, false); n != 1 || why != "" {
 		t.Fatalf("machRoom 레인 1/2: %d %q", n, why)
 	}
 	// 자동 감사 줄은 레인상한을 안 본다
 	NOWL = []string{"b", "b"}
-	if n, _ := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, true, 0); n != 3 {
+	if n, _ := machRoom(Machine{Name: "b", Cap: "5", LCap: "2"}, true); n != 3 {
 		t.Fatalf("자동 감사: %d", n)
 	}
 }

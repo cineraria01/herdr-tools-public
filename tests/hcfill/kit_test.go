@@ -301,6 +301,20 @@ func (k *K) lj(specs ...string) {
 	k.set(`HC_FAKE_LS={"terminals":[` + strings.Join(l, ",") + `]}`)
 }
 
+// ljq: lj와 같고, 그 터미널을 대기열이 띄운 것으로도 적는다(이름의 줄을 넣고 up·기계·주소로) — 자리는 대기열이 띄운 것만
+// 센다(ht-seat-working-only, docs/hc-fill/slots.md). 기계를 「일하는 에이전트」로 채우는 차림에 쓴다
+func (k *K) ljq(specs ...string) {
+	k.lj(specs...)
+	for _, x := range specs {
+		f := strings.SplitN(x, ":", 4)
+		m, _, _ := strings.Cut(f[0], "/")
+		if k.where(f[2]) == "" {
+			k.add(f[2])
+		}
+		k.hSetQ(f[2], map[int]string{6: "up", 7: m, 8: f[0]})
+	}
+}
+
 // brief: $T/<이름>.md 지시문을 쓰고 그 경로.
 func (k *K) brief(name string) string {
 	p := k.T + "/" + name + ".md"

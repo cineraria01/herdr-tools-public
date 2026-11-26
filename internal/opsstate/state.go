@@ -60,9 +60,12 @@ type Machine struct {
 	Verifies    *int     `json:"verifies"` // 도는 저장소 검증 수(레인·병합기 합침, 부하와 같은 때 읽음) — 모름 nil
 	LaneCap     *int     `json:"lane_cap"`
 	Free        *int     `json:"free"` // 마지막 바퀴 띄우기가 판정한 빈 자리(hc-fill machRoom) — 모름 nil. advise는 따로 세지 않고 이것만 읽는다(ht-advise-slot-cap)
-	Health      Health   `json:"health"`
-	Steer       string   `json:"steer"`
-	SkipWhy     string   `json:"skip_why"`
+	// Resting·Outside: 자리(Live)에 안 드는 것 — 쉬는(done·idle) 대기열 터미널, 대기열 밖 에이전트(사람·지휘 세션·손 레인·루프). 모름 nil(ht-seat-working-only)
+	Resting *int   `json:"resting"`
+	Outside *int   `json:"outside"`
+	Health  Health `json:"health"`
+	Steer   string `json:"steer"`
+	SkipWhy string `json:"skip_why"`
 
 	// MergeVerifies: Verifies 가운데 병합기 검증(추측 일꾼·착지 실행) 수 — 자리·레인상한에는 안 든다(ht-fill-gate-seat). 모름 nil
 	MergeVerifies *int `json:"merge_verifies"`

@@ -103,7 +103,9 @@
 | `machines[].load1` | 1분 부하 |
 | `machines[].cores` | 코어 수 |
 | `machines[].load_per_core` | 코어당 부하 |
-| `machines[].live` | 살아 있는 에이전트 수 |
+| `machines[].live` | 자리를 쓰는 에이전트 수 — 대기열이 띄워 지금 일하는 것([자리 세기](../hc-fill/slots.md)) |
+| `machines[].resting` | 자리에 안 드는 쉬는(done·idle) 대기열 터미널 수(감사·착지·다시 넣기 기다림) — 옛 기록이면 `null` |
+| `machines[].outside` | 자리에 안 드는 대기열 밖 에이전트 수(사람·지휘 세션·손으로 띄운 레인·루프 — 상태를 보내는 터미널) — 옛 기록이면 `null` |
 | `machines[].seats` | 자리 상한 |
 | `machines[].lanes` | hc-fill이 띄운 레인 수 |
 | `machines[].verifies` | 도는 저장소 검증 수(레인·추측·착지 검증 합친 검증 나무 수, `hc-lane merger --spec-idle`과 같은 셈, 부하와 같은 때 읽음) |

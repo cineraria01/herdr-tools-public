@@ -14,7 +14,7 @@ func TestCountSeatsEndedKeepShell(t *testing.T) {
 	HOME = t.TempDir()
 	defer func(o bool) { dry = o }(dry) // 뒤 시험에 dry를 남기지 않는다
 	dry, AGENT, LOCAL = true, "claude-code", "here"
-	ALLM, AUDN, AWT, NOWL, EVBAD = nil, nil, nil, nil, false
+	NOWL, EVBAD = nil, false
 	r := t.TempDir()
 	for _, d := range []string{"/r.wt/sub", "/r.wt/fresh"} {
 		if err := os.MkdirAll(r+d, 0o755); err != nil {
@@ -36,13 +36,14 @@ func TestCountSeatsEndedKeepShell(t *testing.T) {
 		{LOCAL, "x2", "zsh", "sub", "-", r + "/r.wt/sub"},     // 병합기에 제출하고 끝남
 		{LOCAL, "x3", "env", "fresh", "-", r + "/r.wt/fresh"}, // 띄운 직후 — 상태 전
 	}
-	countSeats()
-	if got := strings.Join(SEATS, ","); got != LOCAL {
-		t.Fatalf("SEATS %q, 바람 %q(띄운 직후 하나만)", got, LOCAL)
-	}
 	ROWS = nil
 	for _, x := range [][2]string{{"gone", "x1"}, {"sub", "x2"}, {"fresh", "x3"}} {
 		ROWS = append(ROWS, pad16(x[0], "p", "/b.md", "-", "-", "up", LOCAL, x[1]))
+	}
+	defer func() { ROWS = nil }()
+	countSeats()
+	if got := strings.Join(SEATS, ","); got != LOCAL {
+		t.Fatalf("SEATS %q, 바람 %q(띄운 직후 하나만)", got, LOCAL)
 	}
 	if n := lanesOn(LOCAL); n != 1 {
 		t.Fatalf("lanesOn %d, 바람 1(끝난 keep 셸 레인은 안 셈)", n)

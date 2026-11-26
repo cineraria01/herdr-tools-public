@@ -210,7 +210,7 @@ func secD(k *K) {
 	k.check("우선순위: 선행이 안 들어간 높은 것은 건너뛰고 들어간(없는) 낮은 것을 띄움", k.state("hb") == "wait" && k.where("ll") == "up slow slow/ll")
 
 	k.fresh()
-	k.lj("slow/x:claude-code:x")
+	k.ljq("slow/x:claude-code:x")
 	k.add("wn", "--only", "slow")
 	k.add("wu", "--only", "slow", "--priority", "urgent")
 	k.run("run")

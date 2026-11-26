@@ -66,11 +66,11 @@ func TestLoadParseVerifies(t *testing.T) {
 			t.Errorf("%q: %+v", c.in, l)
 		}
 	}
-	if !strings.Contains(loadLine("a", mLoad{L1: 8, Cores: 8, OK: true, Ver: 1, VerOK: true}, 0, 3, -1, "", ""), "부하 8.0/8(코어당 1.00) · 검증 1") {
+	if !strings.Contains(loadLine("a", mLoad{L1: 8, Cores: 8, OK: true, Ver: 1, VerOK: true}, 0, 3, -1, "", "", ""), "부하 8.0/8(코어당 1.00) · 검증 1") {
 		t.Error("기계 줄에 검증 1 없음")
 	}
 	for _, l := range []mLoad{{L1: 8, Cores: 8, OK: true}, {L1: 8, Cores: 8, OK: true, VerOK: true}} {
-		if s := loadLine("a", l, 0, 3, -1, "", ""); strings.Contains(s, "검증") {
+		if s := loadLine("a", l, 0, 3, -1, "", "", ""); strings.Contains(s, "검증") {
 			t.Errorf("모름·0인데 검증 칸: %s", s)
 		}
 	}
@@ -152,13 +152,13 @@ func TestLoadSkewDue(t *testing.T) {
 
 // ⑦ status 기계 줄 꼴: 이름 · 부하/코어(코어당) · 레인/자리 · 조정 · 안 띄운 까닭
 func TestLoadStatusLine(t *testing.T) {
-	got := loadLine("a", mLoad{L1: 40, Cores: 12, OK: true}, 2, 3, 0, "자리 2(지휘, 30분)", "모두 바쁨")
-	for _, w := range []string{"a", "40.0/12", "3.33", "2/3 · 빈 0", "자리 2(지휘, 30분)", "모두 바쁨"} {
+	got := loadLine("a", mLoad{L1: 40, Cores: 12, OK: true}, 2, 3, 0, " · 쉼 1", "자리 2(지휘, 30분)", "모두 바쁨")
+	for _, w := range []string{"a", "40.0/12", "3.33", "2/3 · 빈 0 · 쉼 1", "자리 2(지휘, 30분)", "모두 바쁨"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("%q 에 %q 없음", got, w)
 		}
 	}
-	got = loadLine("u", mLoad{}, 0, 3, -1, "", "")
+	got = loadLine("u", mLoad{}, 0, 3, -1, "", "", "")
 	if !strings.Contains(got, "모름") || strings.Contains(got, "0.00") || strings.Contains(got, "빈") {
 		t.Errorf("모름 줄: %q", got)
 	}

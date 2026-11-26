@@ -13,7 +13,7 @@ func TestGateSeatMergerNotCounted(t *testing.T) {
 	lpFix(t)
 	defer func(o bool) { dry = o }(dry)
 	confLines = []string{"local a", "machine w 3 3", "repo p w /r"}
-	CONN, AGENT, ALLM, AUDN, AWT, EVBAD = []string{"w"}, "claude-code", nil, nil, nil, false
+	CONN, AGENT, EVBAD = []string{"w"}, "claude-code", false
 	LANEADDR = []string{"w/a1", "w/a2"}
 	lanes := []Term{
 		{"w", "w/a1", "claude-code", "l1", "working", "/r.wt/l1"},
@@ -30,11 +30,11 @@ func TestGateSeatMergerNotCounted(t *testing.T) {
 		{"병합 검증 0", nil},
 	} {
 		TERMS = append(append([]Term(nil), lanes...), c.extra...)
+		ROWS = []Row{pad16("l1", "p", "/b.md", "-", "-", "up", "w", "w/a1"), pad16("l2", "p", "/b.md", "-", "-", "up", "w", "w/a2")}
 		dry = true
 		countSeats()
 		dry = false
-		ROWS = []Row{pad16("l1", "p", "/b.md", "-", "-", "up", "w", "w/a1"), pad16("l2", "p", "/b.md", "-", "-", "up", "w", "w/a2")}
-		if n, why := machRoom(Machine{Name: "w", Cap: "3", LCap: "3"}, false, 0); n != 1 || why != "" {
+		if n, why := machRoom(Machine{Name: "w", Cap: "3", LCap: "3"}, false); n != 1 || why != "" {
 			t.Fatalf("%s: 빈 자리 %d %q, 바람 1(레인 2/3)", c.name, n, why)
 		}
 		// 상태 한 장·advise는 바퀴 기록(load.tsv)의 빈 자리만 읽는다 — 띄우기와 같은 값
@@ -70,11 +70,11 @@ func TestLoadParseGates(t *testing.T) {
 		}
 	}
 	l := mLoad{L1: 8, Cores: 8, OK: true, Ver: 2, VerOK: true, Gates: 1, GatesOK: true}
-	if s := loadLine("a", l, 2, 3, 1, "", ""); !strings.Contains(s, " · 검증 2(병합 1)") {
+	if s := loadLine("a", l, 2, 3, 1, "", "", ""); !strings.Contains(s, " · 검증 2(병합 1)") {
 		t.Errorf("기계 줄에 병합 검증 없음: %s", s)
 	}
 	l.Gates = 0
-	if s := loadLine("a", l, 2, 3, 1, "", ""); !strings.Contains(s, " · 검증 2 ") || strings.Contains(s, "병합") {
+	if s := loadLine("a", l, 2, 3, 1, "", "", ""); !strings.Contains(s, " · 검증 2 ") || strings.Contains(s, "병합") {
 		t.Errorf("병합 0이면 지금 글 그대로: %s", s)
 	}
 }

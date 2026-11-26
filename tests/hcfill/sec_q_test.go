@@ -30,7 +30,7 @@ func secQ(k *K) {
 	k.run("run")
 	k.check("idle_empty 60: 빈 기계들을 한 사건으로 묶어 보냄",
 		nrl() == 1 && hasF(RL, "box-1 자리") && hasF(RL, "box-2 자리") && hasF(RL, "대기열에 띄울 것 없음 --name hc-fill-idle"), read(RL))
-	k.lj("box-1/x1:claude-code:a", "box-1/x2:claude-code:b")
+	k.ljq("box-1/x1:claude-code:a", "box-1/x2:claude-code:b")
 	k.run("run")
 	k.lj()
 	k.run("run")

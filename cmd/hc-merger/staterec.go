@@ -143,10 +143,33 @@ func cmpOr(a, b string) string {
 	return b
 }
 
+// stAgents: 지금 푸는 중인 풀이가 띄운 에이전트(단계 resolve는 풀이 merge-<레인>, audit는 풀이 감사 audit-merge-<레인> — resolve.go가
+// 띄울 때 준 이름과 받은 주소). hc-fill 자리 셈이 주소+이름으로 센다(docs/hc-fill/slots.md). 상태가 깨졌거나 주소가 없으면 뺀다
+func (m *M) stAgents() []mergerstate.Wait {
+	des, err := os.ReadDir(m.mj + "/resolve")
+	if err != nil {
+		return nil
+	}
+	var ws []mergerstate.Wait
+	for _, d := range des {
+		r, ok := loadR(m.mj + "/resolve/" + d.Name())
+		if !ok || r.addr == "" || r.addr[0] == '-' {
+			continue
+		}
+		name := "merge-" + r.ln
+		if r.phase == "audit" {
+			name = "audit-merge-" + r.ln
+		}
+		ws = append(ws, mergerstate.Wait{Machine: m.mme, Addr: r.addr, Name: name, Role: "풀이 " + r.phase, At: r.t0})
+	}
+	return ws
+}
+
 // stWrite: 지금 기록을 쓴다(잠금을 쥔 채로 부른다)
 func (m *M) stWrite() {
 	r := m.rs.cur
 	r.At, r.Machine, r.Term, r.Base = time.Now().Unix(), m.mme, os.Getenv("HC_TERMINAL_ID"), m.base
+	r.Agents = m.stAgents()
 	if err := mergerstate.Write(m.mj, r); err != nil {
 		if !m.rs.warned {
 			fmt.Fprintf(os.Stderr, "hc-lane merger: 상태 기록을 쓰지 못했다(hc-fill이 모름으로 본다 — 병합 동작은 그대로): %v\n", err)

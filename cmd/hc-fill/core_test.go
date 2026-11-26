@@ -144,25 +144,27 @@ func TestLandedUnknownOnGitFailure(t *testing.T) {
 	}
 }
 
-// 자리 세기: 다른 종류는 hc-lane 레인(상태 모름)만 셈, working은 셈, done이어도 셈 all 기계는 셈, 작업 트리 아닌 done은 안 셈
+// 자리 세기(ht-seat-working-only): 대기열이 띄운 것만 — 상태 모름(뜨는 중)·working은 셈, 대기열 밖(사람·지휘 세션)·다른 종류·done·idle은 안 셈
 func TestCountSeatsSimple(t *testing.T) {
 	setData(t)
 	HOME = t.TempDir()
 	defer func(o bool) { dry = o }(dry) // 뒤 시험에 dry를 남기지 않는다(ops-knobs-reland: 뒤의 TestKnobRemoteTick이 push 대신 dry-run으로 돌았다)
 	dry, AGENT, LOCAL = true, "claude-code", "here"
 	LANEADDR = []string{"b/l1"}
-	ALLM = []string{"s"}
-	AUDN, AWT = nil, nil
+	ROWS = []Row{pad16("l1", "p", "/b.md", "-", "-", "up", "b", "b/l1"), pad16("q", "p", "/b.md", "-", "-", "up", "b", "b/q"),
+		pad16("d", "p", "/b.md", "-", "-", "up", "s", "s/d")}
+	defer func() { ROWS = nil }()
 	TERMS = []Term{
 		{"b", "b/l1", "env", "l1", "-", "/"},
 		{"b", "b/p", "env", "proxy", "-", "/"},
+		{"b", "b/q", "claude-code", "q", "working", "/r.wt/q"},
 		{"b", "b/w", "claude-code", "w", "working", "/"},
-		{"s", "s/d", "claude-code", "d", "done", "/"},
+		{"s", "s/d", "claude-code", "d", "done", "/r.wt/d"},
 		{"b", "b/r", "claude-code", "r", "idle", "/srv/app"},
 	}
 	countSeats()
-	if got := strings.Join(SEATS, ","); got != "b,b,s" {
-		t.Fatalf("SEATS %q, 바람 b,b,s", got)
+	if got := strings.Join(SEATS, ","); got != "b,b" {
+		t.Fatalf("SEATS %q, 바람 b,b(l1 뜨는 중·q 일함)", got)
 	}
 	if !HELDW.Load() || len(HNEW) != 2 {
 		t.Fatalf("HELDW %v HNEW %v", HELDW.Load(), HNEW)

@@ -125,7 +125,7 @@ func secE(k *K) {
 		hasF(ab, "git -C /Users/other/src/app.wt/w1 diff origin/main..."+s40("abc1234")) && hasF(ab, "~/.local/share/hc-fill/runs/w1-run.md") && hasF(ab, "~/.local/share/hc-fill/reports/audit-"+A1+".md") && hasF(ab, "hc-lane report 판정 "+s40("abc1234")+" \"감사 완료 "+A1+" 높음") && !hasE(ab, `\{[a-z_]*\}`), read(ab))
 	arun := k.DATA + "/runs/audit-" + A1 + "-run.md"
 	k.check("감사 줄의 run 지시문에는 감사·착지 절 없음(읽기 레인), 차수마다 따로", exists(arun) && !isDir(arun) && !hasF(arun, "감사·착지 (hc-fill 자동)"))
-	k.check("자리: 감사에 넘겨진 쓰기 레인(done)은 안 셈 — 자리 1인 slow에 감사가 뜸", strings.Contains(k.out, "자리 slow slow/w1 w1: done, 자동 감사 기다림(자리는 감사 줄이) → 안 셈"))
+	k.check("자리: 감사에 넘겨진 쓰기 레인(done)은 쉬므로 안 셈 — 자리 1인 slow에 감사가 뜸", strings.Contains(k.out, "자리 slow slow/w1 w1: done, 쉼 → 안 셈"))
 	got := strings.Join([]string{k.acol(A1, 2), k.acol(A1, 3), k.acol(A1, 4), k.acol(A1, 5), k.acol(A1, 6), k.acol(A1, 7), k.acol(A1, 8)}, " ")
 	k.check("audit.tsv 차수 줄: 레인 차수 부모실행(<터미널>@<created_ms>) 40자 sha 기계 부모주소 queued",
 		got == "w1 1 w1@1700000000000 "+s40("abc1234")+" slow slow/w1 queued", read(k.AT()))
