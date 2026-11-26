@@ -333,7 +333,8 @@ func sweepMain(args []string) int {
 	self := fs.Bool("self-test", false, "가짜 기록으로 규칙 판정 확인")
 	minAge := fs.Float64("min-age", 10, "고아·색인 최소 나이(분, 기본 10)")
 	only := fs.String("only-under", "", "이 폴더 아래 작업 트리만(시험용)")
-	backlog := fs.Float64("tmp-backlog", 0, "이미 쌓인 임시 찌꺼기 한 번 치우기: 이 시간 넘게 안 바뀌고 아무도 안 연 맨 위 항목(--dry-run이면 종류별 개수·크기만)")
+	backlog := fs.Float64("tmp-backlog", 0, "이미 쌓인 임시 찌꺼기 한 번 치우기: 이 시간 넘게 안 바뀌고 아무도 안 연 맨 위 항목(--dry-run이면 종류별 개수·크기와 --only 한 줄)")
+	pick := fs.String("only", "", "--tmp-backlog로 지울 종류(dry-run이 보인 종류 글자 그대로, 쉼표로) — --dry-run 없이 지울 때는 꼭 있어야 한다")
 	health := fs.Bool("health", false, "이 기계의 마지막 건강 점검 결과(잠자기 끔·키체인)만 찍고 끝(재지 않음, 0 좋음·1 나쁨·3 모름)")
 	for _, a := range args { // 위치 인자를 받지 않으니 끝표시 「--」도 사용 오류(셸 판 argparse와 같게, R-39 — flag가 삼켜 0으로 돌았다)
 		if a == "--" {
@@ -346,6 +347,19 @@ func sweepMain(args []string) int {
 	if fs.NArg() > 0 { // 셸 판 argparse와 같게 쓸기 전에 사용 오류(B02 — flag는 첫 위치 인자에서 멈춰 뒤의 --dry-run을 놓친다)
 		fmt.Fprintf(os.Stderr, "hc-sweep: 모르는 인자: %s\n", strings.Join(fs.Args(), " "))
 		fs.Usage()
+		return 2
+	}
+	picked := onlySet(*pick)
+	if *pick != "" && *backlog <= 0 {
+		fmt.Fprintln(os.Stderr, "hc-sweep: --only는 --tmp-backlog와 함께만 쓴다")
+		return 2
+	}
+	if *backlog > 0 && !*dry && picked == nil { // 운영체제 것 빼기 목록을 끝없이 늘리는 대신 사람이 본 종류만 지운다(ht-tmp-backlog-only)
+		fmt.Fprintln(os.Stderr, "hc-sweep: 한 번 치우기는 --only '<종류>,…'로 고른 종류만 지운다 — 먼저 --dry-run으로 종류를 보고 그 끝 줄을 붙여라")
+		return 2
+	}
+	if *backlog > 0 && !*dry && inJob() { // 레인이 실연하다 바깥 운영체제 자리(실제 사용자 임시 폴더)를 지웠다(2026-11-27) — 지우기는 지휘 몫
+		fmt.Fprintln(os.Stderr, "hc-sweep: 레인 안(TMPDIR이 작업 임시 폴더)에서는 한 번 치우기로 지우지 않는다 — --dry-run만, 지우기는 지휘가")
 		return 2
 	}
 	if *health {
@@ -372,7 +386,7 @@ func sweepMain(args []string) int {
 		defer lk.Close()
 	}
 	if *backlog > 0 { // 쓸기 바퀴와 따로 — 지휘가 기계마다 dry-run을 보고 돌린다(docs/hc-sweep/job-tmp.md)
-		return backlogRun(*backlog, *dry, run)
+		return backlogRun(*backlog, *dry, picked, run)
 	}
 	// 색인·디스크 쓸기·Tailscale·건강 점검은 따로: hc ls 실패와 상관없이 돌고, 실패해도 서로·터미널·고아 쓸기를 막지 않는다
 	jobRootDir = jobRoot() // 작업별 임시 폴더(jobtmp.go): 디스크 부족 글의 크기, 닫은 터미널 것은 닫자마자, 주인 없는 것은 hc ls 뒤 바퀴가

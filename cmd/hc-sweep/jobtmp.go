@@ -161,22 +161,27 @@ func osOwned(name string) bool {
 	return false
 }
 
-// tmpKind: 이름 꼴(보이기 전용 — 지울지는 이름으로 정하지 않는다). Test*, 끝 숫자·_를 떼고, 마지막 . - _ 뒤 마디에 숫자·대문자가
-// 섞였으면(mktemp 꼬리) 그 마디를 *로, 아니면 뗀 자리를 *로. 4글자 이하 확장자(.lock 등)는 떼었다 붙인다
+// tmpKind: 이름 꼴 — dry-run이 보이고 --only가 글자 그대로 고르는 종류. Test*, 그 밖은 끝 숫자·_를 떼고 마지막 . - _ 뒤 마디를 *로
+// (같은 머리 — com.google.Chrome.·lane-dev-app- — 는 꼬리가 소문자뿐이어도 한 줄). 숫자가 든 마디 뒤의 4글자 이하 소문자 확장자
+// (uv-<꼬리>.lock)는 떼었다 붙인다. 이름 하나로만 정해진다(함께 있는 것과 상관없음 — dry-run과 지우기가 같은 종류를 본다)
 func tmpKind(n string) string {
 	if strings.HasPrefix(n, "Test") {
 		return "Test*"
 	}
 	stem, ext := n, ""
-	if i := strings.LastIndex(n, "."); i > 0 && len(n)-i-1 <= 4 && len(n)-i-1 > 0 {
-		stem, ext = n[:i], n[i:]
+	if i := strings.LastIndex(n, "."); i > 0 && len(n)-i-1 <= 4 && len(n)-i-1 > 0 && strings.Trim(n[i+1:], "abcdefghijklmnopqrstuvwxyz") == "" {
+		seg := n[:i]
+		seg = seg[strings.LastIndexAny(seg, ".-_")+1:]
+		if strings.ContainsAny(seg, "0123456789") {
+			stem, ext = n[:i], n[i:]
+		}
 	}
 	s := strings.TrimRight(stem, "0123456789_")
 	if s == "" {
 		s = stem
 	}
-	if i := strings.LastIndexAny(s, ".-_"); i >= 0 && strings.ContainsAny(s[i+1:], "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-		return s[:i+1] + "*" + ext // 마지막 마디가 mktemp 꼬리 꼴(숫자·대문자 섞임)
+	if i := strings.LastIndexAny(s, ".-_"); i > 0 {
+		return s[:i+1] + "*" + ext
 	}
 	if s != stem {
 		return s + "*" + ext
@@ -184,9 +189,29 @@ func tmpKind(n string) string {
 	return n
 }
 
+// unpicked: --only에 붙일 줄에서 뺄 종류 — 꼴이 아닌 이름 하나(데몬 폴더·kw 같은 정체 모름), 한 개뿐이고 0.0MB, 붙여 넣기를 깨는 글자
+func unpicked(kind string, n int, size int64) bool {
+	return !strings.Contains(kind, "*") || n == 1 && size < 50000 || strings.ContainsAny(kind, ",'")
+}
+
+// onlySet: --only 글(쉼표로 나눔, 앞뒤 빈칸 뺌). 고른 것이 없으면 nil
+func onlySet(v string) map[string]bool {
+	var m map[string]bool
+	for _, k := range strings.Split(v, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			if m == nil {
+				m = map[string]bool{}
+			}
+			m[k] = true
+		}
+	}
+	return m
+}
+
 // backlogRun: 이미 쌓인 임시 찌꺼기 한 번 치우기(--tmp-backlog <시간>). 사용자 임시 폴더 맨 위 내 항목 가운데 안쪽 모두가 hours시간 넘게
-// 안 바뀌었고 lsof로 아무도 열지 않은 것 — 운영체제 것은 뺀다. dry면 종류별 개수·크기만. lsof를 못 읽으면 하나도 안 지운다(종료 1)
-func backlogRun(hours float64, dry bool, r runner) int {
+// 안 바뀌었고 lsof로 아무도 열지 않은 것 — 운영체제 것은 뺀다. only가 있으면 그 종류(tmpKind 글자 그대로)만 — 지우기는 only가 꼭 있다(sweepMain).
+// dry면 종류별 개수·크기(큰 차례)와 --only에 붙일 한 줄. lsof를 못 읽으면 하나도 안 지운다(종료 1)
+func backlogRun(hours float64, dry bool, only map[string]bool, r runner) int {
 	base := tmpDir(r)
 	ents, err := os.ReadDir(base)
 	if err != nil {
@@ -200,7 +225,7 @@ func backlogRun(hours float64, dry bool, r runner) int {
 		size    int64
 	}
 	var cands []cand
-	osN, newN := 0, 0
+	osN, newN, skipN := 0, 0, 0
 	for _, e := range ents {
 		p := filepath.Join(base, e.Name())
 		st, err := os.Lstat(p)
@@ -209,6 +234,9 @@ func backlogRun(hours float64, dry bool, r runner) int {
 			continue
 		case osOwned(e.Name()):
 			osN++
+			continue
+		case only != nil && !only[tmpKind(e.Name())]:
+			skipN++
 			continue
 		}
 		if size, aged, err := scan(p, cutoff); err == nil && aged {
@@ -228,6 +256,22 @@ func backlogRun(hours float64, dry bool, r runner) int {
 		n    int
 		size int64
 	}
+	// 지운 이름 낱낱이(2026-11-27 — 합계만 남아 무엇을 지웠는지 나중에 못 봤다): 실행마다 한 파일, 못 열면 하나도 안 지운다
+	logDir := filepath.Join(stateHome(), "hc-sweep", "tmp-backlog")
+	logPath := filepath.Join(logDir, fmt.Sprintf("%s-%d.log", time.Now().Format("20060102-150405"), os.Getpid()))
+	var lf *os.File
+	if dry {
+		fmt.Printf("지우면 지운 이름을 낱낱이 %s/<시각>-<pid>.log에 남긴다\n", logDir)
+	} else if len(cands) > 0 {
+		if err = os.MkdirAll(logDir, 0o755); err == nil {
+			lf, err = os.OpenFile(logPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		}
+		if err != nil {
+			fmt.Println("한 번 치우기: 지운 이름 기록 파일을 못 엶 — 하나도 안 지움:", err)
+			return 1
+		}
+		defer lf.Close()
+	}
 	kinds, busy, n, total := map[string]*sum{}, 0, 0, int64(0)
 	for _, c := range cands {
 		in := false
@@ -245,6 +289,10 @@ func backlogRun(hours float64, dry bool, r runner) int {
 			if err := removeTree(c.p); err != nil {
 				fmt.Printf("못 지움: %s %v\n", c.p, err)
 				continue
+			}
+			if _, err := fmt.Fprintf(lf, "%s\t%s\t%d\n", time.Now().Format("2006-01-02T15:04:05-0700"), flat(c.p), c.size); err != nil {
+				fmt.Printf("지운 이름 기록을 못 씀 — 여기서 멈춤(방금 지운 것: %s): %v\n", c.p, err)
+				return 1
 			}
 		}
 		if kinds[c.kind] == nil {
@@ -265,9 +313,29 @@ func backlogRun(hours float64, dry bool, r runner) int {
 	if dry {
 		word = "지울 것"
 	}
-	fmt.Printf("한 번 치우기(%s, %s시간 넘음): %s %d개 %s · 열린 것 %d개·새 것 %d개 남김 · 운영체제 것 %d개 뺌\n", base, pyFloat(hours), word, n, human(total), busy, newN, osN)
+	skipped := ""
+	if only != nil {
+		skipped = fmt.Sprintf(" · 고르지 않은 것 %d개 남김", skipN)
+	}
+	fmt.Printf("한 번 치우기(%s, %s시간 넘음): %s %d개 %s · 열린 것 %d개·새 것 %d개 남김%s · 운영체제 것 %d개 뺌\n", base, pyFloat(hours), word, n, human(total), busy, newN, skipped, osN)
+	var pick, rest []string
 	for _, k := range ks {
 		fmt.Printf("  %s\t%d개\t%s\n", k, kinds[k].n, human(kinds[k].size))
+		if unpicked(k, kinds[k].n, kinds[k].size) {
+			rest = append(rest, k)
+		} else {
+			pick = append(pick, k)
+		}
+	}
+	if dry && len(pick) > 0 { // 따옴표 — 종류의 *를 셸이 펼치지 않게
+		fmt.Printf("고르기(hc-sweep --tmp-backlog %s 뒤에 붙임):\n--only '%s'\n", pyFloat(hours), strings.Join(pick, ","))
+	}
+	if dry && len(rest) > 0 {
+		fmt.Printf("그 밖(고르지 않음): %s\n", strings.Join(rest, ","))
+	}
+	if lf != nil {
+		fmt.Fprintf(lf, "합계\t%d개\t%d\n", n, total)
+		fmt.Println("지운 이름:", logPath)
 	}
 	if n > 0 && !dry {
 		record("임시:"+base, "-", "임시 찌꺼기 한 번 치우기("+pyFloat(hours)+"시간 넘음)", base, "-", fmt.Sprintf("%d개 %s", n, human(total)))

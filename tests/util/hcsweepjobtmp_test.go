@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -111,7 +112,8 @@ exit 1
 	c.ok("closed.log에 한 줄씩", grepc(read(T+"/home/.claude-tasks/closed.log"), "작업 임시 폴더 지움") == 3)
 }
 
-// ⑦ 한 번 치우기(--tmp-backlog <시간>): dry-run은 종류별 개수·크기만 보이고 안 지운다. 운영체제 것·새 것·열린 것은 뺀다
+// ⑦ 한 번 치우기(--tmp-backlog <시간>): dry-run은 종류별 개수·크기(큰 차례, 같은 머리는 한 줄)와 --only에 붙일 한 줄을 보이고 안 지운다.
+// 지우는 것은 --only로 고른 종류만(없으면 거절). 운영체제 것·새 것·열린 것은 --only에 들어도 뺀다(ht-tmp-backlog-only)
 func TestHcSweepTmpBacklog(t *testing.T) { run1(t, testHcSweepTmpBacklog) }
 
 func testHcSweepTmpBacklog(t *testing.T, T string, e Env) {
@@ -124,40 +126,112 @@ func testHcSweepTmpBacklog(t *testing.T, T string, e Env) {
 	// 가짜 lsof: @T@/lsof-held의 경로를 다른 프로세스가 연 것으로
 	script(t, T+"/bin/lsof", T, "#!/bin/sh\nprintf 'p%s\\nfcwd\\nn/\\n' \"$PPID\"\n"+
 		"[ -f @T@/lsof-held ] && while read -r p; do printf 'p1\\nfcwd\\nn%s\\n' \"$p\"; done < @T@/lsof-held\nexit 0\n")
-	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+X)
+	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+X, "XDG_STATE_HOME="+T+"/state")
+	big := strings.Repeat("x", 200000) // 0.0MB가 아니게
 	oldDirs := []string{"wails3-find-AbCdEf", "wails3-find-XyZw12", "tmp.Ab12Cd", "proj-agent-tools-123", "scoped_dir123_45",
-		"com.apple.foo", "TemporaryItems", "audit-held"}
+		"com.google.Chrome.qmjab12", "com.google.Chrome.zzkq", "lane-dev-app-foo", "lane-dev-app-bar", "com.apple.foo", "TemporaryItems", "audit-held"}
 	for _, d := range oldDirs {
-		write(t, X+"/"+d+"/f", strings.Repeat("x", 4096))
+		write(t, X+"/"+d+"/f", big)
+	}
+	for _, d := range []string{"contentlinkingd", "kw", "mediaanalysisd-access"} { // 데몬 같은 이름·한 개뿐 0MB → 그 밖
+		mkdirs(t, X+"/"+d)
 	}
 	write(t, X+"/uv-1234abcd5678.lock", "x")
+	write(t, X+"/uv-9876fedc4321.lock", "x")
 	write(t, X+"/tmp.New123/f", "x") // 새 것
 	write(t, X+"/wails3-find-Mixed1/old", "x")
 	write(t, X+"/wails3-find-Mixed1/new", "x") // 안쪽 하나만 새로움
 	write(t, T+"/lsof-held", X+"/audit-held\n")
 	old := time.Now().Add(-72 * time.Hour)
-	for _, p := range append(oldDirs, "uv-1234abcd5678.lock", "wails3-find-Mixed1") {
-		filepath.Walk(X+"/"+p, func(q string, _ os.FileInfo, _ error) error { return os.Chtimes(q, old, old) })
+	age := func(p string) {
+		filepath.Walk(p, func(q string, _ os.FileInfo, _ error) error { return os.Chtimes(q, old, old) })
+	}
+	for _, p := range append(oldDirs, "uv-1234abcd5678.lock", "uv-9876fedc4321.lock", "wails3-find-Mixed1", "contentlinkingd", "kw", "mediaanalysisd-access") {
+		age(X + "/" + p)
 	}
 	now := time.Now()
 	os.Chtimes(X+"/wails3-find-Mixed1/new", now, now)
+	pick := regexp.MustCompile(`(?m)^--only '([^']*)'$`)
 
 	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48", "--dry-run")
 	c.ok("dry-run: 종류별 개수", grep(out, `(?m)^  wails3-find-\*\t2개\t`) && grep(out, `(?m)^  tmp\.\*\t1개\t`) &&
-		grep(out, `(?m)^  proj-agent-tools-\*\t1개\t`) && grep(out, `(?m)^  scoped_dir\*\t1개\t`) && grep(out, `(?m)^  uv-\*\.lock\t1개\t`))
-	c.ok("dry-run: 합계·남김·운영체제 것 뺌 한 줄", strings.Contains(out, "지울 것 6개") && strings.Contains(out, "열린 것 1개·새 것 2개 남김") &&
+		grep(out, `(?m)^  proj-agent-tools-\*\t1개\t`) && grep(out, `(?m)^  scoped_\*\t1개\t`) && grep(out, `(?m)^  uv-\*\.lock\t2개\t`))
+	c.ok("③ 같은 머리는 한 줄(mktemp 꼬리가 소문자뿐이어도)", grep(out, `(?m)^  com\.google\.Chrome\.\*\t2개\t`) && grep(out, `(?m)^  lane-dev-app-\*\t2개\t`) &&
+		!strings.Contains(out, "qmj") && !strings.Contains(out, "zzkq"))
+	c.ok("dry-run: 합계·남김·운영체제 것 뺌 한 줄", strings.Contains(out, "지울 것 14개") && strings.Contains(out, "열린 것 1개·새 것 2개 남김") &&
 		strings.Contains(out, "운영체제 것 2개 뺌"))
+	c.ok("dry-run: 크기 큰 차례", strings.Index(out, "  wails3-find-*") < strings.Index(out, "  tmp.*") && strings.Index(out, "  tmp.*") < strings.Index(out, "  uv-*.lock"))
+	m := pick.FindStringSubmatch(out)
+	c.ok("dry-run: --only에 붙일 한 줄(데몬 같은 것·한 개 0MB는 그 밖)", m != nil && strings.Contains(m[1], "wails3-find-*") && strings.Contains(m[1], "com.google.Chrome.*") &&
+		!strings.Contains(m[1], "contentlinkingd") && !strings.Contains(m[1], "kw") && !strings.Contains(m[1], "mediaanalysisd") &&
+		grep(out, `(?m)^그 밖\(고르지 않음\): .*contentlinkingd`) && grep(out, `(?m)^그 밖\(고르지 않음\): .*mediaanalysisd-\*`) && grep(out, `(?m)^그 밖\(고르지 않음\): .*kw`))
 	c.ok("dry-run: 아무것도 안 지움", exists(X+"/tmp.Ab12Cd") && exists(X+"/wails3-find-AbCdEf"))
+	c.ok("dry-run: 기록 파일 자리 한 줄·파일은 안 만듦", strings.Contains(out, T+"/state/hc-sweep/tmp-backlog/") && !exists(T+"/state/hc-sweep/tmp-backlog"))
 
-	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48")
-	c.ok("치우기: 오래되고 안 열린 것만 지움", !exists(X+"/tmp.Ab12Cd") && !exists(X+"/wails3-find-AbCdEf") && !exists(X+"/uv-1234abcd5678.lock"))
-	c.ok("치우기: 운영체제 것·새 것·안쪽이 새로운 것·열린 것은 남김", exists(X+"/com.apple.foo") && exists(X+"/TemporaryItems") &&
-		exists(X+"/tmp.New123") && exists(X+"/wails3-find-Mixed1") && exists(X+"/audit-held"))
+	// ① --only 없이 지우려 함 → 거절, 아무것도 안 지움
+	out, rc := run(T, e, SWEEP, "--tmp-backlog", "48")
+	c.ok("① --only 없이 지우기는 거절(종료 2)", rc == 2 && strings.Contains(out, "--only") && strings.Contains(out, "--dry-run") &&
+		exists(X+"/tmp.Ab12Cd") && exists(X+"/wails3-find-AbCdEf") && exists(X+"/contentlinkingd"))
+
+	// ② 고른 종류만 지우고 나머지는 그대로 ④ 열린 것·새 것은 골라도 남김
+	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48", "--only", "tmp.*, wails3-find-*,audit-*")
+	c.ok("② 고른 종류만 지움", !exists(X+"/tmp.Ab12Cd") && !exists(X+"/wails3-find-AbCdEf") && !exists(X+"/wails3-find-XyZw12") &&
+		exists(X+"/proj-agent-tools-123") && exists(X+"/uv-1234abcd5678.lock") && exists(X+"/com.google.Chrome.zzkq") && exists(X+"/kw"))
+	c.ok("④ 열린 것·새 것·안쪽이 새로운 것은 골라도 남김", exists(X+"/audit-held") && exists(X+"/tmp.New123") && exists(X+"/wails3-find-Mixed1") &&
+		strings.Contains(out, "지움 3개"))
 	c.ok("치우기: closed.log 한 줄", grepc(read(T+"/home/.claude-tasks/closed.log"), "임시 찌꺼기 한 번 치우기") == 1)
+	// 지운 이름 낱낱이: 상태 폴더 hc-sweep/tmp-backlog/ 아래 실행마다 한 파일 — 한 줄에 시각·경로·바이트, 끝 줄 합계
+	logs, _ := filepath.Glob(T + "/state/hc-sweep/tmp-backlog/*.log")
+	lg := ""
+	if len(logs) == 1 {
+		lg = read(logs[0])
+	}
+	c.ok("지운 이름 기록: 파일 하나, 이름 수 = 지운 수(3), 끝 줄 합계", len(logs) == 1 && grepc(lg, "\t"+X+"/") == 3 &&
+		strings.Contains(lg, "\t"+X+"/tmp.Ab12Cd\t") && strings.Contains(lg, X+"/wails3-find-XyZw12") && grep(lg, `합계\t3개\t`) &&
+		strings.Contains(out, logs[0]))
+
+	// ⑤ dry-run 끝 줄을 --only에 넣으면 같은 집합
+	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48", "--dry-run")
+	m = pick.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("--only 줄 없음:\n%s", out)
+	}
+	kindsOf := func(s string) string { // 종류 줄(큰 차례)을 쉼표로
+		var ks []string
+		for _, x := range regexp.MustCompile(`(?m)^  (\S+)\t`).FindAllStringSubmatch(s, -1) {
+			ks = append(ks, x[1])
+		}
+		return strings.Join(ks, ",")
+	}
+	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48", "--dry-run", "--only", m[1])
+	same := kindsOf(out) == m[1] && !strings.Contains(out, "그 밖")
+	out, _ = run(T, e, SWEEP, "--tmp-backlog", "48", "--only", m[1])
+	c.ok("⑤ dry-run 끝 줄로 고르면 같은 집합 — 그 밖만 남고 나머지는 지움", same && kindsOf(out) == m[1] &&
+		!exists(X+"/proj-agent-tools-123") && !exists(X+"/uv-1234abcd5678.lock") && !exists(X+"/com.google.Chrome.zzkq") && !exists(X+"/lane-dev-app-foo") &&
+		exists(X+"/contentlinkingd") && exists(X+"/kw") && exists(X+"/mediaanalysisd-access") && exists(X+"/com.apple.foo") && exists(X+"/audit-held"))
+
+	// 레인 안(TMPDIR에 작업 표식 .hc-job)에서는 지우기를 거절 — 바깥 운영체제 자리(가짜 getconf)를 지우지 않는다. dry-run은 된다
+	J, O := T+"/jobtmp", T+"/ostmp"
+	write(t, J+"/.hc-job", "t1\nlane\n1\n")
+	write(t, O+"/tmp.Os12Ab/f", "x")
+	age(O + "/tmp.Os12Ab")
+	script(t, T+"/bin/getconf", T, "#!/bin/sh\necho "+O+"\n") // 실행 권한 — 진짜 getconf로 새면 실제 사용자 임시 폴더다
+	ej := e.With("TMPDIR=" + J)
+	out, rc = run(T, ej, SWEEP, "--tmp-backlog", "48", "--dry-run")
+	if !strings.Contains(out, "한 번 치우기("+O+",") {
+		t.Fatalf("가짜 getconf가 안 쓰임 — 지우기 시험을 멈춘다:\n%s", out)
+	}
+	c.ok("레인 안 dry-run은 바깥 자리를 보임", rc == 0 && strings.Contains(out, "지울 것 1개") && exists(O+"/tmp.Os12Ab"))
+	write(t, J+"/tmp.Jb12Cd/f", "x") // 작업 임시 폴더 안 것도 그대로여야
+	age(J + "/tmp.Jb12Cd")
+	out, rc = run(T, ej, SWEEP, "--tmp-backlog", "48", "--only", "tmp.*")
+	c.ok("레인 안에서는 지우기 거절(종료 2, --only 있어도)", rc == 2 && exists(O+"/tmp.Os12Ab") && exists(J+"/tmp.Jb12Cd") && strings.Contains(out, "레인 안"))
+	out, rc = run(T, ej, SWEEP, "--tmp-backlog", "48")
+	c.ok("레인 안에서 --only도 없이 지우기 → 거절·아무것도 안 지움", rc == 2 && exists(O+"/tmp.Os12Ab") && exists(J+"/tmp.Jb12Cd"))
 
 	write(t, T+"/bin/lsof", "#!/bin/sh\nexit 1\n")
 	write(t, X+"/tmp.Again1/f", "x")
-	filepath.Walk(X+"/tmp.Again1", func(q string, _ os.FileInfo, _ error) error { return os.Chtimes(q, old, old) })
-	out, rc := run(T, e, SWEEP, "--tmp-backlog", "48")
+	age(X + "/tmp.Again1")
+	out, rc = run(T, e, SWEEP, "--tmp-backlog", "48", "--only", "tmp.*")
 	c.ok("lsof 실패면 하나도 안 지우고 종료 1", rc == 1 && exists(X+"/tmp.Again1") && strings.Contains(out, "lsof 실패"))
 }

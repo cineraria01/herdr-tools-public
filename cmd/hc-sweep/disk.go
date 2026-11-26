@@ -21,10 +21,16 @@ const gb = 1e9
 
 var hexDir = regexp.MustCompile(`^[0-9a-f]{2}$`)
 
-// tmpDir: 사용자 임시 폴더. TMPDIR이 작업별 임시 폴더(표식 .hc-job — 레인 안에서 부름)면 그 바깥 운영체제 자리
+// inJob: TMPDIR이 작업별 임시 폴더(표식 .hc-job — 레인·감사·병합기 일꾼 안에서 부름)
+func inJob() bool {
+	t := os.Getenv("TMPDIR")
+	return t != "" && lexists(filepath.Join(t, jobtmp.Marker))
+}
+
+// tmpDir: 사용자 임시 폴더. TMPDIR이 작업별 임시 폴더(inJob)면 그 바깥 운영체제 자리
 func tmpDir(r runner) string {
 	t := os.Getenv("TMPDIR")
-	job := t != "" && lexists(filepath.Join(t, jobtmp.Marker))
+	job := inJob()
 	if t != "" && !job {
 		return t
 	}

@@ -29,7 +29,7 @@
 
 ## 사건을 받으면
 
-- `hc-disk-low`: `hc-sweep --dry-run`으로 지울 것을 보고, 끝난 작업 트리는 `hc-lane gc --repo <저장소> --dry-run`부터. 임시 폴더에 쌓인 옛 찌꺼기는 `hc-sweep --tmp-backlog 48 --dry-run`(종류별 개수·크기)을 보고 지휘가 `--dry-run` 없이 한 번(docs/hc-sweep/job-tmp.md).
+- `hc-disk-low`: `hc-sweep --dry-run`으로 지울 것을 보고, 끝난 작업 트리는 `hc-lane gc --repo <저장소> --dry-run`부터. 임시 폴더에 쌓인 옛 찌꺼기는 `hc-sweep --tmp-backlog 48 --dry-run`(종류별 개수·크기, 끝에 `--only '…'` 한 줄)을 보고 지휘가 고른 종류만 `hc-sweep --tmp-backlog 48 --only '<종류>,…'`로 한 번 — `--only` 없이는 안 지운다(docs/hc-sweep/job-tmp.md).
 - `hc-sweep-tmp-skip`: 그 기계에서 `hc-sweep --dry-run`으로 건너뜀이 이어지는지, lsof가 왜 느린지 본다.
 - `hc-tailscale`: 그 기계 `tailscale status`, 이 기계 `hc machine ls`.
 - `hc-health`: 그 기계 `hc-sweep --health`. 키체인 막힘이면 코어를 다시 띄우고, 키체인이 필요한 레인은 다른 기계로.
