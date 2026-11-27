@@ -280,6 +280,16 @@ const (
 	rcAlerted = 4
 	rcLanes   = 5
 
+	// 저장소 읽기 막힘 격리 cordon.tsv(cordonRow 칸 차례 — cordon.go)
+	cdMach    = 1
+	cdState   = 2
+	cdSince   = 3
+	cdAt      = 4
+	cdOn      = 5
+	cdAlerted = 6
+	cdWhy     = 7
+	cdNF      = 7
+
 	// 선행 착지 표식 after-landed.tsv 「프로젝트 레인 표식 출처 표식」
 	alProj = 1
 	alLane = 2

@@ -28,7 +28,9 @@ const actNS = "refs/hc-fill/act/"
 // 바꾼 파일 = 기준과의 merge-base부터 작업 트리까지(커밋·스테이지·안 올린 것) + 추적 안 하는 새 파일.
 // shx.Script로 감싼다 — 끝 표식이 성공을 정하므로 마지막 빈 줄 건너뛰기의 1이 조각 전체를 실패로 만들지 않고(fill/R-216:
 // 추적 파일만 고친 작업 트리가 「못 읽음」이 돼 겹침을 놓쳤다), 잘린 출력은 표식이 없어 못 읽음이 된다
-var actScript = shx.Script(loadSnip + `
+func actScript(m string) string { return shx.Script(loadSnip(m) + actBody) }
+
+const actBody = `
 while [ $# -ge 4 ]; do p=$1 n=$2 w=$3 b=$4; shift 4
 case $w in "~/"*) w=$HOME/${w#"~/"} ;; esac
 [ -d "$w" ] || { printf '%s\t%s\t!작업 트리 없음 %s\n' "$p" "$n" "$w"; continue; }
@@ -38,7 +40,7 @@ u=$(git -C "$w" -c core.quotepath=off ls-files --others --exclude-standard 2>/de
 printf '%s\t%s\t+\n' "$p" "$n"
 printf '%s\n%s\n' "$o" "$u" | while IFS= read -r f; do [ -n "$f" ] && printf '%s\t%s\t=%s\n' "$p" "$n" "$f"; done
 done
-`)
+`
 
 // actParse: actScript 출력 → 「p<TAB>n」 → 파일(읽은 레인만)
 func actParse(out string) map[string][]string {
@@ -153,6 +155,10 @@ func actTick(rows []Row) {
 			why[e.p+"\t"+e.n] = "@" + e.m + " 저장소 경로 없음(설정 repo)"
 			continue
 		}
+		if cordonOn(e.m) { // 격리(저장소 읽기 막힘) — 작업 트리 읽기가 막혀 바퀴를 늦춘다. 점검은 cordonTick이 상한 안에서
+			why[e.p+"\t"+e.n] = "@" + e.m + " " + cordonWhy
+			continue
+		}
 		byM[e.m] = append(byM[e.m], e.p, e.n, r+".wt/"+e.n, base[e.p])
 	}
 	var mu sync.Mutex
@@ -161,7 +167,7 @@ func actTick(rows []Row) {
 		wg.Add(1)
 		go func(m string, args []string) {
 			defer wg.Done()
-			raw, rc := onm(nil, m, actScript, append([]string{"-"}, args...)...)
+			raw, rc := onm(nil, m, actScript(m), append([]string{"-"}, args...)...)
 			out, ok := shx.Cut(raw, rc)
 			mu.Lock()
 			defer mu.Unlock()
@@ -173,9 +179,7 @@ func actTick(rows []Row) {
 				}
 				return
 			}
-			if l := loadParse(out); l.OK { // 같은 호출에 실은 부하 한 줄(fill-load-steer)
-				loadPut(m, l)
-			}
+			loadTake(m, out) // 같은 호출에 실은 부하 한 줄(fill-load-steer)·읽기 점검(cordon.go)
 			for k, v := range actParse(out) {
 				ACT[k] = v
 			}

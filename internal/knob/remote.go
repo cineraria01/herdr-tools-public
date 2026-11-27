@@ -17,14 +17,26 @@ import (
 const (
 	Ref        = "refs/herdr/knobs"
 	remoteHead = "hc-knobs"
+	// CordonPre: 「cordon@<기계>\t1\t<기한>」 줄 — hc-fill이 저장소 읽기 막힘으로 격리한 기계(실행 상태, docs/hc-fill/cordon.md).
+	// 등록 표에 없다(사람이 거는 손잡이가 아니다 — 설정 파일·knob set은 안 받는다). 기한이 늘 있어 hc-fill이 안 돌면 저절로 낡는다
+	CordonPre = "cordon@"
 )
+
+// remoteLive: 원격에 싣고 읽는 줄 — 등록 표의 Remote 손잡이(프로젝트별 덮어쓰기 뺌)로 살아 있는 값, 또는 기한 안의 격리 줄
+func remoteLive(n string, e Entry, now time.Time) bool {
+	if m, ok := strings.CutPrefix(n, CordonPre); ok {
+		return m != "" && e.Value == "1" && now.Unix() < e.Until
+	}
+	d, ok := Find(n)
+	return ok && d.Remote && d.Per != PerProject && e.Live(now)
+}
 
 // FormatRemote: 원격 커밋 메시지. 실을 것이 없으면 빈 글(참조를 지움). 「이름@<프로젝트>」 줄은 싣지 않는다 — 프로젝트별 값은 ForProject로 먼저 푼다.
 // 기계별 묶음 손잡이(merger_gate@<기계>)는 그 이름 그대로 싣는다
 func FormatRemote(es map[string]Entry, now time.Time) string {
 	var ns []string
 	for n, e := range es {
-		if d, ok := Find(n); ok && d.Remote && d.Per != PerProject && e.Live(now) {
+		if remoteLive(n, e, now) {
 			ns = append(ns, n)
 		}
 	}
@@ -83,7 +95,7 @@ func ParseRemote(msg string, now time.Time) Remote {
 			}
 			e.Until = u
 		}
-		if d, ok := Find(e.Name); ok && d.Remote && d.Per != PerProject && e.Live(now) {
+		if remoteLive(e.Name, e, now) {
 			r[e.Name] = e.Value
 		}
 	}

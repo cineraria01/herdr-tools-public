@@ -516,6 +516,7 @@ func knobRemoteOf(es map[string]knob.Entry, p string, now time.Time) map[string]
 			o[n] = e
 		}
 	}
+	cordonRemote(o) // 저장소 읽기 막힘 격리(cordon.go) — 병합기가 고르기에서 뺀다
 	return o
 }
 

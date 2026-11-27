@@ -66,8 +66,16 @@ func (l mLoad) gatesPtr() *int {
 // loadSnip: 「load <1분 부하> <코어 수>」 한 줄(리눅스 /proc/loadavg·getconf, macOS sysctl). 실패해도 조각을 실패로 만들지 않는다 —
 // 꼴이 틀린 줄은 loadParse가 모름으로 읽는다. 한 줄이다(끝 줄바꿈 없음) — 혼자 부를 때는 끝 표식 없이 그대로(잘린 출력은 꼴이 틀려 모름).
 // 이어 그 기계의 도는 저장소 검증 수를 병합기 검증 기계 고르기와 같은 명령(hc-lane merger --spec-idle — 「load=… cpus=… verifies=n」)으로
-// 한 줄 더(ht-skew-verify-cause — 레인 0인 바쁜 기계의 까닭이 병합기 추측 검증임을 보이게). 못 부르면 그 줄이 없어 검증 수만 모름
-const loadSnip = `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; hc-lane merger --spec-idle; } 2>/dev/null || :`
+// 한 줄 더(ht-skew-verify-cause — 레인 0인 바쁜 기계의 까닭이 병합기 추측 검증임을 보이게). 못 부르면 그 줄이 없어 검증 수만 모름.
+// 같은 호출에 그 기계 repo 줄 폴더들의 읽기 점검(--repo-read — cordon.go). 그 인자를 모르는 옛 판은 거절하니 인자 없이 한 번 더(점검만 모름)
+func loadSnip(m string) string {
+	rr := ""
+	for _, r := range repoPaths(m) {
+		rr += " " + shq(r.path)
+	}
+	return `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; hc-lane merger --spec-idle --repo-read` +
+		rr + ` || hc-lane merger --spec-idle; } 2>/dev/null || :`
+}
 
 // loadParse: 출력에서 「load」로 시작하는 첫 줄(부하). 꼴이 틀리거나 없으면 모름. --spec-idle 줄이 있으면 그 verifies= 를 검증 수로
 func loadParse(out string) mLoad {
@@ -149,10 +157,8 @@ func loadTick() {
 		wg.Add(1)
 		go func(m string) {
 			defer wg.Done()
-			if out, rc := onm(nil, m, loadSnip, "-"); rc == 0 {
-				if l := loadParse(out); l.OK {
-					loadPut(m, l)
-				}
+			if out, rc := onm(nil, m, loadSnip(m), "-"); rc == 0 {
+				loadTake(m, out)
 			}
 		}(m)
 	}
@@ -360,6 +366,8 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 				}
 			case "멈춤(조정)":
 				pin = append(pin, m+" 멈춤")
+			case cordonWhy:
+				pin = append(pin, m+" 격리")
 			case "자리 참":
 				full = m
 				pin = append(pin, pinNote(m, "상한"))
@@ -528,14 +536,14 @@ func machineLines(withEmpty bool) []string {
 		return nil
 	}
 	var o []string
-	rn := reachNotes() // 끊김(unreach.go)
+	rn, cn := reachNotes(), cordonNotes() // 끊김(unreach.go)·격리(cordon.go)
 	for _, mc := range machines() {
 		x, ok := recs[mc.Name]
 		used := x.used
 		if !ok {
 			used = -1
 		}
-		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), x.freeN(), x.whoNote(), machAdj(mc.Name), x.why)+rn[mc.Name])
+		o = append(o, loadLine(mc.Name, x.l, used, int(num(mc.Cap)), x.freeN(), x.whoNote(), machAdj(mc.Name), x.why)+rn[mc.Name]+cn[mc.Name])
 	}
 	return o
 }

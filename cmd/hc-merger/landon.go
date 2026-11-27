@@ -122,13 +122,17 @@ func (m *M) landPick() (verified.Verifier, string, bool) {
 		skip[d] = true
 	}
 	var cs []*landCand
+	var cord []string
 	listed := false
 	for _, v := range m.vers {
 		if v.Machine == m.mme || mode == "list" && !in[v.Machine] {
 			continue
 		}
 		listed = true
-		if !skip[v.Machine] {
+		switch {
+		case cordoned(v.Machine): // 격리(저장소 읽기 막힘 — verifierpick.go)는 재지 않고 까닭에만
+			cord = append(cord, v.Machine+" 격리")
+		case !skip[v.Machine]:
 			cs = append(cs, &landCand{v: v})
 		}
 	}
@@ -159,6 +163,7 @@ func (m *M) landPick() (verified.Verifier, string, bool) {
 		for _, d := range dead {
 			notes = append(notes, d+" 죽음")
 		}
+		notes = append(notes, cord...)
 		if in[m.mme] {
 			return verified.Verifier{}, localTag + "손잡이 목록 — 닿는 워커 없음", false
 		}

@@ -271,6 +271,8 @@ func machRoom(mc Machine, isa bool) (int, string) {
 		return 0, "연결 안 됨"
 	case has(AGUNK, m): // 유형 모를 터미널이 있다 — 자리를 셀 수 없다(재감사2 fill/R-203)
 		return 0, "유형 모를 터미널"
+	case cordonOn(m): // 저장소 읽기 막힘 격리(cordon.go) — 감사도 그 기계 작업 트리라 함께 막는다. 사람의 멈춤과 따로
+		return 0, cordonWhy
 	case !isa && machPaused(m): // 실행 중 멈춤(hc-fill machine --pause) — 떠 있는 레인의 감사는 그대로 띄운다
 		return 0, "멈춤(조정)"
 	}

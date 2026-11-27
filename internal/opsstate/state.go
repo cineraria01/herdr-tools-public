@@ -69,6 +69,8 @@ type Machine struct {
 
 	// MergeVerifies: Verifies 가운데 병합기 검증(추측 일꾼·착지 실행) 수 — 자리·레인상한에는 안 든다(ht-fill-gate-seat). 모름 nil
 	MergeVerifies *int `json:"merge_verifies"`
+	// Cordon: 저장소 읽기 막힘 격리 중이면 그 까닭(cordon.go), 아니면 nil
+	Cordon *Cordon `json:"cordon"`
 }
 
 // Health: 빈 글 = 모름(json null)

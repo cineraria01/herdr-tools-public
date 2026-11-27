@@ -25,6 +25,7 @@ const (
 	OpsTmpSkip   = "hc-sweep-tmp-skip"
 	OpsHealth    = "hc-health"
 	OpsUnreach   = "hc-fill-unreach"
+	OpsCordon    = "hc-fill-cordon"
 	OpsStaleRes  = "hc-stale-resident"
 	OpsTestOrph  = "hc-test-orphan"
 	OpsAdvise    = "hc-fill-advise"
@@ -53,6 +54,7 @@ var Ops = []Op{
 	{OpsTailscale, "tailscale status"},
 	{OpsHealth, "hc-sweep --health"},
 	{OpsUnreach, "hc machine ls"},
+	{OpsCordon, "hc-fill machine"},
 	{OpsStaleRes, "hc-fill state"},
 	{OpsTestOrph, "ps -o pid,ppid,etime,%cpu,command -p <pid>"},
 	{OpsAdvise, "hc-fill advise"},

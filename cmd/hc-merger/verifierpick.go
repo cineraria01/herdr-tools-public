@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/knob"
 	"herdr-tools/internal/verified"
 )
 
@@ -174,18 +175,27 @@ func verifyCount(ps string, self int) (n, gates int) {
 	return n, gates
 }
 
-// specIdleMain: hc-lane merger --spec-idle — 이 기계의 한가함 한 줄(병합기가 hc exec --on으로 부른다). 못 재면 종료 1
+// specIdleMain: hc-lane merger --spec-idle — 이 기계의 한가함 한 줄(병합기가 hc exec --on으로 부른다). 못 재면 종료 1.
+// --repo-read <폴더>…이면 이어서 저장소 읽기 점검 줄들(reporead.go — hc-fill이 부른다). 옛 판은 인자를 거절해(종료 2) 그 줄이 없다 = 모름
 func specIdleMain(a []string) int {
-	if len(a) != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-idle 은 인자를 받지 않는다")
+	rr := len(a) > 0 && a[0] == "--repo-read"
+	if !rr && len(a) != 0 {
+		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-idle 은 --repo-read <폴더>… 말고는 인자를 받지 않는다")
 		return 2
 	}
 	i, ok := idleProbe()
+	if ok {
+		fmt.Println(i)
+	}
+	if rr {
+		for _, l := range repoRead(a[1:]) {
+			fmt.Println(l)
+		}
+	}
 	if !ok {
 		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-idle — 부하·도는 검증을 재지 못했다")
 		return 1
 	}
-	fmt.Println(i)
 	return 0
 }
 
@@ -218,6 +228,10 @@ const (
 
 // gateOn: 손잡이 merger_gate@<기계>가 1(병합 검증 자리를 받은 기계)
 func gateOn(mach string) bool { return rk["merger_gate@"+mach] == "1" }
+
+// cordoned: hc-fill이 저장소 읽기 막힘으로 격리한 기계(원격 손잡이 참조의 cordon@<기계> — 기한이 지났거나 없으면 모름 = 빼지 않음,
+// docs/hc-fill/cordon.md). 추측·범인 가리기·미리 검증·나눠 검증·착지 실행 기계로 고르지 않는다. 이미 맡긴 검증은 건드리지 않는다
+func cordoned(mach string) bool { return rk[knob.CordonPre+mach] == "1" }
 
 // gateEnv: 그 기계에 띄우는 병합 검증(추측 일꾼·착지 실행)에 줄 env 인자 — 자리를 받은 기계만 HERDR_VERIFY_GATE=1
 func gateEnv(mach string) []string {
@@ -269,6 +283,10 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 			skipped = append(skipped, v.Machine+" 추측 도는 중")
 			continue
 		}
+		if cordoned(v.Machine) {
+			skipped = append(skipped, v.Machine+" 격리(저장소 읽기 막힘)")
+			continue
+		}
 		wg.Add(1)
 		go func(mach string) {
 			defer wg.Done()
@@ -304,7 +322,7 @@ func (m *M) idleProbeAll(c *specCtx, busy map[string]bool) {
 func (m *M) specPick(c *specCtx, busy, skip map[string]bool, avoid string, gate bool) verified.Verifier {
 	var cand []verified.Verifier
 	for _, v := range c.vers {
-		if !busy[v.Machine] && v.Machine != m.mme && !skip[v.Machine] {
+		if !busy[v.Machine] && v.Machine != m.mme && !skip[v.Machine] && !cordoned(v.Machine) {
 			cand = append(cand, v)
 		}
 	}

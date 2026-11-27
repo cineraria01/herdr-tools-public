@@ -422,6 +422,9 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 	var hot, cool []string
 	hotSet := map[string]bool{}
 	for _, m := range s.Machines {
+		if m.Cordon != nil {
+			o = append(o, cordonItem(m))
+		}
 		if m.Reach != "ok" {
 			if strings.Contains(m.Why, "모름") {
 				o = append(o, unknown("machine:"+m.Name, "기계 "+m.Name, m.Why))

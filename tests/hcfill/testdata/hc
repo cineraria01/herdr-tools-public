@@ -18,7 +18,7 @@ case $1 in
        esac ;;
   exec) echo "$*" >>"$T_LOG/hc.log"; case "$*" in *"${HC_FAKE_EXEC_FAIL:-@@없음@@}"*) exit 255 ;; esac
         case "$*" in *"${HC_FAKE_EXEC_NO:-@@없음@@}"*) echo no; exit 255 ;; esac   # EXEC_NO: 「no」를 찍고 실패 종료(출력은 믿으면 안 됨)
-        while [ "$1" != -- ]; do shift; done; shift; exec "$@" ;;
+        while [ "$1" != -- ]; do [ "$1" = --on ] && export HC_FAKE_ON="$2"; shift; done; shift; exec "$@" ;;   # HC_FAKE_ON: 가짜 hc-lane이 그 기계 몫을 고른다
   send) echo "$*" >>"$T_LOG/send.log"; case " ${HC_FAKE_SEND_FAIL-} " in *" $2 "*) exit 1 ;; esac ;;   # 실패시킬 주소 목록
   *) echo "$*" >>"$T_LOG/hc.log" ;;
 esac

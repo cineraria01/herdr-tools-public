@@ -168,14 +168,27 @@ func TestLoadSkewEvent(t *testing.T) {
 
 // 부하 조각을 이 기계의 sh로 — 혼자(한 줄, 종료 0)와 실제 변경 조각 앞에 실린 꼴(끝 표식) 둘 다 읽힌다
 func TestLoadSnipHere(t *testing.T) {
-	if strings.Contains(loadSnip, "\n") {
-		t.Fatal("조각은 한 줄이어야 한다(가짜 hc 기록 한 줄 = exec 한 번)")
+	confLines = []string{"repo p x /r/with space", "repo q x /r/it's"} // 폴더 인용(빈칸·따옴표)도 한 줄 그대로
+	defer func() { confLines = nil }()
+	if strings.Contains(loadSnip("x"), "\n") || !strings.Contains(loadSnip("x"), `--repo-read '/r/with space' '/r/it'\''s' ||`) {
+		t.Fatalf("조각은 한 줄이어야 한다(가짜 hc 기록 한 줄 = exec 한 번): %s", loadSnip("x"))
 	}
-	out, err := exec.Command("sh", "-c", X+loadSnip, "_", "-").Output()
+	out, err := exec.Command("sh", "-c", X+loadSnip("x"), "_", "-").Output()
 	if l := loadParse(string(out)); err != nil || !l.OK {
 		t.Fatalf("이 기계 부하를 못 읽음: %q %v", out, err)
 	}
-	out, err = exec.Command("sh", "-c", X+actScript, "_", "-").Output()
+	// 원격 셸이 zsh여도 같은 조각(ht-worker-cordon 외부 가정) — 인용한 폴더가 한 인자로 간다(가짜 hc-lane이 받은 인자를 줄마다)
+	if zsh, err := exec.LookPath("zsh"); err == nil {
+		d := t.TempDir()
+		os.WriteFile(d+"/hc-lane", []byte("#!/bin/sh\nfor a in \"$@\"; do echo \"arg $a\"; done\n"), 0o755)
+		c := exec.Command(zsh, "-c", X+loadSnip("x"), "_", "-")
+		c.Env = append(os.Environ(), "PATH="+d+":"+os.Getenv("PATH"))
+		o, err := c.Output()
+		if err != nil || !strings.Contains(string(o), "arg /r/with space\narg /r/it's\n") || !loadParse(string(o)).OK {
+			t.Fatalf("zsh: %q %v", o, err)
+		}
+	}
+	out, err = exec.Command("sh", "-c", X+actScript("x"), "_", "-").Output()
 	b, ok := shx.Cut(string(out), 0)
 	if l := loadParse(b); err != nil || !ok || !l.OK || len(actParse(b)) != 0 {
 		t.Fatalf("실제 변경 조각에 실린 부하: %q %v", out, err)

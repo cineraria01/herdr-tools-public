@@ -245,6 +245,12 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		}
 		s.Machines = append(s.Machines, x)
 	}
+	cds := cordonLoad() // 격리(cordon.go) — 닿지 않는 기계도 칸은 싣는다
+	for i, x := range s.Machines {
+		if c := cds[x.Name]; c.On {
+			s.Machines[i].Cordon = &opsstate.Cordon{SinceS: max(0, now.Unix()-c.Since), Why: c.Why}
+		}
+	}
 
 	// 병합 줄: run 바퀴의 병합기 살아 있음 기록과 그 줄에 받아 둔 병합기 기록 한 장(지금 상태 — mergerrec.go). 검증 시간·건너뜀
 	// 이력은 병합기 기계 일지에만 — 이 기계 병합기면 로컬 일지에서 읽고(statemerge.go), 다른 기계면 모름

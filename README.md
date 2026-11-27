@@ -44,6 +44,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 지시문 복사](docs/hc-fill/brief-copy.md)
 - [hc-fill: .qa 자료 싣기](docs/hc-fill/carry.md)
 - [hc-fill: 설정](docs/hc-fill/config.md)
+- [hc-fill: 저장소 읽기 막힘 격리](docs/hc-fill/cordon.md)
 - [hc-fill: 선행 사슬](docs/hc-fill/dep-chain.md)
 - [hc-fill: 먼저 띄움](docs/hc-fill/early.md)
 - [hc-fill: 줄 고치기 (edit)](docs/hc-fill/edit.md)

@@ -21,11 +21,13 @@ func launchRows() {
 		ov = "block"
 	}
 	OVM, OWN, OVWAIT, OVQ, WAITOK = ov, nil, nil, nil, map[string]bool{}
-	LOADS, MWHY = map[string]mLoad{}, map[string]string{} // 부하(loadsteer.go) — actTick이 같은 호출로 읽은 기계부터 채운다
+	LOADS, MWHY, REPOCK = map[string]mLoad{}, map[string]string{}, map[string]repoCk{} // 부하(loadsteer.go)·읽기 점검(cordon.go) — actTick이 같은 호출로 읽은 기계부터 채운다
 	tickMark("owners")
 	syncOwners()
 	tickMark("load")
 	loadTick()
+	tickMark("cordon")
+	cordonTick() // 저장소 읽기 점검·격리 — 띄우기 전(cordon.go)
 	NDOLD, NDNOW = readLines(DATA+"/need.tsv"), nil
 	ELIST, UPNOW, ECAPHIT, ECAPM, PINNOW = "", "", false, "", nil
 	SEENOFF = nil
