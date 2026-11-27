@@ -57,6 +57,7 @@ type specCtx struct {
 // spec: 바퀴 갈고리 — 후보(m.b)가 정해진 뒤, 착지 전에. 빠른 착지면 그 추측 트리도 돌려준다
 func (m *M) spec() (specDecision, string) {
 	d, t := m.specDecide()
+	m.deadJournal(d, time.Now().Unix())
 	m.freezeAt(d) // 기다리는 맨 앞 무리는 얼리고, 그 밖(착지·줄이기·반송)은 풀어 다음 바퀴는 줄 차례대로(frontsteady.go A)
 	m.sparts = ""
 	if d == specLand && m.sfid != "" { // 병합기 기계가 직접 검증 — 맨 앞 추측의 통과 조각을 넘긴다(쓸지는 검증 스크립트가)
@@ -78,6 +79,7 @@ func (m *M) specDecide() (specDecision, string) {
 	}
 	groups := m.specGroups()
 	now := time.Now().Unix()
+	m.specDead(c, groups, now) // 일꾼이 죽었다고 확신하는 도는 추측은 상한을 기다리지 않고 모름(specdead.go)
 	if st := specWalk(m.btree, groups, c.rows); len(st) > 0 {
 		shardSettle(c, st[0].row)          // 길에서 벗어난 나눔 추측은 몫이 다 끝나면 모름(specshards.go)
 		m.offPathKill(c, m.keepIDs(c, st)) // 길에서 벗어난 도는 추측은 이 바퀴에 끝낸다(frontsteady.go C)

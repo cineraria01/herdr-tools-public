@@ -21,8 +21,12 @@ import (
 //
 // get <기계>/spec-<아이디8>은 $IDLEDIR/get-spec-<아이디8>이 있으면 그 글(살아 있는 터미널), 없으면 표준 오류에 not_found(진짜 hc 0.1.22처럼 — ht-land-offload-lost). exec … -- sh …은
 // 이 기계에서 그대로 돌려 그 출력을 돌려준다(추측 진행 확인 — 검증 기계 클론이 이 기계 임시 폴더에 있다. 그 기계가 unreach면 같은 실패)
-const fakeHcIdle = `if [ "$1" = get ]; then
+//
+// machine ls는 $IDLEDIR/machines가 있으면 그 글(없으면 빈 출력 — 못 읽음). get 전에 $IDLEDIR/get-hook이 있으면 부른다(그 사이 결과가 생김)
+const fakeHcIdle = `if [ "$1" = machine ]; then [ -f "$IDLEDIR/machines" ] && cat "$IDLEDIR/machines"; exit 0; fi
+if [ "$1" = get ]; then
   case ${2##*/} in spec-*|land-*)
+    [ -x "$IDLEDIR/get-hook" ] && "$IDLEDIR/get-hook"
     if [ -f "$IDLEDIR/get-${2##*/}" ]; then cat "$IDLEDIR/get-${2##*/}"; exit 0; fi
     echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
   esac
