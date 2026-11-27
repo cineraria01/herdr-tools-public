@@ -232,6 +232,8 @@
 # sweep_resident_grace	5
 # — 부모 없는 시험 고아(시험 임시 경로 프로세스)가 이만큼 남아 있으면 운영 사건 hc-test-orphan 한 번(끄지 않음) (범위 1~10080 분)
 # sweep_test_orphan	30
+# — 에이전트가 만들고 쥔 ego 작업 공간이 이만큼 그대로면(목록 지문이 안 바뀜) 닫음(0이면 끔 — 목록도 안 읽음) (범위 0~10080 분)
+# sweep_ego_idle	120
 
 ## selfexec
 # — 상주 고리(hc-lane watch·merger, hc-fill watch, herdr-balance --watch, hc-job-server)가 새로 깔린 판으로 스스로 넘어간다(0이면 끔 — 손으로 다시 띄울 때까지 옛 판) (범위 0~1)

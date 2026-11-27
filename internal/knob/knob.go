@@ -162,6 +162,7 @@ var Defs = []Def{
 	{Name: "resident_reexec", Tool: "selfexec", Default: "1", Min: 0, Max: 1, Desc: "상주 고리(hc-lane watch·merger, hc-fill watch, herdr-balance --watch, hc-job-server)가 새로 깔린 판으로 스스로 넘어간다(0이면 끔 — 손으로 다시 띄울 때까지 옛 판)"},
 	{Name: "sweep_resident_grace", Tool: "hc-sweep", Default: "5", Min: 1, Max: 1440, Unit: "분", Remote: true, Desc: "새 판이 깔리고(상주가 뜨고) 이만큼 지나도 옛 판·판 모름인 상주에 운영 사건 hc-stale-resident"},
 	{Name: "sweep_test_orphan", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "부모 없는 시험 고아(시험 임시 경로 프로세스)가 이만큼 남아 있으면 운영 사건 hc-test-orphan 한 번(끄지 않음)"},
+	{Name: "sweep_ego_idle", Tool: "hc-sweep", Default: "120", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "에이전트가 만들고 쥔 ego 작업 공간이 이만큼 그대로면(목록 지문이 안 바뀜) 닫음(0이면 끔 — 목록도 안 읽음)"},
 }
 
 // Find: 표에서 이름으로. 묶음 손잡이(「접두@값」)는 Name을 그 저장 이름으로 바꾼 사본을 돌려준다

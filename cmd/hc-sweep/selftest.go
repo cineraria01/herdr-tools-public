@@ -226,5 +226,10 @@ func selfTest() (failed error) {
 	os.WriteFile(log, []byte("t\tpid:5\t-\t고아 관찰(쓰는 터미널 없음)\t/a.wt/l\t-\t나이 0분 sleep 300\n"), 0o644)
 	check(seen(5, "sleep 300", log) && !seen(6, "sleep 300", log) && !seen(5, "sleep 30", log), "seen")
 	check(pyFloat(3) == "3.0" && pyFloat(0.5) == "0.5" && pyFloat(9e-06) == "9e-06" && pyFloat(1e9) == "1000000000.0", "pyFloat")
+	sps, okp := egoParse(egoMark + `[{"createdBy":"agent","id":1,"name":"a","ownership":"agent","profileId":"D","recentTabTitles":[],"taskId":"a"},` +
+		`{"createdBy":"agent","id":2,"name":"b","ownership":"agentDelegatedToUser","profileId":"D","recentTabTitles":[],"taskId":"b"}]`)
+	check(okp && len(sps) == 2 && egoMine(sps[0]) && !egoMine(sps[1]), "ego 후보는 에이전트가 만들고 쥔 것만")
+	_, okp = egoParse(egoMark + `[{"id":1}]`)
+	check(!okp, "ego 칸이 빠지면 모름")
 	return failed
 }

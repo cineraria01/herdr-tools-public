@@ -95,6 +95,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane watch (늘 도는 감시)](docs/hc-lane/watch.md)
 - [launchd 작업: 지킴이(`hc-launchd-guard`)로 Herdr 터미널에서](docs/hc-launchd-guard/guard.md)
 - [hc-sweep: 디스크 쓸기](docs/hc-sweep/disk-sweep.md)
+- [hc-sweep: ego 작업 공간 쓸기 (주인 없이 남은 브라우저 공간 닫기)](docs/hc-sweep/ego-spaces.md)
 - [hc-sweep: 건강 점검 (잠자기 끔·키체인)](docs/hc-sweep/health.md)
 - [hc-sweep: 색인 쓸기](docs/hc-sweep/index-sweep.md)
 - [작업별 임시 폴더 (hc가 띄운 작업마다 자기 TMPDIR, 끝나면 통째로 지움)](docs/hc-sweep/job-tmp.md)

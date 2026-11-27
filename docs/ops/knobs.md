@@ -123,6 +123,7 @@
   - 거기 없는 값은 이 기계의 손잡이 설정 파일(herdr-sync로 맞춘 같은 파일), 그것도 없으면 기본이다.
 - `sweep_resident_grace`(분, 기본 5): 상주 판 점검의 유예 — 새 판이 깔린 지도, 상주가 뜬 지도 이만큼 지나야 옛 판·판 모름을 알린다([상주 판 점검](../hc-sweep/resident.md)). 같은 곳에서 읽는다. `herdr-sync --check`의 상주 확인도 이 유예를 쓴다(맥 저장 파일).
 - `sweep_test_orphan`(분, 기본 30): 부모 없는 시험 고아(시험 임시 경로 프로세스)가 이만큼 남아 있으면 운영 사건 `hc-test-orphan` 한 번([시험 고아 점검](../hc-sweep/test-orphans.md)). 같은 곳에서 읽는다.
+- `sweep_ego_idle`(분, 0~10080, 기본 120): 에이전트가 만들고 쥔 ego 작업 공간의 목록 지문이 이만큼 그대로면 닫고 운영 사건 `hc-ego-idle`([ego 작업 공간 쓸기](../hc-sweep/ego-spaces.md)). 0이면 끔(목록도 안 읽음). 같은 곳에서 읽는다.
 - `resident_reexec`(0|1, 기본 1): 상주 고리가 새로 깔린 판으로 스스로 넘어간다 — 0이면 넘어가지 않고 손으로 다시 띄울 때까지 옛 판([selfexec](../go/selfexec.md)). 상주가 새 판을 본 바퀴에 **그 기계의** 저장 파일, 없으면 손잡이 설정 파일을 읽는다(원격 참조 없음 — 모든 기계에서 끄려면 설정 파일, 한 기계만 잠깐이면 그 기계 `~/.local/state/herdr-ops/knobs.tsv`).
 
 ## 검증 범위 (`verify_scope`, 검증하는 모든 기계)

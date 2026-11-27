@@ -48,6 +48,7 @@ func isolated(T string) Env {
 	e := Env(clitest.Env(T))
 	e["HC_SWEEP_TAILSCALE"] = "off" // 이 기계의 진짜 Tailscale을 부르지 않게
 	e["HC_SWEEP_HEALTH"] = "off"    // 이 기계의 진짜 잠자기·키체인 점검과 그 사건을 내지 않게
+	e["HC_SWEEP_EGO"] = "off"       // 이 기계의 진짜 ego 앱(작업 공간 목록)을 부르지 않게
 	return e
 }
 
