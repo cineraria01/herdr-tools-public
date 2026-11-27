@@ -238,6 +238,7 @@ func carryKeep(lane string, ext map[string]string, fresh bool) {
 // carryWrite <사본> <레인> <프로젝트> <글>: 경로를 바꿔 쓴 지시문 사본을 두고 저장소 밖 파일 사본을 새로(edit)
 func carryWrite(bf, lane, prj string, b []byte) error {
 	b, ext := carryPrep(lane, prj, b, map[string]bool{}, true)
+	carryCheck(lane, prj, b, ext, true) // 앞 지시문을 덮기 전에
 	if err := writeAtomic(bf, string(b)); err != nil {
 		return err
 	}
@@ -255,52 +256,108 @@ func carryTaken(lane string) map[string]bool {
 	return t
 }
 
-// carryTar <레인> <프로젝트> <본문>: 본문의 .qa/… 자료를 tar 한 묶음으로(작업 트리 상대 이름). 없으면 nil.
-// .qa/carry/<이름>은 데이터 폴더 사본이 먼저, 없으면 저장소. 없는 자료는 알림 한 줄. 상한을 넘으면 why
-func carryTar(lane, prj, body string) ([]byte, string) {
+// carryGroup: 지시문에 적힌 경로 하나가 실을 몫(넣을 때 거절 글의 큰 것 목록)
+type carryGroup struct {
+	path string
+	n    int
+	est  int64
+}
+
+// carrySet <레인> <프로젝트> <본문> <미룬 사본> <새로>: 본문의 .qa/… 자료(작업 트리 상대 이름 → 이 기계 경로)와 묶음 어림 크기·경로별 몫·지휘 기계에 없는 경로.
+// 넣을 때(carryCheck)와 띄울 때(carryTar)가 이 한 셈을 쓴다 — 두 판정이 어긋나지 않게(2026-11-28 ht-carry-add-check).
+// pend: 아직 데이터 폴더에 두지 않은 사본(이름 → 이 기계 경로, add·edit·--then 때). fresh: 데이터 폴더 옛 사본을 보지 않음(add·edit는 새로 비운다)
+func carrySet(lane, prj, body string, pend map[string]string, fresh bool) (map[string]string, int64, []carryGroup, []string) {
 	repo := strings.TrimRight(repoOf(prj, LOCAL), "/")
-	files := map[string]string{} // 작업 트리 상대 이름 → 이 기계 경로
-	sizes := map[string]int64{}
+	files := map[string]string{}
+	var gs []carryGroup
+	var miss []string
+	est := int64(1024) // 읽기 전에 크기로 어림(머리 PAX 포함 넉넉히 1,536바이트 + 512 단위 올림, 끝 1,024)
 	for _, cands := range carryToks(body) {
 		for _, c := range cands {
 			rel := carryRel(c)
 			if rel == "" {
 				continue
 			}
-			src := ""
-			if k := DATA + "/carry/" + lane + "/" + strings.TrimPrefix(rel, ".qa/carry/"); strings.HasPrefix(rel, ".qa/carry/") && lcE(k) {
+			src, label := "", rel
+			nm, isc := strings.CutPrefix(rel, ".qa/carry/")
+			if k := DATA + "/carry/" + lane + "/" + nm; isc && pend[nm] != "" {
+				src, label = pend[nm], pend[nm]
+			} else if isc && !fresh && lcE(k) {
 				src = k
 			} else if repo != "" && lcE(repo+"/"+rel) {
 				src = repo + "/" + rel
 			}
 			if src == "" {
 				if c == cands[len(cands)-1] {
-					say("알림 %s: 지시문의 %s 가 지휘 기계에 없어 싣지 않음", lane, rel)
+					miss = append(miss, rel)
 				}
 				continue
 			}
+			g := carryGroup{path: label}
 			filepath.WalkDir(src, func(p string, e fs.DirEntry, err error) error {
 				if err == nil && e.Type().IsRegular() {
-					if fi, err := e.Info(); err == nil {
+					if fi, err := e.Info(); err == nil && files[rel+strings.TrimPrefix(p, src)] == "" {
 						files[rel+strings.TrimPrefix(p, src)] = p
-						sizes[p] = fi.Size()
+						g.n++
+						g.est += 1536 + (fi.Size()+511)/512*512
 					}
 				}
 				return nil
 			})
+			if g.n > 0 {
+				est += g.est
+				gs = append(gs, g)
+			}
 			break
 		}
+	}
+	return files, est, gs, miss
+}
+
+// carryOver: 상한을 넘었을 때의 까닭(넣을 때·띄울 때 같은 글), 아니면 ""
+func carryOver(n int, est int64) string {
+	if est <= carryMax {
+		return ""
+	}
+	return fmt.Sprintf("실어 보낼 자료가 상한 %d바이트를 넘음(파일 %d개 약 %d바이트)", carryMax, n, est)
+}
+
+// carryCheck <레인> <프로젝트> <바꿔 쓴 글> <저장소 밖 사본(carryPrep)> <새로>: 띄울 때 실릴 자료가 상한을 넘으면 넣기 전에 거절(die — 아무것도 쓰기 전).
+// 띄울 때의 검사는 그대로 남는다(넣은 뒤 .qa가 커질 수 있다)
+func carryCheck(lane, prj string, b []byte, ext map[string]string, fresh bool) {
+	pend := map[string]string{}
+	for real, nm := range ext {
+		pend[nm] = real
+	}
+	files, est, gs, _ := carrySet(lane, prj, string(b), pend, fresh)
+	why := carryOver(len(files), est)
+	if why == "" {
+		return
+	}
+	sort.SliceStable(gs, func(i, j int) bool { return gs[i].est > gs[j].est })
+	msg := why + " — 넣지 않음"
+	for i, g := range gs {
+		if i == 3 {
+			break
+		}
+		msg += fmt.Sprintf("\n  %s — 파일 %d개 약 %d바이트", g.path, g.n, g.est)
+	}
+	die("%s\n폴더 통째 대신 레인이 실제로 읽을 파일만 적어라(큰 자료는 저장소에 두거나 레인이 그 기계에서 만들게)", msg)
+}
+
+// carryTar <레인> <프로젝트> <본문>: 본문의 .qa/… 자료를 tar 한 묶음으로(작업 트리 상대 이름). 없으면 nil.
+// .qa/carry/<이름>은 데이터 폴더 사본이 먼저, 없으면 저장소. 없는 자료는 알림 한 줄. 상한을 넘으면 why
+func carryTar(lane, prj, body string) ([]byte, string) {
+	files, est, _, miss := carrySet(lane, prj, body, nil, false)
+	for _, rel := range miss {
+		say("알림 %s: 지시문의 %s 가 지휘 기계에 없어 싣지 않음", lane, rel)
 	}
 	if len(files) == 0 {
 		return nil, ""
 	}
-	// 읽기 전에 크기로 판정 — 큰 폴더를 가리켜도 통째로 메모리에 올리지 않는다(머리 PAX 포함 넉넉히 1,536바이트 + 512 단위 올림)
-	est := int64(1024)
-	for _, p := range files {
-		est += 1536 + (sizes[p]+511)/512*512
-	}
-	if est > carryMax {
-		return nil, fmt.Sprintf("실어 보낼 자료가 상한 %d바이트를 넘음(파일 %d개 약 %d바이트)", carryMax, len(files), est)
+	// 읽기 전에 크기로 판정 — 큰 폴더를 가리켜도 통째로 메모리에 올리지 않는다
+	if why := carryOver(len(files), est); why != "" {
+		return nil, why
 	}
 	names := make([]string, 0, len(files))
 	for n := range files {

@@ -56,14 +56,14 @@ func secCarryQA(k *K) {
 	k.check("옛 줄: 띄울 때 저장소 .qa 절대 경로·저장소 밖 파일을 바꿔 쓰고 실음", in(rf, "설계 .qa/carry/DESIGN.md 와 절대 .qa/d/sea.mp4 를") &&
 		read(k.T+"/carried-old/.qa/carry/DESIGN.md") == "설계\n" && read(k.T+"/carried-old/.qa/d/sea.mp4") == "영상", k.out, rf)
 
-	// 상한 넘침: 띄우지 않고 막힘 사건
+	// 상한 넘침: 넣을 때 작았다가 띄우기 전에 커진 자료(넣을 때 거절은 carryadd_test.go)
 	k.fresh()
-	write(k.t, R+"/.qa/big/big.bin", strings.Repeat("x", 7340033))
-	writeX(k.t, R+"/.qa/big/a-unreadable.bin", "x") // 이름 차례로 먼저 오는 읽을 수 없는 파일: 상한 판정은 읽기 전에(크기로) 한다
-	os.Chmod(R+"/.qa/big/a-unreadable.bin", 0)
 	bb := k.T + "/cbig.md"
 	write(k.t, bb, "# 지시문 cbig\n큰 자료 .qa/big 을 본다\n")
 	k.run("add", "--name", "cbig", "--project", "app", "--brief", bb)
+	write(k.t, R+"/.qa/big/big.bin", strings.Repeat("x", 7340033))
+	writeX(k.t, R+"/.qa/big/a-unreadable.bin", "x") // 이름 차례로 먼저 오는 읽을 수 없는 파일: 상한 판정은 읽기 전에(크기로) 한다
+	os.Chmod(R+"/.qa/big/a-unreadable.bin", 0)
 	k.run("run")
 	k.check("상한 넘침: 띄우지 않음(대기로 남음)", k.state("cbig") == "wait" && !in(read(k.T+"/lane.log"), "cbig") && !exists(k.T+"/carried-cbig"), k.out)
 	k.check("상한 넘침: 까닭과 막힘 사건(파일을 읽기 전에 크기로 판정)", in(k.out, "상한 7340032바이트를 넘음") && !in(k.out, "읽지 못해") &&

@@ -171,6 +171,7 @@ func addCmd(args []string) {
 	tmp := bf + ".tmp." + strconv.Itoa(os.Getpid())
 	b, err := os.ReadFile(brief)
 	b, ext := carryPrep(name, prj, b, map[string]bool{}, true) // 지휘 기계 경로를 레인 작업 트리 .qa/… 로(carry.go)
+	carryCheck(name, prj, b, ext, true)                        // 실을 자료가 상한을 넘으면 아무것도 쓰기 전에 거절
 	if err != nil || os.MkdirAll(filepath.Dir(bf), 0o755) != nil || os.WriteFile(tmp, b, 0o644) != nil || len(b) == 0 {
 		os.Remove(tmp)
 		die("지시문을 복사하지 못했다: %s → %s", brief, bf)
@@ -352,6 +353,7 @@ func thenLocked(tl, pre, prj, brief string) {
 	add, ext := carryPrep(pre, prj, add, carryTaken(pre), true) // 사본 폴더는 선행 레인 것(carry.go)
 	mid := fmt.Sprintf("\n## 이어서: %s (hc-fill add --then, %s)\n위 일을 끝내 커밋한 뒤 같은 작업 트리에서 이어서 한다. 이 절의 커밋 제목 머리는 `%s:`으로 쓴다(이 이름을 --after로 기다리는 레인이 풀리게).\n위 일의 완료 보고·착지는 하지 않는다 — 이 절까지 끝낸 뒤 한 번만 report 완료.\n",
 		tl, nowMin(), tl)
+	carryCheck(pre, prj, []byte(string(old)+mid+string(add)), ext, false) // 띄울 때 실릴 범위 그대로(앞 단계 + 이어 붙일 것)
 	if err1 != nil || err2 != nil || writeAtomic(pb, string(old)+mid+string(add)) != nil {
 		DRC = 1 // 검사 거절(2)이 아니라 쓰기 실패 — 셸 판과 같은 1(Fable L3)
 		die("선행 지시문에 붙이지 못했다: %s", pb)
