@@ -149,7 +149,7 @@ func rmPreview(name string, force bool) {
 	if r == nil {
 		noLane(name) // 실제 rm과 같은 글·종료 1(감사 atozkxr 낮음 1)
 	}
-	if r.F(qEarly) == "parked" && !force {
+	if rowMode(r) == mParked && !force {
 		refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
 	}
 	preview("뺌 %s (상태 %s, 떠 있는 터미널은 그대로) · 되돌리기 %s", name, r.F(qState), rmUndo(r))

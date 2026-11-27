@@ -177,7 +177,7 @@ func lsCmd(args []string) {
 	for _, l := range readLines(Q) {
 		f := Row(lsSplit(l, qNF))
 		name, proj, brief, after, only, state, addr, stuck := f.F(qName), f.F(qProj), f.F(qBrief), f.F(qAfter), f.F(qOnly), f.F(qState), f.F(qAddr), f.F(qStuck)
-		reply, owner, prio, early, ak, ovk := f.F(qReply), f.F(qOwner), f.F(qPrio), f.F(qEarly), f.F(qAudit), f.F(qOverlap)
+		reply, owner, prio, em, ak, ovk := f.F(qReply), f.F(qOwner), f.F(qPrio), rowMode(f), f.F(qAudit), f.F(qOverlap)
 		live, lr, s, a := "", "", "", ""
 		switch state {
 		case "wait":
@@ -238,23 +238,23 @@ func lsCmd(args []string) {
 			note += " 기계 " + only
 		}
 		ew := "선행 " + after
-		if early == "early" && live != "" {
+		if em == mEarly && live != "" {
 			if e, ok := lsEls(proj, after); ok {
 				ew = e
 			}
 		}
-		switch early {
-		case "early":
+		switch em {
+		case mEarly:
 			note = "먼저 띄움(" + ew + ")" + earlyChainNote(name, f.F(qRID)) + strings.TrimPrefix(note, "선행 "+after)
-		case "no-early":
+		case mNoEarly:
 			note += " 먼저 띄움 끔"
-		case "parked":
+		case mParked:
 			note = "주차(선행 " + after + " — 들어가면 lane/" + name + " 에서 이어 띄움)" + strings.TrimPrefix(note, "선행 "+after)
-		case "resumed":
+		case mResumed:
 			note += " 주차에서 이어 띄움"
-		case "stacked":
+		case mStacked:
 			note = stackNote(name) + strings.TrimPrefix(note, "선행 "+after)
-		case "bounced":
+		case mBounced:
 			note += " 반송됨 — 같은 이름으로 다시 띄움 대기"
 		}
 		if stuck != "-" {

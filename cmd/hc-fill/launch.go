@@ -530,7 +530,7 @@ func tryget(name, rid, m string) (string, bool) {
 // done·idle을 건너뛰고 띄워 13바퀴 거절이 「자리 없음」으로 찍혔다). 0 채택 · 1 건너뜀(닫혀 없음) · 2 기다림(까닭)
 func parkCandidate(name, rid, m, addr, st string) (int, string) {
 	attempt, _ := tryget(name, rid, m)
-	if strings.SplitN(attempt, "\t", 2)[0] == "resumed" {
+	if modeOf(strings.SplitN(attempt, "\t", 2)[0]) == mResumed {
 		if EVBAD || has(EV, "모름 "+m) || pget(addr) != pLive {
 			return 2, "이어 띄운 실행 " + addr + " 확인 못 함"
 		}

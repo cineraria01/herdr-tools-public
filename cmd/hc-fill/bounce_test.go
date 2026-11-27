@@ -68,7 +68,7 @@ func TestBounceRelaunch(t *testing.T) {
 	if !strings.Contains(rep, "report|중간|-|반송 다시 띄움 l-v") || !strings.Contains(rep, "--key|hf:reland:700-l-v|") {
 		t.Fatalf("주인 알림: %q", rep)
 	}
-	if s := stStage(stIn{State: r.F(qState), Early: r.F(qEarly)}); s != "반송됨 — 다시 띄움 대기" {
+	if s := stStage(stIn{State: r.F(qState), Mode: rowMode(r)}); s != "반송됨 — 다시 띄움 대기" {
 		t.Fatalf("status 단계: %q", s)
 	}
 	MQP, MQS, MQBAD = "", nil, ""

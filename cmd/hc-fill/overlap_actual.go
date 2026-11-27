@@ -98,7 +98,7 @@ func actTick(rows []Row) {
 	var parked []ent
 	ACTPARK = map[string]bool{}
 	for _, r := range rows {
-		if r.F(qState) == "wait" && dash(r.F(qEarly)) == "parked" && !strings.HasPrefix(r.F(qAudit), "audit=") && !seen[r.F(qProj)+"\t"+r.F(qName)] {
+		if r.F(qState) == "wait" && rowMode(r) == mParked && !strings.HasPrefix(r.F(qAudit), "audit=") && !seen[r.F(qProj)+"\t"+r.F(qName)] {
 			parked = append(parked, ent{r.F(qProj), r.F(qName), ""})
 			ACTPARK[r.F(qProj)+"\t"+r.F(qName)] = true
 			ps[r.F(qProj)] = true

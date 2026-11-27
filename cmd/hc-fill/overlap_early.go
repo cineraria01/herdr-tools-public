@@ -82,7 +82,7 @@ func earlyChainSave(rows []Row, add []Row) {
 	f := DATA + "/early-chain.tsv"
 	live := map[string]bool{}
 	for _, r := range rows {
-		if r.F(qState) == "up" && r.F(qEarly) == "early" {
+		if r.F(qState) == "up" && rowMode(r) == mEarly {
 			live[r.F(qName)+"\t"+r.F(qRID)] = true
 		}
 	}

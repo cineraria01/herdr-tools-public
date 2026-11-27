@@ -16,7 +16,7 @@ import (
 
 func stackTick() {
 	for _, r := range qRows() {
-		if r.F(qState) != "up" || r.F(qEarly) != "stacked" {
+		if r.F(qState) != "up" || rowMode(r) != mStacked {
 			continue
 		}
 		name, prj := r.F(qName), r.F(qProj)
@@ -199,7 +199,7 @@ func restackRelaunch(name, pn, p, onto, s, ms, why string) string {
 		return ""
 	}
 	q := qrow(name)
-	if q == nil || qset(true, q.F(qRID), name, "wait", "-", "-", q.F(qStuck), "bounced", "") != 0 {
+	if q == nil || qset(true, q.F(qRID), name, "wait", "-", "-", q.F(qStuck), mBounced.val(), "") != 0 {
 		return ""
 	}
 	say("다시 쌓기 %s: %s — 반송 다시 띄움 대기로(%s)", name, why, rq)

@@ -16,17 +16,18 @@ import (
 
 // stIn: 한 줄의 단계를 정하는 재료
 type stIn struct {
-	State, Early string // 대기열 6칸(wait|up|sent)·14칸
-	Lane         string // 레인 이름(쌓아 띄움 덧말 — stack.go)
-	Live         string // 살아 있는 터미널 상태(없으면 빈 값), 기계가 연결 안 됨이면 "?"
-	Last         Row    // last.tsv 줄(레인 상태 sha8 시각 한줄 …) — 없으면 nil
-	Aud          string // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
-	Pos          int    // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
-	Batch        string // 병합기가 지금 도는 묶음의 구성원이면 그 덧말(mqBatch — 「묶음 검증 중 <기계> n분째」), 아니면 빈 값
-	Pin          string // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
-	Ovl          string // 대기 줄: 겹침 비고(ovWaitNote — 「겹침 대기(…)」·「다음 차례(…)」), 아니면 빈 값
-	Bg           bool   // 살아 있는 배경 셸을 기다림(hangBgWait)
-	Land         string // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
+	State string  // 대기열 6칸(wait|up|sent)
+	Mode  relMode // 14칸(rowMode)
+	Lane  string  // 레인 이름(쌓아 띄움 덧말 — stack.go)
+	Live  string  // 살아 있는 터미널 상태(없으면 빈 값), 기계가 연결 안 됨이면 "?"
+	Last  Row     // last.tsv 줄(레인 상태 sha8 시각 한줄 …) — 없으면 nil
+	Aud   string  // 자동 감사 비고(anote), 감사 대상이 아니면 빈 값
+	Pos   int     // 병합기 줄 차례(1부터) · 0 줄에 없음 · -1 줄을 못 읽음
+	Batch string  // 병합기가 지금 도는 묶음의 구성원이면 그 덧말(mqBatch — 「묶음 검증 중 <기계> n분째」), 아니면 빈 값
+	Pin   string  // 대기 줄: 묶인 기계(--only)가 모두 상한·멈춤이라 못 뜬 까닭(pinned.go), 아니면 빈 값
+	Ovl   string  // 대기 줄: 겹침 비고(ovWaitNote — 「겹침 대기(…)」·「다음 차례(…)」), 아니면 빈 값
+	Bg    bool    // 살아 있는 배경 셸을 기다림(hangBgWait)
+	Land  string  // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
 }
 
 // stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
@@ -36,10 +37,10 @@ func stStage0(in stIn) string {
 		if in.Pin != "" { // 선행은 들어갔다 — 「선행 기다림」이 아니라 진짜 까닭(ht-advise-only-stuck)
 			return "대기(묶인 기계 " + in.Pin + ")"
 		}
-		if in.Early == "bounced" { // bounce.go
+		if in.Mode == mBounced { // bounce.go
 			return "반송됨 — 다시 띄움 대기"
 		}
-		if in.Early == "parked" {
+		if in.Mode == mParked {
 			return "대기(주차 — 선행 기다림)"
 		}
 		if in.Ovl != "" {
@@ -307,7 +308,7 @@ func statusCmd(args []string) {
 	ovs := readRows(DATA + "/overlap.tsv")
 	for _, r := range rows {
 		name, addr := r.F(qName), r.F(qAddr)
-		in := stIn{State: r.F(qState), Early: r.F(qEarly), Lane: name, Last: lsFirst(DATA+"/last.tsv", name)}
+		in := stIn{State: r.F(qState), Mode: rowMode(r), Lane: name, Last: lsFirst(DATA+"/last.tsv", name)}
 		if in.State == "wait" {
 			in.Pin, _ = pinOf(name, r.F(qRID))
 			in.Ovl = ovWaitNote(name, ovs)

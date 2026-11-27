@@ -22,7 +22,7 @@ func asSetup(t *testing.T, cap string, laAuto bool) *asT {
 	OWNF, OWND = d+"/own.tsv", d+"/own"
 	LOCAL, dry, P, CONN, AGENT, EVBAD = "here", true, "", nil, "claude-code", false
 	AGUNK, SEATS, NOW, NOWL, ROWS, OREC, HELD = nil, nil, nil, nil, nil, nil, nil
-	AK, AUD, NEED, RESUME, EARLYF, HOLD = "-", d+"/audit.md", "", false, "", 60
+	AK, AUD, NEED, RSRC, EARLYF, HOLD = "-", d+"/audit.md", "", srcNew, "", 60
 	RID, stuck, SB = "r1", "-", d+"/brief.md"
 	confLines = []string{"machine here " + cap + " -", "repo p here " + d + "/r"}
 	for _, w := range []string{"/r.wt/la", "/r.wt/lb", "/r.wt/lc"} {

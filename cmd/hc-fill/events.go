@@ -197,22 +197,22 @@ func parkTick() {
 		return
 	}
 	for _, q := range qRows() {
-		n, m, a, st, rid, ef := q.F(qName), q.F(qMach), q.F(qAddr), q.F(qStuck), q.F(qRID), q.F(qEarly)
-		if q.F(qState) != "up" || (ef != "early" && ef != "parked") || n == "" {
+		n, m, a, st, rid, em := q.F(qName), q.F(qMach), q.F(qAddr), q.F(qStuck), q.F(qRID), rowMode(q)
+		if q.F(qState) != "up" || (em != mEarly && em != mParked) || n == "" {
 			continue
 		}
 		if parkev(n, a, m) != tri.Yes {
 			continue
 		}
 		w := ""
-		if ef != "early" {
+		if em != mEarly {
 			w = " (주차 뒤 다시 잡힌 줄 복구)"
 		}
 		if dry {
 			fmt.Println(P + "주차로 되돌릴 " + n + " (" + a + ")" + w)
 			continue
 		}
-		if qset(true, rid, n, "wait", "-", "-", st, "parked", "") == 0 {
+		if qset(true, rid, n, "wait", "-", "-", st, mParked.val(), "") == 0 {
 			fmt.Println("주차 " + n + ": " + a + " 가 lane/" + n + " (" + head(evF(PKL, evSHA), 8) + ")에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움" + w)
 			if gone, why := parkClose(n, a, m); !gone {
 				fmt.Println("주차 터미널 남김 " + a + " (" + n + "): " + why + " — 다음 바퀴에 다시 본다")

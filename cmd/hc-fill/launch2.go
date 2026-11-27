@@ -171,8 +171,8 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		}
 	}
 	// 시도 기록: 이름·줄 ID·기계·먼저·감사를 띄우기 전에. 채택이 같은 줄 ID·기계면 이것을 쓴다
-	if RESUME {
-		EARLYF = "resumed"
+	if RSRC == srcPark {
+		EARLYF = mResumed.val()
 	}
 	// 주소 칸 ?: 미확정 — 띄우기 결과를 알기 전에 죽거나 시간을 넘기면 그대로 남아 다음 바퀴가 이 기계만 본다(tryUnsure)
 	if !dry && tryput(lane, RID, mm, dash(EARLYF), dash(LAUTO), "?", "") != 0 {
@@ -186,7 +186,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if rd != "" {
 		la = append(la, rd)
 	}
-	if RESUME {
+	if RSRC == srcPark {
 		la = append(la, "--resume")
 	}
 	if on != "" {
@@ -406,7 +406,7 @@ func place(lane, p, brief, only, reply, owner, after string) {
 		}
 		ADDR, pst_, EARLYF = "", utcnow(), ""
 		if after != "" {
-			EARLYF = "early"
+			EARLYF = mEarly.val()
 		}
 		lr := launch(lane, brief, m, repo, reply, owner)
 		if lr == 4 { // 입력 거절: 다른 기계로 넘기지 않고 줄을 멈춘다
@@ -458,29 +458,17 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			if !isa {
 				NOWL = append(NOWL, m)
 			}
-			pe := ""
-			if after != "" {
-				pe = "early"
-			}
-			if RESUME {
-				pe = "resumed" // 주차에서 이어 띄움은 resumed(다시 먼저 띄움 후보가 아님)
-			}
-			if BOUNCE {
-				pe = "-" // 반송됨 표시를 지운다(떠 있는 줄)
-			}
-			if STACK != "" {
-				pe = "stacked" // 쌓아 띄움(stack.go)
-			}
-			if tryput(lane, RID, m, pe, LAUTO, ADDR, START_RUN) != 0 {
+			bc := bindRun(lane, RID, m, ADDR, START_RUN, launchedMode(after != ""), LAUTO)
+			if bc == -1 {
 				die("실행 기록 저장 실패")
 			}
-			if qset(true, RID, lane, "up", m, ADDR, stuck, pe, LAUTO) == 0 {
+			if bc == 0 {
 				stackSave(lane, RID)
 				if after != "" {
 					say("먼저 띄움 %s → %s %s (%s, 선행 %s)", lane, m, ADDR, repo, after)
 				} else {
 					rs := ""
-					if RESUME {
+					if RSRC == srcPark {
 						rs = ", 주차한 가지 lane/" + lane + " 에서 이어"
 					}
 					if LIGHT { // 무게 근거(weight.go) — 보통은 지금 줄 그대로

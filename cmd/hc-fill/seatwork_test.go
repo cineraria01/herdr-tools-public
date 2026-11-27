@@ -25,7 +25,7 @@ func swSetup(t *testing.T, cap, lcap string) *swT {
 	OWNF, OWND = d+"/own.tsv", d+"/own"
 	LOCAL, dry, P, CONN, AGENT, EVBAD = "here", true, "", nil, "claude-code", false
 	AGUNK, SEATS, NOW, NOWL, ROWS, OREC, LANEADDR, TERMS, EV = nil, nil, nil, nil, nil, nil, nil, nil, nil
-	AK, AUD, NEED, RESUME, EARLYF = "-", d+"/audit.md", "", false, ""
+	AK, AUD, NEED, RSRC, EARLYF = "-", d+"/audit.md", "", srcNew, ""
 	RID, stuck, SB = "r1", "-", d+"/brief.md"
 	confLines = []string{"machine here " + cap + " " + lcap, "repo p here " + d + "/r"}
 	if err := os.MkdirAll(d+"/r.wt", 0o755); err != nil {

@@ -56,7 +56,7 @@ func TestPinnedRound(t *testing.T) {
 	if why != "here 상한" && !strings.HasPrefix(why, "here 상한 — 부하 ") || since == 0 {
 		t.Fatalf("첫 바퀴 pinned.tsv: %q %d\n%s", why, since, readLinesT(DATA+"/pinned.tsv"))
 	}
-	if st := stStage(stIn{State: "wait", Early: "parked", Pin: why}); st != "대기(묶인 기계 "+why+")" {
+	if st := stStage(stIn{State: "wait", Mode: mParked, Pin: why}); st != "대기(묶인 기계 "+why+")" {
 		t.Errorf("상태 단계: %q", st)
 	}
 	for _, r := range qRows() {
@@ -143,7 +143,7 @@ func TestPinnedSaveSince(t *testing.T) {
 }
 
 func TestPinnedStage(t *testing.T) {
-	for _, in := range []stIn{{State: "wait", Early: "parked", Pin: "a 상한 — 부하 18.9/10"}, {State: "wait", Pin: "a 상한 — 부하 18.9/10"}} {
+	for _, in := range []stIn{{State: "wait", Mode: mParked, Pin: "a 상한 — 부하 18.9/10"}, {State: "wait", Pin: "a 상한 — 부하 18.9/10"}} {
 		if got := stStage(in); got != "대기(묶인 기계 a 상한 — 부하 18.9/10)" {
 			t.Errorf("%+v: %q", in, got)
 		}
@@ -177,7 +177,7 @@ func TestPinnedAdviseTick(t *testing.T) {
 		}
 	}
 	why, _ := pinOf("lane-p", "r9")
-	if st := stStage(stIn{State: "wait", Early: "parked", Pin: why}); st != "대기(묶인 기계 w 상한 — 부하 30.0/10)" {
+	if st := stStage(stIn{State: "wait", Mode: mParked, Pin: why}); st != "대기(묶인 기계 w 상한 — 부하 30.0/10)" {
 		t.Errorf("상태 줄: %q", st)
 	}
 }

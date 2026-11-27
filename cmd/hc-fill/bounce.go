@@ -93,7 +93,7 @@ func bounceInMain(p, n string) tri.State {
 // 기록만 잇고, 다른 반송으로 반송됨인 줄(아직 안 뜸)은 이 반송으로 절을 다시 쓴다
 func bounceGate(n, lane, p string, rec func(string, string), recTell func(string, string, string)) bool {
 	r := qrow(lane)
-	bounced := r != nil && r.F(qState) == "wait" && r.F(qEarly) == "bounced"
+	bounced := r != nil && r.F(qState) == "wait" && rowMode(r) == mBounced
 	switch {
 	case r == nil || r.F(qProj) != p:
 		say("반송 다시 띄움 안 함 %s: 대기열에 그 레인 줄이 없다(지휘가 뺌 — refs/merge-failed/%s)", lane, n)
@@ -176,7 +176,7 @@ func bounceRelaunch(n, lane, base, why string, r Row, live bool, rec func(string
 		say("반송 다시 띄움 보류 %s: 절을 못 씀: %v", lane, err)
 		return
 	}
-	if qset(true, q.F(qRID), lane, "wait", "-", "-", q.F(qStuck), "bounced", "") != 0 {
+	if qset(true, q.F(qRID), lane, "wait", "-", "-", q.F(qStuck), mBounced.val(), "") != 0 {
 		say("반송 다시 띄움 보류 %s: 대기열 줄을 못 바꿈 — 다음 바퀴에", lane)
 		return
 	}

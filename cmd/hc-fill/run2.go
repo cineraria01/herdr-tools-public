@@ -224,7 +224,7 @@ func stuckAlive(sa string) bool {
 // waitRow: 대기열 줄 하나(셸 판 run 고리 본문)
 func waitRow(r Row) {
 	name, prj, brief, after, only, state := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qOnly), r.F(qState)
-	a0, reply, owner, ef, ak, ovk, rid := r.F(qAddr), r.F(qReply), r.F(qOwner), r.F(qEarly), r.F(qAudit), r.F(qOverlap), r.F(qRID)
+	a0, reply, owner, em, ak, ovk, rid := r.F(qAddr), r.F(qReply), r.F(qOwner), rowMode(r), r.F(qAudit), r.F(qOverlap), r.F(qRID)
 	RID, proj, stuck = rid, prj, r.F(qStuck)
 	// 상태가 안 잡혀 남긴 터미널이 살아났으면 같은 레인이 둘 돈다: 알리고 그 레인은 더 띄우지 않는다(지휘가 정리)
 	dupr := false
@@ -290,20 +290,12 @@ func waitRow(r Row) {
 			say("알림 %s: 같은 이름 터미널 %s 는 hc-lane 레인(%s 폴더)이 아니라 채택하지 않음", name, t.Addr, prj)
 			continue
 		}
-		if ef == "bounced" { // 반송된 줄(bounce.go): 같은 이름의 옛 실행은 채택하지 않는다 — 제출하고 끝냈으면 닫고 띄우고, 아니면 기다림
-			if gone, why := endClose(name, t.Addr, t.M, "제출"); !gone {
-				parkbusy = "같은 이름 반송된 옛 실행 터미널 살아 있음 " + t.Addr + " (" + dash(t.Status) + ", 안 닫음: " + why + ")"
-			}
+		switch k, why := takeover(name, rid, em, t); k { // 주차·반송 줄은 그 출처의 끝 보고로 끝낸 옛 실행을 닫고 띄운다(relaunch.go)
+		case 1:
 			continue
-		}
-		if dash(ef) == "parked" {
-			switch pc, why := parkCandidate(name, rid, t.M, t.Addr, t.Status); pc {
-			case 1:
-				continue
-			case 2:
-				parkbusy = why
-				continue
-			}
+		case 2:
+			parkbusy = why
+			continue
 		}
 		live = t
 		break
@@ -331,8 +323,8 @@ func waitRow(r Row) {
 	}
 	STACK, STREF = "", ""
 	if after != "-" {
-		if ar := afterOK(name, prj, after); ar != 0 && (ar != 1 || !stackPick(r, dash(ef))) { // 쌓아 띄움이면 이어 띄운다(stack.go)
-			if ar == 1 && dash(ef) == "-" {
+		if ar := afterOK(name, prj, after); ar != 0 && (ar != 1 || !stackPick(r)) { // 쌓아 띄움이면 이어 띄운다(stack.go)
+			if ar == 1 && em.Src == srcNew && dash(em.Early) == "-" {
 				ELIST += "," + name + "=" + bBranch
 			}
 			hold(name, ar == 1) // 판정 못 함(2)은 기다려도 안 풀릴 수 있다 — 놀고 있음 알림에 남긴다
@@ -350,26 +342,26 @@ func waitRow(r Row) {
 		say("건너뜀 %s: 대기열 줄이 바뀌었다(rm·다시 add) — 다음 바퀴에", name)
 		return
 	}
-	RESUME, RSEC, BOUNCE = false, "", false
-	if dash(ef) == "parked" {
-		RESUME, RSEC = true, resumeSec(name, after, bBranch)
-	}
-	if ef == "bounced" { // 반송 다시 띄움(bounce.go) — 절이 없으면 띄우지 않는다(반송 커밋을 모르는 채 본 작업을 처음부터 하게 된다)
+	RSRC, RSEC = srcNew, ""
+	switch em {
+	case mParked:
+		RSRC, RSEC = srcPark, resumeSec(name, after, bBranch)
+	case mBounced: // 반송 다시 띄움(bounce.go) — 절이 없으면 띄우지 않는다(반송 커밋을 모르는 채 본 작업을 처음부터 하게 된다)
 		if RSEC = bounceSec(name); RSEC == "" {
 			say("실패 %s: 반송 절을 읽지 못함: %s", name, bounceFile(name))
 			return
 		}
-		BOUNCE = true
+		RSRC = srcBounce
 	}
 	if STACK != "" { // 쌓아 띄움 절이 먼저 띄움 절 자리에 — 주차 이어 가기 절(origin/<기본> rebase)은 대신한다
-		ESEC = stackSec(name, dash(ef), bBranch)
-		if RESUME {
+		ESEC = stackSec(name, em, bBranch)
+		if RSRC == srcPark {
 			RSEC = ""
 		}
 	}
 	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
-	RESUME, RSEC, BOUNCE, ESEC, STACK, STREF = false, "", false, "", "", ""
+	RSRC, RSEC, ESEC, STACK, STREF = srcNew, "", "", "", ""
 	if placed || GOTADDR {
 		ovlPlaced(name, prj, SB, after, dash(ak))
 	}
@@ -407,9 +399,7 @@ func adopt(name, rid, reply string, t *Term) {
 	if pget(t.Addr) != pLive {
 		PRUN = "-"
 	}
-	if tryput(name, rid, t.M, te, tu, t.Addr, PRUN) == 0 {
-		qset(true, rid, name, "up", t.M, t.Addr, stuck, te, tu)
-	}
+	bindRun(name, rid, t.M, t.Addr, PRUN, te, tu)
 	if got {
 		e, u := te, tu
 		if e == "" {
@@ -448,7 +438,7 @@ func earlyRows() {
 	}
 	elive := 0
 	for _, r := range ROWS {
-		if r.F(qState) == "up" && r.F(qEarly) == "early" && lalive(r.F(qAddr), r.F(qName)) {
+		if r.F(qState) == "up" && rowMode(r) == mEarly && lalive(r.F(qAddr), r.F(qName)) {
 			elive++
 		}
 	}

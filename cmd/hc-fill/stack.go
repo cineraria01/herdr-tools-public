@@ -90,7 +90,7 @@ func stackEnvs() []string {
 // stackRef <레인> <기준 참조>: 감사 범위의 시작 — 쌓아 띄운 레인이면 P, 아니면 그대로
 func stackRef(lane, ref string) string {
 	if r := stackRec(lane); r != nil && r.F(skState) != "rebased-main" {
-		if q := qrow(lane); q != nil && q.F(qEarly) == "stacked" {
+		if q := qrow(lane); q != nil && rowMode(q) == mStacked {
 			return r.F(skP)
 		}
 	}
@@ -145,11 +145,11 @@ func stackMetaKV(repo, ref, as string) map[string]string {
 	return kv
 }
 
-// stackPick <대기 줄> <14칸>: 이 줄을 쌓아 띄울 수 있으면 STACK·STREF를 채우고 true. 판정은 바로 앞 afterOK가 fetch한 저장소(FR)로
-func stackPick(r Row, ef string) bool {
+// stackPick <대기 줄>: 이 줄을 쌓아 띄울 수 있으면 STACK·STREF를 채우고 true. 판정은 바로 앞 afterOK가 fetch한 저장소(FR)로
+func stackPick(r Row) bool {
 	STACK, STREF = "", ""
 	name, prj, after, ak := r.F(qName), r.F(qProj), r.F(qAfter), dash(r.F(qAudit))
-	if !stackOn(prj) || ef == "no-early" || strings.HasPrefix(ak, "audit=") {
+	if !stackOn(prj) || rowMode(r) == mNoEarly || strings.HasPrefix(ak, "audit=") {
 		return false
 	}
 	pred := ""
@@ -211,15 +211,15 @@ func stackPick(r Row, ef string) bool {
 	return true
 }
 
-// stackSec <레인> <14칸> <기본 가지 참조>: run 지시문 끝 쌓아 띄움 절(먼저 띄움 절 자리)
-func stackSec(lane, ef, base string) string {
+// stackSec <레인> <14칸 출처> <기본 가지 참조>: run 지시문 끝 쌓아 띄움 절(먼저 띄움 절 자리)
+func stackSec(lane string, em relMode, base string) string {
 	pred, p, _ := strings.Cut(STACK, "@")
 	b := strings.TrimPrefix(base, "origin/")
 	first := ""
-	switch ef {
-	case "parked":
+	switch em {
+	case mParked:
 		first = "0. 이 작업 트리는 주차한 가지(준비 커밋)에서 만들었다. 먼저 `git fetch origin && git rebase " + p + "` — 선행 커밋 위로(origin/" + b + " 로 rebase하지 않는다). 충돌은 양쪽 내용을 살려 푼다.\n"
-	case "bounced":
+	case mBounced:
 		first = "0. 위 반송·다시 쌓기 절 2의 rebase 기준 `origin/" + b + "` 대신 선행 커밋 `" + p + "`(다시 쌓기 절이면 `git rebase --onto " + p + " <옛 선행 커밋>`). 그 밖은 그 절 그대로.\n"
 	}
 	return fmt.Sprintf("\n## 쌓아 띄움 — 기준은 선행 %[1]s %[2]s(아직 %[3]s에 없음) (hc-fill, %[4]s)\n"+

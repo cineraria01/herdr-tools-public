@@ -59,7 +59,7 @@ func watchOwners() {
 func watchOpen(r, last Row, live string) bool {
 	switch r.F(qState) {
 	case "wait":
-		return r.F(qEarly) == "parked"
+		return rowMode(r) == mParked
 	case "up":
 	default:
 		return false

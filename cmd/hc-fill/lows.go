@@ -185,7 +185,7 @@ func lowsTick() {
 			fmt.Println("후속 미룸 " + lane + ": 지시문을 쓰지 못함 " + bf)
 			continue
 		}
-		if qAdd("", name, p, bf, lane, "-", "wait", "-", "-", "-", nowMin(), "-", own, "low", "no-early", "-", "-") != 0 {
+		if qAdd("", name, p, bf, lane, "-", "wait", "-", "-", "-", nowMin(), "-", own, "low", mNoEarly.val(), "-", "-") != 0 {
 			fmt.Println("후속 미룸 " + lane + ": 대기열에 넣지 못함")
 			continue
 		}

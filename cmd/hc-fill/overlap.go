@@ -25,7 +25,7 @@ func afterTick() {
 	atn := strconv.FormatInt(nowUnix(), 10)
 	var ms []string
 	for _, r := range qs {
-		if r.F(qState) == "up" && r.F(qEarly) == "early" && r.F(qMach) != "" {
+		if r.F(qState) == "up" && rowMode(r) == mEarly && r.F(qMach) != "" {
 			ms = append(ms, r.F(qMach))
 		}
 	}
@@ -41,7 +41,7 @@ func afterTick() {
 		var ab []string // 「선행<TAB>go|stop<TAB>까닭<TAB>쓴시각」
 		done := map[string]bool{}
 		for _, r := range qs {
-			if r.F(qState) != "up" || r.F(qEarly) != "early" || r.F(qMach) != am || r.F(qAfter) == "-" {
+			if r.F(qState) != "up" || rowMode(r) != mEarly || r.F(qMach) != am || r.F(qAfter) == "-" {
 				continue
 			}
 			ap := r.F(qProj)

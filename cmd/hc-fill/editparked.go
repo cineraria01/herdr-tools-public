@@ -13,8 +13,8 @@ import (
 // (done·idle, 또는 없음) 그 실행의 마지막 보고(정리됨 빼고)가 「주차」면 같은 줄 ID로 대기·parked로 되돌린 줄.
 // 아니면(일하는 중·주차 보고 없음·터미널이나 사건을 모름) r 그대로 — 부르는 쪽이 지금처럼 거절한다
 func editParked(r Row, need bool) Row {
-	n, a, m, ef := r.F(qName), r.F(qAddr), r.F(qMach), r.F(qEarly)
-	if !need || r.F(qState) != "up" || (ef != "early" && ef != "parked") || dash(a) == "-" {
+	n, a, m, em := r.F(qName), r.F(qAddr), r.F(qMach), rowMode(r)
+	if !need || r.F(qState) != "up" || (em != mEarly && em != mParked) || dash(a) == "-" {
 		return r
 	}
 	t, found, err := hcGet(a)
@@ -45,7 +45,7 @@ func editParked(r Row, need bool) Row {
 	if run != "" {
 		l = runlast(n, a, run, "")
 	}
-	if evF(l, evState) != "주차" || qset(true, r.F(qRID), n, "wait", "-", "-", r.F(qStuck), "parked", "") != 0 {
+	if evF(l, evState) != "주차" || qset(true, r.F(qRID), n, "wait", "-", "-", r.F(qStuck), mParked.val(), "") != 0 {
 		return r
 	}
 	say("주차 %s: %s 가 주차를 보고하고 차례를 끝냄(%s) — 줄을 대기·주차로 되돌림(run 바퀴의 주차 되돌리기를 먼저)", n, a, dash(t.Status))

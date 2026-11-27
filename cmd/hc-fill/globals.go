@@ -89,9 +89,8 @@ var (
 	NEED      string // 지시문 「필요:」 능력(쉼표)
 	stuck     string // 이번 줄의 남긴것(9칸)
 	proj      string // 이번 줄 프로젝트
-	RESUME    bool   // 주차한 줄을 그 가지에서 이어 띄움
+	RSRC      relSrc // 이번 띄우기의 출처(relaunch.go): 새로·주차한 가지에서 이어(--resume)·반송된 줄을 같은 이름으로 다시(bounce.go)
 	RSEC      string // 이어 가기 절(반송 다시 띄움이면 반송 절)
-	BOUNCE    bool   // 반송된 줄을 같은 이름으로 다시 띄움(bounce.go)
 	ESEC      string // 먼저 띄움 절
 	AK        string // 감사 칸(15칸, 빈 값은 -)
 	PRIO      string // 우선 칸(13칸) — 띄울 때 레인 환경 HC_LANE_PRIORITY(제출 우선)로

@@ -18,7 +18,7 @@ const (
 	qReply   = 11 // 되돌릴곳(<기계>:<경로>#<요청 ID>, 손으로 넣은 줄은 -)
 	qOwner   = 12 // 주인 지휘
 	qPrio    = 13 // urgent·high·normal·low
-	qEarly   = 14 // 먼저 띄움(-·no-early·early·parked·resumed·bounced — 반송 다시 띄움 대기, bounce.go)
+	qEarly   = 14 // 먼저 띄움·다시 띄울 출처 — relaunch.go의 rowMode·setMode로만 읽고 쓴다(값 일곱 가지, queue.md)
 	qAudit   = 15 // 자동 감사(-·no-audit·auto·audit=<레인>)
 	qOverlap = 16 // 겹침칸(-·solo·overlap-ok)
 	qRID     = 17 // 줄 ID(16칸까지의 옛 줄은 빈 값)

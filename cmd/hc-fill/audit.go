@@ -443,7 +443,7 @@ func aPut(aid, lane, m, p string) bool {
 		return true
 	}
 	return qAdd("", "audit-"+aid, p, DATA+"/briefs/audit/"+aid+".md", "-", m, "wait", "-", "-", "-", nowMin(), "-", qown(lane),
-		"urgent", "no-early", "audit="+lane, "-") == 0
+		"urgent", mNoEarly.val(), "audit="+lane, "-") == 0
 }
 
 // aproj <aid>: 그 차수의 프로젝트(audit-proj.tsv)

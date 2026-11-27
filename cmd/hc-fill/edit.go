@@ -183,7 +183,7 @@ func editCmd(args []string) {
 					note += ", 겹침 " + map[string]string{"-": "봄", "overlap-ok": "봄 끔"}[ovk]
 				}
 				if early != "" {
-					x = x.Set(qEarly, early)
+					x = setMode(x, modeOf(early))
 					note += ", 먼저 띄움 " + map[string]string{"-": "켬", "no-early": "끔"}[early]
 				}
 				if wt != "" {
@@ -268,7 +268,7 @@ func rmCmd(args []string) {
 	}
 	rc := withQ(func() {
 		r := qrow(name)
-		if r != nil && r.F(qEarly) == "parked" && !force {
+		if r != nil && rowMode(r) == mParked && !force {
 			refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
 		}
 		if r != nil {
@@ -296,7 +296,7 @@ func editNotUp(r Row, ov, ea bool) {
 		die("%s: 감사 줄이다 — 겹침 검사·먼저 띄움을 쓰지 않는다", n)
 	case ov && r.F(qOverlap) == "solo":
 		die("%s: 단독(--solo) 줄이다 — 겹침 검사를 따로 바꾸지 않는다. 바꾸려면 rm 뒤 다시 add", n)
-	case ea && r.F(qEarly) == "parked":
+	case ea && rowMode(r) == mParked:
 		die("%s: 주차 중(refs/park/%s) — 이미 먼저 띄워 준비 커밋이 있다. 먼저 띄움 칸을 바꾸면 이어 띄우기를 잃는다", n, n)
 	}
 }
@@ -320,7 +320,7 @@ func editUndo(r Row, a, o, b, p, ov, ea, w bool) string {
 		s += map[bool]string{true: " --overlap-ok", false: " --overlap-check"}[r.F(qOverlap) == "overlap-ok"]
 	}
 	if ea {
-		s += map[bool]string{true: " --no-early", false: " --early"}[r.F(qEarly) == "no-early"]
+		s += map[bool]string{true: " --no-early", false: " --early"}[rowMode(r) == mNoEarly]
 	}
 	if w {
 		s += " --weight " + dash(r.F(qWeight))

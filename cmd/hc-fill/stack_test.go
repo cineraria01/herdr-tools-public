@@ -129,7 +129,7 @@ func (s *skScene) pick(name string) bool {
 	if afterOK(name, r.F(qProj), r.F(qAfter)) != 1 {
 		s.t.Fatalf("%s 선행이 「아직」이 아님", name)
 	}
-	return stackPick(r, dash(r.F(qEarly)))
+	return stackPick(r)
 }
 
 // ① 선행이 감사 통과로 제출되면 뒤 레인이 그 커밋 위에서 뜬다(착지를 안 기다림) — 지시문 절·환경·감사 범위
@@ -145,13 +145,13 @@ func TestStackPickSubmitted(t *testing.T) {
 	if e := stackEnvs(); len(e) != 1 || e[0] != "HC_LANE_STACK=A@"+a {
 		t.Errorf("레인 환경: %v", e)
 	}
-	sec := stackSec("B", "-", "origin/main")
+	sec := stackSec("B", modeOf("-"), "origin/main")
 	for _, w := range []string{"## 쌓아 띄움 — 기준은 선행 A " + a[:8], "범위는 " + a[:8] + "..HEAD", "`git rebase origin/main` 하지 않는다"} {
 		if !strings.Contains(sec, w) {
 			t.Errorf("절에 %q 없음:\n%s", w, sec)
 		}
 	}
-	if p := stackSec("B", "parked", "origin/main"); !strings.Contains(p, "`git fetch origin && git rebase "+a+"`") {
+	if p := stackSec("B", modeOf("parked"), "origin/main"); !strings.Contains(p, "`git fetch origin && git rebase "+a+"`") {
 		t.Errorf("주차 이어 띄움 절: %s", p)
 	}
 	// ③ 감사 범위: 떠 있음(stacked)으로 기록되면 origin/{base} 자리가 P
@@ -233,7 +233,7 @@ func TestStackPickChainAndShape(t *testing.T) {
 	}
 	s.row("F", "A@other", "wait", "-")
 	FETCHED, FETCHBAD = "", ""
-	if r := qrow("F"); stackPick(r, "-") {
+	if r := qrow("F"); stackPick(r) {
 		t.Fatal("다른 프로젝트 선행에 쌓음")
 	}
 }

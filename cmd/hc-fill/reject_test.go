@@ -22,7 +22,7 @@ func rejSetup(t *testing.T) *rejT {
 	HOME = d
 	Q, OWNF, OWND = d+"/queue.tsv", d+"/own.tsv", d+"/own"
 	LOCAL, dry, P, CONN, AGUNK, SEATS, NOW, NOWL, ROWS, TERMS, OREC = "here", false, "", []string{"far"}, nil, nil, nil, nil, nil, nil, nil
-	AK, AUD, NEED, RESUME, EARLYF, COORD, TASK, LAUNCH = "-", "", "", false, "", "", "{run}", "agent {task}"
+	AK, AUD, NEED, RSRC, EARLYF, COORD, TASK, LAUNCH = "-", "", "", srcNew, "", "", "{run}", "agent {task}"
 	confLines = []string{"machine here 5 -", "machine far 5 -", "repo p here " + d + "/r", "repo p far /far/r"}
 	RID, proj, stuck, SB = "r1", "p", "-", d+"/brief.md"
 	rejW(t, d+"/hc-lane", `#!/bin/sh

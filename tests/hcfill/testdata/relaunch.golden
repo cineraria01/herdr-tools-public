@@ -1,0 +1,610 @@
+## 먼저 띄움·끔·선행 없음 첫 바퀴
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+선행 ea ← pz: 아직 (origin/main)
+선행 ne ← pz: 아직 (origin/main)
+띄움 pl → box-1 box-1/pl (/home/me/src/app)
+먼저 띄움 ea → box-1 box-1/ea (/home/me/src/app, 선행 pz)
+-- 대기열
+ea up box-1 box-1/ea early <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+--- --print-steps --on box-1 --name pl --repo /home/me/src/app --- --on box-1 --name pl --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/pl-run.md 지시문을 읽고 진행하라. --- --print-steps --on box-1 --name ea --repo /home/me/src/app --- --on box-1 --name ea --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/ea-run.md 지시문을 읽고 진행하라. 
+-- hc
+
+## ls
+$ hc-fill ls (종료 0)
+레인                   프로젝트 상태         주소                   주인   우선 선행·비고
+ea                       app        끝남         box-1/ea                 -        보통 먼저 띄움(선행 pz) 기계 box-1 
+ne                       app        대기         -                        -        보통 선행 pz 기계 box-1 먼저 띄움 끔
+pl                       app        끝남         box-1/pl                 -        보통 기계 box-1 
+-- 대기열
+ea up box-1 box-1/ea early <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## status
+$ hc-fill status (종료 0)
+레인                     기계         넣은 뒤  단계                                 예상·근거
+ea                       box-1        <시각>       끝남
+ne                       -            <시각>       대기
+pl                       box-1        <시각>       끝남
+기계 box-1  부하 0.1/12(코어당 0.01) <시각> 전  자리 2/2 · 빈 0
+기계 box-2  부하 0.1/12(코어당 0.01) <시각> 전  자리 0/2 · 빈 2
+기계 shared  부하 0.1/12(코어당 0.01) <시각> 전  자리 0/3 · 빈 2
+기계 slow  부하 0.1/12(코어당 0.01) <시각> 전  자리 0/1 · 빈 1
+기계 here  부하 0.1/12(코어당 0.01) <시각> 전  자리 0/5 · 빈 5 · 대기열 밖 1
+-- 대기열
+ea up box-1 box-1/ea early <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## 두 번째 바퀴(같은 상태)
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+선행 ne ← pz: 아직 (origin/main)
+-- 대기열
+ea up box-1 box-1/ea early <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## 채택
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/ea ea: working → 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working, 대기열 밖 → 안 셈
+실제 변경 못 읽음 ea(작업 트리 없음 /home/me/src/app.wt/ea; 제출·주차 가지 없음),pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+선행 ne ← pz: 아직 (origin/main)
+이미 떠 있음 ad: box-2/ad — 떠 있음으로 표시
+-- 대기열
+ea up box-1 box-1/ea early <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/ea
+read box-1/pl
+## 주차 사건(터미널 working)
+$ hc-fill run (종료 0)
+주차 ea: box-1/ea 가 lane/ea (abcdef12)에 두고 끝냄 — 자리 비움, 선행 착지 뒤 그 가지에서 이어 띄움
+주차 터미널 남김 box-1/ea (ea): 상태 working — 다음 바퀴에 다시 본다
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/ea ea: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+실제 변경 못 읽음 ea(작업 트리 없음 /home/me/src/app.wt/ea; 제출·주차 가지 없음),pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+주차 정리 기다림 ea: 같은 이름 주차 터미널 살아 있음 box-1/ea (working, 안 닫음: 상태 working)
+선행 ne ← pz: 아직 (origin/main)
+-- 대기열
+ea wait - - parked <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/pl
+read box-2/ad
+## 주차 줄 dry-run
+$ hc-fill run --dry-run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/ea ea: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+실제 변경 못 읽음 ea(작업 트리 없음 /home/me/src/app.wt/ea; 제출·주차 가지 없음),pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+주차 정리 기다림 ea: 같은 이름 주차 터미널 살아 있음 box-1/ea (working, 안 닫음: 상태 working)
+선행 ne ← pz: 아직 (origin/main)
+-- 대기열
+ea wait - - parked <줄1>
+ne wait - - no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## 선행 착지 — 옛 주차 터미널 working이라 미룸
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/ea ea: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+실제 변경 못 읽음 ea(작업 트리 없음 /home/me/src/app.wt/ea; 제출·주차 가지 없음),pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+주차 정리 기다림 ea: 같은 이름 주차 터미널 살아 있음 box-1/ea (working, 안 닫음: 상태 working)
+선행 ne ← pz: 들어감 (aaaa1111 pz: 끝)
+띄움 ne → box-1 box-1/ne (/home/me/src/app)
+-- 대기열
+ea wait - - parked <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ea	<줄1>	box-1	early	auto	box-1/ea	ea@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+--- --print-steps --on box-1 --name ne --repo /home/me/src/app --- --on box-1 --name ne --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/ne-run.md 지시문을 읽고 진행하라. 
+-- hc
+read box-1/pl
+read box-2/ad
+## 옛 주차 터미널 없어짐 — 이어 띄움
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+실제 변경 못 읽음 pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+선행 ea ← pz: 들어감 (aaaa1111 pz: 끝)
+띄움 ea → box-1 box-1/ea (/home/me/src/app, 주차한 가지 lane/ea 에서 이어)
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+--- --print-steps --on box-1 --name ea --repo /home/me/src/app --- --resume --on box-1 --name ea --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/ea-run.md 지시문을 읽고 진행하라. 
+-- hc
+read box-1/pl
+read box-2/ad
+## ls 이어 띄운 뒤
+$ hc-fill ls (종료 0)
+레인                   프로젝트 상태         주소                   주인   우선 선행·비고
+ea                       app        끝남         box-1/ea                 -        보통 선행 pz 기계 box-1 주차에서 이어 띄움 
+ne                       app        끝남         box-1/ne                 -        보통 보고 없음 · 선행 pz 기계 box-1 먼저 띄움 끔 
+pl                       app        떠 있음(working) box-1/pl                 -        보통 보고 없음 · 기계 box-1 
+ad                       app        떠 있음(working) box-2/ad                 -        보통 보고 없음 · 기계 box-2
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## 두 번째 바퀴(이어 띄운 뒤)
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/pl
+read box-2/ad
+## 반송됨 — 절 없음
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+실제 변경 못 읽음 pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+실패 bq: 반송 절을 읽지 못함: $T/home/.local/share/hc-fill/bounce/bq.md
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+bq wait - - bounced <줄5>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/pl
+read box-2/ad
+## 반송됨 — 옛 실행 남음
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+자리 box-2 box-2/t-old bq: idle, 대기열 밖 → 안 셈
+실제 변경 못 읽음 pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음),bq(작업 트리 없음 /home/me/src/app.wt/bq; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+주차 정리 기다림 bq: 같은 이름 반송된 옛 실행 터미널 살아 있음 box-2/t-old (idle, 안 닫음: 이름·실행이 다름(t-old))
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+bq wait - - bounced <줄5>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/pl
+read box-2/ad
+## ls 반송됨
+$ hc-fill ls (종료 0)
+레인                   프로젝트 상태         주소                   주인   우선 선행·비고
+ea                       app        끝남         box-1/ea                 -        보통 주차 abcdef12 <시각> lane/ea 준비 · 선행 pz 기계 box-1 주차에서 이어 띄움 
+ne                       app        끝남         box-1/ne                 -        보통 보고 없음 · 선행 pz 기계 box-1 먼저 띄움 끔 
+pl                       app        떠 있음(working) box-1/pl                 -        보통 보고 없음 · 기계 box-1 
+ad                       app        떠 있음(working) box-2/ad                 -        보통 보고 없음 · 기계 box-2
+bq                       app        대기         -                        -        보통 기계 box-2 반송됨 — 같은 이름으로 다시 띄움 대기
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+bq wait - - bounced <줄5>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+-- 지시문 절
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+
+## 반송됨 — 옛 실행 없어짐
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+자리 box-2 box-2/t-old bq: idle, 대기열 밖 → 안 셈
+실제 변경 못 읽음 pl(작업 트리 없음 /home/me/src/app.wt/pl; 제출·주차 가지 없음),ad(작업 트리 없음 /home/me/src/app.wt/ad; 제출·주차 가지 없음),bq(작업 트리 없음 /home/me/src/app.wt/bq; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+띄움 bq → box-2 box-2/bq (/home/me/src/app)
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+bq up box-2 box-2/bq - <줄5>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+bq	<줄5>	box-2	-	auto	box-2/bq	bq@1700000000000
+-- 지시문 절
+bq-run.md: ## 감사·착지 (hc-fill 자동)
+bq-run.md: ## 반송 — 병합기가 이 레인의 제출을 돌려보냈다 (hc-fill, 시험)
+bq-run.md: 1. git fetch origin refs/merge-failed/900-bq 뒤 git reset --keep FETCH_HEAD
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+--- --print-steps --on box-2 --name bq --repo /home/me/src/app --- --on box-2 --name bq --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/bq-run.md 지시문을 읽고 진행하라. 
+-- hc
+read box-1/pl
+read box-2/ad
+## 두 번째 바퀴(반송 다시 띄운 뒤)
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/pl pl: working → 셈
+자리 box-2 box-2/ad ad: working → 셈
+자리 box-2 box-2/t-old bq: idle, 대기열 밖 → 안 셈
+-- 대기열
+ea up box-1 box-1/ea resumed <줄1>
+ne up box-1 box-1/ne no-early <줄2>
+pl up box-1 box-1/pl - <줄3>
+ad up box-2 box-2/ad - <줄4>
+bq up box-2 box-2/bq - <줄5>
+-- 시도 기록
+pl	<줄3>	box-1	-	auto	box-1/pl	pl@1700000000000
+ad	<줄4>	box-2	-	-	box-2/ad	ad@1700000000000
+ne	<줄2>	box-1	-	auto	box-1/ne	ne@1700000000000
+ea	<줄1>	box-1	resumed	auto	box-1/ea	ea@1700000000000
+bq	<줄5>	box-2	-	auto	box-2/bq	bq@1700000000000
+-- 지시문 절
+bq-run.md: ## 감사·착지 (hc-fill 자동)
+bq-run.md: ## 반송 — 병합기가 이 레인의 제출을 돌려보냈다 (hc-fill, 시험)
+bq-run.md: 1. git fetch origin refs/merge-failed/900-bq 뒤 git reset --keep FETCH_HEAD
+ea-run.md: ## 감사·착지 (hc-fill 자동)
+ea-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+ne-run.md: ## 감사·착지 (hc-fill 자동)
+pl-run.md: ## 감사·착지 (hc-fill 자동)
+-- hc-lane
+
+-- hc
+read box-1/pl
+read box-2/ad
+## 옛 꼴 섞인 대기열 — ls
+$ hc-fill ls (종료 0)
+레인                   프로젝트 상태         주소                   주인   우선 선행·비고
+o1                       app        대기         -                        -        보통 
+o2                       app        대기         -                        -        보통 선행 pz 기계 box-1 먼저 띄움 끔
+o3                       app        떠 있음(working) box-1/o3                 -        보통 먼저 띄움(선행 기다림 pz) 기계 box-1
+o4                       app        대기         -                        -        보통 주차(선행 pz — 들어가면 lane/o4 에서 이어 띄움) 기계 box-1
+o5                       app        떠 있음(working) box-1/o5                 -        보통 선행 pz 기계 box-1 주차에서 이어 띄움
+o6                       app        대기         -                        -        보통 기계 box-2 반송됨 — 같은 이름으로 다시 띄움 대기
+o7                       app        떠 있음(working) box-1/o7                 -        보통 쌓아 띄움 기계 box-1
+o8                       app        떠 있음(working) box-2/o8                 -        보통 주차(선행 - — 들어가면 lane/o8 에서 이어 띄움) 기계 box-2
+-- 대기열
+o1 wait - - - 
+o2 wait - - no-early <줄6>
+o3 up box-1 box-1/o3 early <줄7>
+o4 wait - - parked <줄8>
+o5 up box-1 box-1/o5 resumed <줄9>
+o6 wait - - bounced <줄10>
+o7 up box-1 box-1/o7 stacked <줄11>
+o8 up box-2 box-2/o8 parked <줄12>
+-- 시도 기록
+-- 지시문 절
+-- hc-lane
+
+-- hc
+
+## 옛 꼴 섞인 대기열 — status
+$ hc-fill status (종료 0)
+레인                     기계         넣은 뒤  단계                                 예상·근거
+o1                       -            -        대기
+o2                       -            -        대기
+o3                       box-1        -        작업 중(working)
+o4                       -            -        대기(주차 — 선행 기다림)
+o5                       box-1        -        작업 중(working)
+o6                       -            -        반송됨 — 다시 띄움 대기
+o7                       box-1        -        작업 중(working) · 쌓아 띄움
+o8                       box-2        -        작업 중(working)
+-- 대기열
+o1 wait - - - 
+o2 wait - - no-early <줄6>
+o3 up box-1 box-1/o3 early <줄7>
+o4 wait - - parked <줄8>
+o5 up box-1 box-1/o5 resumed <줄9>
+o6 wait - - bounced <줄10>
+o7 up box-1 box-1/o7 stacked <줄11>
+o8 up box-2 box-2/o8 parked <줄12>
+-- 시도 기록
+-- 지시문 절
+-- hc-lane
+
+-- hc
+
+## 옛 꼴 섞인 대기열 — run --dry-run
+$ hc-fill run --dry-run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/o3 o3: working → 셈
+자리 box-1 box-1/o5 o5: working → 셈
+자리 box-1 box-1/o7 o7: working → 셈
+자리 box-2 box-2/o8 o8: working → 셈
+실제 변경 못 읽음 o3(작업 트리 없음 /home/me/src/app.wt/o3; 제출·주차 가지 없음),o5(작업 트리 없음 /home/me/src/app.wt/o5; 제출·주차 가지 없음),o7(작업 트리 없음 /home/me/src/app.wt/o7; 제출·주차 가지 없음),o8(작업 트리 없음 /home/me/src/app.wt/o8; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+[dry-run] 띄울 o1 → box-2 (/home/me/src/app)
+선행 o2 ← pz: 아직 (origin/main)
+선행 o4 ← pz: 아직 (origin/main)
+실패 o6: 반송 절을 읽지 못함: $T/home/.local/share/hc-fill/bounce/o6.md
+[dry-run] 선행 상태 @box-1: pz	stop	대기열에 없음(착지 안 하고 끝남)
+gc app @box-1: 지움 0 · 남김 0
+gc app @box-2: 지움 0 · 남김 0
+gc app @shared: 지움 0 · 남김 0
+gc app @slow: 지움 0 · 남김 0
+gc app @here: 지움 0 · 남김 0
+gc tools @here: 지움 0 · 남김 0
+-- 대기열
+o1 wait - - - 
+o2 wait - - no-early <줄6>
+o3 up box-1 box-1/o3 early <줄7>
+o4 wait - - parked <줄8>
+o5 up box-1 box-1/o5 resumed <줄9>
+o6 wait - - bounced <줄10>
+o7 up box-1 box-1/o7 stacked <줄11>
+o8 up box-2 box-2/o8 parked <줄12>
+-- 시도 기록
+-- 지시문 절
+-- hc-lane
+
+-- hc
+
+## 옛 꼴 섞인 대기열 — run
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/o3 o3: working → 셈
+자리 box-1 box-1/o5 o5: working → 셈
+자리 box-1 box-1/o7 o7: working → 셈
+자리 box-2 box-2/o8 o8: working → 셈
+실제 변경 못 읽음 o3(작업 트리 없음 /home/me/src/app.wt/o3; 제출·주차 가지 없음),o5(작업 트리 없음 /home/me/src/app.wt/o5; 제출·주차 가지 없음),o7(작업 트리 없음 /home/me/src/app.wt/o7; 제출·주차 가지 없음),o8(작업 트리 없음 /home/me/src/app.wt/o8; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+띄움 o1 → box-2 box-2/o1 (/home/me/src/app)
+선행 o2 ← pz: 아직 (origin/main)
+선행 o4 ← pz: 아직 (origin/main)
+실패 o6: 반송 절을 읽지 못함: $T/home/.local/share/hc-fill/bounce/o6.md
+-- 대기열
+o1 up box-2 box-2/o1 - 
+o2 wait - - no-early <줄6>
+o3 up box-1 box-1/o3 early <줄7>
+o4 wait - - parked <줄8>
+o5 up box-1 box-1/o5 resumed <줄9>
+o6 wait - - bounced <줄10>
+o7 up box-1 box-1/o7 stacked <줄11>
+o8 up box-2 box-2/o8 parked <줄12>
+-- 시도 기록
+o1		box-2	-	-	box-2/o1	o1@1700000000000
+-- 지시문 절
+-- hc-lane
+--- --print-steps --on box-2 --name o1 --repo /home/me/src/app --- --on box-2 --name o1 --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/o1-run.md 지시문을 읽고 진행하라. 
+-- hc
+read box-1/o3
+read box-1/o5
+read box-1/o7
+read box-2/o8
+## 주차 사건이 먼저(줄은 아직 대기)
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+선행 rv ← pz: 아직 (origin/main)
+먼저 띄움 rv → box-1 box-1/rv (/home/me/src/app, 선행 pz)
+-- 대기열
+rv up box-1 box-1/rv early <줄13>
+-- 시도 기록
+rv	<줄13>	box-1	early	-	box-1/rv	rv@1700000000000
+-- 지시문 절
+rv-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+-- hc-lane
+--- --print-steps --on box-1 --name rv --repo /home/me/src/app --- --on box-1 --name rv --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/rv-run.md 지시문을 읽고 진행하라. 
+-- hc
+
+## 주차 줄 — 터미널 목록 못 읽음
+$ hc-fill run (종료 1)
+hc-fill: hc ls 실패, 이번 바퀴는 띄우지 않았다
+-- 대기열
+rv wait - - parked <줄13>
+-- 시도 기록
+rv	<줄13>	box-1	early	-	box-1/rv	rv@1700000000000
+-- 지시문 절
+rv-run.md: ## 먼저 띄움 — 선행 착지 전에 띄웠다 (hc-fill, <시각>)
+-- hc-lane
+
+-- hc
+
+## 주차 줄 — 같은 이름 옛 터미널 hc get finished
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-1 box-1/old/rv rv: idle, 대기열 밖 → 안 셈
+실제 변경 못 읽음 rv(작업 트리 없음 /home/me/src/app.wt/rv; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+선행 rv ← pz: 들어감 (aaaa1111 pz: 끝)
+띄움 rv → box-1 box-1/rv (/home/me/src/app, 주차한 가지 lane/rv 에서 이어)
+-- 대기열
+rv up box-1 box-1/rv resumed <줄13>
+-- 시도 기록
+rv	<줄13>	box-1	resumed	-	box-1/rv	rv@1700000000000
+-- 지시문 절
+rv-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+-- hc-lane
+--- --print-steps --on box-1 --name rv --repo /home/me/src/app --- --resume --on box-1 --name rv --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/rv-run.md 지시문을 읽고 진행하라. 
+-- hc
+
+## 반송 줄 — 같은 이름 옛 터미널 hc get not_found
+$ hc-fill run (종료 0)
+자리 here t0 coord: working, 대기열 밖 → 안 셈
+자리 box-2 box-2/old/bx bx: idle, 대기열 밖 → 안 셈
+실제 변경 못 읽음 bx(작업 트리 없음 /home/me/src/app.wt/bx; 제출·주차 가지 없음) — 그 레인은 예약만으로 판정
+띄움 bx → box-2 box-2/bx (/home/me/src/app)
+-- 대기열
+rv up box-1 box-1/rv resumed <줄13>
+bx up box-2 box-2/bx - <줄14>
+-- 시도 기록
+rv	<줄13>	box-1	resumed	-	box-1/rv	rv@1700000000000
+bx	<줄14>	box-2	-	-	box-2/bx	bx@1700000000000
+-- 지시문 절
+bx-run.md: ## 반송 — 병합기가 이 레인의 제출을 돌려보냈다 (hc-fill, 시험)
+bx-run.md: 1. git fetch origin refs/merge-failed/901-bx 뒤 git reset --keep FETCH_HEAD
+rv-run.md: ## 이어 가기 — 주차한 가지에서 다시 띄웠다 (hc-fill, <시각>)
+-- hc-lane
+--- --print-steps --on box-2 --name bx --repo /home/me/src/app --- --on box-2 --name bx --repo /home/me/src/app -- sh -c exec example-agent --model example-model "$1" _ $T/home/.local/share/hc-fill/runs/bx-run.md 지시문을 읽고 진행하라. 
+-- hc
+

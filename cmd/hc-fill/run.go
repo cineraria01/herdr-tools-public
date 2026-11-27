@@ -281,7 +281,7 @@ func orderRows() {
 		}
 	}
 	for _, r := range rows {
-		if !(r.F(qState) == "wait" || (r.F(qState) == "up" && r.F(qEarly) == "early")) || r.F(qAfter) == "" || r.F(qAfter) == "-" {
+		if !(r.F(qState) == "wait" || (r.F(qState) == "up" && rowMode(r) == mEarly)) || r.F(qAfter) == "" || r.F(qAfter) == "-" {
 			continue
 		}
 		seen := map[string]bool{}

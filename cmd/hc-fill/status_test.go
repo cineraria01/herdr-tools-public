@@ -14,7 +14,7 @@ func TestStatusStage(t *testing.T) {
 		want string
 	}{
 		{stIn{State: "wait"}, "대기"},
-		{stIn{State: "wait", Early: "parked"}, "대기(주차 — 선행 기다림)"},
+		{stIn{State: "wait", Mode: mParked}, "대기(주차 — 선행 기다림)"},
 		{stIn{State: "sent"}, "되돌려줌"},
 		{stIn{State: "up", Live: "working"}, "작업 중(working)"},
 		{stIn{State: "up", Live: "?연결 안 됨"}, "모름(연결 안 됨)"},
