@@ -21,6 +21,25 @@ func predQueued(p map[string]opsstate.Lane, l opsstate.Lane, proj string, up boo
 	}
 }
 
+// predThen <대기열 줄>: --then 이어 붙인 단계 이름 → 받은 줄(run 바퀴의 THENMAP과 같은 읽기 — 지시문의 「## 이어서: <이름>」, 선행 판정
+// overlap2.go는 그 이름이 대기열 줄이 아닐 때만 받은 줄로 읽는다). advise가 이어서 단계를 「대기열에 없음 → 풀 수 있음」으로 권했다(ht-advise-noise)
+func predThen(rows []Row) map[string]string {
+	in, m := map[string]bool{}, map[string]string{}
+	for _, r := range rows {
+		in[r.F(qName)] = true
+	}
+	for _, r := range rows {
+		for _, n := range thenNames(r.F(qBrief)) {
+			if n = strings.TrimSpace(n); n != "" && !in[n] {
+				if _, ok := m[n]; !ok { // thenof처럼 대기열 차례로 첫 줄
+					m[n] = r.F(qName)
+				}
+			}
+		}
+	}
+	return m
+}
+
 // predWaitLane: 대기·되돌려줌 줄의 단계(나이 = 넣은 뒤)
 func predWaitLane(r Row, now time.Time) opsstate.Lane {
 	pin, _ := pinOf(r.F(qName), r.F(qRID))

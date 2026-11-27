@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,9 @@ type Facts struct {
 	// 열쇠는 「이름@프로젝트」(PredKey) — 같은 이름의 다른 프로젝트 줄과 섞지 않는다.
 	// 추린 떠 있는 레인에서만 찾아 착지한 선행·대기 줄·나이 모름이 「단계 모름」으로 보였다(ht-advise-stage-lookup)
 	Pred map[string]Lane
+	// Then: --then으로 앞 레인 지시문에 이어 붙인 단계 이름 → 받은 대기열 줄(선행 판정 overlap2.go의 thenof·THENMAP과 같은 대응 — 그 이름
+	// 자체가 대기열 줄이면 넣지 않는다). nil = 재료 없음
+	Then map[string]string
 }
 
 // Wait: 대기 줄 하나와 기다리는 까닭
@@ -265,6 +269,9 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 				Evidence: fmt.Sprintf("빈 자리 %d(%s) · %s 기다린 지 %s · %s %s — 앞 레인 %s %s", n, ft, w.Lane, age(w.AgeS), what, strings.Join(w.Keys, ","), w.Front, predStage(s, f, w.Front, w.Project)),
 				Cost:     "안 풀면: 앞 레인 착지까지 기다림(남은 예상 모름) 동안 자리가 논다 · 풀면: " + gain,
 				Next:     next, Sure: sure})
+		case slices.ContainsFunc(w.After, func(a string) bool { return thenWait(f, a, w.Project) != "" }):
+			// 앞 레인 지시문에 이어 붙인 단계(--then)는 그 레인이 마저 하는 중 — 선행을 풀면 이어서 단계를 안 기다리고 뜬다(ht-advise-noise:
+			// 「선행이 대기열에 없음 → 풀 수 있음」을 지휘 넷이 받았다). 근거 글은 선행 단계(predStage)가 「… 이어서 단계 … 대기」로 보인다
 		case len(w.After) > 0:
 			add(Item{Key: "free-wait:" + w.Lane, Kind: "free-wait",
 				What:     fmt.Sprintf("풀 수 있는 대기: %s(선행 %s)", w.Lane, strings.Join(w.After, ",")),
@@ -276,10 +283,21 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 
 	o = append(o, pinnedItems(s, f, th, free, freeFor)...) // 묶인 기계(advise_pinned.go)
 
+	// 끊긴(닿지 않는) 기계의 레인은 단계가 「모름」이라 레인마다 「같은 단계에 오래」로 내지 않고 그 기계 항목 하나에 살아 있는 레인 이름으로
+	// 묶는다(ht-advise-noise — 전원으로 몇 분 끊긴 워커의 끝난 옛 줄 175건이 lane-long으로 나왔다). 기계가 돌아오면 레인별 판정이 다시 선다
+	down := map[string]bool{}
+	for _, m := range s.Machines {
+		down[m.Name] = m.Reach != "ok"
+	}
+	downLive := map[string][]string{}
+
 	// 레인: 터미널 error·blocked·done(보고 없음) · 막힘 · 감사 자리 없음 · 같은 단계에 오래 — 레인마다 하나
 	for _, l := range s.Lanes {
 		if Finished(l) {
 			continue
+		}
+		if down[l.Machine] && !Ended(l) {
+			downLive[l.Machine] = append(downLive[l.Machine], l.Name)
 		}
 		addr := ""
 		if f.Addr != nil {
@@ -327,7 +345,8 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 					continue
 				}
 			}
-			if l.Open && !l.Queued && th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
+			// 대기열에 살아 있는 줄만(끝남·착지·정리됨은 터미널이 열려 있어도 아님 — Ended), 끊긴 기계 줄은 기계 항목이 맡는다
+			if l.Open && !l.Queued && !Ended(l) && !down[l.Machine] && th.StageMin > 0 && l.StageAgeS != nil && *l.StageAgeS >= th.StageMin*60 {
 				look("lane-long", fmt.Sprintf("레인 %s 같은 단계에 %d분", l.Name, *l.StageAgeS/60), "멈췄으면 자리를 잡은 채 시간이 간다")
 				o[len(o)-1].What = fmt.Sprintf("레인 %s: 같은 단계에 %d분 — %s", l.Name, *l.StageAgeS/60, l.Stage)
 			}
@@ -405,7 +424,7 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 			Sure: SureHuman})
 	}
 
-	o = append(o, machineItems(s, f, free, th)...)
+	o = append(o, machineItems(s, f, free, th, downLive)...)
 
 	// 재료를 못 읽음 — 위 판정이 비었어도 「없음」이 아니다
 	for _, x := range s.Sources {
@@ -416,8 +435,8 @@ func Advise(s State, f Facts, th Thresholds) []Item {
 	return o
 }
 
-// machineItems: 기계 끊김·치우침(Advise의 한 단계). free는 Advise가 센 빈 자리
-func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
+// machineItems: 기계 끊김·치우침(Advise의 한 단계). free는 Advise가 센 빈 자리, live는 닿지 않는 기계마다 살아 있는 레인(Advise가 묶음)
+func machineItems(s State, f Facts, free map[string]int, th Thresholds, live map[string][]string) []Item {
 	var o []Item
 	var hot, cool []string
 	hotSet := map[string]bool{}
@@ -426,13 +445,7 @@ func machineItems(s State, f Facts, free map[string]int, th Thresholds) []Item {
 			o = append(o, cordonItem(m))
 		}
 		if m.Reach != "ok" {
-			if strings.Contains(m.Why, "모름") {
-				o = append(o, unknown("machine:"+m.Name, "기계 "+m.Name, m.Why))
-			} else {
-				o = append(o, Item{Key: "machine:" + m.Name, Kind: "machine", What: "기계 " + m.Name + " 모름: " + or(m.Why, "까닭 모름"),
-					Evidence: "그 기계 레인·자리를 잴 수 없다", Cost: "그 기계에 떠 있는 레인이 멈췄어도 모른다",
-					Next: []string{"hc machine ls"}, Sure: SureJudge})
-			}
+			o = append(o, downItem(m, live[m.Name]))
 			continue
 		}
 		if m.LoadPerCore == nil || th.SkewHi <= 0 {

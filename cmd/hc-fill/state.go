@@ -200,6 +200,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		predQueued(f.Pred, ln, r.F(qProj), true)
 	}
 	s.Queue.Oldest = oldest
+	f.Then = predThen(rows)
 	predLanded(&f, now) // 선행 단계 재료(statepred.go)
 
 	// 기계: 설정 machine 차례, 부하·쓴 자리·까닭은 바퀴 기록, 조정은 지금 손잡이

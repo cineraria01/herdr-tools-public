@@ -22,7 +22,15 @@ const DeployNotTarget = "대상 아님(배포에서 건너뜀만)"
 // 지휘 지시 — 착지·정리까지 끝난 레인 179줄이 기본 출력에 남았다), 단계 글이 착지·끝남(뒤에 「· 대기열이 제출함」이 붙어도).
 // 터미널이 살아 있으면(Open) 끝난 레인이 아니다
 func Finished(l Lane) bool {
-	return !l.Open && (l.Done || strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남"))
+	return !l.Open && (l.Done || Ended(l))
+}
+
+// Ended: 대기열에서 끝난 줄 — 마지막 보고가 착지·정리됨이거나 단계 글이 착지·끝남. 터미널이 살아 있는지(또는 끊긴 기계라 모르는지)는 보지
+// 않는다. 「같은 단계에 오래」는 이 줄을 안 낸다 — 터미널이 아직 열려 있거나 기계가 끊겨 Open인 끝난 줄이 「같은 단계에 713분」·끊긴 기계
+// 옛 줄 175건으로 나왔다(ht-advise-noise, 2026-11-28). Finished와 한 정의
+func Ended(l Lane) bool {
+	ev, _, _ := strings.Cut(l.LastEvent, " ")
+	return ev == "착지" || ev == "정리됨" || strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남")
 }
 
 // Trim: 기본 출력. 끝난 레인은 마지막 사건이 doneMin분 안이면 남기고(나이 모름도 남김 — 오래됐다고 말할 수 없다), 안 도는 감시와
