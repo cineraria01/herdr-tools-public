@@ -32,8 +32,8 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
   herdr-sync                      저장소 ↔ 맥, 그다음 hc machine ls의 모든 기계에 맞춘다
   herdr-sync <기계>…              고른 기계만
   herdr-sync --check [<기계>…]    고치지 않고 비교만 한다 (다름·충돌이 있으면 종료 1, 첫 줄 「맥:」은 맥 ↔ 저장소 방향)
-  herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다)
-  herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
+  herdr-sync --take <기계>:<경로|*>   충돌을 맥 값으로 덮는다 (백업을 남긴다) — 기계 인자를 안 적으면 가리킨 기계만
+  herdr-sync --pull <기계>:<경로|*>   그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다 — 기계 인자를 안 적으면 가리킨 기계만
   herdr-sync --at <커밋> [--check] [<기계>…]  올려 둔 그 커밋의 릴리스 바이너리만 깐다(되돌리기, 짓지 않음)
   herdr-sync --status [<기계>…]   기계마다 깔린 판·origin/main과의 차이·병합 줄·도는 배포 (고치지 않음)
   herdr-sync --log [<n>] [--json] 배포 기록 마지막 n줄 (기본 20, --json은 칸 이름 꼴 — docs/ops/agents.md)
@@ -43,6 +43,7 @@ const usage = `맥의 실제 파일을 정본으로 두 저장소(범용 도구�
 
 경로는 sync.list의 맥 경로(~ 아래, 나무 줄은 그 안 파일 하나)나 설정 키(.model, hook:PreToolUse:cotenant-guard 꼴), *는 그 기계의 충돌 전부, <폴더>/**는 그 나무의 충돌 전부다.
 저장소와의 충돌은 기계 자리에 repo를 쓴다: --take repo:<경로>는 맥 값을, --pull repo:<경로>는 저장소 값을 남긴다.
+기계 자리·<기계>:는 hc machine ls의 이름·이 기계·repo만 받는다 — 모르는 이름은 아무것도 하기 전에 거절(종료 2).
 범용 저장소는 HERDR_TOOLS_REPO (기본 ~/Documents/app/herdr-tools), 개인 저장소는 HERDR_TOOLS_CONFIG (기본 ~/.config/herdr-tools).
 sh를 못 띄우는 기계(Windows 등)와 uname이 Darwin·Linux가 아닌 기계는 「건너뜀」 한 줄만 찍고 아무것도 쓰지 않는다(--take·--pull도, 종료 코드에 안 넣음).
 `
@@ -186,6 +187,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "herdr-sync: --check는 --take·--pull과 함께 쓰지 않는다")
 		os.Exit(2)
 	}
+	var err error
+	if machines, err = pickMachines(machines, all); err != nil { // 배포 기록·잠금 뒤 쓰기보다 먼저 — 모르는 이름은 아무 데도 남지 않게
+		fmt.Fprintln(os.Stderr, "herdr-sync: "+err.Error())
+		os.Exit(2)
+	}
 	if deployPicked, machines = machines, notLocal(machines); len(deployPicked) == 0 { // 이 기계 이름만 골랐으면 다른 기계는 없음
 		machines = all
 	}
@@ -199,7 +205,6 @@ func main() {
 	if !check {
 		deployStart() // 배포 기록·도는 배포 표식(deploylog.go) — 이 뒤 끝은 모두 exit·신호를 지난다
 	}
-	var err error
 	if TMP, err = os.MkdirTemp(os.Getenv("TMPDIR"), "herdr-sync."); err != nil {
 		exit(1)
 	}
@@ -264,15 +269,6 @@ func isFile(p string) bool {
 }
 
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
-
-// specShape: --take·--pull 값 꼴 <기계>:<경로> (:의 앞뒤에 글자)
-func specShape(s string) bool {
-	i := strings.IndexByte(s, ':')
-	return i > 0 && i < len(s)-1
-}
-
-func before(s string) string { i := strings.IndexByte(s, ':'); return s[:i] }
-func after(s string) string  { i := strings.IndexByte(s, ':'); return s[i+1:] }
 
 // git: 표준 출력(끝 줄바꿈 뺌)과 종료 코드. 표준 오류는 그대로 흘린다
 func git(args ...string) (string, int) {

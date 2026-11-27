@@ -38,7 +38,7 @@ var dropPrefix = []string{"HC_", "HERDR_", "LANE_", "XDG_", "CLAUDE_", "GIT_"}
 // Keep: dropPrefix에 걸려도 남기는 시험 전용 이름(사람이 시험에 주는 덮어쓰기 — 도구는 읽지 않는다)
 var Keep = map[string]bool{
 	"HERDR_SYNC": true, "HERDR_SETTINGS_MERGE": true, "HERDR_TOOLS_PUBLISH": true, "HERDR_TOOLS_CONFIG_BIN": true, // clitest.Tool 덮어쓰기
-	"HERDR_HOOKS_CORPUS": true, "HERDR_SCAN_ROOT": true,
+	"HERDR_HOOKS_CORPUS": true, "HERDR_SCAN_ROOT": true, "HERDR_SYNC_GOLDEN_UPDATE": true, // 끝은 herdr-sync 견본 다시 만들기
 	Marker: true, childEnv: true,
 }
 

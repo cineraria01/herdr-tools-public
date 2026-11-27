@@ -4,8 +4,8 @@
 herdr-sync --check              # 고치지 않고 모든 기계를 한 표로. 다름·충돌이 있으면 종료 1
 herdr-sync                      # 맞춘다
 herdr-sync box-1 box-2          # 고른 기계만
-herdr-sync --take <기계>:<경로>  # 충돌을 맥 값으로 덮는다 (그 기계에 백업)
-herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다
+herdr-sync --take <기계>:<경로>  # 충돌을 맥 값으로 덮는다 (그 기계에 백업) — 그 기계만 돈다
+herdr-sync --pull <기계>:<경로>  # 그 기계 값을 맥 실제 파일로 가져온 뒤 맞춘다 — 그 기계만 돈다
 herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합 줄 (배포 기록·되돌리기·스스로 배포는 deploy.md)
 ```
 
@@ -14,6 +14,11 @@ herdr-sync --status             # 기계마다 깔린 판·밀린 커밋·병합
 - 출력·기록의 `맥`은 이 기계 이름이다 — 개인 설정 `hc-fill.tsv`의 `local` 줄이 있으면 그 이름으로 적는다([이 기계 이름](local-name.md)).
 - 경로는 `sync.list`의 맥 경로(`~` 아래)다.
   예: `.claude/docs/notes.md`, 지침 본문은 `.claude/CLAUDE.md#body`, Codex 공통 구역은 `.codex/AGENTS.md#codex-shared`, 링크는 `.claude/skills/my-skill@`, 설정 키는 `.model`, 설정 훅은 `hook:PreToolUse:cotenant-guard`(herdr-settings-merge의 판정 이름), 나무 안 파일은 `.agents/skills/my-skill/scripts/run.sh`.
+- 기계 자리와 `--take`·`--pull`의 `<기계>:`는 `hc machine ls`의 이름·이 기계 이름(옛 이름 `맥`도)·`repo`(`--take`·`--pull`만)만 받는다(2026-11-28 ht-sync-arg-guards — 기계 자리에 잘못 넣은 낱말을 기계로 다뤄 배포 기록에 `<낱말>=실패`가 남았다).
+  모르는 이름(대소문자가 다른 것·바꾸기 전 옛 이름도)은 아무것도 하기 전에 `herdr-sync: 모르는 기계 <이름> — 기계 표: <이름들>`, 종료 2 — 배포 기록·일지·원격 호출 없음.
+- `--take`·`--pull`로 `<기계>:`를 가리키고 기계 인자를 따로 안 적으면 가리킨 기계만 돈다(여럿이면 그 합집합, 이 기계는 늘 맞춘다).
+  기계 인자를 적으면 그 목록이고, 가리킨 기계가 그 목록에 없으면 한 줄로 거절한다(종료 2). `repo:`만 주면 지금처럼 모든 기계다.
+  그래서 `--pull <기계>:…`로 맥에 들인 값은 다음 보통 배포(`herdr-sync`) 때 다른 기계에 퍼진다.
 - `<기계>:*`는 그 기계의 충돌 전부, `<기계>:<폴더>/**`는 그 나무 줄의 그 기계 충돌 전부다(`repo:<폴더>/**`도 된다).
 - Codex 공통 구역과 설정 키는 `--pull`을 받지 않는다(구역은 맥 지침에서 다시 만들고, 설정은 맥 `settings.json`을 고친다).
   `--take`를 쓴다.

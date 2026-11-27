@@ -13,8 +13,8 @@ import (
 
 func (s *sx) repoAndMore() {
 	T, M, W1, LX := s.T, s.MAC, s.W1, s.LX
-	// 5. --pull: 그 기계 값을 맥으로 가져와 저장소·다른 기계까지
-	s.run("--pull", "lx:.claude/CLAUDE.md#body")
+	// 5. --pull: 그 기계 값을 맥으로 가져와 저장소·다른 기계까지(기계 인자 없이는 가리킨 기계만 돈다 — ht-sync-arg-guards, 퍼뜨릴 기계를 적는다)
+	s.run("--pull", "lx:.claude/CLAUDE.md#body", "w1", "lx")
 	s.ok("--pull: 종료 0", s.r.RC == 0)
 	s.ok("--pull: 맥 본문이 lx 값, 맥 OMC는 그대로", s.is(M+"/.claude/CLAUDE.md", "OMC mac\n<!-- User customizations -->\n본문 0\n"))
 	s.ok("--pull: 저장소와 w1까지", s.corigin("show", "main:claude/CLAUDE.body.md") == "본문 0" && s.is(W1+"/.claude/CLAUDE.md", "OMC w1\n<!-- User customizations -->\n본문 0\n"))

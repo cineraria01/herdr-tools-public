@@ -171,7 +171,7 @@ func (s *sx) trees() {
 	}
 	s.run()
 	s.ok("큰 충돌 내용 읽기도 나눈다: 줄 수가 맞다", s.r.RC == 1 && s.has("충돌 w1 .claude/skills/heavy/h1.md (1줄 다름)") && s.has("충돌 w1 .claude/skills/heavy/h3.md (1줄 다름)"))
-	s.run("--pull", "w1:.claude/skills/**")
+	s.run("--pull", "w1:.claude/skills/**", "w1", "lx") // lx까지 퍼뜨린다(기계 인자 없이는 w1만 — ht-sync-arg-guards)
 	h2 := ct.Lines(ct.Read(C + "/heavy/h2.md"))
 	s.ok("큰 --pull도 나눠 받는다", s.r.RC == 0 && same(W1+"/.claude/skills/heavy/h3.md", C+"/heavy/h3.md") && len(h2) > 0 && h2[len(h2)-1] == "w1 덧붙임" && same(C+"/heavy/h2.md", LX+"/.claude/skills/heavy/h2.md"))
 

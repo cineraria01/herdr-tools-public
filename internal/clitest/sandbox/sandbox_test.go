@@ -14,7 +14,7 @@ func TestDrop(t *testing.T) {
 		"HC_LANE_SPEC_IDLE_LOAD": true, "HC_FILL_DATA": true, "HERDR_TOOLS_CONFIG": true, "LANE_REPO": true, "XDG_STATE_HOME": true,
 		"CLAUDE_CONFIG_DIR": true, "GIT_DIR": true, "HERDR_FUTURE_KNOB": true,
 		"HERDR_VERIFY_JOBS": false, "HERDR_VERIFY_BOOT_TMPDIR": false, "HC_MERGER_TEST_HELPER": false, "HC_FILL_EXAMPLE": false,
-		"HC_FILL_CRASH_AT": false, "HERDR_SYNC": false, Marker: false, childEnv: false, "PATH": false, "GOCACHE": false, "TMPDIR": false,
+		"HC_FILL_CRASH_AT": false, "HERDR_SYNC": false, "HERDR_SYNC_GOLDEN_UPDATE": false, Marker: false, childEnv: false, "PATH": false, "GOCACHE": false, "TMPDIR": false,
 	} {
 		if Drop(k) != want {
 			t.Errorf("Drop(%s) = %v, 바람 %v", k, !want, want)

@@ -31,32 +31,23 @@ lx 참고 .permissions
 맥: 같음
 w1: 충돌 1건
 lx: 충돌 2건
-$ --take w1:.claude/docs/b.md → 1
+$ --take w1:.claude/docs/b.md → 0
 w1 씀 .claude/docs/b.md
 w1 참고 .permissions
-충돌 lx .claude/CLAUDE.md#body (2줄 다름)
-충돌 lx .codex/AGENTS.md#codex-shared (1줄 다름)
-lx 예외 .effortLevel
-lx 참고 .permissions
 맥: 같음
 w1: 같음
-lx: 충돌 2건
 $ --take lx:.claude/CLAUDE.md#body → 1
-w1 참고 .permissions
 lx 씀 .claude/CLAUDE.md#body
 충돌 lx .codex/AGENTS.md#codex-shared (1줄 다름)
 lx 예외 .effortLevel
 lx 참고 .permissions
 맥: 같음
-w1: 같음
 lx: 충돌 1건
 $ --take lx:.codex/AGENTS.md#codex-shared → 0
-w1 참고 .permissions
 lx 씀 .codex/AGENTS.md#codex-shared
 lx 예외 .effortLevel
 lx 참고 .permissions
 맥: 같음
-w1: 같음
 lx: 같음
 $ --check → 0
 w1 참고 .permissions
@@ -140,9 +131,9 @@ lx: 모름 (깐 기록 없음)
 스스로 배포 끔
 $ --log → 0
 <시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=충돌 lx=충돌
-<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=씀 lx=충돌
-<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=충돌
-<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=씀
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=씀
+<시각> 배포 종료 1 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 lx=충돌
+<시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 lx=씀
 <시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=씀 lx=씀
 <시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=같음 w1=같음 lx=같음
 <시각> 배포 종료 0 · 범용 <H> · 개인 <H> · 부른 곳 - · 맥=씀 w1=씀 lx=씀
@@ -151,9 +142,9 @@ $ --log 2 --json → 0
 [{"when":"<시각>","kind":"배포","exit":0,"tools_commit":"<H>","source":"3832504415.94","config_commit":"<H>","by":"-","machines":{"lx":"씀","w1":"씀","맥":"씀"},"raw":"맥=씀 w1=씀 lx=씀"},{"when":"<시각>","kind":"되돌림","exit":0,"tools_commit":"<H>","source":"at:<H>","config_commit":"<H>","by":"-","machines":{"lx":"같음","w1":"씀","맥":"씀"},"raw":"맥=씀 w1=씀 lx=같음"}]
 # deploy.tsv
 <시각>	배포	1	<H>	-	<H>	-	맥=씀 w1=충돌 lx=충돌
-<시각>	배포	1	<H>	-	<H>	-	맥=같음 w1=씀 lx=충돌
-<시각>	배포	1	<H>	-	<H>	-	맥=같음 w1=같음 lx=충돌
-<시각>	배포	0	<H>	-	<H>	-	맥=같음 w1=같음 lx=씀
+<시각>	배포	0	<H>	-	<H>	-	맥=같음 w1=씀
+<시각>	배포	1	<H>	-	<H>	-	맥=같음 lx=충돌
+<시각>	배포	0	<H>	-	<H>	-	맥=같음 lx=씀
 <시각>	배포	0	<H>	3901473422.92	<H>	-	맥=씀 w1=씀 lx=씀
 <시각>	배포	0	<H>	3901473422.92	<H>	-	맥=같음 w1=같음 lx=같음
 <시각>	배포	0	<H>	3832504415.94	<H>	-	맥=씀 w1=씀 lx=씀

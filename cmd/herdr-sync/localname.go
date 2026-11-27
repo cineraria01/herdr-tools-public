@@ -78,14 +78,12 @@ func mustLocal(machines []string) string {
 }
 
 // notLocal: 고른 기계 목록에서 이 기계 이름을 뺀다 — 이 기계는 늘 먼저(따로) 맞추고 보이니, hc --on으로 자기에게 가거나 줄이 두 번 나오지
-// 않게(상태 한 장의 「herdr-sync --status <기계>」 권함이 이 이름을 댄다). 이름을 정하지 않았으면 그대로(옛 출력 그대로)
+// 않게(상태 한 장의 「herdr-sync --status <기계>」 권함이 이 이름을 댄다). 옛 이름 「맥」도 이 기계(이름을 정하지 않았을 때 hc --on 맥으로
+// 가 「연결 실패」로 적히던 것, ht-sync-arg-guards — --take 맥:… 만 쳐도 이 기계만 돈다)
 func notLocal(ms []string) []string {
-	if LOCAL == oldLocal {
-		return ms
-	}
 	r := []string{}
 	for _, m := range ms {
-		if m != LOCAL {
+		if m != LOCAL && m != oldLocal {
 			r = append(r, m)
 		}
 	}
