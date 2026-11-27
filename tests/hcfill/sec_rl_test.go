@@ -24,7 +24,10 @@ type rlT struct {
 
 var rlTime = regexp.MustCompile(`\d{4}-\d\d-\d\d[T ]\d\d:\d\d(:\d\d(\.\d+)?Z?)?|\b\d\d:\d\d\b|\b\d{8}T?\d{6}\b|\b\d+m\b|\d+분`)
 
-// norm: 실행마다 바뀌는 값(임시 폴더·줄 ID·시각)을 이름으로
+// rlCores: 기계 줄의 코어 수 — 부하 재기가 시험을 도는 기계의 진짜 코어 수를 읽는다(2026-11-28 ht-revive-cmd: 12코어에서 찍은 골든이 10코어 워커에서 깨졌다)
+var rlCores = regexp.MustCompile(`/\d+\(코어당`)
+
+// norm: 실행마다 바뀌는 값(임시 폴더·줄 ID·시각·코어 수)을 이름으로
 func (s *rlT) norm(x string) string {
 	x = strings.ReplaceAll(x, s.k.T, "$T")
 	for _, r := range rows(s.k.Q) {
@@ -40,7 +43,7 @@ func (s *rlT) norm(x string) string {
 	for _, id := range ids {
 		x = strings.ReplaceAll(x, id, s.rids[id])
 	}
-	return rlTime.ReplaceAllString(x, "<시각>")
+	return rlTime.ReplaceAllString(rlCores.ReplaceAllString(x, "/<코어>(코어당"), "<시각>")
 }
 
 // step: 한 걸음 — hc-fill <인자> 출력, 대기열 줄(이름·6·7·8·14칸), 시도 기록, 새로 쌓인 hc-lane 호출·hc 기록

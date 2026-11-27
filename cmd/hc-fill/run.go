@@ -83,38 +83,7 @@ func runRound() {
 			exit(0)
 		}
 	}
-	TASK, LAUNCH = conf("task"), conf("launch")
-	if COORD = os.Getenv("HC_FILL_COORD"); COORD == "" {
-		COORD = conf("coord")
-	}
-	if TASK == "" {
-		TASK = "{run}"
-	}
-	if !strings.Contains(LAUNCH, "{task}") {
-		die("설정 launch 줄에 {task} 자리가 없다: %s", CONF)
-	}
-	if !strings.Contains(TASK, "{run}") {
-		die("설정 task 줄에 {run} 자리가 없다: %s", CONF)
-	}
-	AUD = conf("audit")
-	if strings.HasPrefix(AUD, "~/") {
-		AUD = HOME + "/" + AUD[2:]
-	}
-	AFIN = conf("audit_final")
-	am := conf("audit_max")
-	if am == "" {
-		am = "2"
-	}
-	if !isDigits(am) {
-		say("알림: 설정 audit_max는 횟수(숫자)다, 2로: %s", am)
-		am = "2"
-	}
-	AMAX = atoi10(am)
-	if AUD != "" {
-		if why, b := briefBad(AUD); b {
-			die("설정 audit 틀을 읽지 못함(%s): %s", why, AUD)
-		}
-	}
+	launchConf()
 	tickMark("tables")
 	readTables()
 	tickMark("conf")
@@ -174,6 +143,42 @@ func runRound() {
 	}
 	launchRows()
 	exit(0)
+}
+
+// launchConf: 띄우기 설정(task·launch·coord·audit·audit_final·audit_max)과 감사·착지 절(ASEC) — run 바퀴와 revive가 같은 값으로 띄운다
+func launchConf() {
+	TASK, LAUNCH = conf("task"), conf("launch")
+	if COORD = os.Getenv("HC_FILL_COORD"); COORD == "" {
+		COORD = conf("coord")
+	}
+	if TASK == "" {
+		TASK = "{run}"
+	}
+	if !strings.Contains(LAUNCH, "{task}") {
+		die("설정 launch 줄에 {task} 자리가 없다: %s", CONF)
+	}
+	if !strings.Contains(TASK, "{run}") {
+		die("설정 task 줄에 {run} 자리가 없다: %s", CONF)
+	}
+	AUD = conf("audit")
+	if strings.HasPrefix(AUD, "~/") {
+		AUD = HOME + "/" + AUD[2:]
+	}
+	AFIN = conf("audit_final")
+	am := conf("audit_max")
+	if am == "" {
+		am = "2"
+	}
+	if !isDigits(am) {
+		say("알림: 설정 audit_max는 횟수(숫자)다, 2로: %s", am)
+		am = "2"
+	}
+	AMAX = atoi10(am)
+	if AUD != "" {
+		if why, b := briefBad(AUD); b {
+			die("설정 audit 틀을 읽지 못함(%s): %s", why, AUD)
+		}
+	}
 }
 
 // sweepTmp: 강제 종료 뒤 남은 임시 파일(10분 넘은 .x.tmp*·x.tmp·x.tmp.<pid>)을 거둔다 — run.lock 안이라 바퀴 쓰기와 겹치지 않고,

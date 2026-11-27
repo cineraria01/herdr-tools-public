@@ -48,6 +48,8 @@ func launchRows() {
 			fmt.Fprintf(os.Stderr, "hc-fill: %v\n", err)
 		}
 	}
+	tickMark("revive")
+	reviveAutoTick() // 다시 닿은 기계의 꺼져 죽은 줄을 같은 작업 트리에서 이어 띄움(revive.go) — 표를 믿을 수 있는 동안, 빈 자리 띄우기 앞
 	tickMark("launch")
 	LSSNAP = false // 이제 띄운다 — 새 주소는 표에 없으니 pget이 다시 hc get으로 본다
 	for _, r := range ROWS {
@@ -226,6 +228,7 @@ func waitRow(r Row) {
 	name, prj, brief, after, only, state := r.F(qName), r.F(qProj), r.F(qBrief), r.F(qAfter), r.F(qOnly), r.F(qState)
 	a0, reply, owner, em, ak, ovk, rid := r.F(qAddr), r.F(qReply), r.F(qOwner), rowMode(r), r.F(qAudit), r.F(qOverlap), r.F(qRID)
 	RID, proj, stuck = rid, prj, r.F(qStuck)
+	defer relaunchClear() // 이 줄에 채운 출처·절·쌓음 환경을 어느 반환 길에서도 다음 줄에 넘기지 않는다(relaunch.go)
 	// 상태가 안 잡혀 남긴 터미널이 살아났으면 같은 레인이 둘 돈다: 알리고 그 레인은 더 띄우지 않는다(지휘가 정리)
 	dupr := false
 	if stuck != "-" {
@@ -361,7 +364,7 @@ func waitRow(r Row) {
 	}
 	AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 	place(name, prj, SB, only, dash(reply), dash(owner), "")
-	RSRC, RSEC, ESEC, STACK, STREF = srcNew, "", "", "", ""
+	relaunchClear()
 	if placed || GOTADDR {
 		ovlPlaced(name, prj, SB, after, dash(ak))
 	}
@@ -517,7 +520,7 @@ func earlyRows() {
 		}
 		AK, PAFT, PSOLO, PRIO, PADDED = dash(ak), after, dash(ovk), r.F(qPrio), r.F(qAdded)
 		place(name, prj, SB, only, dash(reply), dash(owner), after)
-		ESEC = ""
+		relaunchClear()
 		if placed || GOTADDR {
 			ovlPlaced(name, prj, SB, after, dash(ak))
 		}

@@ -31,7 +31,7 @@ func valS(args []string) string {
 
 // startKnown: 띄우기·clean·gc·fetch가 받는 인자(모르는 인자 권함용)
 var startKnown = []string{"--on", "--branch", "--name", "--repo", "--brief", "--carry", "--start-wait", "--min-age", "--verdict", "--read", "--direct",
-	"--resume", "--revive", "--dry-run", "--print-steps", "--integ", "--remote-branches", "--archive"}
+	"--resume", "--revive", "--continue-from", "--dry-run", "--print-steps", "--integ", "--remote-branches", "--archive"}
 
 // parseStart: 옵션을 전역에 읽고, 남은 것(-- 뒤 실행 명령, fetch의 참조)을 돌려준다
 func parseStart(cmd string, args []string) []string {
@@ -58,6 +58,10 @@ func parseStart(cmd string, args []string) []string {
 			continue
 		case "--brief":
 			brief = valS(args)
+			args = args[2:]
+			continue
+		case "--continue-from":
+			contFrom = valS(args)
 			args = args[2:]
 			continue
 		case "--carry":
@@ -144,8 +148,11 @@ func checkArgs(cmd string, rest []string) {
 	if revive && (!launch || read || resume || carry != "") {
 		die("--revive는 있는 작업 트리에 쓰기 레인을 이어 띄울 때만 쓴다(--read·--resume·--carry와 함께 쓰지 않는다)")
 	}
-	if revive && !steps && brief == "" {
-		die("--revive에는 --brief <지시문>이 있어야 한다(사본에 「재시동 뒤 이어 가기」 절을 붙인다)")
+	if contFrom != "" && (!revive || brief != "") {
+		die("--continue-from은 --brief 없이 --revive와만 쓴다(이미 둔 run 지시문 사본 — hc-fill revive)")
+	}
+	if revive && !steps && brief == "" && contFrom == "" {
+		die("--revive에는 --brief <지시문>(사본에 「재시동 뒤 이어 가기」 절을 붙인다)이나 --continue-from <이미 둔 사본>이 있어야 한다")
 	}
 	if read && direct {
 		argFail(2, "--read와 --direct는 함께 쓰지 않는다(--direct는 쓰기 레인만)")

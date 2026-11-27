@@ -12,6 +12,7 @@ const (
 	srcNew    relSrc = iota // 새로 — 지시문 처음부터
 	srcPark                 // 주차 가지 lane/<레인>(hc-lane park → 선행 착지 뒤 hc-lane --resume, park.md)
 	srcBounce               // 반송 가지 refs/merge-failed/<제출>(반송 절, bounce.md)
+	srcTree                 // 기존 작업 트리 — 터미널만 죽은 떠 있음 줄을 같은 작업 트리에(hc-lane --revive, revive.go). 줄의 14칸은 그대로라 디스크 값이 없다
 )
 
 // relMode: 14칸 한 칸을 두 뜻으로 갈라 읽은 값 — Early는 먼저 띄움 여부, Src·Ran은 다시 띄울 출처
@@ -106,6 +107,12 @@ func takeover(name, rid string, m relMode, t *Term) (int, string) {
 	}
 	return 0, ""
 }
+
+// relaunchClear: 한 번 띄우기에만 쓰는 전역(다시 띄울 출처 RSRC·그 절 RSEC·먼저/쌓아 띄움 절 ESEC·쌓음 환경 STACK·STREF)을 비운다 —
+// 채워서 띄우는 쪽(waitRow·reviveLaunch는 defer, earlyRows는 한 줄 띄운 뒤)이 모두 이것으로 끝내 어느 반환 길에서도 다음 레인에 새지 않는다
+// (감사 atp6hkn M1 — 이어 띄운 쌓인 줄의 절·HC_LANE_STACK이 같은 바퀴 다음 레인에 샜다).
+// ponytail: launch가 이 값들을 인자(구조체 하나)로 받게 바꾸면 전역이 없어진다 — launch·place 호출 길이 몇십 곳이라 이번엔 한 곳 비우기까지
+func relaunchClear() { RSRC, RSEC, ESEC, STACK, STREF = srcNew, "", "", "", "" }
 
 // bindRun <레인> <줄 ID> <기계> <주소> <실행 키> <14칸> <감사 칸>: 줄을 새 실행에 묶는다 — 시도 기록(실행 키)을 먼저, 그다음 대기열 줄을
 // 떠 있음·그 주소로. 14칸·감사 칸 ""은 그대로 둠. 반환 -1 시도 기록을 못 씀(대기열 그대로), 그 밖은 qset의 종료(0 됨)

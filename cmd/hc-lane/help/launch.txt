@@ -31,6 +31,8 @@
                 없으면 11)를 HC_LANE_LEASE로 이어 쓴다. 파일에 손대지 않고 실패해도 작업 트리를 지우지 않는다. --brief가 있어야 하고
                 사본에 「재시동 뒤 이어 가기」 절, 첫 글이 그 사본인 레인 대화가 있으면 레인 환경 HC_LANE_CONTINUE=--resume=<id>
                 (같은 폴더의 감사 대화는 고르지 않는다. docs/hc-lane/revive.md)
+  --continue-from <사본>  --revive에 --brief 대신: 사본을 이미 둔 쪽(hc-fill revive — 절은 --print-steps --revive로 받는다)이
+                그 경로를 준다. 첫 글이 그 경로로 시작하는 대화를 잇는다
   --carry       이 기계 tar 묶음을 작업 트리를 만든 직후(설정 훅 뒤·임대 전) 그 안에 푼다(--on이면 hc exec -i). 못 풀면 작업 트리를
                 되돌리고 종료 1. 쓰기 레인만(hc-fill이 지시문의 지휘 기계 .qa 자료를 싣는다)
   설정 lane.notify no면 hc run --no-notify(hc가 지휘 입력에 종료·막힘을 넣지 않음 — 지휘가 hc-lane wait를 늘 걸 때만)

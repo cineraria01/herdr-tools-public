@@ -70,6 +70,9 @@ func aQueued() {
 		}
 		switch ats {
 		case "gone", "done", "idle":
+			if auRebound("판정 없음 버림") { // 레인과 감사 터미널이 함께 죽은 재시동 — 이어 뜬 실행의 새 완료로 새 차수(감사 atp6fql M1)
+				return
+			}
 			n := atoi10(auAnv) + 1
 			auAnv = strconv.Itoa(n)
 			aupd(auAid, cv{atNoVerdict, auAnv})
@@ -102,6 +105,9 @@ func aQueued() {
 		return
 	}
 	if pr == pDone || PRUN != auPrun {
+		if auRebound("판정 버림") {
+			return
+		}
 		aEsc(auAid, "parent-ended", auLn+" 감사 "+auRnd+"번째 판정이 왔는데 부모 실행("+auPrun+")이 끝났다 — 지휘 판단 ("+head(auSha, 8)+", "+auAn+" @"+qm+" "+rep+")")
 		return
 	}
@@ -201,7 +207,7 @@ func aDeliver() {
 		return
 	}
 	if pr == pDone || PRUN != auPrun {
-		if aVoid(auAid, auLn, auAm) == avVoid {
+		if aVoid(auAid, auLn, auAm) == avVoid && !auRebound("판정 취소") {
 			aEsc(auAid, "parent-ended", auLn+" 감사 "+auRnd+"번째 판정("+auAv+")을 수거하기 전에 부모 실행("+auPrun+")이 끝났다 — 지휘 판단 ("+auAn+" "+auRep+")")
 		}
 		return

@@ -82,7 +82,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	}
 	// 지시문의 .qa/… 자료를 작업 트리에 실을 묶음(carry.go) — 쓰기 레인·지휘가 쓴 지시문만. 상한을 넘으면 막힘 사건 뒤 띄우지 않음
 	cf, cok := "", true
-	if rd == "" && dash(dest) == "-" {
+	if rd == "" && dash(dest) == "-" && RSRC != srcTree { // 이어 띄움은 작업 트리에 이미 풀렸다
 		if body, cf, cok = lcCarry(lane, proj, body, dash(owner)); !cok {
 			return 2
 		}
@@ -91,6 +91,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	sa := []string{"--print-steps"}
 	if rd != "" {
 		sa = append(sa, rd)
+	}
+	if RSRC == srcTree { // 착지 절차에 「재시동 뒤 이어 가기」 절까지(hc-lane --revive가 --brief로 붙이는 것과 같은 글)
+		sa = append(sa, "--revive")
 	}
 	if on != "" {
 		sa = append(sa, "--on", on)
@@ -101,7 +104,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		return 1
 	}
 	steps := sub(so)
-	if rsec != "" && rid == "" && oldReport(m, lane) != 0 {
+	if rsec != "" && rid == "" && RSRC != srcTree && oldReport(m, lane) != 0 { // 이어 띄움은 같은 일 — 그 보고를 비키지 않는다
 		say("실패 %s @%s: 그 기계의 옛 보고를 비켜 두지 못했다", lane, m)
 		return 1
 	}
@@ -178,7 +181,7 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	if !dry && tryput(lane, RID, mm, dash(EARLYF), dash(LAUTO), "?", "") != 0 {
 		return 2
 	}
-	if rd == "" {
+	if rd == "" && RSRC != srcTree { // 이어 띄움의 쓰기 소유는 다음 바퀴 syncOwners가 옛 기록을 풀고 새 터미널을 입양한다
 		ownAdd(lane, proj, mm, "pending:"+mm, pst_, SB, PAFT, PSOLO)
 		ownStore()
 	}
@@ -188,6 +191,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 	}
 	if RSRC == srcPark {
 		la = append(la, "--resume")
+	}
+	if RSRC == srcTree { // 이을 대화는 첫 글이 이 run 지시문인 세션(docs/hc-lane/revive.md)
+		la = append(la, "--revive", "--continue-from", rf)
 	}
 	if on != "" {
 		la = append(la, "--on", on)

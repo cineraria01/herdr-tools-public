@@ -118,6 +118,10 @@ func startCheck(a string) int {
 		if pr == spUnknown {
 			unk = true
 		}
+		// Claude는 신뢰 창에서도 status(blocked)를 낸다(2026-11-28 실측) — 잡혔어도 신뢰 질문을 아직 안 봤으면 화면을 한 번 본다
+		if pr == spStatus && tr == "" && strust == "on" && trustq.Seen(hcRead(a)) {
+			pr = spNoStatus
+		}
 		if pr == spStatus {
 			start = "ok"
 			if _, err := exec.LookPath("jq"); fwait == 0 || err != nil {

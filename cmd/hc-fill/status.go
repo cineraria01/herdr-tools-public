@@ -28,6 +28,7 @@ type stIn struct {
 	Ovl   string  // 대기 줄: 겹침 비고(ovWaitNote — 「겹침 대기(…)」·「다음 차례(…)」), 아니면 빈 값
 	Bg    bool    // 살아 있는 배경 셸을 기다림(hangBgWait)
 	Land  string  // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
+	Rev   string  // 꺼져 죽음·이어 띄움 덧말(rvNote, revive.go), 아니면 빈 값
 }
 
 // stStage0: 단계 한 마디(stStage가 「대기열이 제출함」을 덧붙인다 — autosubmit.go)
@@ -64,6 +65,8 @@ func stStage0(in stIn) string {
 		return "착지 " + in.Land
 	case ls == "착지":
 		return "착지 " + sha
+	case strings.HasPrefix(in.Rev, "꺼져 죽음"): // 터미널이 없어졌는데 끝 보고가 없다 — 「끝남」·마지막 보고로 묻히지 않게(revive.go)
+		return in.Rev
 	case ls == "막힘":
 		return "막힘: " + dash(msg)
 	case ls == "제출" && in.Pos < 0:
@@ -305,7 +308,7 @@ func statusCmd(args []string) {
 		}
 		fmt.Println(stLine(r.F(qName), dash(r.F(qMach)), stAge(r.F(qAdded), t), stage, est))
 	}
-	ovs := readRows(DATA + "/overlap.tsv")
+	ovs, rvl := readRows(DATA+"/overlap.tsv"), readRows(rvFile())
 	for _, r := range rows {
 		name, addr := r.F(qName), r.F(qAddr)
 		in := stIn{State: r.F(qState), Mode: rowMode(r), Lane: name, Last: lsFirst(DATA+"/last.tsv", name)}
@@ -332,7 +335,11 @@ func statusCmd(args []string) {
 			}
 			var end int64
 			in.Land, end = stEnd(r, in.Pos, x.marks)
+			in.Rev = rvNote(rvl, r, in.Live)
 			stage := stStage(in)
+			if strings.HasPrefix(in.Rev, "이어 띄움") {
+				stage += " · " + in.Rev
+			}
 			if pr, _ := prOf(name); pr != "" { // PR 거울(pr.go) — PR이 없으면 줄이 전과 같다
 				stage += " · " + pr
 			}

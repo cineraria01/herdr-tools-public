@@ -123,10 +123,12 @@ func unreachTick() {
 	}
 	sort.Strings(names)
 	var out []reachRow
+	REACHED = map[string]bool{}
 	for _, m := range names {
 		pv, seen := prev[m]
 		x := reachRow{M: m, St: "up", Since: now}
 		if connHas(m) {
+			REACHED[m] = seen && pv.St == "down" // 다시 닿은 바퀴 — 꺼져 죽은 레인을 스스로 이어 띄운다(revive.go reviveAutoTick)
 			x.Lanes = reachLanes(m, q)
 			if seen && pv.St == "up" {
 				x.Since = pv.Since

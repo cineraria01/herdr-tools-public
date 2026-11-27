@@ -280,6 +280,20 @@ const (
 	rcAlerted = 4
 	rcLanes   = 5
 
+	// 꺼져 죽음·이어 띄움 revive.tsv(revive.go) 「레인 줄ID 옛주소 무엇 새주소 시각(초) 어떻게」 — 무엇: 죽음·죽음(재시동)·알림·이어 띄움·묶기만·못 띄움·상한
+	rvLane = 1
+	rvRID  = 2
+	rvOld  = 3
+	rvWhat = 4
+	rvNew  = 5
+	rvAt   = 6
+	rvHow  = 7 // 명령·스스로
+
+	// 이어 붙인 단계 착지 확인 then.tsv(thencheck.go) 「레인 줄ID 결과(옛·없음·알림)」
+	thLane = 1
+	thRID  = 2
+	thRes  = 3
+
 	// 저장소 읽기 막힘 격리 cordon.tsv(cordonRow 칸 차례 — cordon.go)
 	cdMach    = 1
 	cdState   = 2

@@ -174,11 +174,12 @@ func lsCmd(args []string) {
 		maPrint() // 병합기 한 줄(mergeralive.go)은 표 끝에
 		exit(0)
 	}
+	led := readRows(rvFile()) // 꺼져 죽음·이어 띄움 기록(revive.go)
 	for _, l := range readLines(Q) {
 		f := Row(lsSplit(l, qNF))
 		name, proj, brief, after, only, state, addr, stuck := f.F(qName), f.F(qProj), f.F(qBrief), f.F(qAfter), f.F(qOnly), f.F(qState), f.F(qAddr), f.F(qStuck)
 		reply, owner, prio, em, ak, ovk := f.F(qReply), f.F(qOwner), f.F(qPrio), rowMode(f), f.F(qAudit), f.F(qOverlap)
-		live, lr, s, a := "", "", "", ""
+		live, lr, s, a, rvx := "", "", "", "", ""
 		switch state {
 		case "wait":
 			s, a = "대기", "-"
@@ -208,6 +209,9 @@ func lsCmd(args []string) {
 					s = "모름(연결 확인 못 함)"
 				default:
 					s = "끝남"
+				}
+				if rvx = rvNote(led, f, live); strings.HasPrefix(rvx, "꺼져 죽음") { // 끝남·빈 셸로 되살아남(떠 있음(-)) — revive.go
+					s = "꺼져 죽음"
 				}
 			}
 			a = addr
@@ -259,6 +263,9 @@ func lsCmd(args []string) {
 		}
 		if stuck != "-" {
 			note += " 상태 안 잡힘 남김 " + stuck
+		}
+		if rvx != "" {
+			note += " " + rvx
 		}
 		if dash(reply) != "-" {
 			note += " 받은편지 " + strings.SplitN(reply, ":", 2)[0]

@@ -14,6 +14,7 @@
 3. 막힘 풀기: 띄우기 거절은 까닭을 고친 뒤 `hc-fill retry <레인>`, 선행·기계·지시문 바꾸기는 `hc-fill edit <레인> --after <선행>|--only <기계>|--brief <지시문>`.
    - 아직 안 뜬 줄의 겹침 검사·먼저 띄움: `hc-fill edit <레인> --overlap-ok|--overlap-check` · `--early|--no-early` (rm 뒤 add로 다시 넣지 않는다).
    - 레인 터미널이 일시 오류로 멈춤(hc 상태 error, 보고 없음): `hc-fill nudge <레인> --why <까닭>` — 이어 가라는 글 한 줄(한 레인에 손잡이 `nudge_every`분 안에 한 번).
+   - 레인 터미널이 꺼져 죽음(기계 재시동 등 — 「꺼져 죽음」 사건·표시): `hc-fill revive <레인> [--dry-run]` — 같은 작업 트리에 이어 띄우거나 손으로 띄운 세션에 묶는다(손으로 같은 폴더에 새 세션을 띄우지 않는다, docs/hc-fill/revive.md).
    - 병합기가 제출 탓이 아닌 검증 실패로 돌려보냄(시험 환경·흔들림): `hc-fill requeue <레인> --why <까닭> [--dry-run]` — 같은 커밋·같은 감사 판정으로 줄 끝에(충돌 반송은 거절).
    - 줄에 선 내 레인 제출이 진짜로 깨질 것을 앎(먼저 든 변경과 뜻이 부딪힘 등): `hc-fill withdraw <레인> --why <까닭> [--dry-run]` — 병합기 반송과 같은 꼴로 빼서 뒤 제출이 기다리지 않게, 레인은 반송 다시 띄움으로 고쳐 다시 낸다(남의 레인은 `--force`, docs/hc-fill/withdraw.md).
    - 레인이 PR 사람 리뷰를 「반영 안 함」으로 보고(손잡이 `pr_human`): 맞으면 `hc-fill human-ok <레인> --why <까닭>` — 막은 착지를 푼다(docs/hc-fill/pr.md 「사람 리뷰」).

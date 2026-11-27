@@ -107,6 +107,15 @@ func s27Revive(k *K) {
 		o, _ := k.exe(k.T, "", []string{cont}, sh, "-c", `printf '[%s]' $HC_LANE_CONTINUE --model x "$1"`, "_", "task")
 		k.check("⑥ "+sh+" 틀에서 $HC_LANE_CONTINUE는 인자 하나 --resume=<id>", o == "[--resume=lane-1][--model][x][task]")
 	}
+	// ⑥ 대기열(hc-fill revive): 사본을 스스로 두고 그 경로로 첫 지시를 준 레인 — --brief 대신 --continue-from <그 경로>로 고른다
+	qrun := k.T + "/runs/rv-a-run.md"
+	write(k.t, pd+"lane-q.jsonl", user(qrun+" 지시문을 읽고 진행하라. 너는 worker다."))
+	os.Remove(k.HCLOG)
+	k.runE(nil, "--revive", "--continue-from", qrun, "--name", "rv-a", "--repo", k.R, "--", "claude", qrun+" 지시문을 읽고 진행하라.")
+	k.check("⑥ --revive --continue-from: 첫 글이 그 사본인 대화를 골라 HC_LANE_CONTINUE=--resume=<id>, 사본을 새로 두지 않음",
+		k.rc == 0 && k.has("HC_LANE_CONTINUE="+"--resume="+"lane-q") && s27snap(k, wt) == before)
+	k.run("--continue-from", qrun, "--name", "rv-a", "--repo", k.R, "--", "claude")
+	k.check("⑥ --continue-from은 --revive와만", k.rc == 1 && strings.Contains(k.errf(), "--continue-from"))
 
 	// 쌓아 띄운 레인: 작업 트리가 이미 있어 선행 제출을 다시 확인하지 않는다(시작점을 쓰지 않음), 범위 환경은 그대로 넘긴다
 	st := "HC_LANE_STACK=rv-p@" + strings.Repeat("0", 40)

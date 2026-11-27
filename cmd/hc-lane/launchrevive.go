@@ -112,7 +112,11 @@ func reviveSession() string {
 	var jb strings.Builder // Claude(JSON.stringify)처럼 <>&는 그대로
 	enc := json.NewEncoder(&jb)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(runBrief); err != nil {
+	key := runBrief
+	if contFrom != "" { // 대기열(hc-fill revive)은 사본을 스스로 두고 그 경로로 첫 지시를 준다 — 그 경로로 고른다
+		key = contFrom
+	}
+	if err := enc.Encode(key); err != nil {
 		die("--revive: 지시문 사본 경로를 JSON 글로 바꾸지 못했다: %v", err)
 	}
 	jr := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(jb.String()), `"`), `"`)
@@ -145,5 +149,5 @@ func reviveSteps(w io.Writer) {
 	fmt.Fprint(w, "- 앞 실행(터미널)이 죽은 뒤 같은 작업 트리·가지·임대로 다시 떴다. 일을 잇기 전에 차례대로:\n")
 	fmt.Fprint(w, "1. git status와 진행 중인 rebase·merge(git status 첫 줄)를 먼저 본다 — 진행 중이면 그것부터 마저 푼다\n")
 	fmt.Fprint(w, "2. 반쯤 쓴 파일을 확인한다(git diff · git diff --cached · 추적 안 된 파일). 되돌리거나 stash·reset·checkout·clean 하지 않는다\n")
-	fmt.Fprintf(w, "3. 이 레인의 마지막 보고(hc-lane events --lane %s 의 끝 줄)가 「완료」이고 그 sha가 지금 HEAD와 같으면 다시 보고하지 않고 턴을 끝내 판정을 기다린다 — 아니면 위 지시문대로 이어서 일한다\n", name)
+	fmt.Fprintf(w, "3. 이 레인의 마지막 보고(hc-lane events --lane %s 의 끝 줄)가 「완료」이고 그 sha가 지금 HEAD와 같으면 같은 줄(hc-lane report 완료 HEAD \"<한 줄>\")을 이 실행으로 한 번 더 부르고 턴을 끝내 판정을 기다린다(감사는 실행마다 열려 앞 실행의 판정은 이 실행에 오지 않는다) — 아니면 위 지시문대로 이어서 일한다\n", name)
 }

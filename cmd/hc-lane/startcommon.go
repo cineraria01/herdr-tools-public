@@ -26,7 +26,8 @@ var (
 	branch, name, brief, swarg, integ, minage         string
 	carry                                             string // --carry <이 기계 tar>: 작업 트리를 만든 직후 그 안에 푼다(hc-fill — 지휘 기계 .qa 자료)
 	read, direct, resume, archive, dry, steps, rbFlag bool
-	revive                                            bool // --revive: 있는 작업 트리에 이어 띄움(launchrevive.go)
+	revive                                            bool   // --revive: 있는 작업 트리에 이어 띄움(launchrevive.go)
+	contFrom                                          string // --continue-from <사본>: --revive가 이을 대화의 첫 글(hc-fill이 둔 run 지시문 — --brief 대신)
 	cmdName                                           string
 	top, wt, rx, undo                                 string
 	norepo                                            bool

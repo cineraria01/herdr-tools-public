@@ -68,6 +68,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-fill: 우선순위](docs/hc-fill/priority.md)
 - [hc-fill: 대기열 파일](docs/hc-fill/queue.md)
 - [hc-fill: 거짓 반송 다시 넣기 (requeue)](docs/hc-fill/requeue.md)
+- [hc-fill: 꺼져 죽은 레인 이어 띄우기 (revive)](docs/hc-fill/revive.md)
 - [hc-fill: 한 바퀴](docs/hc-fill/round.md)
 - [hc-fill: 줄 ID·채택·끊긴 기계](docs/hc-fill/row-id.md)
 - [hc-fill: 늘 돌리기](docs/hc-fill/service.md)
