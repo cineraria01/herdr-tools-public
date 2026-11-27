@@ -41,6 +41,7 @@ var (
 	remote           bool
 	lforceOld        bool   // --force-old: 원격 lane/<레인>의 조상(옛 커밋)도 제출
 	bref, blab       string // 착지 기준 참조와 그 이름(알림용)
+	wstart           string // 띄우기: 작업 트리 시작(기본 브랜치·주차 가지·쌓아 띄움 P) — rollback이 고유 커밋을 여기서부터 센다
 	lpid, lorig      string // 승인 착지: 승인 변경 patch-id, 대조 원본 커밋
 	lmb, lrrf        string // 승인 원본과 기준의 갈림점, rerere 기록 파일
 	llog, qa0        string // 착지 로그, 검증 전 .qa 폴더 목록

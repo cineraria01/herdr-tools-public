@@ -84,12 +84,17 @@ func firstAddr(out string) string {
 
 // rollback: 띄우기 전에 실패하면 방금 만든 작업 트리·가지를 지운다 — 고유 커밋이 없을 때만. 돌려준 값은 die에 붙일 한 줄
 func rollback() string {
-	k, r := xoutQ("git", "-C", repo, "rev-list", "--count", bref+"..refs/heads/"+branch)
+	from := wstart // 주차 가지·쌓아 띄움은 시작이 기본 브랜치에 없는 커밋을 담는다 — 그건 이 레인의 고유 커밋이 아니다
+	if from == "" {
+		from = bref
+	}
+	k, r := xoutQ("git", "-C", repo, "rev-list", "--count", from+"..refs/heads/"+branch)
 	if r != 0 {
 		k = "?"
 	}
 	if k == "0" && xrun(nil, nil, "git", "-C", repo, "worktree", "remove", "--force", wt) == 0 {
-		if xrun(nil, nil, "git", "-C", repo, "branch", "-q", "-d", branch) == 0 {
+		// -D: 시작부터 고유 커밋 0을 위에서 셌다 — 주차 가지·P는 upstream(기본 브랜치)에 없어 -d가 거절한다(그 커밋은 원격에 그대로 있다)
+		if xrun(nil, nil, "git", "-C", repo, "branch", "-q", "-D", branch) == 0 {
 			return fmt.Sprintf("방금 만든 워크트리 %s·브랜치 %s 는 지웠다(고유 커밋 없음). 원인을 고친 뒤 같은 명령을 다시 돌린다", wt, branch)
 		}
 		return fmt.Sprintf("방금 만든 워크트리 %s 는 지웠고 브랜치 %s 는 못 지웠다. 지우려면: %sgit -C %s branch -d %s", wt, branch, rx, q(repo), branch)

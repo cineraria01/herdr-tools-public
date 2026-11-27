@@ -323,9 +323,9 @@ func launchDry(nn, envs, rest []string, wfrom string) {
 		fmt.Printf("[dry-run] 메인 폴더 앞당김(기본 브랜치 %s·추적 변경 없음·merge/rebase 없을 때만): git -C %s merge --ff-only %s\n", base, q(repo), bref)
 	}
 	if !read {
-		tk := "--track "
-		if resume {
-			tk = ""
+		tk := ""
+		if wfrom == bref {
+			tk = "--track "
 		}
 		fmt.Printf("[dry-run] git -C %s worktree add %s-b %s %s %s\n", q(repo), tk, branch, q(wt), wfrom)
 		fmt.Printf("[dry-run] (%s 에 .claude/herdr-setup.sh 가 있으면) 워크트리에서 bash .claude/herdr-setup.sh\n", blab)
@@ -356,16 +356,19 @@ func launchDry(nn, envs, rest []string, wfrom string) {
 
 // makeWorktree: 쓰기 레인의 작업 트리·upstream·rr-cache·준비 훅(전역 logPath)
 func makeWorktree(wfrom string) {
-	// --track: upstream을 붙여 착지 뒤 branch -d가 통한다. 주차한 가지(가지가 아닌 참조)에서는 아래에서 기본 브랜치로 붙인다
-	wa := []string{"git", "-C", repo, "worktree", "add", "-q", "--track", "-b", branch, wt, wfrom}
-	if resume {
-		wa = []string{"git", "-C", repo, "worktree", "add", "-q", "-b", branch, wt, wfrom}
+	wstart = wfrom
+	// upstream을 기본 브랜치로 붙여 착지 뒤 branch -d가 통한다. 시작이 기본 브랜치면 --track, 가지가 아닌 시작(주차 가지 refs/hc-park/·
+	// 쌓아 띄움의 커밋 P)은 --track이 거절하니(「starting point … is not a branch」) 만든 뒤 --set-upstream-to로 — 한 길
+	track := wfrom == bref
+	wa := []string{"git", "-C", repo, "worktree", "add", "-q", "-b", branch, wt, wfrom}
+	if track {
+		wa = []string{"git", "-C", repo, "worktree", "add", "-q", "--track", "-b", branch, wt, wfrom}
 	}
 	if xrun(os.Stdout, os.Stderr, wa...) != 0 {
 		die("워크트리를 만들지 못했다: %s", wt)
 	}
-	if resume && xrun(os.Stdout, os.Stderr, "git", "-C", wt, "branch", "-q", "--set-upstream-to="+blab, branch) != 0 {
-		die("--resume: upstream을 %s 로 두지 못했다. %s", blab, rollback())
+	if !track && xrun(os.Stdout, os.Stderr, "git", "-C", wt, "branch", "-q", "--set-upstream-to="+blab, branch) != 0 {
+		die("upstream을 %s 로 두지 못했다(시작 %s). %s", blab, wfrom, rollback())
 	}
 	// rerere: 저장소 설정에 쓰지 않고 공용 git 폴더에 rr-cache만 만든다(정해 둔 rerere.enabled는 그대로)
 	if xrun(os.Stdout, os.Stderr, "sh", "-c", `d=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir) && mkdir -p "$d/rr-cache"`, "_", repo) != 0 {

@@ -35,7 +35,11 @@
 - 서로 잇지 않은 선행 둘·다른 프로젝트 선행·대기열 밖 선행(제목 규칙만)·감사 전·지적 고치는 중인 선행은 오늘 그대로(먼저 띄움·주차).
 - 사슬 깊이: 손잡이 `stack_depth`(기본 2) = B 아래 아직 안 든 조상 수의 상한. 근거: 병합기 묶음 기본 3(`HC_LANE_MERGER_BATCH`)이라 A·B·C 세 겹이 한 묶음에 든다. 넘으면 오늘 그대로 기다린다.
 - 떠 있는 먼저 띄움 레인은 건드리지 않는다 — 준비를 마치고 주차하면 다음 바퀴에 쌓아 이어 띄운다(이어 가기 길을 그대로 쓴다).
-- 띄움: 대기·`parked`·`bounced` 줄을 hc-lane에 환경 `HC_LANE_STACK=<선행>@<P 40자>`로 — hc-lane이 원격 `lane/<선행>`을 `refs/hc-stack/<레인>`으로 받아 P인지 보고 거기서 작업 트리를 만든다(아니면 거절 — 다음 바퀴에). `--resume`(주차 가지)이면 주차 가지에서 만들고 레인이 절대로 `git rebase P`. upstream은 `origin/<기본>` 그대로. 14칸 `stacked`, 기록 `<상태 폴더>/stack.tsv`(레인·줄 ID·선행·P·선행 큐 이름·상태·시각 — 쌓지 않고 다시 띄우면 지운다).
+- 띄움: 대기·`parked`·`bounced` 줄을 hc-lane에 환경 `HC_LANE_STACK=<선행>@<P 40자>`로. 14칸 `stacked`, 기록 `<상태 폴더>/stack.tsv`(레인·줄 ID·선행·P·선행 큐 이름·상태·시각 — 쌓지 않고 다시 띄우면 지운다). hc-lane이 실제로 도는 git(`cmd/hc-lane/stack.go` `stackFrom` → `launchsteps.go` `makeWorktree`):
+  1. `git fetch -q origin +refs/heads/lane/<선행>:refs/hc-stack/<레인>` → `git rev-parse refs/hc-stack/<레인>^{commit}`이 P인지 → `git update-ref -d refs/hc-stack/<레인>`(확인에만 쓰고 어느 결과로 끝나도 남기지 않는다). P가 아니면 거절(종료 11 — 다음 바퀴에), 아무것도 만들지 않는다.
+  2. `git worktree add -q -b <레인> <작업 트리> <P>` → `git -C <작업 트리> branch -q --set-upstream-to=origin/<기본> <레인>`. `--resume`이면 `<P>` 자리가 주차 가지 `refs/hc-park/<레인>`이고 레인이 스스로 `git rebase P`. 시작이 가지가 아니면(P·주차 가지) `--track`을 붙이지 않는다 — git이 「starting point … is not a branch」로 거절한다(2026-11-27 첫 실제 쌓아 띄움에서 레인 둘이 이걸로 못 떴다). 시작이 기본 브랜치일 때만 `--track`. 판정은 「시작 = 기본 브랜치 참조」 하나다.
+  3. 그 뒤 단계(준비 훅·임대·`hc run`)가 실패하면 `rollback()`이 시작(P·주차 가지)부터 센 고유 커밋이 0일 때 작업 트리와 가지를 지운다(`branch -D` — P는 upstream에 없어 `-d`가 거절한다, P는 원격 `lane/<선행>`에 그대로).
+  - 그래서 뜬 작업 트리는 HEAD = P, upstream = `origin/<기본>`, 레인 환경 `HC_LANE_STACK`이고, 선행·자기 커밋이 착지하면 `branch -d`가 통한다(시험 `tests/hclane/s26_stack_test.go` — 가짜 hc·진짜 git).
 - 지시문 끝 블록(먼저 띄움 블록 자리) 「## 쌓아 띄움 — 기준은 선행 <선행> <P 8>(아직 기본 가지에 없음)」: 본 일을 끝까지 하고 완료 보고, 자기 범위는 `P..HEAD`, 선행 파일은 고치지 않는다(고칠 것이 나오면 막힘), `git rebase origin/<기본>` 하지 않는다.
 
 ## 기록 칸

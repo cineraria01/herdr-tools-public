@@ -58,8 +58,9 @@ func stackMeta() string {
 	return ""
 }
 
-// stackFrom: 띄울 때 선행의 제출 가지(lane/<선행>)를 받아 그 값이 P일 때 그 참조에서 시작한다(--resume이면 주차 가지에서 — 레인이 P 위로
-// rebase한다, 지시문 절). 돌려준 값은 작업 트리 시작 참조. 쓰기 레인이 아니면 HC_LANE_STACK을 받지 않는다
+// stackFrom: 띄울 때 선행의 제출 가지(lane/<선행>)를 받아 그 값이 P인지 보고 P(커밋)를 작업 트리 시작으로 돌려준다(--resume이면 주차 가지에서
+// — 레인이 P 위로 rebase한다, 지시문 절). 받은 refs/hc-stack/<레인>은 확인에만 쓰고 곧바로 지운다(어느 결과로 끝나도 남기지 않는다 —
+// 작업 트리는 커밋 P에서 만들고, 그 뒤 범위는 레인 환경 HC_LANE_STACK이 말한다). 쓰기 레인이 아니면 HC_LANE_STACK을 받지 않는다
 func stackFrom(wfrom string) string {
 	pred, p := stackEnv()
 	if p == "" {
@@ -71,19 +72,22 @@ func stackFrom(wfrom string) string {
 	if !remote {
 		refuse("쌓아 띄움: 원격(origin)이 없는 저장소에는 선행 제출이 없다: %s", repo)
 	}
-	sref := "refs/hc-stack/" + name
-	switch {
-	case dry:
-		fmt.Printf("[dry-run] 쌓아 띄움: 선행 %s 제출 %s 위에서\n", pred, cut(p, 12))
-		return wfrom
-	case xfetch(repo, "-q", "origin", "+refs/heads/lane/"+pred+":"+sref) != 0:
-		die("쌓아 띄움: 선행 제출 가지 lane/%s 를 받지 못했다: %s", pred, repo)
-	}
-	if v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", sref+"^{commit}"); r != 0 || v != p {
-		refuse("쌓아 띄움: 선행 제출 가지 lane/%s 가 %s 가 아니다(%s) — 선행이 다시 냈거나 들어갔다, 다음 바퀴에: %s", pred, cut(p, 12), cut(v, 12), repo)
+	if dry {
+		fmt.Printf("[dry-run] 쌓아 띄움: 선행 %s 제출 %s 위에서(원격 lane/%s 가 그 커밋일 때만)\n", pred, cut(p, 12), pred)
+	} else {
+		sref := "refs/hc-stack/" + name
+		fr := xfetch(repo, "-q", "origin", "+refs/heads/lane/"+pred+":"+sref)
+		v, r := xout("git", "-C", repo, "rev-parse", "-q", "--verify", sref+"^{commit}")
+		xrun(nil, nil, "git", "-C", repo, "update-ref", "-d", sref) // 확인에만 썼다 — 받지 못해 없으면 지울 것도 없다
+		if fr != 0 {
+			die("쌓아 띄움: 선행 제출 가지 lane/%s 를 받지 못했다: %s", pred, repo)
+		}
+		if r != 0 || v != p {
+			refuse("쌓아 띄움: 선행 제출 가지 lane/%s 가 %s 가 아니다(%s) — 선행이 다시 냈거나 들어갔다, 다음 바퀴에: %s", pred, cut(p, 12), cut(v, 12), repo)
+		}
 	}
 	if resume {
 		return wfrom
 	}
-	return sref
+	return p
 }
