@@ -151,7 +151,7 @@ var Defs = []Def{
 	// 알림 받는 쪽(2026-11-27 ht-alert-route, docs/hc-fill/alert-route.md) — 지휘 watch가 바퀴마다, hc-fill이 사건 보낼 때 읽는다
 	{Name: "alert_route", Tool: "hc-lane", Default: "all", Enum: []string{"all", "one"}, Desc: "주인 없는·주인 모르는 사건을 밀어 넣는 받는 쪽 — all 모든 지휘(지금 그대로) · one 대표 지휘 한 명(그 레인 주인·그 저장소 대표·전역 대표)"},
 	{Name: "alert_coord", Tool: "hc-lane", Default: "-", List: true, Proj: true, Unit: "지휘 주소", Desc: "alert_route one의 대표 지휘(쉼표면 앞에서부터 살아 있는 것, - = 저장소를 맡는다고 적힌 지휘 가운데 가장 먼저 뜬 것). alert_coord@<프로젝트>(저장소 ID 마지막 마디)가 그 프로젝트 몫"},
-	{Name: "alert_escalate_min", Tool: "hc-lane", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "대표에게 간 막힘 사건에 이만큼 조치함(대표가 그 레인·프로젝트에 한 조치 — 일지)·풀림(같은 레인 뒤 사건)이 없으면 모든 지휘에게 한 번(0이면 끔)"},
+	{Name: "alert_escalate_min", Tool: "hc-lane", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "대표에게 간 막힘 사건 뒤 이만큼 대표 턴이 안 돌고(hc get 상태 그대로·질문 창) 풀림(같은 레인 뒤 사건)도 없으면 모든 지휘에게 한 번(0이면 끔)"},
 	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},

@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -11,8 +12,6 @@ import (
 	"time"
 
 	"herdr-tools/internal/events"
-	"herdr-tools/internal/journal"
-	"herdr-tools/internal/opsstate"
 	"herdr-tools/internal/tri"
 )
 
@@ -23,11 +22,13 @@ type repPick struct {
 
 // alertSend: 이 watch가 그 사건을 보내나. one이면 그 저장소(모르면 전역) 대표만 보내고, 대표를 못 정하면 오늘처럼 repoSend.
 // 대표가 아닌 watch는 대표가 본(커서 seen.<대표>) 뒤에야 놓는다 — 대표 커서에 없으면 repoSend처럼 유예(rgrace) 뒤 보낸다(아무도 안 받음은 없다).
-// 막힘은 대표가 본 뒤 alert_escalate_min분 동안 조치함(대표의 일지 줄)·풀림(같은 레인 뒤 사건이 막힘 아님)이 없으면 한 번 보낸다
+// 막힘은 대표 커서에 적힌 뒤 alert_escalate_min분 동안 대표 턴(repSaw)·풀림(같은 레인 뒤 사건이 막힘 아님)이 없으면 한 번 보낸다(켜기 전 사건은 빼고)
 func (e *ev) alertSend(l string) bool {
 	if v, _ := e.knob("alert_route"); v != "one" {
+		os.Unsetenv(oneEnv) // 다시 켜면 그때부터 센다
 		return e.repoSend(l)
 	}
+	oneSince()
 	r := e.evrepo(l)
 	p := e.alertRep(r)
 	if p.st != tri.Yes {
@@ -67,15 +68,15 @@ func (e *ev) alertSend(l string) bool {
 	m, _ := e.knob("alert_escalate_min")
 	n, _ := strconv.Atoi(m)
 	at, err := time.Parse(time.RFC3339, x.Time)
-	subs := []string{x.Lane}
-	if r != "" {
-		subs = append(subs, lastSeg(r))
-	}
-	if n <= 0 || err != nil || e.resolved(x, at) || acted(p.addr, at, subs) {
+	if n <= 0 || err != nil || at.Before(oneSince()) || e.resolved(x, at) {
 		e.appendCur(k)
 		return false
 	}
 	if time.Since(at) < time.Duration(n)*time.Minute {
+		return false
+	}
+	if repSaw(p.addr, at) {
+		e.appendCur(k)
 		return false
 	}
 	e.rtag[k] = fmt.Sprintf(" → 모든 지휘(대표 %s %d분 조치 없음)", p.addr, n)
@@ -96,19 +97,30 @@ func (e *ev) resolved(x events.Event, at time.Time) bool {
 	return false
 }
 
-// acted: 대표가 그 사건 뒤 그 레인·프로젝트(subs)에 조치를 남겼나 — advise_claim의 「조치함」과 같은 재료(opsstate.ActedOn: 조치 동작,
-// 실패·거절 아님). 못 읽으면 아님 — 올려 보내는 쪽으로
-func acted(rep string, at time.Time, subs []string) bool {
-	es, _, err := journal.Read(journal.Filter{Since: at})
-	if err != nil {
+// repSaw: 대표가 그 사건 뒤 턴을 돌렸나 — hc get의 에이전트 상태가 사건 뒤 바뀌었고(status_ms) 지금 막힘·오류가 아님. 놓침 막기가 막는 것은
+// 「대표가 못 봄」이지 「보고 손 안 댐」이 아니다(ht-alert-stale-escalate — 일지 밖 처리·손댈 것 없음이 30분 뒤 모두에게 갔다). 못 읽으면 아님 — 올려 보내는 쪽으로.
+// shortcut: 기준이 보낸 때가 아니라 사건 시각이라 사건과 보냄(한 바퀴·유예) 사이의 상태 바뀜도 봄으로 친다(그 뒤 붙여 넣은 글은 살아 있는 에이전트가 이어 읽는다) — 보낸 시각이 커서에 적히는 날 그것으로
+func repSaw(rep string, at time.Time) bool {
+	t, found, err := hcGet(10, rep)
+	if err != nil || !found || t.State != "live" || t.Status != "idle" && t.Status != "working" && t.Status != "done" {
 		return false
 	}
-	for _, j := range es {
-		if lastSeg(j.By) == lastSeg(rep) && opsstate.ActedOn(j, subs, at) {
-			return true
-		}
+	ms, err := strconv.ParseInt(string(t.Raw["status_ms"]), 10, 64)
+	return err == nil && ms > at.UnixMilli()
+}
+
+// oneEnv: 이 watch가 alert_route one을 처음 본 때(유닉스 초) — 새 판 넘겨줌(selfexec, os.Environ 그대로 exec)에도 남게 프로세스 환경에 둔다
+const oneEnv = "HC_LANE_ALERT_ONE_SINCE"
+
+// oneSince: 기능이 켜진 때 — 그 앞 사건은 놓침 막기로 세지 않는다(옛 사건이 켜자마자 「n분 조치 없음」으로 올라갔다).
+// shortcut: watch를 새로 띄우면(넘겨줌 아님) 그때부터 — 띄우기 전 막힘은 이 watch가 올려 보내지 않는다, 켠 때를 일지에서 읽게 되면 그것으로
+func oneSince() time.Time {
+	if s, err := strconv.ParseInt(os.Getenv(oneEnv), 10, 64); err == nil {
+		return time.Unix(s, 0)
 	}
-	return false
+	now := time.Now()
+	os.Setenv(oneEnv, strconv.FormatInt(now.Unix(), 10)) // 열쇠가 상수라 실패 없음 — 실패해도 다음 바퀴에 다시 적을 뿐
+	return now
 }
 
 // alertRep: 저장소 r(빈 값 = 전역)의 대표 지휘 — 바퀴마다 다시 고른다(e.arep, wfilter가 비움).
