@@ -20,7 +20,7 @@ func launchRows() {
 		say("알림: 설정 overlap은 warn|block|off다, block으로: %s", ov)
 		ov = "block"
 	}
-	OVM, OWN, OVWAIT, OVQ = ov, nil, nil, nil
+	OVM, OWN, OVWAIT, OVQ, WAITOK = ov, nil, nil, nil, map[string]bool{}
 	LOADS, MWHY = map[string]mLoad{}, map[string]string{} // 부하(loadsteer.go) — actTick이 같은 호출로 읽은 기계부터 채운다
 	tickMark("owners")
 	syncOwners()
@@ -270,6 +270,7 @@ func waitRow(r Row) {
 		LIGHT, LIGHTWHY = laneWeight(r) // 감사 줄은 그 레인의 기계에(무게를 안 본다)
 	}
 	if tryOldBusy(name, rid) {
+		hold(name, true)
 		say("옛 실행 정리 기다림 %s", name)
 		return
 	}
@@ -310,6 +311,7 @@ func waitRow(r Row) {
 		return
 	}
 	if parkbusy != "" {
+		hold(name, true)
 		say("주차 정리 기다림 %s: %s", name, parkbusy)
 		return
 	}
@@ -331,6 +333,7 @@ func waitRow(r Row) {
 			if ar == 1 && dash(ef) == "-" {
 				ELIST += "," + name + "=" + bBranch
 			}
+			hold(name, ar == 1) // 판정 못 함(2)은 기다려도 안 풀릴 수 있다 — 놀고 있음 알림에 남긴다
 			return
 		}
 	}
@@ -369,6 +372,7 @@ func waitRow(r Row) {
 		ovlPlaced(name, prj, SB, after, dash(ak))
 	}
 	if !placed && !bad {
+		hold(name, true) // 빈 자리가 있는데도 못 놓음 = 기계 조건(기계 제한·가벼운 일만·능력·부하) — 기다리면 풀림
 		say("자리 없음 %s: 대기", name)
 		if ONLYFULL != "" && !GOTADDR {
 			PINNOW = append(PINNOW, Row{name, rid, "", ONLYFULL})

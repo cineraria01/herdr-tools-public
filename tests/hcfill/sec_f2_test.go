@@ -336,9 +336,18 @@ func secF2(k *K) {
 	rl := k.T + "/report.log"
 	rm(rl)
 	k.run("run")
-	k.check("놀고 있음: 「겹침 대기 n줄」 사유는 그 줄을 받을 수 있는 기계(box-1)에만, 다른 기계는 「띄울 것 없음」(아스트라 중간 5)",
-		fBoth(rl, "box-1 자리 1개", "(겹침 대기 1줄) — 겹침 대기") && fBoth(rl, "대기열에 띄울 것 없음", "box-2 자리 2개") &&
-			!fBoth(rl, "대기열에 띄울 것 없음", "box-1 ") && !fBoth(rl, "겹침 대기", "box-2 "), read(rl))
+	// ht-alert-route ⑩: 그 기계가 받을 대기 줄이 모두 기다리면 풀리는 것(겹침 대기)이면 할 일 없음 — 「겹침 대기」 알림 없이 띄울 것 없음 묶음(idle_empty)에만
+	k.check("놀고 있음: 겹침 대기뿐인 기계(box-1)는 「겹침 대기」 알림 없음 — 띄울 것 없음 묶음에만",
+		fBoth(rl, "대기열에 띄울 것 없음", "box-1 자리 1개") && fBoth(rl, "대기열에 띄울 것 없음", "box-2 자리 2개") &&
+			!strings.Contains(read(rl), "겹침 대기"), read(rl))
+	// 뜰 수 있는데 안 뜬 줄(지시문을 못 읽음 — 기다려도 안 풀림)이 box-1에 있으면 「겹침 대기 n줄」 사유로 그대로 알림
+	k.fOadd("bad", "파일: docs/z.md", "--only", "box-1")
+	rm(k.qcol("bad", 3))
+	k.fBack(2, 700)
+	rm(rl)
+	k.run("run")
+	k.check("놀고 있음: 뜰 수 있는데 안 뜬 줄이 있으면 「겹침 대기 n줄」 사유로 그 기계(box-1)에 알림",
+		fBoth(rl, "box-1 자리 1개", "(겹침 대기 1줄) — 겹침 대기") && !fBoth(rl, "겹침 대기", "box-2 "), read(rl)+k.out)
 
 	secF2k(k)
 }

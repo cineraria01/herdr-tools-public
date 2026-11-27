@@ -34,7 +34,7 @@ func agentGate(cmd string, args []string) {
 	line := strings.Join(append([]string{"hc-fill", cmd}, args...), " ")
 	if why := oaHandoff(cmd, args); why != "" {
 		jotBy("운영 에이전트 "+id, "거절", cmd, why, "사람에게 넘김", "-", oaFlat(line))
-		hcLaneReport("막힘", oaFlat("사람이 정한다: 운영 에이전트("+id+")가 「"+line+"」를 치려 함 — "+why+". 권함: 필요하면 사람이 직접 친다"), "hc-fill-agent", "", "")
+		hcLaneReport("막힘", oaFlat("사람이 정한다: 운영 에이전트("+id+")가 「"+line+"」를 치려 함 — "+why+". 권함: 필요하면 사람이 직접 친다"), "hc-fill-agent", alertOwner(line), "")
 		dieNext("결과 파일에 「사람이 정한다: …」로 적고 다음 일로", "운영 에이전트는 이 명령을 치지 않는다(%s) — 사람에게 넘겼다", why)
 	}
 	switch {

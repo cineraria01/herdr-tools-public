@@ -63,6 +63,9 @@ type ev struct {
 	seenc        map[string]seenCache
 	rgrace       time.Duration        // 남의 저장소 주인 없는 사건을 미루는 유예(repoSend)
 	rdefer       map[string]time.Time // 미룬 열쇠 → 이 watch가 처음 미룬 때(바퀴를 넘어 남음)
+	arep         map[string]repPick   // 이 바퀴 저장소 → 대표 지휘(alertroute.go)
+	rtag         map[string]string    // 이 바퀴 보낼 열쇠 → 받는 쪽 한 구절(alertSend)
+	win          []string             // 이 바퀴 사건(문맥 포함) — 풀림 보기
 	dg           digestState          // 지휘 알림 묶기(digest.go)
 }
 
@@ -400,7 +403,8 @@ func (e *ev) loop(to int64) int {
 			told = append(told, m)
 		}
 		if e.ec == "watch" {
-			e.lrepo = laneRepos(append(append([]string(nil), ctx...), evl...))
+			e.win = append(append([]string(nil), ctx...), evl...)
+			e.lrepo = laneRepos(e.win)
 		}
 		cand := append([]string(nil), evl...)
 		var st []string

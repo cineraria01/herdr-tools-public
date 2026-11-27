@@ -40,7 +40,7 @@ func (e *ev) emit(lines []string) int {
 		if len(imm) > 0 {
 			var parts []string
 			for _, l := range imm {
-				parts = append(parts, wpart(l))
+				parts = append(parts, wpart(l)+e.rtag[lineKey(l)])
 			}
 			msg = append(msg, "hc-lane: "+strings.Join(parts, " ‖ "))
 		}
@@ -110,7 +110,7 @@ func (e *ev) wfilter(lines []string) []string {
 	w0 := lastSeg(e.wto)
 	recipientRun := ""
 	occ := map[string]tri.State{}
-	e.occ, e.seenc = occ, map[string]seenCache{}
+	e.occ, e.seenc, e.arep, e.rtag = occ, map[string]seenCache{}, nil, nil
 	e.pruneDefer()
 	orc := map[string]string{}
 	var out []string
@@ -145,7 +145,7 @@ func (e *ev) wfilter(lines []string) []string {
 		}
 		o := e.evowner(l)
 		if o == "-" {
-			if e.repoSend(l) {
+			if e.alertSend(l) {
 				out = append(out, l)
 			}
 			continue
@@ -175,7 +175,7 @@ func (e *ev) wfilter(lines []string) []string {
 				continue
 			}
 			if oc != om {
-				if !e.prevseen(a, l, o) && e.repoSend(l) {
+				if !e.prevseen(a, l, o) && e.alertSend(l) {
 					out = append(out, l)
 				}
 				continue
@@ -195,7 +195,7 @@ func (e *ev) wfilter(lines []string) []string {
 		if r != tri.No {
 			continue
 		}
-		if !e.prevseen(a, l, o) && e.repoSend(l) {
+		if !e.prevseen(a, l, o) && e.alertSend(l) {
 			out = append(out, l)
 		}
 	}

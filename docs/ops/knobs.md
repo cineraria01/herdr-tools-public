@@ -65,6 +65,7 @@
 - 목록 손잡이 `stack`(쌓아 띄움을 켤 프로젝트, `-` = 끔)과 사슬 깊이 `stack_depth`(겹, 1~5, 기본 2) — [쌓아 띄움](../hc-fill/stack.md).
 - 목록 손잡이 `pr`(PR 거울을 켤 프로젝트, `-` = 끔)과 `pr_max`(바퀴당 gh 호출)·`pr_fail`(바퀴)·`pr_timeout`(초)·`pr_inbox`(완료 없는 레인의 PR, 0·1), 사람 리뷰의 `pr_human`(읽을 작성자 목록, `me` = gh 로그인, `-` = 끔)·`pr_human_block`(착지를 막는 글 종류)·`pr_human_approve`(재승인 기다림, 0·1) — [PR 거울](../hc-fill/pr.md).
 - 지휘 알림 묶기 `coord_digest`(분, 0~120, 기본 0 = 하나씩 — 읽는 도구 hc-lane watch, 보낼 때마다 이 저장 파일을 읽는다) — [watch](../hc-lane/watch.md) 「지휘 알림 묶기」. 주기 전이라도 보내는 개수 `coord_digest_max`(개, 기본 20).
+- 알림 받는 쪽 `alert_route`(`all`|`one`, 기본 `all`)·대표 지휘 `alert_coord`(지휘 주소 목록, 프로젝트별 `alert_coord@<프로젝트>`)·놓침 막기 `alert_escalate_min`(분, 기본 30, 0 끔) — 읽는 도구 hc-lane watch(바퀴마다)·hc-fill(운영 에이전트 사건) — [알림 받는 쪽](../hc-fill/alert-route.md).
 - 상수에서 올린 정책(ht-config-knobs, 2026-11-26 — 기본은 그때 값 그대로): `light_guess`(0·1, 기본 1 — 무게 안 정한 레인을 지시문 「파일:」 줄로 가벼움 추정, [부하](../hc-fill/load-steer.md)), `hang_shell_grace`(초, 기본 180 — [멈춘 레인](../hc-fill/hang.md)의 셸 기다림), `unsure_warn`(바퀴, 기본 5 — 띄움 미확정 막힘 사건), `orphan_alarm`(바퀴, 기본 10 — 남은 무리로 건너뛴 바퀴 막힘 사건), `pr_open_max`(분, 기본 15 — 착지 뒤 OPEN인 PR 닫기), 병합기 `merger_defer_alarm`(바퀴, 기본 10 — 같은 까닭으로 쉰 바퀴 막힘 사건).
 - 묶음 손잡이: 표 줄의 이름이 `접두@`이고 `Per`가 있으면 저장 이름은 `접두@<값>`이다 — `seats@<기계>`·`pause@<기계>`·`light_only@<기계>`(값 부분은 설정 `machine` 줄 이름만 받는다, `hc-fill machine`이 쓰는 길).
   표 기본은 없고(설정 줄 값이 기본), `knob ls`에는 둔 값만 한 줄씩 나온다.

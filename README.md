@@ -38,6 +38,7 @@ README에는 아래 목차 줄만 둔다.
 - [Go 작은 도구](docs/go/small-tools.md)
 - [hc-core-relaunch: 코어 판 맞추기 (--update)](docs/hc-core-relaunch/update.md)
 - [hc-fill: 다른 프로젝트 선행](docs/hc-fill/after-other-project.md)
+- [hc-fill: 알림 받는 쪽](docs/hc-fill/alert-route.md)
 - [hc-fill: 자동 감사](docs/hc-fill/audit.md)
 - [hc-fill: 반송 다시 띄우기](docs/hc-fill/bounce.md)
 - [hc-fill: 지시문 복사](docs/hc-fill/brief-copy.md)

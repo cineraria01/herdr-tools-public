@@ -50,6 +50,20 @@ func claimOK(e journal.Entry, me string, since time.Time) bool {
 	return true
 }
 
+// ActedOn: 일지 줄 e가 since 뒤 subs 가운데 하나를 겨냥한 조치인가 — Claims와 같은 재료(claimOK의 동작·결과 거름, actSubjects의 대상).
+// 누가 했는지는 부르는 쪽이 본다(hc-lane watch의 놓침 막기 — ht-alert-route)
+func ActedOn(e journal.Entry, subs []string, since time.Time) bool {
+	if !claimOK(e, "사람", since) {
+		return false
+	}
+	for _, a := range actSubjects(e) {
+		if has(subs, a) {
+			return true
+		}
+	}
+	return false
+}
+
 // Claims: items마다 대상에 win 안의 다른 지휘 조치가 있으면 Claim을 채운다(가장 최근 하나, 여럿이면 「· 조치 n건」). es는 일지(시각 순), me는 부른 쪽
 // (journal.Who). win 0이면 끔
 func Claims(items []Item, s State, es []journal.Entry, me string, now time.Time, win time.Duration) {

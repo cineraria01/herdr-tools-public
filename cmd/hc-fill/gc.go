@@ -156,7 +156,7 @@ func idleTick() {
 					ion++
 				}
 			}
-			if ion != 0 {
+			if ion != 0 && idleWorth(m) { // 겹침·선행·주차·기계 조건을 기다리는 줄뿐이면 할 일 없음 — 띄울 것 없음(idle_empty)으로
 				ik = "ovl"
 			}
 		}

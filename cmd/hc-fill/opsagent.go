@@ -202,7 +202,7 @@ func oaStart(st *oaState, now time.Time, manual bool, why string) error {
 			hand = append(hand, it.Key)
 		case !k.Done && !k.Asked:
 			msg := fmt.Sprintf("사람이 정한다: %s — 운영 에이전트를 %d번 띄웠는데 못 풀림(시간 넘김·결과 없이 끝남). 권함: hc-fill agent status로 까닭을 보고 직접 조치하거나 손잡이 ops_agent_tries를 늘린다", k.Summary, k.Tries)
-			if hcLaneReport("막힘", oaFlat(msg), "hc-fill-agent", "", "") == 0 {
+			if hcLaneReport("막힘", oaFlat(msg), "hc-fill-agent", alertOwner(k.Summary), "") == 0 {
 				k.Asked = true
 			}
 		}
@@ -521,7 +521,7 @@ func oaFinish(st *oaState, now time.Time) {
 		if i == 5 {
 			break // 한 바퀴에 다섯까지 — 나머지는 결과 파일에
 		}
-		hcLaneReport("막힘", oaFlat(a), "hc-fill-agent", "", "")
+		hcLaneReport("막힘", oaFlat(a), "hc-fill-agent", alertOwner(a), "")
 	}
 	if h := oaHash(); h != r.Hash {
 		e := knob.Entry{Name: "ops_agent", Value: "끔", By: "hc-fill 스스로", Why: "운영 에이전트 실행 중 띄울 명령·틀이 바뀜", At: now.Unix()}
@@ -532,7 +532,7 @@ func oaFinish(st *oaState, now time.Time) {
 		hcLaneReport("막힘", "사람이 정한다: 운영 에이전트 실행("+r.ID+") 중에 띄울 명령("+oaLaunchK+")이나 틀("+oaTmpl+")이 바뀌었다 — ops_agent를 끔으로 둠. 권함: 바뀐 것을 보고 맞으면 hc-fill knob unset ops_agent 뒤 다시 켠다", "hc-fill-agent", "", "")
 	}
 	msg := oaFlat(fmt.Sprintf("운영 에이전트 끝: %s (%s, %s, 손댈 것 %d개, 일지 hc-fill journal --by %s)", summary, kind, r.Mode, len(r.Keys), oaJournalBy(r)))
-	if hcLaneReport("중간", msg, "hc-fill-agent", "", "") != 0 {
+	if hcLaneReport("중간", msg, "hc-fill-agent", alertOwner(summary), "") != 0 {
 		say("운영 에이전트: 끝 사건을 보내지 못했다(hc-lane report)")
 	}
 	jotBy("hc-fill 스스로", "agent 끝", r.ID, "", kind, "-", summary)
