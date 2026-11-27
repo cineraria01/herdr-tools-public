@@ -151,6 +151,12 @@ func prepRepo(rdir string) {
 	if !dry && remote && xfetch(repo, "-q", "origin") != 0 {
 		die("git fetch 실패: %s", repo)
 	}
+	if revive { // 있어야 할 작업 트리·가지는 reviveGate가 봤다
+		if !dry && remote {
+			ffmain(repo, base)
+		}
+		return
+	}
 	again := "다른 이름은 --branch <이름>"
 	// 이미 있나: 0 있음, 1 없음만 잇는다. 그 밖(hc 실패 125·시간 넘김)은 모름 — 띄우지 않는다(hc-exec-result)
 	there := func(what string, args ...string) bool {
@@ -231,6 +237,9 @@ func laneEnvs(tid string) []string {
 		envs = append(envs, "LANE_BASE="+base)
 	} else {
 		envs = append(envs, "LANE_WORKTREE="+wt, "LANE_BRANCH="+branch, "LANE_BASE="+base)
+	}
+	if reviveSess != "" { // 실행 명령 틀이 $HC_LANE_CONTINUE를 CLI 인자 자리에 둔다 — 한 낱말(zsh는 변수를 나누지 않는다, docs/hc-lane/revive.md)
+		envs = append(envs, "HC_LANE_CONTINUE=--resume="+reviveSess)
 	}
 	// 레인 안에서도 주인 지휘를 알게(사건 11칸). 지휘 터미널에서 바로 띄우면 그 지휘, 모르면 *(주인 없음)
 	lenvO := os.Getenv("HC_LANE_OWNER")
@@ -322,7 +331,9 @@ func launchDry(nn, envs, rest []string, wfrom string) {
 		fmt.Printf("[dry-run] git -C %s fetch -q origin\n", q(repo))
 		fmt.Printf("[dry-run] 메인 폴더 앞당김(기본 브랜치 %s·추적 변경 없음·merge/rebase 없을 때만): git -C %s merge --ff-only %s\n", base, q(repo), bref)
 	}
-	if !read {
+	if revive {
+		fmt.Printf("[dry-run] 이어 띄움: 작업 트리 %s%s 그대로(만들기·설정 훅·실어 온 자료 풀기 건너뜀), 임대 refs/hc-lanes/%s 이어 씀(%s)\n", onc(), q(wt), name, cut(reviveLease, 12))
+	} else if !read {
 		tk := ""
 		if wfrom == bref {
 			tk = "--track "
@@ -386,16 +397,8 @@ func makeWorktree(wfrom string) {
 // takeLease: 쓰기 레인은 hc run 직전에 원격 refs/hc-lanes/<레인>을 없을 때만 만든다(모르면 안 띄움).
 // 반환: 임대 sha(원격 없음이면 빈 값), 띄우지 않고 끝낼 종료 코드(0이면 잇는다)
 func takeLease() (string, int) {
-	who := on
-	if who == "" {
-		if h, r := outOf(nil, []string{"hostname", "-s"}); r == 0 {
-			who = h
-		} else {
-			who = "-"
-		}
-	}
 	leaseBranch = branch // 임대 주인 표식 refs/hc-lease-owners/<가지>(셸 lease_x의 ${branch-})
-	lo, lr := leaseX("take", name, who)
+	lo, lr := leaseX("take", name, leaseWho())
 	switch lr {
 	case 0:
 		return lo, 0
@@ -416,6 +419,17 @@ func takeLease() (string, int) {
 		errf("hc-lane: 임대를 잡지 못했다(git ls-remote·push origin 실패, 종료 %d). 레인을 띄우지 않았다 — 원격이 닿으면 다시. %s\n", lr, rollback())
 		return "", 1
 	}
+}
+
+// leaseWho: 임대 제목의 기계 칸 — --on이면 그 기계, 아니면 이 기계 hostname -s(모르면 -)
+func leaseWho() string {
+	if on != "" {
+		return on
+	}
+	if h, r := outOf(nil, []string{"hostname", "-s"}); r == 0 {
+		return h
+	}
+	return "-"
 }
 
 // hcRunLane: hc run --bg를 상한 안에서 돌려 표준 출력을 돌려준다. 실패면 거절(종료 1)·미확정(종료 5)으로 끝낸다
@@ -494,6 +508,10 @@ func recordLane(tid string, fill bool) {
 
 // launchRun: 실제로 띄운다 — 작업 트리 → 임대 → hc run → 레인 기록·감시·시작 확인. ok=false면 띄우지 않았다(code로 끝낸다)
 func launchRun(nn, envs, rest []string, wfrom, tid string, fill bool) (code int, ok bool) {
+	if revive { // 만들기·훅·풀기·임대 잡기 없이 — 임대는 reviveGate가 본 값을 이어 쓴다
+		envs = append([]string{"HC_LANE_LEASE=" + reviveLease}, envs...)
+		return launchHC(nn, envs, rest, reviveLease, tid, fill), true
+	}
 	if !read {
 		makeWorktree(wfrom)
 		carryIn()

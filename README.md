@@ -91,6 +91,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane 병합기 (제출·merger, 최소판)](docs/hc-lane/merger.md)
 - [hc-lane park (주차)](docs/hc-lane/park.md)
 - [hc-lane rerere (같은 충돌 다시 풀기)](docs/hc-lane/rerere.md)
+- [hc-lane 이어 띄우기 (--revive)](docs/hc-lane/revive.md)
 - [hc-lane stats (착지 통계)](docs/hc-lane/stats.md)
 - [hc-lane watch (늘 도는 감시)](docs/hc-lane/watch.md)
 - [launchd 작업: 지킴이(`hc-launchd-guard`)로 Herdr 터미널에서](docs/hc-launchd-guard/guard.md)

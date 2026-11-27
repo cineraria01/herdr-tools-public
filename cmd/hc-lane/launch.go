@@ -63,6 +63,9 @@ func anySteps(w io.Writer) {
 		readSteps(w)
 	} else {
 		printSteps(w)
+		if revive {
+			reviveSteps(w)
+		}
 	}
 }
 
@@ -86,6 +89,9 @@ func launchMain(args []string) int {
 	if queueOnly(fill, tid) {
 		return 2
 	}
+	if revive {
+		reviveGate() // 있는 작업 트리에 이어 띄움 — 아니면 여기서 끝난다(launchrevive.go)
+	}
 	liveNameCheck()
 	nn := launchSettings(fill)
 	rest = briefCommand(rest)
@@ -94,8 +100,13 @@ func launchMain(args []string) int {
 	if resume {
 		wfrom = resumeFrom() // --resume: 주차한 가지를 받아 그 참조에서 시작(launchresume.go)
 	}
-	wfrom = stackFrom(wfrom) // 쌓아 띄움: 선행 제출 P에서(stack.go)
+	if !revive { // 이어 띄움은 작업 트리가 이미 있어 시작점을 쓰지 않는다(범위 환경 HC_LANE_STACK은 laneEnvs가 그대로 넘긴다)
+		wfrom = stackFrom(wfrom) // 쌓아 띄움: 선행 제출 P에서(stack.go)
+	}
 	rest = placeBrief(rest)
+	if revive {
+		reviveSess = reviveSession() // 사본 경로(runBrief)로 레인 자신의 대화를 고른다
+	}
 	// 작업별 임시 폴더(docs/hc-sweep/job-tmp.md): 레인·감사 안의 TMPDIR을 그 작업 것으로 — 에이전트가 그대로 터미널의 프로그램(exec 꼴), 지우기는 hc-sweep
 	rest = jobtmp.Wrap(cfg(jobtmp.Key, jobtmp.Default), name, cwd, false, rest)
 	envs := laneEnvs(tid)

@@ -84,6 +84,9 @@ func firstAddr(out string) string {
 
 // rollback: 띄우기 전에 실패하면 방금 만든 작업 트리·가지를 지운다 — 고유 커밋이 없을 때만. 돌려준 값은 die에 붙일 한 줄
 func rollback() string {
+	if revive { // 이어 띄움은 작업 트리를 만들지 않았다 — 커밋 안 된 변경이 든 그 작업 트리를 지우지 않는다
+		return fmt.Sprintf("작업 트리 %s%s 는 그대로 둠(--revive)", wt, onNote())
+	}
 	from := wstart // 주차 가지·쌓아 띄움은 시작이 기본 브랜치에 없는 커밋을 담는다 — 그건 이 레인의 고유 커밋이 아니다
 	if from == "" {
 		from = bref
