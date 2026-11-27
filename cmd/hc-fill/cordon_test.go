@@ -27,6 +27,10 @@ export M; exec "$@"
 const ctFakeLane = `#!/bin/sh
 if [ "$1" = report ]; then printf '%s\n' "$*" >>"$CD/ev.log"; [ -f "$CD/report.rc" ] && exit 1; exit 0; fi
 if [ "$1 $2" = "merger --spec-idle" ]; then
+  if [ "$3" = --remote-auth ]; then
+    echo "${M:-a}" >>"$CD/auth.calls"; a="$CD/${M:-a}.auth"; [ -f "$a" ] || exit 2; f="$CD/${M:-a}"; [ -f "$f" ] || exit 2
+    head -1 "$f"; cat "$a"; tail -n +2 "$f"; exit 0
+  fi
   if [ "$3" = --repo-read ]; then f="$CD/${M:-a}"; [ -f "$f" ] || exit 2; cat "$f"; exit 0; fi
   echo "load=0.10 cpus=8 verifies=0 gates=0"; exit 0
 fi
@@ -58,8 +62,8 @@ func ctFix(t *testing.T) *ctx {
 	}
 	t.Setenv("CD", cd)
 	t.Setenv("PATH", cd+":"+os.Getenv("PATH"))
-	CORDON, REPOCK, ROWS, TERMS = nil, nil, nil, nil
-	t.Cleanup(func() { CORDON, REPOCK, TERMS = nil, nil, nil })
+	CORDON, REPOCK, AUTHCK, ROWS, TERMS = nil, nil, nil, nil, nil
+	t.Cleanup(func() { CORDON, REPOCK, AUTHCK, TERMS = nil, nil, nil, nil })
 	c := &ctx{t, cd, re}
 	c.set("a", ctGood)
 	c.set("b", ctGood)
@@ -78,16 +82,18 @@ func (c *ctx) ev() string { b, _ := os.ReadFile(c.cd + "/ev.log"); return string
 // tick: 바퀴 하나(이 바퀴 점검을 비우고 cordonTick) — 앞 기록의 때를 back초 앞으로 당겨 문턱·간격을 기다리지 않는다
 func (c *ctx) tick(back int64) {
 	c.t.Helper()
-	var rs []Row
-	for _, r := range readRows(cordonFile()) {
-		rs = append(rs, r.Set(cdSince, fmt.Sprint(int64(atoi10(r.F(cdSince)))-back)).Set(cdAt, fmt.Sprint(int64(atoi10(r.F(cdAt)))-back)))
-	}
-	if len(rs) > 0 {
-		if err := writeAtomic(cordonFile(), rowsText(rs)); err != nil {
-			c.t.Fatal(err)
+	for _, ck := range cordonCks {
+		var rs []Row
+		for _, r := range readRows(ck.file()) {
+			rs = append(rs, r.Set(cdSince, fmt.Sprint(int64(atoi10(r.F(cdSince)))-back)).Set(cdAt, fmt.Sprint(int64(atoi10(r.F(cdAt)))-back)))
+		}
+		if len(rs) > 0 {
+			if err := writeAtomic(ck.file(), rowsText(rs)); err != nil {
+				c.t.Fatal(err)
+			}
 		}
 	}
-	REPOCK = map[string]repoCk{}
+	REPOCK, AUTHCK = map[string]repoCk{}, map[string]string{}
 	cordonTick()
 }
 

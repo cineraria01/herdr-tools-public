@@ -155,7 +155,7 @@ func actTick(rows []Row) {
 			why[e.p+"\t"+e.n] = "@" + e.m + " 저장소 경로 없음(설정 repo)"
 			continue
 		}
-		if cordonOn(e.m) { // 격리(저장소 읽기 막힘) — 작업 트리 읽기가 막혀 바퀴를 늦춘다. 점검은 cordonTick이 상한 안에서
+		if repoCordonOn(e.m) { // 격리(저장소 읽기 막힘 — 원격 로그인 거절은 작업 트리를 읽을 수 있어 그대로 본다) — 작업 트리 읽기가 막혀 바퀴를 늦춘다. 점검은 cordonTick이 상한 안에서
 			why[e.p+"\t"+e.n] = "@" + e.m + " " + cordonWhy
 			continue
 		}

@@ -177,18 +177,31 @@ func verifyCount(ps string, self int) (n, gates int) {
 
 // specIdleMain: hc-lane merger --spec-idle — 이 기계의 한가함 한 줄(병합기가 hc exec --on으로 부른다). 못 재면 종료 1.
 // --repo-read <폴더>…이면 이어서 저장소 읽기 점검 줄들(reporead.go — hc-fill이 부른다). 옛 판은 인자를 거절해(종료 2) 그 줄이 없다 = 모름
+// --remote-auth --repo-read <폴더>…이면 그 폴더들로 원격 로그인 점검 한 줄도(remoteauth.go — 점검 줄들 앞에, 한가함·읽기와 함께 돌려 시간을 늘리지 않음)
 func specIdleMain(a []string) int {
+	ra := len(a) > 0 && a[0] == "--remote-auth"
+	if ra {
+		a = a[1:]
+	}
 	rr := len(a) > 0 && a[0] == "--repo-read"
-	if !rr && len(a) != 0 {
-		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-idle 은 --repo-read <폴더>… 말고는 인자를 받지 않는다")
+	if !rr && (len(a) != 0 || ra) {
+		fmt.Fprintln(os.Stderr, "hc-lane merger: --spec-idle 은 [--remote-auth] --repo-read <폴더>… 말고는 인자를 받지 않는다")
 		return 2
+	}
+	auth := make(chan string, 1)
+	if ra {
+		go func() { auth <- remoteAuth(a[1:]) }()
 	}
 	i, ok := idleProbe()
 	if ok {
 		fmt.Println(i)
 	}
 	if rr {
-		for _, l := range repoRead(a[1:]) {
+		ls := repoRead(a[1:])
+		if ra {
+			fmt.Println(<-auth)
+		}
+		for _, l := range ls {
 			fmt.Println(l)
 		}
 	}

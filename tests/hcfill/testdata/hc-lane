@@ -5,8 +5,10 @@ if [ "${1-}" = coord ] && [ "${2-}" = --set ]; then   # 지휘 정보 남기기:
   echo "${3-}" >>"$T_LOG/coordset.log"; [ -z "${HC_FAKE_COORDSET_HOOK-}" ] || bash -c "$HC_FAKE_COORDSET_HOOK" >/dev/null 2>&1   # COORDSET_HOOK: add가 잠금 밖에서 기다리는 사이 끼어드는 일
   case " ${HC_FAKE_COORD_SET_FAIL-} " in *" ${3-} "*) echo "hc-lane coord --set: ${3-} 는 지휘가 아니다(가짜)" >&2; exit 1 ;; esac; echo "${3-}"; exit 0; fi
 if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord: 지휘 없음(가짜)" >&2; exit 1; }; echo "$HC_FAKE_COORD"; exit 0; fi   # 지휘 정보 확인
-if [ "${1-}" = merger ] && [ "${2-}" = --spec-idle ]; then [ -n "${HC_FAKE_SPEC_IDLE-}" ] || exit 1; echo "$HC_FAKE_SPEC_IDLE"   # 부하 조각의 도는 검증 수 — 없으면 모름
-  [ "${3-}" != --repo-read ] || cat "$T_LOG/repo-read.${HC_FAKE_ON:-here}" 2>/dev/null; exit 0; fi   # 저장소 읽기 점검 — 그 기계 몫 파일이 없으면 줄 없음(모름)
+if [ "${1-}" = merger ] && [ "${2-}" = --spec-idle ]; then [ -n "${HC_FAKE_SPEC_IDLE-}" ] || exit 1   # 부하 조각의 도는 검증 수 — 없으면 모름
+  ra=; a="${3-}"; [ "$a" != --remote-auth ] || { ra=1; a="${4-}"; }; case "$a" in ""|--repo-read) ;; *) exit 2 ;; esac; [ -z "$ra" ] || [ "$a" = --repo-read ] || exit 2   # 진짜처럼 모르는 꼴은 거절
+  echo "$HC_FAKE_SPEC_IDLE"; [ -z "$ra" ] || { echo "${HC_FAKE_ON:-here}" >>"$T_LOG/remote-auth.calls"; cat "$T_LOG/remote-auth.${HC_FAKE_ON:-here}" 2>/dev/null || echo "remote-auth 1 0 git.example.test -"; }   # 원격 로그인 점검 — 몫 파일이 없으면 좋음
+  [ "$a" != --repo-read ] || cat "$T_LOG/repo-read.${HC_FAKE_ON:-here}" 2>/dev/null; exit 0; fi   # 저장소 읽기 점검 — 그 기계 몫 파일이 없으면 줄 없음(모름)
 if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi
 if [ "${1-}" = gc ]; then echo "$*" >>"$T_LOG/gc.log"; i=0; while [ "$i" -lt "$((${HC_FAKE_GC_SLEEP:-0} * 10))" ] && [ ! -e "$T_LOG/gc.release" ]; do sleep 0.1; i=$((i + 1)); done; echo "지움 0 · 남김 0"; exit "${HC_FAKE_GC_RC:-0}"; fi   # gc는 따로 기록 — $HC_FAKE_GC_SLEEP초 걸림, $T_LOG/gc.release가 생기면 그때 끝남

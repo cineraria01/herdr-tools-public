@@ -21,7 +21,7 @@ func launchRows() {
 		ov = "block"
 	}
 	OVM, OWN, OVWAIT, OVQ, WAITOK = ov, nil, nil, nil, map[string]bool{}
-	LOADS, MWHY, REPOCK = map[string]mLoad{}, map[string]string{}, map[string]repoCk{} // 부하(loadsteer.go)·읽기 점검(cordon.go) — actTick이 같은 호출로 읽은 기계부터 채운다
+	LOADS, MWHY, REPOCK, AUTHCK = map[string]mLoad{}, map[string]string{}, map[string]repoCk{}, map[string]string{} // 부하(loadsteer.go)·읽기·원격 로그인 점검(cordon.go) — actTick이 같은 호출로 읽은 기계부터 채운다
 	tickMark("owners")
 	syncOwners()
 	tickMark("load")

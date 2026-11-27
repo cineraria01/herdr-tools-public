@@ -245,10 +245,14 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		}
 		s.Machines = append(s.Machines, x)
 	}
-	cds := cordonLoad() // 격리(cordon.go) — 닿지 않는 기계도 칸은 싣는다
+	cds := cordonOnRows() // 격리(cordon.go — 점검 여럿이면 가장 이른 시작·까닭을 「; 」로) — 닿지 않는 기계도 칸은 싣는다
 	for i, x := range s.Machines {
-		if c := cds[x.Name]; c.On {
-			s.Machines[i].Cordon = &opsstate.Cordon{SinceS: max(0, now.Unix()-c.Since), Why: c.Why}
+		if cs := cds[x.Name]; len(cs) > 0 {
+			cd := &opsstate.Cordon{SinceS: max(0, now.Unix()-cs[0].Since), Why: cs[0].Why}
+			for _, c := range cs[1:] {
+				cd.SinceS, cd.Why = max(cd.SinceS, now.Unix()-c.Since), cd.Why+"; "+c.Why
+			}
+			s.Machines[i].Cordon = cd
 		}
 	}
 

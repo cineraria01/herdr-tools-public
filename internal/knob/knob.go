@@ -66,7 +66,7 @@ var Defs = []Def{
 	{Name: "skew_min", Tool: "hc-fill", Default: "10", Min: 1, Max: 1440, Unit: "분", Desc: "한 기계가 load_busy를 넘은 채 한가한 기계가 있으면 이만큼 뒤 치우침 사건"},
 	{Name: "skew_every", Tool: "hc-fill", Default: "60", Min: 0, Max: 1440, Unit: "분", Desc: "치우침 사건 되풀이 간격(0이면 끔)"},
 	{Name: "unreach", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "레인이 있는 기계가 이만큼 연결 안 됨이면 주인 지휘에 한 번(0이면 끔, docs/hc-fill/unreach.md)"},
-	{Name: "cordon", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "기계가 저장소 폴더를 이만큼 못 읽으면 격리 — 새 레인·감사·병합 검증을 안 보내고 돌아오면 스스로 풂(0이면 격리 안 하고 5분에 알리기만, docs/hc-fill/cordon.md)"},
+	{Name: "cordon", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "기계가 저장소 폴더를 이만큼 못 읽거나 원격 저장소가 자격을 이만큼 거절하면 격리 — 새 레인·감사·병합 검증을 안 보내고 돌아오면 스스로 풂(0이면 격리 안 하고 5분에 알리기만, docs/hc-fill/cordon.md)"},
 	// 상태 한 장의 「눈에 띄는 것」 문턱(2026-11-24 ops-state, docs/ops/state.md) — 사실만 보이고 조치는 하지 않는다
 	{Name: "state_stage", Tool: "hc-fill", Default: "90", Min: 0, Max: 10080, Unit: "분", Desc: "레인이 같은 단계에 이만큼 머물면 눈에 띄는 것(0이면 끔)"},
 	{Name: "state_hot", Tool: "hc-fill", Default: "200", Min: 0, Max: 10000, Unit: "%", Desc: "코어당 부하 이 값 이상인 기계와 state_cool 이하인 기계가 함께 있으면 눈에 띄는 것(0이면 끔)"},

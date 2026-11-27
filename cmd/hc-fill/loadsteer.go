@@ -67,14 +67,21 @@ func (l mLoad) gatesPtr() *int {
 // 꼴이 틀린 줄은 loadParse가 모름으로 읽는다. 한 줄이다(끝 줄바꿈 없음) — 혼자 부를 때는 끝 표식 없이 그대로(잘린 출력은 꼴이 틀려 모름).
 // 이어 그 기계의 도는 저장소 검증 수를 병합기 검증 기계 고르기와 같은 명령(hc-lane merger --spec-idle — 「load=… cpus=… verifies=n」)으로
 // 한 줄 더(ht-skew-verify-cause — 레인 0인 바쁜 기계의 까닭이 병합기 추측 검증임을 보이게). 못 부르면 그 줄이 없어 검증 수만 모름.
-// 같은 호출에 그 기계 repo 줄 폴더들의 읽기 점검(--repo-read — cordon.go). 그 인자를 모르는 옛 판은 거절하니 인자 없이 한 번 더(점검만 모름)
+// 같은 호출에 그 기계 repo 줄 폴더들의 읽기 점검(--repo-read — cordon.go), 물을 차례면 원격 로그인 점검(--remote-auth — cordonauth.go).
+// 그 인자를 모르는 옛 판은 거절(종료 2)하니 하나씩 덜고 다시(점검만 모름 — 원격 로그인 꼴은 거절일 때만 덜어, 한가함을 못 재 종료 1이면
+// 읽기를 두 번 돌지 않는다). 원격 로그인을 물은 조각은 「remote-auth-asked」 한 줄을 먼저 낸다 — 물었는가는 이 표식 하나로만(repoTake)
 func loadSnip(m string) string {
 	rr := ""
 	for _, r := range repoPaths(m) {
 		rr += " " + shq(r.path)
 	}
-	return `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; hc-lane merger --spec-idle --repo-read` +
-		rr + ` || hc-lane merger --spec-idle; } 2>/dev/null || :`
+	try := "hc-lane merger --spec-idle --repo-read" + rr + " || "
+	if authDue(m) {
+		try = "echo " + authAsked + "; hc-lane merger --spec-idle --remote-auth --repo-read" + rr + " || { [ $? = 2 ] && " +
+			strings.TrimSuffix(try, " || ") + "; } || "
+	}
+	return `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; ` +
+		try + `hc-lane merger --spec-idle; } 2>/dev/null || :`
 }
 
 // loadParse: 출력에서 「load」로 시작하는 첫 줄(부하). 꼴이 틀리거나 없으면 모름. --spec-idle 줄이 있으면 그 verifies= 를 검증 수로
@@ -366,7 +373,7 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 				}
 			case "멈춤(조정)":
 				pin = append(pin, m+" 멈춤")
-			case cordonWhy:
+			case cordonWhy, cdAuth.why():
 				pin = append(pin, m+" 격리")
 			case "자리 참":
 				full = m
