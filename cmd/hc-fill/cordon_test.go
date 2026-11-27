@@ -20,6 +20,7 @@ import (
 const ctFakeHC = `#!/bin/sh
 [ "$1" = exec ] || exit 0
 while [ "$1" != -- ]; do [ "$1" = --on ] && M=$2; shift; done; shift
+echo "$M" >>"$CD/exec.calls"
 [ -f "$CD/$M.rc" ] && exit "$(cat "$CD/$M.rc")"
 export M; exec "$@"
 `

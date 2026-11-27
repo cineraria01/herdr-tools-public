@@ -196,7 +196,29 @@ func addCmd(args []string) {
 	dupWarn(name, prj, bf)
 	siblingNote(name, prj, coord, time.Now())
 	thenHint(after, prj)
+	if ovk == "-" {
+		claimNote(bf)
+	}
 	exit(0)
+}
+
+// claimNote <지시문>: 쓰기 줄 지시문에 값 있는 「파일:」·「쓰기:」 예약 줄(겹침 lkeys와 같은 ovExRe)이 없으면 알림 한 줄 — 막지 않는다
+// (2026-11-28 ht-fill-smalls-1128 — 같은 폴더를 고치는 두 레인이 나란히 떠 뒤 것이 합친 뒤 컴파일 실패로 반송됐다, 한쪽에 그 줄이 없었다)
+func claimNote(brief string) {
+	for _, l := range readLines(brief) {
+		if m := ovExRe.FindStringSubmatch(l); m != nil && strings.TrimSpace(m[3]) != "" {
+			return
+		}
+	}
+	say("알림: 지시문에 「파일:」 줄이 없다 — 다른 레인과 겹쳐도 기다리지 않는다")
+}
+
+// claimNoteEdit <이름> <지시문 바꿈>: edit가 지시문을 바꾼 줄이 겹침을 보는 쓰기 줄(겹침 봄 끔·단독·받은편지·감사 줄 아님)이면 claimNote
+func claimNoteEdit(name string, changed bool) {
+	r := qrow(name)
+	if ov := dash(r.F(qOverlap)); changed && r != nil && ov != "overlap-ok" && ov != "solo" && dash(r.F(qReply)) == "-" && !strings.HasPrefix(r.F(qAudit), "audit=") {
+		claimNote(r.F(qBrief))
+	}
 }
 
 // addNote: 「더함」 줄의 괄호 안(프로젝트 뒤) — 기본값이 아닌 칸만

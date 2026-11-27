@@ -188,8 +188,7 @@ func loadTake(m, out string) {
 	repoTake(m, out)
 }
 
-// repoTake: 읽기 점검과 원격 로그인 점검(cordonTick이 따로 부른 조각 — 부하는 loadTick이 안 읽는 기계라 모름 그대로 둔다).
-// 원격 로그인은 loadSnip이 물은 조각(표식 줄 authAsked — 차례를 다시 셈하지 않는다: 감사 atp61ld 중간 1)의 끝 줄이 있는 온전한 출력에서만
+// repoTake: 읽기 점검과 원격 로그인 점검. 원격 로그인은 loadSnip이 물은 조각(표식 줄 authAsked — 차례를 다시 셈하지 않는다: 감사 atp61ld 중간 1)의 끝 줄이 있는 온전한 출력에서만
 func repoTake(m, out string) {
 	ck, ok := repoParse(out)
 	if !ok {
@@ -246,7 +245,7 @@ func cordonTick() {
 		go func(m string) {
 			defer wg.Done()
 			if out, rc := onm(nil, m, loadSnip(m)); rc == 0 {
-				repoTake(m, out)
+				loadTake(m, out) // 부하도 — loadTick이 안 읽는 기계(멈춤 등)의 부하가 이 점검 간격으로 보이게(ht-fill-smalls-1128)
 			}
 		}(m)
 	}

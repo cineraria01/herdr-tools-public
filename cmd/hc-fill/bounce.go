@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"herdr-tools/internal/journal"
 	"herdr-tools/internal/tri"
 )
 
@@ -117,6 +118,31 @@ func bounceGate(n, lane, p string, rec func(string, string), recTell func(string
 		say("반송 다시 띄움 보류 %s: 반송 커밋이 기본 가지에 있는지 모름 — 다음 바퀴에", lane)
 		return false
 	}
+}
+
+// relandGone <레인> <프로젝트> <큐 이름> <대기열 줄>: rebase 충돌 반송의 레인을 지휘가 뺐나(hc-fill rm — 대기열에 그 프로젝트의 그 이름 줄이
+// 없고 일지에 rm 됨 기록, ht-fill-smalls-1128 — 11-27 rm --force 직후의 반송에 -reland가 들어가 지휘가 닫은 레인이 되살아났다).
+// 지웠으면 한 줄·「줄 없음」을 적고 참, 일지를 못 읽으면(모름) 적지 않고 참(다음 바퀴에). 대기열 밖에서 띄운 레인(줄도 rm 기록도 없음)은 거짓 — 지금처럼
+// shortcut: rm 기록은 시각을 가리지 않는다 — 지운 이름을 대기열 밖 레인이 다시 쓰면 그 반송도 안 맞춘다, 겪으면 rm 시각을 제출 시각과 견준다
+func relandGone(lane, p, n string, rows []Row, rec func(string, string)) bool {
+	for _, r := range rows {
+		if r.F(qName) == lane && r.F(qProj) == p {
+			return false
+		}
+	}
+	es, _, err := journal.Read(journal.Filter{Action: "rm", Target: lane})
+	if err != nil {
+		say("다시 맞춤 보류 %s: 대기열에서 지워진 레인인지 모름(일지를 못 읽음: %v) — 다음 바퀴에", lane, err)
+		return true
+	}
+	for _, e := range es {
+		if e.Tool == "hc-fill" && e.Result == "됨" {
+			say("반송 다시 띄움 안 함 %s: 대기열에서 지워진 레인(refs/merge-failed/%s)", lane, n)
+			rec("줄 없음", "-")
+			return true
+		}
+	}
+	return false
 }
 
 func bounceMsg(lane, n string) string {

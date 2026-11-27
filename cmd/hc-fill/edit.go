@@ -213,6 +213,7 @@ func editCmd(args []string) {
 	if rejDrop(name) > 0 { // 띄우기 거절로 멈춘 줄은 고친 뒤 다시 시도(reject.go)
 		say("다시 시도 %s — 띄우기 거절 멈춤을 풀었다", name)
 	}
+	claimNoteEdit(name, brief != "")
 	// 떠 있는 레인: 이미 병합기 큐에 냈으면 그 큐 메타도(prio와 같은 길)
 	if prio != "" && st != "wait" && prioMeta(name, prj, plabel(prio)) == 1 {
 		say("알림: %s 는 아직 병합기 큐에 안 냈다 — 떠 있는 레인 환경의 HC_LANE_PRIORITY는 띄울 때 값이라, 제출한 뒤 다시 edit --priority 하면 큐 메타를 고친다", name)
@@ -274,13 +275,13 @@ func rmCmd(args []string) {
 			st, undo = r.F(qState), rmUndo(r)
 		}
 		qRm(name)
+		jot("rm", name, why, "됨", undo, "상태 "+st) // 잠금 안 — 자동 다시 맞춤이 줄 없음과 이 기록을 함께 본다(reland.go relandGone)
 	})
 	if rc != 0 {
 		exit(rc)
 	}
 	say("뺌 %s (떠 있는 터미널은 그대로)", name)
 	prCloseReq(name, "hc-fill rm "+why) // 열린 PR이 있으면 다음 바퀴에 까닭 댓글 뒤 닫는다(pr.go)
-	jot("rm", name, why, "됨", undo, "상태 "+st)
 }
 
 // editNotUp: 겹침칸·먼저 띄움을 바꿀 수 있는 줄인가(아니면 거절 — DRC). 대기(wait)·주차만, 감사 줄·단독 줄·주차 줄의 먼저 띄움은 아님

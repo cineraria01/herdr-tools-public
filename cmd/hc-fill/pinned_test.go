@@ -52,14 +52,15 @@ func TestPinnedRound(t *testing.T) {
 	pin("p-0")
 	acTick(t)
 	why, since := pinOf("pin", "rp")
-	if why != "here 상한" || since == 0 {
+	// 격리 점검이 자리 찬 here의 부하도 읽어(ht-fill-smalls-1128) 까닭 끝에 「 — 부하 …」가 붙을 수 있다(이 기계의 실제 부하)
+	if why != "here 상한" && !strings.HasPrefix(why, "here 상한 — 부하 ") || since == 0 {
 		t.Fatalf("첫 바퀴 pinned.tsv: %q %d\n%s", why, since, readLinesT(DATA+"/pinned.tsv"))
 	}
-	if st := stStage(stIn{State: "wait", Early: "parked", Pin: why}); st != "대기(묶인 기계 here 상한)" {
+	if st := stStage(stIn{State: "wait", Early: "parked", Pin: why}); st != "대기(묶인 기계 "+why+")" {
 		t.Errorf("상태 단계: %q", st)
 	}
 	for _, r := range qRows() {
-		if r.F(qName) == "pin" && stateWaitWhy(r) != "묶인 기계 here 상한" {
+		if r.F(qName) == "pin" && stateWaitWhy(r) != "묶인 기계 "+why {
 			t.Errorf("state 대기 까닭: %q", stateWaitWhy(r))
 		}
 	}

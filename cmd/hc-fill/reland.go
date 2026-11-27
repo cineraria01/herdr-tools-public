@@ -384,6 +384,9 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		rec("다시 냄", "-")
 		return
 	}
+	if files != "" && relandGone(lane, p, n, qRows(), rec) {
+		return
+	}
 	if files == "" && !bounceGate(n, lane, p, rec, recTell) {
 		return
 	}
@@ -468,9 +471,16 @@ func relandOne(rf, n, files, base string, r Row, mx int, cnt map[string]int, liv
 		say("다시 맞춤 보류 %s: 지시문을 못 씀: %v", lane, err)
 		return
 	}
-	if qAdd(tmp, name, p, bf, "-", "-", "wait", "-", "-", "-", nowMin(), "-", dash(owner), "high", "-", "no-audit", "-") != 0 {
+	gone := false // 위 확인 뒤 넣기 전에 지휘가 rm했을 수 있다 — 대기열 잠금 안에서 다시(rm은 줄 빼기와 일지를 같은 잠금 안에서 한다)
+	if withQ(func() {
+		if gone = relandGone(lane, p, n, qRowsW(), rec); !gone {
+			qAdd(tmp, name, p, bf, "-", "-", "wait", "-", "-", "-", nowMin(), "-", dash(owner), "high", "-", "no-audit", "-")
+		}
+	}) != 0 || gone {
 		os.Remove(tmp)
-		say("다시 맞춤 보류 %s: 대기열에 못 넣음 — 다음 바퀴에", lane)
+		if !gone {
+			say("다시 맞춤 보류 %s: 대기열에 못 넣음 — 다음 바퀴에", lane)
+		}
 		return
 	}
 	cnt[base]++
