@@ -96,6 +96,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-lane stats (착지 통계)](docs/hc-lane/stats.md)
 - [hc-lane watch (늘 도는 감시)](docs/hc-lane/watch.md)
 - [launchd 작업: 지킴이(`hc-launchd-guard`)로 Herdr 터미널에서](docs/hc-launchd-guard/guard.md)
+- [hc-sweep: 정말 쉬는가 (상태는 쉼인데 안에서 일이 도는 터미널)](docs/hc-sweep/busy-idle.md)
 - [hc-sweep: 디스크 쓸기](docs/hc-sweep/disk-sweep.md)
 - [hc-sweep: ego 작업 공간 쓸기 (주인 없이 남은 브라우저 공간 닫기)](docs/hc-sweep/ego-spaces.md)
 - [hc-sweep: 건강 점검 (잠자기 끔·키체인)](docs/hc-sweep/health.md)

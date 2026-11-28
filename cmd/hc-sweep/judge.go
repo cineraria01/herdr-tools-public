@@ -4,7 +4,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -418,37 +417,6 @@ func laneClean(mainRepo, branch string, r runner) (bool, string) {
 	return res.rc == 0, cutRunes(msg, 200)
 }
 
-// sessionID: pid와 그 자손 가운데 ~/.claude/sessions/<pid>.json이 있는 것의 sessionId
-func sessionID(pid int) string {
-	children := map[int][]int{}
-	res := run(30*time.Second, nil, "ps", "-A", "-o", "pid=,ppid=")
-	for _, l := range strings.Split(res.out, "\n") {
-		f := strings.Fields(l)
-		if len(f) == 2 {
-			c, e1 := strconv.Atoi(f[0])
-			p, e2 := strconv.Atoi(f[1])
-			if e1 == nil && e2 == nil {
-				children[p] = append(children[p], c)
-			}
-		}
-	}
-	var todo []int
-	if pid != 0 {
-		todo = []int{pid}
-	}
-	for len(todo) > 0 {
-		p := todo[0]
-		todo = todo[1:]
-		b, err := os.ReadFile(filepath.Join(sessDir, strconv.Itoa(p)+".json"))
-		var m map[string]any
-		if err == nil && json.Unmarshal(b, &m) == nil {
-			return dash(str(m, "sessionId"))
-		}
-		todo = append(todo, children[p]...)
-	}
-	return "-"
-}
-
 // keepList: ~/.claude-tasks/keep의 이름·주소. 파일이 없으면 빈 목록, 있는데 못 읽으면 ok=false(그 바퀴는 닫지 않는다 — E12)
 func keepList() (map[string]bool, bool) {
 	keep := map[string]bool{}
@@ -540,11 +508,14 @@ func sameOwner(t, g map[string]any) bool {
 	return ok1 && ok2 && c1 == c2 && str(g, "name") == str(t, "name")
 }
 
-// closeTerm: 닫기. 「닫힘…」이면 닫힌 것이 확인됨(그때만 부른 쪽이 작업 트리를 정리한다), 「남김…」이면 손대지 않음, 그 밖은 실패·모름
-func closeTerm(t map[string]any, why string) string {
+// closeTerm: 닫기. 「닫힘…」이면 닫힌 것이 확인됨(그때만 부른 쪽이 작업 트리를 정리한다), 「남김…」이면 손대지 않음, 그 밖은 실패·모름.
+// q는 settle의 쉼 판정 — 쉼이 아니면(0값 포함) 닫지 않는다(닫는 길이 쉼 판정을 건너뛰지 못하게)
+func closeTerm(t map[string]any, why string, q rested) string {
+	if q.state != restQuiet {
+		return "남김(쉼 판정을 거치지 않음 또는 쉼 아님)"
+	}
 	address, name, cwd, title := str(t, "address"), str(t, "name"), str(t, "cwd"), str(t, "title")
-	pid, _ := num(t, "pid")
-	sid := sessionID(int(pid)) // 느린 조회(ps)는 마지막 확인 앞에서 끝낸다(R-02 — 그동안 주소가 바뀔 수 있다)
+	sid := dash(q.sid) // 세션 조회(ps)는 settle이 마지막 확인 앞에서 끝냈다(R-02 — 그동안 주소가 바뀔 수 있다)
 	event, ok := laneEvent(t, why)
 	if !ok {
 		record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)

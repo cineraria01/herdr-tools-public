@@ -66,9 +66,10 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			tail := screenTail(str(t, "address"), run)
 			f.tail, f.fill, f.submitted = &tail, fillState(str(t, "name"), str(t, "address"), ""), sub
 		}
-		why, kept := judge(t, f, now, keep)
+		why, kept, q := settle(t, f, now, keep, run)
 		if why == "" {
-			if dry {
+			// 쉼 판정으로 남긴 것은 실제 쓸기에서도 한 줄 — 그 터미널·세션·까닭 종류마다 한 번(closed.log)
+			if dry || q.sig != "" && keptOnce(t, q, kept) {
 				fmt.Printf("남김: %s %s — %s\n", str(t, "address"), dash(str(t, "name")), kept)
 			}
 			continue
@@ -92,7 +93,7 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 			fmt.Println("닫을 것:", line)
 			continue
 		}
-		res := closeTerm(t, why)
+		res := closeTerm(t, why, q)
 		switch {
 		case strings.HasPrefix(res, "닫힘"):
 			closed++

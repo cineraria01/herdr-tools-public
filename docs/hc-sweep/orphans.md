@@ -13,6 +13,7 @@
   - 끔: 그 밖(작업 트리가 지워졌거나 쓰는 터미널 없음).
     그것과 자손에 TERM, 5초 뒤 KILL. pid·나이·명령 앞 80자를 `~/.claude-tasks/closed.log`에.
   - 터미널 닫기 R2(일 끝난 worker)는 parent가 있거나 라벨 `hc-lane=1`인 것 — hc-fill이 띄운 레인은 parent가 없다.
+  - 터미널을 닫는 규칙은 모두 닫기 전에 「정말 쉬는가」(배경 하위 에이전트·대화 기록)를 거친다 — [정말 쉬는가](busy-idle.md).
     이 기계 hc-fill 대기열에 결과를 아직 되돌려 주지 않은(`up`) 받은편지 레인은 닫지 않는다.
   - 착지한 레인의 교착 풀기(2026-11-21 mini-m6-1 land-metrics 16시간 — hc-sweep은 남은 작업 트리 때문에 터미널을, `hc-lane gc`는 그 폴더를 쓰는 터미널 때문에 작업 트리를 남겨 서로 기다렸다): worker가 링크된 작업 트리에서 쉰 지 30분(또는 제출 뒤)이고, 그 레인이 착지했고(`git cherry origin/main HEAD`에 `+` 없음 + 착지 증거 — 이 레인 이름·이 실행의 hc-lane 사건 착지·제출·완료·판정(실행 키 칸 `<주소>@<created_ms>`가 같은 것, 키 없는 옛 줄은 같은 주소이고 이 터미널이 생긴 뒤 것), 없으면 이 터미널이 생긴 뒤의 원격 `refs/hc-landed/<가지>/<초>` — 같은 이름의 옛 레인 증거는 안 친다) 작업 트리가 깨끗하면(`status --porcelain --untracked-files=all` 빔) 보호를 풀고 R2로 닫은 뒤 `hc-lane clean --repo <메인 저장소> --branch <가지>`를 hc exec로 부른다(결과는 closed.log 「작업 트리 정리」).
     git은 모두 hc exec(TCC), 모름이면 남김.
