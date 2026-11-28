@@ -346,7 +346,7 @@ func launchDry(nn, envs, rest []string, wfrom string) {
 		if carry != "" {
 			fmt.Printf("[dry-run] 실어 보낼 묶음 %s 를 %s%s 에 풂(tar -xf)\n", carry, onc(), q(wt))
 		}
-		fmt.Printf("[dry-run] 임대 잡기 refs/hc-lanes/%s (없을 때만 — 이미 있으면 종료 10, 원격 없음이면 임대 없이)\n", name)
+		fmt.Printf("[dry-run] 임대 잡기 refs/hc-lanes/%s (없을 때만 — 이미 있으면 종료 11, 원격 없음이면 임대 없이)\n", name)
 	}
 	line := "[dry-run] hc run --bg --json"
 	for _, n := range nn {
@@ -411,13 +411,15 @@ func takeLease() (string, int) {
 			return "", 1
 		}
 		return "", 0
-	case 3:
+	case 3: // 다시 해도 같음(launchaux.go rcRefuse) — 그 임대 값이 바뀌거나 없어질 때까지
 		onf := ""
 		if on != "" {
 			onf = " --on " + on
 		}
-		errf("hc-lane: 이미 돎 — refs/hc-lanes/%s 를 다른 실행이 쥐고 있다(%s). 레인을 띄우지 않았다(그 실행이 끝났으면 hc-lane lease drop%s --repo %s --name %s). %s\n", name, lo, onf, q(repo), name, rollback())
-		return "", 10
+		sha, sub, _ := strings.Cut(lo, " ")
+		errf("%s%s\n", leaseWatchPre, sha)
+		errf("hc-lane: 이미 돎 — refs/hc-lanes/%s 를 %s. 레인을 띄우지 않았다(그 실행이 끝났으면 hc-lane lease drop%s --repo %s --name %s). %s\n", name, leaseHolder(sub), onf, q(repo), name, rollback())
+		return "", rcRefuse
 	default:
 		errf("hc-lane: 임대를 잡지 못했다(git ls-remote·push origin 실패, 종료 %d). 레인을 띄우지 않았다 — 원격이 닿으면 다시. %s\n", lr, rollback())
 		return "", 1

@@ -30,15 +30,36 @@ case "$1" in
 report) printf '%s\n' "$*" >>"$HC_T/reports"; exit 0 ;;
 coord) echo t0; exit 0 ;;
 --print-steps) echo steps; exit 0 ;;
+lease) echo "$*" >>"$HC_T/lease-calls"
+  if [ "$2" = drop ]; then
+    a="$*"; case " $a " in *" --expect "*) e=${a##*--expect }; e=${e%% *}
+      [ -z "${HC_T_DROP_EXPECT_MISS-}" ] && [ "$e" = "$(cut -d' ' -f1 "$HC_T/lease")" ] || exit 3 ;; esac
+    rm -f "$HC_T/lease"; exit "${HC_T_DROP_RC:-0}"
+  fi
+  case "$*" in *" --on "*) [ -z "${HC_T_LEASE_ON_FAIL-}" ] || exit 1 ;; esac
+  [ "${HC_T_LEASE_RC:-0}" = 0 ] || { echo "hc-lane lease: show하지 못했다(가짜)" >&2; exit "$HC_T_LEASE_RC"; }
+  cat "$HC_T/lease" 2>/dev/null || echo -; exit 0 ;;
 esac
 m=here; [ "$1" = --on ] && m=$2
 echo "$m" >>"$HC_T/calls"
 eval "rc=\${HC_T_RC_$m:-1}"
+if [ -n "${HC_T_HELD-}" ]; then # 임대를 남이 쥠(새 판 hc-lane): 「풀리면 다시」 한 줄 + 「이미 돎」
+  echo "hc-lane: 풀리면 다시: 임대 $(cut -d' ' -f1 "$HC_T/lease")" >&2
+  echo "hc-lane: 이미 돎 — refs/hc-lanes/l1 를 w1의 실행이 2026-11-28T03:54:00Z부터 쥐고 있다(그 이름의 살아 있는 터미널 없음(w1/l1))" >&2
+  exit "$rc"
+fi
 [ "$rc" = 11 ] && echo "hc-lane: 원격 브랜치 origin/l1 가 이미 있다. 다른 이름은 --branch <이름>" >&2
 [ "$rc" = 1 ] && echo "hc-lane: git fetch 실패" >&2
 exit "$rc"
 `)
-	rejW(t, d+"/hc", "#!/bin/sh\ncat >/dev/null; echo /far/runs/l1-run.md\n")
+	rejW(t, d+"/hc", `#!/bin/sh
+if [ "$1" = get ]; then
+  [ "${HC_T_GET_RC:-0}" = 0 ] || exit "$HC_T_GET_RC"
+  [ "$2" = "${HC_T_LIVE-}" ] && { echo "{\"address\":\"$2\",\"name\":\"l1\",\"created_ms\":1700000000000,\"state\":\"live\"}"; exit 0; }
+  echo '{"error":{"kind":"not_found"}}' >&2; exit 3
+fi
+cat >/dev/null; echo /far/runs/l1-run.md
+`)
 	rejW(t, d+"/brief.md", "# 일\n본문\n")
 	rejW(t, Q, strings.Join([]string{"l1", "p", d + "/brief.md", "-", "-", "wait", "-", "-", "-", "t", "-", "t9", "normal", "-", "-", "-", "r1"}, "\t")+"\n")
 	for _, f := range []string{"hc-lane", "hc"} {
@@ -91,6 +112,9 @@ func TestRejectHolds(t *testing.T) {
 	rep := x.read("reports")
 	if strings.Count(rep, "report 막힘") != 1 || !strings.Contains(rep, "l1 띄우기 거절 — 원격 브랜치") || !strings.Contains(rep, "--to t9") || !strings.Contains(rep, "hc-fill retry l1") {
 		t.Fatalf("사건 %q, 바람 주인에게 한 번", rep)
+	}
+	if lc := x.read("lease-calls"); lc != "" { // ⑤ 「풀리면 다시」가 없는 거절은 임대를 보지 않는다(지휘의 retry를 기다림)
+		t.Fatalf("임대 조회 %q, 바람 없음", lc)
 	}
 }
 

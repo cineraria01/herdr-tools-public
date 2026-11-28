@@ -126,7 +126,7 @@ func secB(k *K) {
 	k.add("lh")
 	k.run("run")
 	k.unset("HC_FAKE_LANE_HELD")
-	k.check("hc-lane 종료 10(이미 돎 — 임대 남음): 못 띄움으로 읽어 다음 기계도 10이면 이번 바퀴 포기(줄은 wait 그대로)", k.where("lh") == "wait - -" && countE(ll, "^lh$") >= 2 && grep(k.out, "실패 lh @box-1"))
+	k.check("옛 판 hc-lane 종료 10(이미 돎 — 임대 남음, 새 판은 11): 일시(안전 쪽) — 못 띄움으로 읽어 다음 기계도 10이면 이번 바퀴 포기(줄은 wait 그대로)", k.where("lh") == "wait - -" && countE(ll, "^lh$") >= 2 && grep(k.out, "실패 lh @box-1"))
 	k.fresh()
 	k.set("HC_FAKE_LANE_START=box-1/s6=6")
 	k.add("s6")

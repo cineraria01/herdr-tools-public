@@ -13,18 +13,30 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+
+	"herdr-tools/internal/hcjson"
 )
 
 func init() {
 	register("lease", leaseMain, can("lease"))
 	argSpecs["lease"] = argSpec{
 		head: func(a []string) bool { return len(a) > 0 }, // show|drop
+		// drop --expect <sha>: 지금 값이 그것일 때만 지운다(본 값으로만 — 그 사이 다른 실행이 잡은 임대를 빼앗지 않게, hc-fill rm)
+		flags: map[string]ownFlag{"--expect": {val: true, bad: func(v string) string {
+			if len(v) < 7 || strings.Trim(v, "0123456789abcdef") != "" {
+				return "--expect는 임대 커밋 sha(16진): " + v
+			}
+			return ""
+		}}},
 		check: func(o *opts, rds bool) *parseErr {
 			if o.head != "show" && o.head != "drop" {
 				return &parseErr{usage: true}
 			}
 			if o.repo == "" || o.name == "" || o.branch != "" || !rds || len(o.rest) > 0 {
 				return die1("lease show|drop에는 --on·--repo·--name만 쓴다")
+			}
+			if o.head == "show" && o.own["--expect"] != "" {
+				return die1("--expect는 lease drop에만 쓴다")
 			}
 			return nil
 		},
@@ -36,11 +48,12 @@ var leaseBranch string // --branch(take의 임대 주인 표식 이름)
 func leaseMain(a []string) int {
 	o := mustParse("lease", a)
 	leaseBranch = o.branch
-	return leaseCmd(o.head, o.name)
+	return leaseCmd(o.head, o.name, o.own["--expect"])
 }
 
-func leaseCmd(act, name string) int {
-	lo, r := leaseX(act, name, "")
+// leaseCmd <show|drop> <레인> <drop 기대값|"">: 0 됨 · 1 못 함 · 3 drop 기대값과 지금 값이 다름(안 지움 — 지금 값을 찍음)
+func leaseCmd(act, name, expect string) int {
+	lo, r := leaseX(act, name, expect)
 	switch {
 	case act == "show" && r == 0:
 		fmt.Println(lo)
@@ -50,6 +63,10 @@ func leaseCmd(act, name string) int {
 			return 1
 		}
 		fmt.Println("- (원격 없음 — 임대 없음)")
+	case act == "drop" && r == 3:
+		fmt.Println(lo)
+		eprintf("hc-lane lease: 지금 값이 %s 가 아니다 — 놓지 않았다\n", expect)
+		return 3
 	case act == "drop" && r == 0:
 		fmt.Printf("hc-lane lease: 놓음 refs/hc-lanes/%s\n", name)
 	default:
@@ -80,6 +97,29 @@ func leaseX(op, name, extra string) (string, int) {
 }
 
 func runCmdArgv(o cmdOpt, argv []string) int { return runCmd(o, argv[0], argv[1:]...) }
+
+// leaseHolder <임대 제목>: 「이미 돎」 글의 「누가 쥐었나」 — 「<기계>의 실행이 <UTC>부터 쥐고 있다(터미널 <주소> 살아 있음|…)」.
+// 터미널은 그 기계의 같은 이름(임대 기록에 터미널 칸이 없다 — 이름으로 hc get 한 번, 모르면 모름)
+func leaseHolder(sub string) string {
+	f := strings.Fields(sub)
+	if len(f) != 5 || f[0] != "hc-lane" || f[1] != "lease" {
+		return fmt.Sprintf("다른 실행이 쥐고 있다(%s)", sub)
+	}
+	a := f[3] + "/" + f[2]
+	if h, r := outOf(nil, []string{"hostname", "-s"}); r == 0 && h == f[3] { // 이 기계가 잡은 임대(기계 칸 = hostname -s)
+		a = f[2]
+	}
+	g, rc := hcGetRaw(10, a)
+	t, found, err := hcjson.ParseGet([]byte(g), rc, "")
+	tm := "터미널 " + a + " 살아 있음"
+	switch {
+	case err != nil:
+		tm = "터미널 " + a + " 모름"
+	case !found || t.State == "finished":
+		tm = "그 이름의 살아 있는 터미널 없음(" + a + ") — 끝난 실행이 남긴 임대면 아래로 놓는다"
+	}
+	return fmt.Sprintf("%s의 실행이 %s부터 쥐고 있다(%s)", f[3], f[4], tm)
+}
 
 // leaseCore: 이 기계에서(셸 lease_core와 같은 git 호출·출력)
 func leaseCore(out *bytes.Buffer, op, r, n, x, owner string) int {

@@ -266,8 +266,10 @@ func rmCmd(args []string) {
 		rmPreview(name, force)
 		exit(0)
 	}
+	var gone Row
 	rc := withQ(func() {
 		r := qrow(name)
+		gone = r
 		if r != nil && rowMode(r) == mParked && !force {
 			refuse("%s: 주차 중(refs/park/%s) — 먼저 해 둔 준비 커밋이 있어 지우고 다시 넣으면 새로 뜬다. 선행만 바꿀 거면 hc-fill edit %s --after <선행>, 그래도 지우려면 --force", name, name, name)
 		}
@@ -281,7 +283,83 @@ func rmCmd(args []string) {
 		exit(rc)
 	}
 	say("뺌 %s (떠 있는 터미널은 그대로)", name)
+	rmLease(gone)
 	prCloseReq(name, "hc-fill rm "+why) // 열린 PR이 있으면 다음 바퀴에 까닭 댓글 뒤 닫는다(pr.go)
+}
+
+// rmLease <뺀 줄>: 그 줄 실행의 터미널이 끝났음이 확인되면(pget 끝남) 그 실행이 남긴 레인 임대를 놓는다 — 줄이 빠져 이어 띄울 일(revive)이
+// 더 없고, 같은 이름을 다시 넣으면 그 임대에 걸려 못 뜬다(2026-11-28 ht-retry-class). 남의 임대는 빼앗지 않는다(감사 atp7x2b-3xl3b2 중간 1):
+// 지금 임대의 제목 기계가 그 줄 기계이고, 그 기계에 같은 이름의 살아 있는 터미널(손으로 이어 띄운 실행 등)이 없을 때만, 본 값으로만(--expect) 놓는다.
+// 하나라도 다르거나 모르면 그대로(같은 이름을 다시 넣어 임대에 걸리면 hc-fill이 알리고, 풀리면 스스로 띄운다)
+func rmLease(r Row) {
+	if r == nil || r.F(qState) != "up" || dash(r.F(qAddr)) == "-" || strings.HasPrefix(r.F(qAudit), "audit=") {
+		return
+	}
+	n, m, a := r.F(qName), r.F(qMach), r.F(qAddr)
+	repo := repoOf(r.F(qProj), m)
+	if repo == "" {
+		return
+	}
+	keep := func(why string) { say("임대 그대로 %s — %s", n, why) }
+	if pget(a) != pDone {
+		keep("그 실행 터미널 " + a + " 이 살아 있거나 모른다")
+		return
+	}
+	sha, subj, ok := rejLeaseNow(n, m, repo)
+	switch f := strings.Fields(subj); {
+	case !ok:
+		keep("지금 임대를 읽지 못했다")
+		return
+	case sha == "-":
+		say("임대 없음 refs/hc-lanes/%s — 놓을 것 없음", n)
+		return
+	case len(f) != 5 || f[2] != n || f[3] != leaseMachine(m):
+		keep("지금 임대는 그 줄 실행이 아닌 다른 실행의 것(" + subj + ")")
+		return
+	}
+	ta := n
+	if m != LOCAL {
+		ta = m + "/" + n
+	}
+	if st := nameState(ta); st != pDone {
+		keep("그 기계에 같은 이름 터미널 " + ta + " 이 살아 있다(또는 모른다) — 그 실행의 임대일 수 있다")
+		return
+	}
+	args := []string{"lease", "drop"}
+	if m != LOCAL {
+		args = append(args, "--on", m)
+	}
+	args = append(args, "--repo", repo, "--name", n, "--expect", sha)
+	switch o, rc := (Cmd{Name: "hc-lane", Args: args, Err: errMerge}).Run(); rc {
+	case 0:
+		say("임대 놓음 refs/hc-lanes/%s (%.12s) — 그 실행 터미널 %s 은 이미 끝났다", n, sha, a)
+	case 3:
+		keep("그 사이 임대가 바뀌었다 — 다른 실행이 잡았다")
+	default:
+		say("경고: 임대를 못 놓음 %s — hc-lane %s (%s)", n, strings.Join(args, " "), lastLine(o))
+	}
+}
+
+// leaseMachine <기계>: 그 기계에 띄운 레인의 임대 제목 기계 칸 — hc-lane leaseWho(--on이면 그 기계, 이 기계면 hostname -s)
+func leaseMachine(m string) string {
+	if m != LOCAL {
+		return m
+	}
+	h, _ := os.Hostname()
+	h, _, _ = strings.Cut(h, ".")
+	return h
+}
+
+// nameState <주소>: 이름으로 부른 hc get(응답 주소는 tN이라 견주지 않는다 — pget과 다름). 끝남 확정·살아 있음·모름
+func nameState(addr string) pstate {
+	t, found, err := hcGetAs(addr, "")
+	switch {
+	case err != nil:
+		return pUnknown
+	case !found || t.State == "finished":
+		return pDone
+	}
+	return pLive
 }
 
 // editNotUp: 겹침칸·먼저 띄움을 바꿀 수 있는 줄인가(아니면 거절 — DRC). 대기(wait)·주차만, 감사 줄·단독 줄·주차 줄의 먼저 띄움은 아님

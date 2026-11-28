@@ -120,7 +120,7 @@ func launchMain(args []string) int {
 	} else {
 		var ok bool
 		if code, ok = launchRun(nn, envs, rest, wfrom, tid, fill); !ok {
-			return code // 임대를 못 잡아 띄우지 않았다(1·10)
+			return code // 임대를 못 잡아 띄우지 않았다(1·11)
 		}
 	}
 	launchSummary()

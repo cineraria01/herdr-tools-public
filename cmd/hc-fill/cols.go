@@ -128,6 +128,7 @@ const (
 	rjTold  = 6 // 알린 사건 키(아직이면 -)
 	rjMach  = 7 // 기계
 	rjWhy   = 8 // 까닭
+	rjLease = 9 // reject: 이 임대 값이 바뀌거나 없어지면 풀림(hc-lane 「풀리면 다시: 임대」) — 없거나 -면 지휘의 retry를 기다림(옛 8칸 줄도)
 )
 
 // 쓰기 소유 실행 기록 own.tsv(OREC, docs/hc-fill/overlap.md)

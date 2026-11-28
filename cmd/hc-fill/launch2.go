@@ -219,9 +219,9 @@ func launch(lane, brief, m, repo, dest, owner string) int {
 		say("모름 %s @%s: hc-lane 띄우기 시간 넘김 — 시작했는지 몰라 다른 기계에 띄우지 않음(다음 바퀴에 그 기계를 본다)", lane, mm)
 		LFWHY = "hc-lane 띄우기 시간 넘김 @" + mm
 		return 3
-	case rejHC: // 입력 거절 — 아무것도 안 만들었다(확정 실패). 다른 기계·다음 바퀴에 되풀이하지 않게 place가 줄을 멈춘다
+	case rejHC: // 다시 해도 같음(구분은 hc-lane이 정한다) — 아무것도 안 만들었다. 다른 기계·다음 바퀴에 되풀이하지 않게 place가 줄을 멈춘다
 		tryMark(lane, mm, "")
-		REJWHY = runeCut(strings.TrimPrefix(lastLine(out), "hc-lane: "), 200)
+		rejParse(out)
 		return 4
 	default:
 		LFWHY = runeCut(fmt.Sprintf("hc-lane 종료 %d @%s: %s", lr, mm, strings.TrimSpace(lcTail3(out))), 200)
@@ -370,7 +370,7 @@ func lcLaunchArgs(lane, brief, m, repo, dest, owner, task string) ([]string, boo
 // placed 띄움 · bad 지시문을 못 읽어 이 바퀴엔 그만. stuck을 고쳐 적는다. 쓰기 줄은 터미널 주소를 받은 때 실행 기록에 적고 GOTADDR
 func place(lane, p, brief, only, reply, owner, after string) {
 	placed, bad, GOTADDR, ONLYFULL = false, false, false, ""
-	if why := rejHeld(lane, owner, reply); why != "" { // 띄우기 거절로 멈춘 줄 — 지휘가 retry·edit·rm 할 때까지(reject.go)
+	if why := rejHeld(lane, p, owner, reply); why != "" { // 띄우기 거절로 멈춘 줄 — 지휘가 retry·edit·rm 하거나 임대가 풀릴 때까지(reject.go)
 		say("멈춤 %s: 띄우기 거절 — %s (hc-fill retry %s)", lane, why, lane)
 		bad = true
 		return
@@ -415,8 +415,8 @@ func place(lane, p, brief, only, reply, owner, after string) {
 			EARLYF = mEarly.val()
 		}
 		lr := launch(lane, brief, m, repo, reply, owner)
-		if lr == 4 { // 입력 거절: 다른 기계로 넘기지 않고 줄을 멈춘다
-			rejHold(lane, m, REJWHY, owner, reply)
+		if lr == 4 { // 다시 해도 같음: 다른 기계로 넘기지 않고 줄을 멈춘다
+			rejHold(lane, m, repo, REJWHY, REJLEASE, owner, reply)
 			bad = true
 			break
 		}

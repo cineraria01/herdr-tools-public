@@ -121,13 +121,16 @@ func connectedOf(raw string) ([]string, bool) {
 
 // hcGet: hc get <주소> --json 한 번(proc 상한)을 hcjson.ParseGet으로 — 표준 출력은 터미널 객체, 종료 3의 오류 객체는 표준 오류에 온다.
 // 오류는 모름(연결 실패·시간 넘김·잘림·찌꺼기·모르는 state·주소 다름)
-func hcGet(addr string) (hcjson.Terminal, bool, error) {
+func hcGet(addr string) (hcjson.Terminal, bool, error) { return hcGetAs(addr, addr) }
+
+// hcGetAs <주소> <견줄 주소>: hcGet과 같되 응답 주소를 want와 견준다(빈 값이면 안 견줌 — 이름으로 부르면 응답 주소가 tN)
+func hcGetAs(addr, want string) (hcjson.Terminal, bool, error) {
 	tickCall("hc", []string{"get"})
 	x := exec.Command("hc", "get", addr, "--json")
 	var o, e bytes.Buffer
 	x.Stdout, x.Stderr = &o, &e
 	rc := proc.Code(proc.RunMax(x, proc.Limit(x.Args)))
-	return hcjson.ParseGet([]byte(hcjson.GetOut(o.String(), e.String(), rc)), rc, addr)
+	return hcjson.ParseGet([]byte(hcjson.GetOut(o.String(), e.String(), rc)), rc, want)
 }
 
 // jsonList: raw의 .<key> 배열에서 sel을 통과한 것의 field를 줄로(jq -er 'map(select(…) | .<field>) | join("\n")'). ok=false면 배열 아님

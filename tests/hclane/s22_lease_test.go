@@ -73,9 +73,15 @@ func s22lease(k *K) {
 		k.rc == 0 && la != "" && grep(s22lsub(k, "ls-a"), `^hc-lane lease ls-a [^ ]+ 20[0-9-]+T[0-9:]+Z$`) && k.has("HC_LANE_LEASE="+la))
 	r0 := k.runs()
 	k.run("--name", "ls-a", "--repo", R2, "--", "claude")
-	k.check("임대: 다른 기계(둘째 클론)에서 같은 이름이면 「이미 돎」 종료 10, hc run 안 부름, 워크트리 되돌림, 임대 그대로",
-		k.rc == 10 && k.runs() == r0 && !exists(R2+".wt/ls-a") && !k.gitOK(R2, "show-ref", "-q", "--verify", "refs/heads/ls-a") &&
-			s22lref(k, "ls-a") == la && strings.Contains(k.errf(), "이미 돎") && strings.Contains(k.errf(), "hc-lane lease drop --repo"))
+	k.check("임대: 다른 기계(둘째 클론)에서 같은 이름이면 「이미 돎」 — 다시 해도 같음(종료 11), 「풀리면 다시: 임대 <값>」 한 줄, 쥔 기계·때·터미널(없음), hc run 안 부름, 워크트리 되돌림, 임대 그대로",
+		k.rc == 11 && k.runs() == r0 && !exists(R2+".wt/ls-a") && !k.gitOK(R2, "show-ref", "-q", "--verify", "refs/heads/ls-a") &&
+			s22lref(k, "ls-a") == la && strings.Contains(k.errf(), "이미 돎") && strings.Contains(k.errf(), "hc-lane lease drop --repo") &&
+			strings.Contains(k.errf(), "hc-lane: 풀리면 다시: 임대 "+la+"\n") && grep(k.errf(), `의 실행이 20[0-9-]+T[0-9:]+Z부터 쥐고 있다`) &&
+			strings.Contains(k.errf(), "그 이름의 살아 있는 터미널 없음"))
+	r0 = k.runs()
+	k.runE([]string{"HC_FAKE_LIVE=ls-a"}, "--on", "box", "--name", "ls-a", "--repo", R2, "--", "claude")
+	k.check("임대: 쥔 실행의 터미널이 살아 있으면 그렇다고(종료 11, hc run 안 부름, 임대 그대로)",
+		k.rc == 11 && k.runs() == r0 && strings.Contains(k.errf(), "터미널 ls-a 살아 있음") && s22lref(k, "ls-a") == la)
 	k.run("--read", "--name", "ls-rd", "--repo", R2, "--", "claude")
 	k.check("임대: --read(조사·감사)는 임대를 잡지 않음", k.rc == 0 && s22lref(k, "ls-rd") == "")
 	// push 응답 유실: 원격에는 들어갔는데 push가 실패로 끝남 → 원격 값이 자기 것이면 잡은 것(띄움), 다른 기계의 다시 시도는 10
@@ -89,7 +95,7 @@ func s22lease(k *K) {
 	k.check("임대 응답 유실: push가 실패로 끝나도 원격 값이 이 실행의 것이면 띄움(같은 값을 레인 환경에)", k.rc == 0 && ll != "" && k.has("HC_LANE_LEASE="+ll))
 	r0 = k.runs()
 	k.runE(lost, "--name", "ls-l", "--repo", R2, "--", "claude")
-	k.check("임대 응답 유실 뒤 다른 기계에서 다시 시도: 종료 10, 안 띄움(둘이 뜨지 않음)", k.rc == 10 && k.runs() == r0 && s22lref(k, "ls-l") == ll)
+	k.check("임대 응답 유실 뒤 다른 기계에서 다시 시도: 종료 11, 안 띄움(둘이 뜨지 않음)", k.rc == 11 && k.runs() == r0 && s22lref(k, "ls-l") == ll)
 	r0 = k.runs()
 	k.runE(down, "--name", "ls-d", "--repo", k.R, "--", "claude")
 	k.check("임대 조회·push 실패(원격 닿지 않음): 종료 1, hc run 안 부름(모르면 안 띄움), 방금 만든 워크트리 지움",
@@ -105,8 +111,12 @@ func s22lease(k *K) {
 	// 손으로: lease show·drop
 	k.run("lease", "show", "--repo", k.R, "--name", "ls-l")
 	k.check("lease show: 「값 제목」", k.rc == 0 && k.out == ll+" "+s22lsub(k, "ls-l"))
-	k.run("lease", "drop", "--repo", R2, "--name", "ls-l")
-	k.check("lease drop: 놓음(다른 클론에서도), 그 뒤 다른 기계가 띄울 수 있음", k.rc == 0 && s22lref(k, "ls-l") == "" && strings.Contains(k.out, "놓음 refs/hc-lanes/ls-l"))
+	k.run("lease", "drop", "--repo", R2, "--name", "ls-l", "--expect", "0123456789abcdef")
+	k.check("lease drop --expect: 지금 값이 아니면 종료 3, 지금 값을 찍고 안 지움", k.rc == 3 && k.out == ll && s22lref(k, "ls-l") == ll)
+	k.run("lease", "show", "--repo", R2, "--name", "ls-l", "--expect", ll)
+	k.check("lease show에 --expect는 거절", k.rc != 0 && k.out == "")
+	k.run("lease", "drop", "--repo", R2, "--name", "ls-l", "--expect", ll)
+	k.check("lease drop: 놓음(다른 클론에서도 — --expect가 지금 값이면), 그 뒤 다른 기계가 띄울 수 있음", k.rc == 0 && s22lref(k, "ls-l") == "" && strings.Contains(k.out, "놓음 refs/hc-lanes/ls-l"))
 	k.run("lease", "show", "--repo", k.R, "--name", "ls-l")
 	k.check("lease show: 없으면 「-」", k.rc == 0 && k.out == "-")
 	k.run("lease", "show", "--repo", k.T+"/없는 저장소", "--name", "ls-l")
