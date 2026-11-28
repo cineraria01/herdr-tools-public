@@ -3,6 +3,7 @@
                 판정이고 처음 부를 때 HEAD가 승인 커밋이어야 한다(아니면 종료 2). 시작 표시(<ID>.ack landing + 승인 변경 patch-id)를 남기고,
                 push 직전 <기준>..HEAD의 patch-id가 같을 때만 push한다(차이가 rebase뿐 — 다르면 종료 2, 새 커밋으로 report 완료).
                 push 응답만 잃었으면 다시 부를 때 끝을 마친다. 끝나면 <ID>.done. hc-fill이 취소한 판정(void)은 종료 2.
+                처음 부를 때 이 기계 사건에서 그 판정 실행의 마지막 완료·막힘·주차가 그 커밋의 완료가 아니면 시작 표시 없이 종료 2
                 .claude/herdr-land.sh 위임 경로는 push 관문(hc-lane guard, patchid 판)이 push 범위를 대조한다(관문 없으면 거절)
   land          착지: .claude/herdr-land.sh가 있으면 HERDR_LAND=1 HERDR_LAND_PRIORITY=<수, 없거나 숫자 아니면 0> bash .claude/herdr-land.sh <기본>. 없으면
                 fetch → rebase origin/<기본> → .claude/herdr-verify.sh(없으면 실패, push 안 함) →
@@ -26,6 +27,7 @@
                 원자 push(같은 레인의 옛 표식은 지움, 기본 브랜치는 안 건드림), 접수가 확인되면 「중간 <sha> 제출 <ID> → <큐>」 사건과
                 끝 줄 「제출 …」, 종료 0(이미 들어간 커밋이면 할 것 없음 0). 켜졌는지(원격 설정·켬 표식) 못 읽으면 착지하지 않고 75.
                 HERDR_MERGER=1이면 늘 착지. HERDR_LAND_AFTER는 최소판에 없다(주면 1). clean은 큐 표식(refs/merge-queue/*-<레인>)이 그 SHA인 가지를 「제출됨」으로 지운다.
+                원격 refs/park/<레인>이 HEAD이고 이 레인의 마지막 완료·주차가 그 커밋의 주차면 제출하지 않는다(종료 2 — 주차된 커밋).
                 제출 push 직전 저장소에 .claude/herdr-precheck.sh가 있으면 돌린다(싼 사전 검사 — 실패면 큐에 넣지 않고 그 출력과 함께 종료 1).
                 HERDR_LAND_PUSH_EXTRA="<git push 인자> …"(refspec — 왼쪽 HEAD = 기본 브랜치에 넣는 커밋 — 와 --force-with-lease=<참조>:<SHA>;
                 병합기는 「:<큐> --force-with-lease=<큐>:<SHA>」와 HEAD:refs/hc-landed/<제출 ID>)면 기본 브랜치와 한 번의 --atomic push로

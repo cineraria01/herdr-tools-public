@@ -4,8 +4,32 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"strings"
+
+	"herdr-tools/internal/proc"
 )
+
+// parkLeftClean: 주차한 실행의 hc-lane clean이 그때 그 폴더를 쓰던 터미널(도는 감사 등)에 막혀 작업 트리가 남았으면(ht-submit-still-stands —
+// 그 뒤 clean을 다시 부르는 길이 없어 이어 띄우기가 「워크트리 폴더가 이미 있다」로 거절됐다), 띄우기 전에 지금 있는 clean을 한 번 부른다.
+// 안전 검사는 clean 그대로(쓰는 터미널·커밋 안 된 변경이면 멈춤, 「주차됨」은 원격 refs/park/<레인>이 그 커밋일 때만). 못 지우면 아래 「이미 있다」 거절 그대로
+func parkLeftClean() {
+	if xrun(nil, io.Discard, "test", "-e", wt) != 0 {
+		return
+	}
+	a := []string{"clean", "--repo", repo, "--branch", branch}
+	if on != "" {
+		a = append(a, "--on", on)
+	}
+	errf("hc-lane: --resume: 주차 뒤 남은 작업 트리 %s — hc-lane clean 을 한 번 부른다\n", wt)
+	c := exec.Command(selfPath, a...)
+	c.Stdout, c.Stderr = os.Stderr, os.Stderr
+	if err := proc.Run(c); err != nil { // 결과는 바로 뒤 「이미 있나」가 다시 본다
+		errf("hc-lane: --resume: 남은 작업 트리를 지우지 못했다(%v) — 그대로 둔다\n", err)
+	}
+}
 
 // resumeFrom: park가 원격 refs/park/<레인>에 둔 가지를 직접 받는다(제출 가지 lane/<레인>과 다른 이름 — 병합기·clean이 헷갈리지 않게).
 // 옛 판이 주차한 lane/<레인>은 refs/park/<레인>이 없을 때만 받는다(바꾼 날 주차해 둔 레인). 돌려준 값은 작업 트리 시작 참조

@@ -342,6 +342,7 @@ func submitCmd() {
 	if rc != 0 {
 		die("land(제출): origin/%s 가 없다", base)
 	}
+	parkGate(sh) // 주차된 커밋은 내지 않는다 — 판정 시작 표시를 두기 전(stands.go)
 	lpid = ""
 	if lvd != "" {
 		bref, blab = ob, "origin/"+base

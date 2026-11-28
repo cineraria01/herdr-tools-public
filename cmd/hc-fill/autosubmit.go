@@ -241,6 +241,11 @@ func aAutoSubmit(base string) bool {
 	case end.mark != "none" && !strings.HasSuffix(end.mark, "+fill"):
 		fmt.Println("대기열 제출 안 함 " + auLn + ": 판정 " + auAid + " 표시가 이미 " + end.mark + "(에이전트가 먼저 받음·취소) — 손대지 않는다")
 		return true
+	case landed && strings.Contains(last, "의 완료(") && strings.Contains(last, "가 서 있지 않다"):
+		// land --verdict가 그 기계의 지금 사건으로 거절(hc-lane stands.go lvStands — 바퀴를 읽은 뒤 레인이 막힘·주차를 적음). 시작 표시 전이라
+		// 넘길 것이 없고, 「착지하라」로 깨우지 않는다 — 다음 바퀴의 aGate가 새 사건으로 보류한다(ht-submit-still-stands 감사 낮음 2)
+		fmt.Println("대기열 제출 멈춤 " + auLn + ": " + last + " — 깨우지 않고 다음 바퀴에")
+		return true
 	default:
 		step := "verdict"
 		if landed {

@@ -209,7 +209,7 @@ func aDeliver() {
 		return
 	}
 	if pr == pDone || PRUN != auPrun {
-		if aVoid(auAid, auLn, auAm) == avVoid && !auRebound("판정 취소") {
+		if aVoid(auAid, auLn, auAm) == avVoid && !auRebound("판정 취소") && !aHeldEnd() {
 			aEsc(auAid, "parent-ended", auLn+" 감사 "+auRnd+"번째 판정("+auAv+")을 수거하기 전에 부모 실행("+auPrun+")이 끝났다 — 지휘 판단 ("+auAn+" "+auRep+")")
 		}
 		return
@@ -224,6 +224,10 @@ func aDeliver() {
 			aupd(auAid, cv{atState, "superseded"})
 			fmt.Println("판정 취소 " + auAn + ": " + auLn + " 이 수거 전에 새 완료를 적었다 — 새 차수로")
 		}
+		return
+	}
+	unk, stop := aGate() // 그 완료가 아직 서 있나(stands.go) — 아니면 판정을 두지 않음, 모르면 두되 이 바퀴는 제출·깨우기 없이
+	if stop {
 		return
 	}
 	ref, ok := abase(aproj(auAid), auAm)
@@ -273,7 +277,7 @@ func aDeliver() {
 		}
 		asNote = "대기열이 시작한 제출이 끝나지 않았다(앞 바퀴) — 에이전트에 넘김"
 	case "none":
-		if aAutoSubmit(branch) {
+		if !unk && aAutoSubmit(branch) {
 			return
 		}
 	}
@@ -292,7 +296,7 @@ func aDeliver() {
 	if isDigits(auAlw) {
 		alw = int64(atoi10(auAlw))
 	}
-	if now-alw >= int64(WAKE*60) || asNote != "" {
+	if !unk && (now-alw >= int64(WAKE*60) || asNote != "") {
 		wn := ""
 		if asNote != "" {
 			wn = " — " + asNote

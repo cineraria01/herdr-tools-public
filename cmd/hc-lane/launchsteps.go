@@ -157,6 +157,9 @@ func prepRepo(rdir string) {
 		}
 		return
 	}
+	if resume && !dry {
+		parkLeftClean() // 주차 뒤 남은 작업 트리(launchresume.go)
+	}
 	again := "다른 이름은 --branch <이름>"
 	// 이미 있나: 0 있음, 1 없음만 잇는다. 그 밖(hc 실패 125·시간 넘김)은 모름 — 띄우지 않는다(hc-exec-result)
 	there := func(what string, args ...string) bool {

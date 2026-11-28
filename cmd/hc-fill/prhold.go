@@ -35,15 +35,11 @@ func (r *prRun) phPending(byPR map[string]*prEnt) {
 			continue
 		}
 		fam := r.phFamily(e)
-		sha := phFixed(fam, T)
-		if sha != "" && (knobInt("pr_human_approve") == 0 || phApproved(rows, P, T)) {
+		sha, kind, label := phJudge(rows, P, T, fam)
+		if label == "" {
 			phAdd("done", P, sha, utcnow(), "-")
 			say("사람 리뷰 PR #%s 반영됨 %s", e.Num, head(sha, 8))
 			continue
-		}
-		kind, label := "fix", "사람 리뷰 반영 중"
-		if sha != "" {
-			kind, label = "approve", "사람 리뷰 기다림(재승인)"
 		}
 		now[P] = label
 		pulled, from, ok := r.phPullAll(e, P, fam, kind)
@@ -67,6 +63,18 @@ func (r *prRun) phPending(byPR map[string]*prEnt) {
 	if err := writeAtomic(prFile("pr-human-now.tsv"), b.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "hc-fill: 사람 리뷰: %v\n", err)
 	}
+}
+
+// phJudge: 막는 글(T 뒤)이 처리됐나 — 처리됨이면 고친 sha와 빈 이름, 아니면 종류(fix·approve)와 이름. 대기열 제출 앞 물음(stands.go)도 이것을 쓴다
+func phJudge(rows []Row, P, T string, fam []string) (sha, kind, label string) {
+	sha = phFixed(fam, T)
+	if sha != "" && (knobInt("pr_human_approve") == 0 || phApproved(rows, P, T)) {
+		return sha, "", ""
+	}
+	if sha != "" {
+		return sha, "approve", "사람 리뷰 기다림(재승인)"
+	}
+	return "", "fix", "사람 리뷰 반영 중"
 }
 
 func phOrder(rows []Row) []string {
