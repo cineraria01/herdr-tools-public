@@ -31,6 +31,7 @@ main에 쓰는 프로세스를 하나로 하면 그 다툼이 통째로 없어�
   줄을 지우면 표식을 지운다 — 손대는 것은 이 설정이 켠 적이 있는 프로젝트뿐(`$DATA/merger.tsv`).
   레인 기계는 개인 설정을 못 읽으니 레인 쪽은 원격 표식만 본다.
 - **레인 쪽 — 제출**(`hc-lane land`가 켜진 저장소에서): 감사받은 HEAD 그대로(rebase하지 않음 — 병합기가 한 번 한다) 한 번의 `git push --atomic`으로 `refs/heads/lane/<레인>`·큐 표식 `refs/merge-queue/<UTC초>-<레인>`(같은 SHA)·제출 기록 `refs/merge-queue-meta/<같은 이름>`(빈 트리 커밋, 부모 = 원본, 메시지 `lane= id=<제출 ID: 기계-UTC시각-pid> orig= fork=<갈래점> base= host= term= owner=<HC_LANE_OWNER|-> job=<HC_LANE_JOB|->`)을 올리고 같은 레인의 옛 표식·기록은 같은 push에서 지운다(다시 제출하면 새 것 하나만).
+  쌓아 띄운 레인(`HC_LANE_STACK`)은 지금도 쌓여 있을 때만 `fork=<P>`·`stack=<선행>@<P>`를 싣는다 — 선행이 이미 착지해 쌓임이 끝났으면 안 쌓인 제출이다([쌓임이 끝나는 때](../hc-fill/stack.md)).
   기본 브랜치는 건드리지 않아 pre-push 관문과 무관하다.
   push가 0이어도 원격을 다시 읽어 세 참조가 모두 그 값일 때 제출로 친다(응답이 끊긴 실패도 같은 판정).
   그새 병합기가 처리해 세 참조가 없으면 이 제출 기록이 `refs/merge-done/<레인>`(넣음)·`refs/merge-failed-meta/<이름>`(돌려보냄)에 있는지로 접수를 본다(아스트라 1차 중간 1).

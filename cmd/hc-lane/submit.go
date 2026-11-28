@@ -219,7 +219,7 @@ func metaPrio(ref, old, pl string, refs map[string]string) bool {
 // 충돌과 같은 「양쪽 살려 풀고 같은 줄을 다시」 — 다만 rebase는 시작하지 않았다). 판정을 못 하면(git 실패·시간 넘김·옛 git) 지금처럼 낸다.
 // rebase를 마치면 origin/<기본>이 제출 커밋의 조상이라 3자 합침은 늘 깨끗하다 — 같은 줄을 다시 부르면 이 검사는 통과한다
 func submitConflict(ob, sh string) {
-	if stackSkipConflict(ob) { // 쌓인 제출이고 선행이 아직 기본 가지에 없다 — 병합기가 후보를 지을 때 본다(stack.go)
+	if stackSkipConflict(ob, sh) { // 쌓인 제출이고 선행이 아직 기본 가지에 없다 — 병합기가 후보를 지을 때 본다(stack.go)
 		return
 	}
 	fs, rc := gitx.MergeConflicts("", ob, sh)
@@ -520,7 +520,7 @@ func submitCmd() {
 		term = "-"
 	}
 	msg := fmt.Sprintf("merge-queue lane=%s id=%s orig=%s fork=%s base=%s host=%s term=%s owner=%s%s job=%s created_ms=%s priority=%s",
-		sln, sid, sh, fk, base, mt, term, ow, orf, trTo(job, alnum+"_.~-"), born, lprio()) + stackMeta()
+		sln, sid, sh, fk, base, mt, term, ow, orf, trTo(job, alnum+"_.~-"), born, lprio()) + stackMeta(sh, ob)
 	if lvd != "" {
 		msg += " verdict=" + lvd + " patch=" + lpid
 	}

@@ -32,14 +32,14 @@ func TestStackForkOf(t *testing.T) {
 	if f, rc := forkOf(s, "main~2"); rc != 0 || f != m {
 		t.Errorf("쌓지 않음: 갈래점 %s(rc %d), 바람 merge-base %s", f, rc, m)
 	}
-	if stackMeta() != "" {
+	if stackMeta(s, "main~2") != "" {
 		t.Error("쌓지 않은 제출에 stack 칸")
 	}
 	t.Setenv("HC_LANE_STACK", "a-1@"+p)
 	if f, rc := forkOf(s, "main~2"); rc != 0 || f != p {
 		t.Errorf("쌓음: 갈래점 %s(rc %d), 바람 P %s", f, rc, p)
 	}
-	if got := stackMeta(); got != " stack=a-1@"+p {
+	if got := stackMeta(s, "main~2"); got != " stack=a-1@"+p {
 		t.Errorf("제출 기록 칸: %q", got)
 	}
 	if pred, pp := stackEnv(); pred != "a-1" || pp != p {
