@@ -40,22 +40,86 @@ func TestOfClaudeWithoutSession(t *testing.T) {
 			{map[string]any{"app": "codex", "state": "done"}, Quiet},
 			{nil, Quiet}, // 셸(hc keep이 남긴 셸 포함)
 		} {
-			if v := Of(map[string]any{"pid": 7.0, "status": c.status}, now, 3.6e7, noPS); v.State != c.want {
+			if v := Of(map[string]any{"pid": 7.0, "status": c.status}, now, 3.6e7, noPS, nil); v.State != c.want {
 				t.Errorf("세션 폴더 %v·status %v: %v, 바람 %v (%s)", mk, c.status, v.State, c.want, v.Sig)
 			}
 		}
 	}
 	os.WriteFile(SessDir+"/7.json", []byte(`{"sessionId":"s7"}`), 0o644)
-	if v := Of(map[string]any{"pid": 7.0, "status": map[string]any{"app": "claude-code"}}, now, 3.6e7, noPS); v.State != Quiet || v.Sid != "s7" {
+	if v := Of(map[string]any{"pid": 7.0, "status": map[string]any{"app": "claude-code"}}, now, 3.6e7, noPS, nil); v.State != Quiet || v.Sid != "s7" {
 		t.Fatalf("세션 있음·기록 없음 = 쉼: %+v", v)
 	}
-	// 사고 꼴: 끝 표시 없는 배경 작업 → 활동
+	// 사고 꼴: 끝 표시 없고 프로세스가 쥔 배경 작업 → 활동
 	p := filepath.Join(TaskRoot, "-p", "s7", "tasks", "b1.output")
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	os.WriteFile(p, nil, 0o644)
-	if v := Of(map[string]any{"pid": 7.0}, now, 3.6e7, noPS); v.State != Busy || v.Sig != "배경 작업 1개 도는 중" {
+	rp, _ := filepath.EvalSymlinks(p)
+	if v := Of(map[string]any{"pid": 7.0}, now, 3.6e7, noPS, func() map[string]bool { return map[string]bool{rp: true} }); v.State != Busy || v.Sig != "배경 작업 1개 도는 중" {
 		t.Fatalf("배경 작업: 활동 %+v", v)
 	}
+}
+
+// ht-rest-task-held: 끝 표시 없는 배경 작업 파일은 「살아 있는 프로세스가 쥐고 있을 때만」 도는 것(운영체제 사실). 쥔 경로는 held가 한 번에 준다
+// (hc-sweep은 openPaths — lsof). 오늘의 두 사례: 상한에 걸려 죽은 전경 명령이 끝 표시 없이 남긴 파일, 쥔 프로세스 0
+func TestBgTasksHeld(t *testing.T) {
+	dirs(t)
+	now := float64(time.Now().UnixMilli())
+	os.MkdirAll(SessDir, 0o755)
+	os.WriteFile(SessDir+"/7.json", []byte(`{"sessionId":"s7"}`), 0o644)
+	tasks := filepath.Join(TaskRoot, "-p", "s7", "tasks")
+	os.MkdirAll(tasks, 0o755)
+	mk := func(name, body string, age time.Duration) string {
+		p := filepath.Join(tasks, name)
+		os.WriteFile(p, []byte(body), 0o644)
+		at := time.Now().Add(-age)
+		os.Chtimes(p, at, at)
+		return p
+	}
+	real := func(p string) string {
+		r, err := filepath.EvalSymlinks(p) // lsof는 링크를 푼 경로를 낸다(맥 /tmp → /private/tmp, 임시 폴더 /var → /private/var)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	calls, holds := 0, map[string]bool{}
+	held := func() map[string]bool { calls++; return holds }
+	check := func(what string, h Held, state State, sig string, wantCalls int) Verdict {
+		t.Helper()
+		calls = 0
+		v := Of(map[string]any{"pid": 7.0}, now, 3.6e7, noPS, h)
+		if v.State != state || v.Sig != sig || calls != wantCalls {
+			t.Errorf("%s: %v %q 부름 %d, 바람 %v %q 부름 %d", what, v.State, v.Sig, calls, state, sig, wantCalls)
+		}
+		return v
+	}
+	// ⑤ 후보 없음 → 부르지 않음
+	check("⑤ 파일 없음", held, Quiet, "", 0)
+	// ④ 끝 표시 있음 → 묻지 않음
+	mk("bdone.output", "x\n\n[exited with code 0]\n", 40*time.Minute)
+	check("④ 끝 표시", held, Quiet, "", 0)
+	// ⑦ r3 넘은 미완 · ⑧ 링크 → 지금처럼 안 셈(후보 아님)
+	mk("bold.output", "", 11*time.Hour) // r3 10시간
+	os.Symlink(filepath.Join(tasks, "bdone.output"), filepath.Join(tasks, "a1.output"))
+	check("⑦⑧ 오래된 미완·링크", held, Quiet, "", 0)
+	// ① 안 쥠 → 안 셈(사례 꼴: 상한에 걸린 go test가 남긴 44바이트). 수정 시각은 지금처럼 마지막 활동
+	fg := mk("bfg.output", "FAIL\therdr-tools/x\t600.268s\n", 30*time.Minute)
+	if v := check("① 안 쥠", held, Quiet, "", 1); now-v.Last > 31*6e4 || now-v.Last < 29*6e4 {
+		t.Errorf("① 마지막 활동 30분 전: %+v", v)
+	}
+	// ② 쥠 → 셈
+	holds[real(fg)] = true
+	check("② 쥠", held, Busy, "배경 작업 1개 도는 중", 1)
+	// ③ 쥔 것 하나 + 안 쥔 것 하나 → 1개(부름은 한 번)
+	mk("bfree.output", "", 2*time.Minute)
+	check("③ 하나만 쥠", held, Busy, "배경 작업 1개 도는 중", 1)
+	// ⑥ 못 읽음(도구 없음·실패·시간 넘김·꼴 다름 — openPaths는 모두 nil)·묻는 길 없음 → 모름
+	check("⑥ 못 읽음", func() map[string]bool { calls++; return nil }, Unknown, "배경 작업을 쥔 프로세스 못 읽음", 1)
+	check("⑥ 묻는 길 없음", nil, Unknown, "배경 작업을 쥔 프로세스 못 읽음", 0)
+	// ⑩ 세는 도중 사라짐(held가 도는 사이 Claude가 지움) → 건너뜀
+	check("⑩ 사라짐", func() map[string]bool { calls++; os.Remove(fg); return holds }, Quiet, "", 1)
+	// 두 번째 실행 → 같은 답
+	check("두 번째", held, Quiet, "", 1)
 }
 
 // 묻기 한 줄: Line ↔ Parse 왕복, 옛 판·잘림·경고 섞임·모르는 상태

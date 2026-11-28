@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -187,7 +188,7 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	sess, proj := restDirs(t)
 	now := float64(time.Now().UnixMilli())
 	r3 := 360 * minute
-	ps := fakeRun(0, "", "", nil)
+	ps := heldRun(nil, nil) // 끝 표시 없는 파일은 모두 쥐어 있음(도는 중) — 안 쥔 꼴은 TestQuietHeldTasks
 	tail := ""
 	f := facts{worktree: no, unlanded: no, tail: &tail}
 	sub := f
@@ -310,6 +311,103 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	put(t, tasks+"bq6.output", "", time.Minute)
 	if q := quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("기록 폴더 없음 + 도는 배경 작업: 활동 %+v", q)
+	}
+}
+
+// heldRun: ps는 빈 답, lsof는 openPaths가 받는 -F 꼴로 이 프로세스(cwd)와 임시 뿌리 아래 *.output 일반 파일 가운데 free에 없는 것을 쥔 것으로
+// 답한다(링크를 푼 경로 — 실제 lsof 꼴). 요청한 필드만 낸다(리눅스 lsof 꼴). calls가 있으면 lsof 부름을 센다
+func heldRun(free map[string]bool, calls *int) runner {
+	return func(_ time.Duration, _ []string, name string, args ...string) result {
+		if filepath.Base(name) != "lsof" {
+			return result{}
+		}
+		if calls != nil {
+			*calls++
+		}
+		fields := args[len(args)-1]
+		rec := func(pid, p string) string {
+			s := "p" + pid + "\n"
+			if strings.Contains(fields, "f") {
+				s += "f1\n"
+			}
+			return s + "n" + p + "\n"
+		}
+		wd, _ := os.Getwd()
+		out := rec(fmt.Sprint(os.Getpid()), wd)
+		filepath.Walk(rest.TaskRoot, func(p string, fi os.FileInfo, err error) error {
+			if err == nil && fi.Mode().IsRegular() && strings.HasSuffix(p, ".output") && !free[filepath.Base(p)] {
+				real, _ := filepath.EvalSymlinks(p)
+				out += rec("1", real)
+			}
+			return nil
+		})
+		return result{out: out}
+	}
+}
+
+// ht-rest-task-held: 끝 표시 없는 파일은 쥔 프로세스가 있을 때만 도는 것. 오늘의 두 사례(상한에 걸려 죽은 전경 명령 — 착지한 레인 터미널·
+// 판정을 넘긴 감사 터미널)와 운영 장면 넷
+func TestQuietHeldTasks(t *testing.T) {
+	sess, proj := restDirs(t)
+	now := float64(time.Now().UnixMilli())
+	r3 := 360 * minute
+	tail := ""
+	f := facts{worktree: no, unlanded: no, tail: &tail}
+	term := map[string]any{"address": "t1", "name": "lane-a", "state": "live", "status": map[string]any{"app": "claude-code", "state": "done"},
+		"labels": map[string]any{"hc-lane": "1"}, "created_ms": now - 9*60*minute, "status_ms": now - 40*minute, "turn": 4.0, "pid": 7.0}
+	put(t, sess+"/7.json", `{"sessionId":"s7"}`, 0)
+	put(t, proj+"/-p/s7.jsonl", "{}\n", 40*time.Minute)
+	tasks := rest.TaskRoot + "/-p/s7/tasks/"
+	free := map[string]bool{"bfg.output": true}
+	calls := 0
+	r := heldRun(free, &calls)
+	// 이미 쌓인 상태에 처음 돎: 판이 올라가기 전 거짓 「활동」이던 터미널(끝 표시 없는 44바이트·쥔 프로세스 0, 끝 표시 붙은 옛 파일들) →
+	// 이번 바퀴에 쉼, 닫기는 지금 규칙(R2 — 상태 40분)대로. 고치기 전 판은 「배경 작업 1개 도는 중」
+	put(t, tasks+"bfg.output", "FAIL\therdr-tools/x\t600.268s\n", 45*time.Minute)
+	for i := 0; i < 50; i++ {
+		put(t, fmt.Sprintf("%sbold%02d.output", tasks, i), "x\n\n[exited with code 0]\n", 2*time.Hour)
+	}
+	if why, kept, q := settle(term, f, now, nil, r); why != "R2" || q.State != restQuiet || calls != 1 {
+		t.Fatalf("안 쥔 미완: R2로 닫힘 %q %q %+v lsof %d번", why, kept, q, calls)
+	}
+	// 두 번째 실행 → 같은 답
+	if why, _, _ := settle(term, f, now, nil, r); why != "R2" {
+		t.Fatalf("두 번째: 같은 답 %q", why)
+	}
+	// 상태 4분(R2 문턱 안)이면 안 쥔 미완이 있어도 지금 규칙대로 안 닫는다 — 한꺼번에 잘못 닫히지 않음
+	young := map[string]any{}
+	for k, v := range term {
+		young[k] = v
+	}
+	young["status_ms"] = now - 4*minute
+	if why, _, _ := settle(young, f, now, nil, r); why != "" {
+		t.Fatalf("문턱 안: 안 닫음 %q", why)
+	}
+	// 바퀴 순서 반대: 판정 사이에 작업이 시작됨(쥠) → 활동, 끝남(안 쥠) → 쉼
+	put(t, tasks+"bnew.output", "", 2*time.Minute)
+	if q := quiet(term, now, r3, r); q.State != restBusy || q.Sig != "배경 작업 1개 도는 중" {
+		t.Fatalf("시작됨: 활동 %+v", q)
+	}
+	free["bnew.output"] = true
+	if q := quiet(term, now, r3, r); q.State != restQuiet {
+		t.Fatalf("끝남(안 쥠): 쉼 %+v", q)
+	}
+	// 외부 가정: lsof가 그 기계에 없음·꼴이 다름·시간 넘김 → 모름(R2 안 닫음)
+	for what, bad := range map[string]runner{
+		"없음":    fakeRun(0, "", "", errors.New("exec: \"lsof\": executable file not found")),
+		"꼴 다름":  fakeRun(0, "COMMAND PID USER\nzsh 1 me\n", "", nil),
+		"시간 넘김": fakeRun(-1, "", "", errors.New("signal: killed")),
+	} {
+		if why, kept, q := settle(term, f, now, nil, bad); why != "" || q.State != restUnknown || !strings.Contains(kept, "배경 작업을 쥔 프로세스 못 읽음") {
+			t.Errorf("lsof %s: 모름 %q %q %+v", what, why, kept, q)
+		}
+	}
+	// 후보 없음(모두 끝 표시) → lsof 안 부름
+	os.Remove(tasks + "bfg.output")
+	os.Remove(tasks + "bnew.output")
+	calls = 0
+	if q := quiet(term, now, r3, r); q.State != restQuiet || calls != 0 {
+		t.Fatalf("후보 없음: lsof 0번 %d %+v", calls, q)
 	}
 }
 

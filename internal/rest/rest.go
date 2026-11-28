@@ -9,6 +9,7 @@ package rest
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,6 +52,12 @@ var (
 
 // PS: `ps -A -o pid=,ppid=`의 출력(ok=false면 못 돌림 — 모름)
 type PS func() (out string, ok bool)
+
+// Held: 살아 있는 프로세스가 연 경로 집합(링크를 푼 실제 경로 — lsof가 내는 꼴). nil이면 못 읽음(모름). Of가 끝 표시 없는 배경 작업 파일이
+// 있을 때만 한 번 부른다(hc-sweep은 openPaths)
+type Held func() map[string]bool
+
+var errHeld = errors.New("배경 작업을 쥔 프로세스 못 읽음")
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
 
@@ -112,9 +119,9 @@ func msOf(fi os.FileInfo) float64 { return float64(fi.ModTime().UnixNano()) / 1e
 
 // Of: 「이 터미널은 지금 정말 쉬는가」(t = hc get 답 하나, now·r3 ms). 세션 파일이 없으면 Claude가 아닌 CLI·셸은 쉼(지금 규칙 그대로),
 // Claude이거나 Claude인지 모르면 모름(자료가 없다 — 판·자리가 바뀌어도 조용히 쉼으로 떨어지지 않게). 기록이 r3 안에 바뀐 하위 에이전트에
-// 끝난 증거(agentEnded)가 없거나, 끝 표시 없는 배경 작업(bgTasks — 끝난 하위 에이전트가 남긴 셸도)이 있으면 활동. 그 밖은 쉼이고 Last가
-// 마지막 활동. 읽다 실패하면 모름
-func Of(t map[string]any, now, r3 float64, ps PS) Verdict {
+// 끝난 증거(agentEnded)가 없거나, 끝 표시 없고 살아 있는 프로세스가 쥔 배경 작업(bgTasks — 끝난 하위 에이전트가 남긴 셸도)이 있으면 활동.
+// 그 밖은 쉼이고 Last가 마지막 활동. 읽다 실패하면 모름
+func Of(t map[string]any, now, r3 float64, ps PS, held Held) Verdict {
 	pid, _ := t["pid"].(float64)
 	sess, err := sessionOf(int(pid), ps)
 	if err != nil {
@@ -192,7 +199,10 @@ func Of(t map[string]any, now, r3 float64, ps PS) Verdict {
 			}
 		}
 	}
-	tasks, err := bgTasks(sid, now, r3, seeMax)
+	tasks, err := bgTasks(sid, now, r3, seeMax, held)
+	if errors.Is(err, errHeld) {
+		return Verdict{Sid: sid, Sig: err.Error()}
+	}
 	if err != nil {
 		return Verdict{Sid: sid, Sig: "배경 작업 못 읽음"}
 	}
@@ -210,9 +220,11 @@ func Of(t map[string]any, now, r3 float64, ps PS) Verdict {
 }
 
 // bgTasks: 그 세션의 배경 작업(run_in_background 셸·Monitor·시간을 넘겨 배경으로 넘어간 명령 — 하위 에이전트가 띄운 것도 주 세션에 든다) 가운데
-// 끝 표시가 없고 r3 안에 바뀐 것의 수. 파일은 <TaskRoot>/<폴더 이름>/<세션 id>/tasks/<작업 id>.output, 끝나면 Claude가 끝에 trailer를 붙인다.
-// 링크(a….output — 하위 에이전트 기록, 위 규칙이 본다)는 안 센다. 뿌리·세션 폴더가 없으면 0, 못 읽으면 오류(모름). 수정 시각은 see로 마지막 활동에
-func bgTasks(sid string, now, r3 float64, see func(float64)) (int, error) {
+// 끝 표시가 없고 r3 안에 바뀌었고 살아 있는 프로세스가 쥔 것의 수. 파일은 <TaskRoot>/<폴더 이름>/<세션 id>/tasks/<작업 id>.output, 끝나면
+// Claude가 끝에 trailer를 붙인다. 끝 표시 없이 남는 파일도 있다(2026-11-28 — 상한에 걸려 죽은 전경 명령, 쥔 프로세스 0): 파일 꼴은 Claude
+// 안쪽 일이라 「도는가」는 운영체제에 묻는다(held, 후보가 있을 때만 한 번). 링크(a….output — 하위 에이전트 기록, 위 규칙이 본다)는 안 센다.
+// 뿌리·세션 폴더가 없으면 0, 못 읽으면 오류(모름 — 쥔 것을 못 읽으면 errHeld). 수정 시각은 쥠과 상관없이 see로 마지막 활동에
+func bgTasks(sid string, now, r3 float64, see func(float64), held Held) (int, error) {
 	dirs, err := os.ReadDir(TaskRoot)
 	if os.IsNotExist(err) {
 		return 0, nil
@@ -220,7 +232,8 @@ func bgTasks(sid string, now, r3 float64, see func(float64)) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, counted := 0, map[string]bool{}
+	var open []string
+	counted := map[string]bool{}
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
@@ -256,9 +269,32 @@ func bgTasks(sid string, now, r3 float64, see func(float64)) (int, error) {
 				return 0, err
 			}
 			if !ended {
-				n++
+				open = append(open, filepath.Join(dir, x.Name()))
 				counted[x.Name()] = true
 			}
+		}
+	}
+	if len(open) == 0 {
+		return 0, nil
+	}
+	var m map[string]bool
+	if held != nil {
+		m = held()
+	}
+	if m == nil {
+		return 0, errHeld
+	}
+	n := 0
+	for _, p := range open {
+		real, err := filepath.EvalSymlinks(p) // lsof는 링크를 푼 경로를 낸다(맥 /tmp → /private/tmp)
+		if os.IsNotExist(err) {               // 세는 사이 끝나 Claude가 지움
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if m[real] {
+			n++
 		}
 	}
 	return n, nil

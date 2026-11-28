@@ -23,12 +23,13 @@ const (
 	restBusy    = rest.Busy
 )
 
-// quiet: rest.Of에 이 쓸기의 실행기로 ps를 준다
+// quiet: rest.Of에 이 쓸기의 실행기로 ps와 열린 경로(openPaths — 디스크 쓸기와 같은 lsof 읽기)를 준다. lsof 상한은 ps와 같은 30초:
+// --rest 전체가 묻는 쪽 상한(rest.AskMax 60초) 안에 끝나게(sweep.lsof_secs는 디스크 쓸기 몫 — 느린 기계에서 넘기면 모름)
 func quiet(t map[string]any, now, r3 float64, r runner) rested {
 	return rest.Of(t, now, r3, func() (string, bool) {
 		res := r(30*time.Second, nil, "ps", "-A", "-o", "pid=,ppid=")
 		return res.out, res.err == nil && res.rc == 0
-	})
+	}, func() map[string]bool { return openPaths(r, 30*time.Second) })
 }
 
 // restMain: hc-sweep --rest <주소> — 이 기계 터미널 하나의 쉼 판정을 한 줄(rest.Line)로. 다른 도구·다른 기계가 닫거나 제출하기 직전에

@@ -6,6 +6,7 @@ package util_test
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,13 +78,31 @@ func bzTask(t *testing.T, T, id, body string, age time.Duration) {
 	os.Chtimes(p, at, at)
 }
 
+// bzHeld: 가짜 lsof(hcsweepjobtmp_test.go와 같은 꼴) — 부른 hc-sweep($PPID)의 cwd와 배경 작업 ids의 파일(링크를 푼 경로)을 다른 프로세스가 연 것으로.
+// ids가 없으면 아무 작업 파일도 안 쥠
+func bzHeld(t *testing.T, T string, ids ...string) {
+	script(t, T+"/bin/lsof", T, "#!/bin/sh\nprintf 'p%s\\nfcwd\\nn/\\n' \"$PPID\"\n"+
+		"while read -r p; do [ -n \"$p\" ] && printf 'p1\\nf1\\nn%s\\n' \"$p\"; done < @T@/lsof-held\nexit 0\n")
+	held := ""
+	for _, id := range ids {
+		p, err := filepath.EvalSymlinks(fmt.Sprintf("%s/ctmp/claude-%d/-nonexistent-bz-lane-a/sid-1/tasks/%s.output", T, os.Getuid(), id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		held += p + "\n"
+	}
+	write(t, T+"/lsof-held", held)
+}
+
 // ht-sweep-busy-tasks 사고 꼴: 끝난 하위 에이전트(finished·끝 줄 end_turn, 40분 전) + 그 에이전트가 띄운 배경 셸이 1시간 50분째 조용히 돎(0바이트·
-// 끝 표시 없음) + 상태 done 33분 → R2도 제출 뒤 빠른 닫기도 안 닫음, 남김 한 줄(두 번 돌아도 한 줄). 끝 표시가 붙으면 다음 바퀴에 닫음
+// 끝 표시 없음, 셸이 그 파일을 쥠) + 상태 done 33분 → R2도 제출 뒤 빠른 닫기도 안 닫음, 남김 한 줄(두 번 돌아도 한 줄). 끝나면 다음 바퀴에 닫음 —
+// 끝 표시가 붙었거나(제출 안 함 판), 끝 표시 없이 쥔 프로세스가 사라졌거나(제출 판 — ht-rest-task-held: 상한에 걸려 죽은 전경 명령 꼴)
 func TestHcSweepBusyBackgroundTask(t *testing.T) {
 	const ended = `{"requestShape":"background","finished":true,"type":"assistant","message":{"stop_reason":"end_turn"}}`
 	for _, submitted := range []bool{false, true} {
 		T, e := bzSetup(t, ended, 40*time.Minute, submitted, true)
 		bzTask(t, T, "bshell1", "", 110*time.Minute)
+		bzHeld(t, T, "bshell1")
 		bzTask(t, T, "bold1", "done\n\n[exited with code 0]\n", 3*time.Hour)
 		bzTask(t, T, "bold2", "\n[killed]\n", 3*time.Hour)
 		out, rc := run(T, e, tool(t, "hc-sweep"), "--only-under", T)
@@ -94,7 +113,11 @@ func TestHcSweepBusyBackgroundTask(t *testing.T) {
 		c.ok("작업 임시 폴더 그대로", exists(T+"/jroot/abc123/.hc-job"))
 		out, rc = run(T, e, tool(t, "hc-sweep"), "--only-under", T)
 		c.ok("두 번째 바퀴: 남김 줄 되풀이 안 함·한 줄", !strings.Contains(out, "남김: t1") && bzKept(T) == 1 && bzKills(T) == 0)
-		bzTask(t, T, "bshell1", "\n[exited with code 0]\n", 35*time.Minute)
+		if submitted {
+			bzHeld(t, T)
+		} else {
+			bzTask(t, T, "bshell1", "\n[exited with code 0]\n", 35*time.Minute)
+		}
 		out, rc = run(T, e, tool(t, "hc-sweep"), "--only-under", T)
 		c.ok("배경 작업 끝남: 닫음", bzKills(T) == 1 && strings.Contains(out, "닫힘: R2 t1"))
 	}
