@@ -30,8 +30,20 @@ func Finished(l Lane) bool {
 // 옛 줄 175건으로 나왔다(ht-advise-noise, 2026-11-28). Finished와 한 정의
 func Ended(l Lane) bool {
 	ev, _, _ := strings.Cut(l.LastEvent, " ")
-	return ev == "착지" || ev == "정리됨" || strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남")
+	if ev == "착지" || ev == "정리됨" || strings.HasPrefix(l.Stage, "착지") || strings.HasPrefix(l.Stage, "끝남") {
+		return true
+	}
+	for _, p := range bounceEnds {
+		if strings.HasPrefix(l.Stage, p) {
+			return true
+		}
+	}
+	return false
 }
+
+// bounceEnds: 반송 뒤 끝난 줄의 단계 글(hc-fill status_done.go stBounce — 장부가 말한 다른 줄이 이어 받음·이미 main). 대기 줄의
+// 「반송됨 — 다시 띄움 대기」와 장부에 줄이 없는 「반송됨(이어 받은 줄 기록 없음)」은 끝이 아니다
+var bounceEnds = []string{"반송됨 →", "반송됨 — 이미 main"}
 
 // Trim: 기본 출력. 끝난 레인은 마지막 사건이 doneMin분 안이면 남기고(나이 모름도 남김 — 오래됐다고 말할 수 없다), 안 도는 감시와
 // 배포 대상 아닌 기계는 센다. s는 바꾸지 않는다

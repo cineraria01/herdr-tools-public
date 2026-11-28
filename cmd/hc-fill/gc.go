@@ -138,25 +138,20 @@ func idleTick() {
 	}
 	inow := nowUnix()
 	var inew []Row
-	type due struct{ k, m, msg string }
+	type due struct {
+		k, m, msg string
+		ov, pk    int
+	}
 	var idl []due
 	old := readRows(DATA + "/idle.tsv")
 	for _, mc := range machines() {
 		m := mc.Name
-		ik, ion := "none", 0
+		ik, ion, ipk := "none", 0, 0
 		if ECAPHIT && (inlist("-", ECAPM) || inlist(m, ECAPM)) {
 			ik = "cap"
 		} else {
-			for _, o := range OVWAIT {
-				oo, op := o.F(wtOnly), o.F(wtProj)
-				if op == "" || (oo != "-" && !inlist(m, oo)) {
-					continue
-				}
-				if repoOf(op, m) != "" {
-					ion++
-				}
-			}
-			if ion != 0 && idleWorth(m) { // 겹침·선행·주차·기계 조건을 기다리는 줄뿐이면 할 일 없음 — 띄울 것 없음(idle_empty)으로
+			ion, ipk = idleWaits(m)
+			if ion+ipk != 0 && idleWorth(m) { // 겹침·선행·주차·기계 조건을 기다리는 줄뿐이면 할 일 없음 — 띄울 것 없음(idle_empty)으로
 				ik = "ovl"
 			}
 		}
@@ -225,9 +220,9 @@ func idleTick() {
 		}
 		imx := fmt.Sprintf("%s 자리 %d개 %d분째 빔", m, fr, (inow-isince)/60)
 		if ik == "ovl" {
-			imx += fmt.Sprintf("(겹침 대기 %d줄)", ion)
+			imx += idleNote(ion, ipk)
 		}
-		idl = append(idl, due{ik, m, imx})
+		idl = append(idl, due{ik, m, imx, ion, ipk})
 	}
 	ito := ""
 	if len(idl) > 0 {
@@ -260,9 +255,11 @@ func idleTick() {
 	}
 	for _, ik := range []string{"cap", "ovl", "none"} {
 		var dm, msgs []string
+		sov, spk := 0, 0
 		for _, d := range idl {
 			if d.k == ik {
 				dm, msgs = append(dm, d.m), append(msgs, d.msg)
+				sov, spk = sov+d.ov, spk+d.pk
 			}
 		}
 		if len(dm) == 0 {
@@ -289,7 +286,7 @@ func idleTick() {
 		case "cap":
 			iwhy = "먼저 띄움 상한(early " + ECAP + ")에 걸려 남김 — 상한을 올리거나 일을 더 넣는다"
 		case "ovl":
-			iwhy = "겹침 대기 — 앞 레인이 착지하면 뜬다(hc-fill ls)"
+			iwhy = idleWhy(sov, spk)
 		default:
 			iwhy = "대기열에 띄울 것 없음"
 		}

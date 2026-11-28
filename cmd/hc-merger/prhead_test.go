@@ -56,8 +56,56 @@ func TestPRNoteRelandTail(t *testing.T) {
 	}
 	h, _ := outQ("rev-parse", "HEAD")
 	rr := h + "\trefs/heads/pr/x" // done의 다시 읽은 목록(머리 가지만), 머리 레인은 바퀴 목록(m.qs — 거울 표식 포함)으로
-	if got := prNote(rr, prLane(mir(h, "x"), "x-reland"), h); got != " · PR 머리 "+first8(h)+" 들어감" {
+	if got := prNote(rr, mir(h, "x"), prLane(mir(h, "x"), "x-reland"), h, h); got != " · PR 머리 "+first8(h)+" 들어감" {
 		t.Errorf("prNote = %q", got)
+	}
+}
+
+// ht-smalls-1129: 「안 들어감」의 까닭을 사실대로 — 레인 커밋이 이미 기본 가지에 있어 rebase가 떨어뜨림 / 머리 가지가 바퀴가 본 값에서 움직임
+// (lease 거절 — 경합) / 그 밖(지금 글). 고치기 전은 셋 다 「가지 갱신 실패」
+func TestPRNoteWhy(t *testing.T) {
+	d := t.TempDir()
+	t.Chdir(d)
+	g := func(a ...string) string {
+		o, err := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", a, err, o)
+		}
+		return strings.TrimSpace(string(o))
+	}
+	write := func(f, s string) {
+		if err := os.WriteFile(f, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g("init", "-q", "-b", "main")
+	g("commit", "-q", "--allow-empty", "-m", "base")
+	g("checkout", "-q", "-b", "lane")
+	write("a", "1")
+	g("add", "a")
+	g("commit", "-q", "-m", "lane a")
+	L := g("rev-parse", "HEAD")
+	g("checkout", "-q", "main")
+	// main을 한 칸 움직여 착지 커밋이 레인 커밋과 다른 SHA가 되게, 신원(작성자·시각·메시지)이 같은 착지 — 보통 착지
+	g("commit", "-q", "--allow-empty", "-m", "main moved")
+	g("cherry-pick", L)
+	landed := g("rev-parse", "HEAD")
+	g("reset", "-q", "--hard", "HEAD~1")
+	write("a", "1")
+	g("add", "a")
+	g("commit", "-q", "-m", "fix lane a") // 같은 패치가 다른 커밋으로 먼저 들어감 — rebase가 레인 커밋을 떨어뜨림
+	dropped := g("rev-parse", "HEAD")
+	other := g("commit-tree", "-m", "other", "-p", dropped, dropped+"^{tree}")
+	rr := func(h string) string { return h + "\trefs/heads/pr/x" }
+	for _, c := range []struct{ name, rr, seen, C, want string }{
+		{"이미 들어 있음", rr(L), mir(L, "x"), dropped, " · PR 머리 안 들어감(이미 들어 있어 올릴 머리 없음 — Merged 표시 없음)"},
+		{"경합", rr(other), mir(L, "x"), landed, " · PR 머리 안 들어감(머리 가지 갱신 거절(경합) — Merged 표시 없음)"},
+		{"그 밖", rr(L), mir(L, "x"), landed, " · PR 머리 안 들어감(가지 갱신 실패 — Merged 표시 없음)"},
+		{"들어감", rr(landed), mir(L, "x"), landed, " · PR 머리 " + first8(landed) + " 들어감"},
+	} {
+		if got := prNote(c.rr, c.seen, "x", L, c.C); got != c.want {
+			t.Errorf("%s: prNote = %q, 바람 %q", c.name, got, c.want)
+		}
 	}
 }
 

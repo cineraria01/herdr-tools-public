@@ -186,7 +186,7 @@ func (m *M) done(q, s, ln, rec, C, why string, claim bool) int {
 	if !m.jonce(mt, n, ln, "착지", C, why) {
 		return 1
 	}
-	msg := fmt.Sprintf("%s — 제출 %s, %s%s", why, first8(s), mt.key(n), mt.infoTail()) + prNote(rr, hl, C)
+	msg := fmt.Sprintf("%s — 제출 %s, %s%s", why, first8(s), mt.key(n), mt.infoTail()) + prNote(rr, m.qs, hl, s, C)
 	if !m.outbox(mt, n, "착지", C, msg, ln) {
 		return 1
 	}

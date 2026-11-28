@@ -48,7 +48,7 @@
 | 대기열 14칸 | `stacked` 쌓아 띄움 · `no-stack` 줄 끔 |
 | 레인 환경 | `HC_LANE_STACK=<선행>@<P>` — 자동 제출(`HC_LANE*`를 옮김)·감사·verdict·land가 읽는다. 없으면 오늘 길 |
 | 제출 기록(메타) | `stack=<선행>@<P>` 한 칸 더 · `fork=<P>` |
-| 병합기 주차 | `refs/merge-parked/<이름>`·`refs/merge-parked-meta/<이름>`(큐·기록 그대로 옮김, 원자 push·lease) + 사건 「주차(선행 반송) <선행>」 — 막힘이 아니라 중간 |
+| 병합기 주차 | `refs/merge-parked/<이름>`·`refs/merge-parked-meta/<이름>`(큐·기록 그대로 옮김, 원자 push·lease) + 사건 「주차(<까닭>) <선행>」 — 막힘이 아니라 중간. 까닭은 바퀴에 읽은 원격으로(글만): 선행 착지 기록 원본이 P가 아니면 「선행이 다른 커밋 <sha8>로 착지함」, 같은 선행 레인이 다른 커밋으로 큐에 있으면 「선행이 새 커밋으로 다시 제출됨」, 그 밖 「선행 빠짐」(옛 판은 늘 「선행 반송」) |
 | hc-fill | `stack.tsv` 상태 `up`(띄움 — 제출 여부는 병합기 줄이 말한다)·`parked`·`restacked`·`relaunch`·`rebased-main` |
 
 ## 감사·제출

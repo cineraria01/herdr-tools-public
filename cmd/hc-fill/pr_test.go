@@ -298,6 +298,20 @@ func TestPRLanded(t *testing.T) {
 	if k2.n("pr close 7") != 1 || !strings.Contains(k2.bodies(), "가지 갱신 실패로 Merged 표시 없음") {
 		t.Fatalf("닫기:\n%s\n%s", k2.logged(), k2.bodies())
 	}
+	// ht-smalls-1129: 병합기가 적은 까닭(이미 들어 있음·경합)을 닫는 댓글에 그대로 — 닫기 동작은 같다
+	for _, c := range []struct{ why, want string }{
+		{"이미 들어 있어 올릴 머리 없음", "이미 들어 있어 올릴 머리 없음 — Merged 표시 없음"},
+		{"머리 가지 갱신 거절(경합)", "머리 가지 갱신 거절(경합)로 Merged 표시 없음"},
+	} {
+		k3 := prSetup(t, "pr app")
+		k3.ev("2026-11-24T01:00:00Z", "here", "w1", "완료", prSHA1, "끝")
+		prTick()
+		k3.ev("2026-11-24T01:20:00Z", "mg", "w1", "착지", prSHA2, "병합기 착지 — 제출 ID x · PR 머리 안 들어감("+c.why+" — Merged 표시 없음)")
+		prTick()
+		if k3.n("pr close 7") != 1 || !strings.Contains(k3.bodies(), "착지 22222222 — "+c.want) || strings.Contains(k3.bodies(), "가지 갱신 실패") {
+			t.Fatalf("%s 닫기:\n%s\n%s", c.why, k3.logged(), k3.bodies())
+		}
+	}
 }
 
 // ⑥ gh가 계속 실패 → 대기열 파일 그대로, pr_fail바퀴째 운영 사건 한 번(더 돌아도 한 번)

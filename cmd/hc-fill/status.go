@@ -28,6 +28,7 @@ type stIn struct {
 	Ovl   string  // 대기 줄: 겹침 비고(ovWaitNote — 「겹침 대기(…)」·「다음 차례(…)」), 아니면 빈 값
 	Bg    bool    // 살아 있는 배경 셸을 기다림(hangBgWait)
 	Land  string  // 착지(stEnd — 「<sha 8> <월-일 시:분>」, status_done.go), 아니면 빈 값
+	Bnc   string  // 반송 뒤 끝남(stBounce — 「반송됨 → <줄>」 등, status_done.go), 아니면 빈 값
 	Rev   string  // 꺼져 죽음·이어 띄움 덧말(rvNote, revive.go), 아니면 빈 값
 }
 
@@ -63,6 +64,8 @@ func stStage0(in stIn) string {
 		return fmt.Sprintf("제출됨(병합기 줄 %d번째%s)", in.Pos, bat)
 	case in.Land != "": // 착지 표식이 사건보다 앞선다 — 대기열이 제출한 레인엔 착지 사건이 오지 않는다
 		return "착지 " + in.Land
+	case in.Bnc != "":
+		return in.Bnc
 	case ls == "착지":
 		return "착지 " + sha
 	case strings.HasPrefix(in.Rev, "꺼져 죽음"): // 터미널이 없어졌는데 끝 보고가 없다 — 「끝남」·마지막 보고로 묻히지 않게(revive.go)
@@ -273,6 +276,7 @@ func statusCmd(args []string) {
 		queue  []string
 		landed []int64
 		marks  map[string]stMark // 레인마다 가장 늦은 착지 표식(stMarks — 끝난 줄 가리기)
+		failed map[string]int64  // 레인마다 가장 늦은 반송 참조의 초(stFailed — 반송 뒤 끝남)
 		bat    map[string]string // 도는 묶음의 구성원 → 덧말(이 기계 병합기 기록 — mqBatch)
 	}
 	rems := map[string]*rem{}
@@ -285,10 +289,10 @@ func statusCmd(args []string) {
 		x := &rem{bat: mqBatch(mr[p], time.Now())}
 		rems[p] = x
 		if repo := repoOf(p, LOCAL); repo != "" {
-			if out, rc := run("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", "refs/hc-landed/*"); rc == 0 {
+			if out, rc := run("git", "-C", repo, "ls-remote", "origin", "refs/merge-queue/*", "refs/hc-landed/*", "refs/merge-failed/*"); rc == 0 {
 				x.ok = true
 				x.queue, x.landed = stRemote(out)
-				x.marks = stMarks(out)
+				x.marks, x.failed = stMarks(out), stFailed(out)
 			}
 		}
 	}
@@ -308,7 +312,7 @@ func statusCmd(args []string) {
 		}
 		fmt.Println(stLine(r.F(qName), dash(r.F(qMach)), stAge(r.F(qAdded), t), stage, est))
 	}
-	ovs, rvl := readRows(DATA+"/overlap.tsv"), readRows(rvFile())
+	ovs, rvl, rld := readRows(DATA+"/overlap.tsv"), readRows(rvFile()), readRows(DATA+"/reland.tsv")
 	for _, r := range rows {
 		name, addr := r.F(qName), r.F(qAddr)
 		in := stIn{State: r.F(qState), Mode: rowMode(r), Lane: name, Last: lsFirst(DATA+"/last.tsv", name)}
@@ -334,7 +338,12 @@ func statusCmd(args []string) {
 				}
 			}
 			var end int64
-			in.Land, end = stEnd(r, in.Pos, x.marks)
+			done := false
+			if in.Land, end = stEnd(r, in.Pos, x.marks); in.Land != "" {
+				done = true
+			} else {
+				in.Bnc, end, done = stBounce(r, in.Pos, rld, x.failed, in.Last, in.Live)
+			}
 			in.Rev = rvNote(rvl, r, in.Live)
 			stage := stStage(in)
 			if strings.HasPrefix(in.Rev, "이어 띄움") {
@@ -346,7 +355,7 @@ func statusCmd(args []string) {
 			if h := prHumanNote(name); h != "" { // 사람 리뷰(prhuman.go) — 꺼져 있으면 줄이 전과 같다
 				stage += " · " + h
 			}
-			show(r, in.Land != "", end, in.Live, stage, stEstimate(in.Pos, x.landed))
+			show(r, done, end, in.Live, stage, stEstimate(in.Pos, x.landed))
 			continue
 		}
 		stage := stStage(in)

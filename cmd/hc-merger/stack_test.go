@@ -152,8 +152,8 @@ func TestStackKeepAndSpecOrphan(t *testing.T) {
 	}
 }
 
-// parked: 주차 참조·사건·일지 — 실패(merge-failed·막힘·돌려보냄)가 없어야
-func (f *fx) parked(name, lane, pred string) {
+// parked: 주차 참조·사건(까닭 why)·일지 — 실패(merge-failed·막힘·돌려보냄)가 없어야
+func (f *fx) parked(name, lane, pred, why string) {
 	f.t.Helper()
 	if f.has("refs/merge-queue/"+name) || !f.has("refs/merge-parked/"+name) || !f.has("refs/merge-parked-meta/"+name) || f.has("refs/merge-queue-meta/"+name) {
 		f.t.Fatal("쌓인 제출은 큐·기록에서 merge-parked로")
@@ -162,8 +162,8 @@ func (f *fx) parked(name, lane, pred string) {
 		f.t.Fatal("주차는 반송이 아니다")
 	}
 	ev, _ := os.ReadFile(f.events)
-	if !strings.Contains(string(ev), "report|중간|-|병합기: 주차(선행 반송) "+pred+" — "+lane+" 제출 ") || strings.Contains(string(ev), "report|막힘|-|병합기: 주차") {
-		f.t.Fatalf("중간 사건 「주차(선행 반송)」: %s", ev)
+	if !strings.Contains(string(ev), "report|중간|-|병합기: 주차("+why+") "+pred+" — "+lane+" 제출 ") || strings.Contains(string(ev), "report|막힘|-|병합기: 주차") {
+		f.t.Fatalf("중간 사건 「주차(%s)」: %s", why, ev)
 	}
 	jr, _ := os.ReadFile(gEvdir + "/merger-journal.tsv")
 	n := 0
@@ -193,7 +193,36 @@ func TestStackPredRejectedParks(t *testing.T) {
 	if !f.has("refs/merge-failed/1000000001-a") {
 		t.Fatal("선행 a는 반송")
 	}
-	f.parked("1000000002-b", "b", "a")
+	f.parked("1000000002-b", "b", "a", "선행 빠짐")
+}
+
+// ht-smalls-1129: 주차 글은 바퀴에 읽어 둔 원격(m.qs)으로 사실대로 — 선행이 새 커밋으로 다시 제출됨(큐에 같은 레인, 다른 커밋) ·
+// 선행이 다른 커밋으로 착지함(merge-done 원본이 P가 아님). 고치기 전은 둘 다 「선행 반송」. 주차·다시 쌓기 동작은 같다
+func TestStackParkWhy(t *testing.T) {
+	t.Run("다시 제출됨", func(t *testing.T) {
+		f, _ := batchFx(t)
+		qa, P := f.sub2(1000000001, "a", "v-a", "", "a.txt", "a\n", false)
+		f.stackSub(1000000002, "b", "a", P, "보통", "")
+		rec := f.git(f.seed, "--git-dir="+f.origin, "rev-parse", "refs/merge-queue-meta/1000000001-a")
+		f.git(f.seed, "push", "-q", "--atomic", "origin", P+":refs/merge-failed/1000000001-a", rec+":refs/merge-failed-meta/1000000001-a", ":"+qa, ":refs/merge-queue-meta/1000000001-a", ":refs/heads/lane/a")
+		f.sub2(1000000003, "a", "v-a2", "", "a.txt", "a2\n", false)
+		f.merger().round()
+		f.parked("1000000002-b", "b", "a", "선행이 새 커밋으로 다시 제출됨")
+	})
+	t.Run("다른 커밋으로 착지함", func(t *testing.T) {
+		f, _ := batchFx(t)
+		qa, P := f.sub2(1000000001, "a", "v-a", "", "a.txt", "a\n", false)
+		f.stackSub(1000000002, "b", "a", P, "보통", "")
+		os.WriteFile(f.seed+"/a.txt", []byte("a2\n"), 0o666)
+		f.git(f.seed, "add", "-A")
+		f.git(f.seed, "commit", "-qm", "a (다시 제출한 새 커밋)")
+		Q := f.git(f.seed, "rev-parse", "HEAD")
+		et := f.git(f.seed, "hash-object", "-t", "tree", "-w", "/dev/null")
+		done := f.git(f.seed, "commit-tree", et, "-p", Q, "-m", "merge-queue lane=a")
+		f.git(f.seed, "push", "-q", "--atomic", "origin", "main", ":"+qa, ":refs/merge-queue-meta/1000000001-a", done+":refs/merge-done/a")
+		f.merger().round()
+		f.parked("1000000002-b", "b", "a", "선행이 다른 커밋 "+Q[:8]+"로 착지함")
+	})
 }
 
 // ⑪ 지휘가 선행을 거둠(withdraw) → 다음 바퀴에 뒤 주차, 같은 바퀴를 다시 돌아도 사건은 하나
@@ -205,12 +234,12 @@ func TestStackPredWithdrawnParks(t *testing.T) {
 	f.git(f.seed, "push", "-q", "--atomic", "origin", P+":refs/merge-failed/1000000001-a", rec+":refs/merge-failed-meta/1000000001-a", ":"+qa, ":refs/merge-queue-meta/1000000001-a")
 	f.merger().round()
 	f.merger().round()
-	f.parked("1000000002-b", "b", "a")
+	f.parked("1000000002-b", "b", "a", "선행 빠짐")
 	if len(landLines(t, landlog)) != 0 {
 		t.Fatal("착지하지 않는다")
 	}
 	ev, _ := os.ReadFile(f.events)
-	if strings.Count(string(ev), "주차(선행 반송)") != 1 {
+	if strings.Count(string(ev), "주차(선행 빠짐)") != 1 {
 		t.Fatalf("주차 사건은 하나: %s", ev)
 	}
 }

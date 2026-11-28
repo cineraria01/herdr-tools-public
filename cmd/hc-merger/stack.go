@@ -245,7 +245,7 @@ func (m *M) park(s stackSub) bool {
 			return false
 		}
 	}
-	why := fmt.Sprintf("주차(선행 반송) %s — %s 제출 %s", s.mt.pred, s.ln, first8(s.s))
+	why := fmt.Sprintf("주차(%s) %s — %s 제출 %s", m.parkWhy(s.mt.pred, s.mt.pp), s.mt.pred, s.ln, first8(s.s))
 	msg := fmt.Sprintf("병합기: %s, %s%s, %s 로 옮김(선행 %s 가 큐에 없고 들지 않음 — 실패 아님, 선행이 다시 서면 다시 쌓는다)",
 		why, s.mt.key(n), s.mt.infoTail(), pr, first8(s.mt.pp))
 	if !m.jonce(s.mt, n, s.ln, "주차", "-", why) || !m.outbox(s.mt, n, "중간", "-", msg, s.ln) {
@@ -254,6 +254,22 @@ func (m *M) park(s stackSub) bool {
 	m.send(n)
 	fmt.Fprintf(os.Stderr, "hc-lane merger: %s\n", why)
 	return true
+}
+
+// parkWhy: 주차 글의 까닭(글만 — 판정은 predDone) — 바퀴에 읽어 둔 원격(m.qs)으로: 선행 착지 기록(merge-done)의 원본이 P가 아님 ·
+// 같은 선행 레인이 다른 커밋으로 큐에 있음 · 그 밖(선행 빠짐 — 반송·거둠)
+func (m *M) parkWhy(pred, p string) string {
+	if d := refsha(m.qs, "refs/merge-done/"+pred); d != "" {
+		if o, rc := outQ("rev-parse", "-q", "--verify", d+"^"); rc == 0 && o != p {
+			return "선행이 다른 커밋 " + first8(o) + "로 착지함"
+		}
+	}
+	for _, line := range strings.Split(m.qs, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] != p && strings.HasPrefix(f[1], "refs/merge-queue/") && qLane(strings.TrimPrefix(f[1], "refs/merge-queue/")) == pred {
+			return "선행이 새 커밋으로 다시 제출됨"
+		}
+	}
+	return "선행 빠짐"
 }
 
 // stackSkip: pickBatch의 건너뜀 — 다른 기본 브랜치로 낸 제출(그 브랜치의 병합기 몫)·선행이 아직 들지 않았는데 이번 묶음에 없는 쌓인 제출

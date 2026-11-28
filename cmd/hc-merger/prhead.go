@@ -75,8 +75,10 @@ func (m *M) prHeads() string {
 	return strings.Join(o, " ")
 }
 
-// prNote <ls-remote 출력> <레인> <착지 커밋>: 착지 사건 글 끝 — 머리 가지가 없으면 빈 값
-func prNote(rr, ln, C string) string {
+// prNote <정리 때 ls-remote> <바퀴 ls-remote(m.qs)> <머리 레인> <제출 SHA> <착지 커밋>: 착지 사건 글 끝 — 머리 가지가 없으면 빈 값.
+// 안 들어감의 까닭(글만 — 판정·동작은 같다): 제출 끝 커밋이 착지 기록에 없고 패치는 다 들어 있음(이미 기본 가지에 있어 rebase가 떨어뜨림 —
+// 올릴 머리 없음) · 머리 가지가 바퀴가 본 값에서 움직임(본 값 lease 거절 — 경합) · 그 밖. hc-fill PR 거울(cmd/hc-fill/pr2.go prWhy)이 이 글을 읽는다
+func prNote(rr, qs, ln, s, C string) string {
 	h := refsha(rr, prRef(ln))
 	if h == "" {
 		return ""
@@ -84,5 +86,25 @@ func prNote(rr, ln, C string) string {
 	if runQ("merge-base", "--is-ancestor", h, C) == 0 { // 없는 객체·오류는 「안 들어감」(모름을 Merged로 치지 않는다)
 		return " · PR 머리 " + first8(h) + " 들어감"
 	}
-	return " · PR 머리 안 들어감(가지 갱신 실패 — Merged 표시 없음)"
+	why := "가지 갱신 실패"
+	switch {
+	case prDropped(s, C):
+		why = "이미 들어 있어 올릴 머리 없음"
+	case h != refsha(qs, prRef(ln)):
+		why = "머리 가지 갱신 거절(경합)"
+	}
+	return " · PR 머리 안 들어감(" + why + " — Merged 표시 없음)"
+}
+
+// prDropped: 제출 s의 끝 커밋과 신원(작성자·작성 시각·메시지 — hc-lane landprhead.go prEnds가 머리를 찾는 열쇠)이 같은 커밋이 착지 C의 최근
+// 500개에 없고, s의 패치는 C에 다 있다(git cherry에 + 없음) — rebase가 떨어뜨림. git 오류는 거짓(지금 글)
+func prDropped(s, C string) bool {
+	const f = "--format=%x1e%an%x1f%ae%x1f%at%x1f%B%x1d"
+	w, rc := outQ("log", "-1", f, s)
+	l, rc2 := outQ("log", "-n", "500", f, C)
+	if rc != 0 || rc2 != 0 || w == "" || strings.Contains(l, w) {
+		return false
+	}
+	ch, rc := outQ("cherry", C, s)
+	return rc == 0 && !strings.Contains("\n"+ch, "\n+")
 }

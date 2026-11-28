@@ -7,6 +7,7 @@ package main
 // state_done분(상태 한 장이 끝난 레인을 숨기는 손잡이 — 같은 값·같은 비교)이 넘은 줄은 기본 표에서 빠진다(--all은 모두).
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -45,6 +46,57 @@ func stEnd(r Row, pos int, mk map[string]stMark) (string, int64) {
 		return "", 0
 	}
 	return head(m.SHA, 8) + " " + time.Unix(m.Sec, 0).Format("01-02 15:04"), m.Sec
+}
+
+var mfNameRe = regexp.MustCompile(`^refs/merge-failed/([0-9]{10})-(.+)$`)
+
+// stFailed: ls-remote 출력에서 레인마다 가장 늦은 반송 참조 refs/merge-failed/<초>-<레인>의 초
+func stFailed(out string) map[string]int64 {
+	m := map[string]int64{}
+	for _, l := range lines(out) {
+		if f := fields(l); len(f) == 2 {
+			if x := mfNameRe.FindStringSubmatch(f[1]); x != nil && int64(num(x[1])) > m[x[2]] {
+				m[x[2]] = int64(num(x[1]))
+			}
+		}
+	}
+	return m
+}
+
+// stBounce: 떠 있는(up) 줄의 반송 뒤 글·끝난 초·끝남, 아니면 빈 값. 병합기 줄에 없음이 확인됐고(pos 0 — 줄에 있음·줄을 못 읽음 = 모름이면
+// 빈 값) 이 줄 접수 뒤의 반송이 ① 장부(reland.tsv)의 그 레인 마지막 판정 줄이 다른 줄이 이어 받음(넣음 → 「반송됨 → <줄>」)이나 「이미 main」
+// (→ 「반송됨 — 이미 main」)이면 끝난 줄(opsstate.Ended가 이 글을 끝으로 읽는다) — 보냄·다시 냄 등(원래 레인이 고침)은 빈 값
+// ② 장부에 그 레인 줄이 없는 반송(방금 반송돼 처리 전·다시 맞춤 꺼짐·옛 줄 — failed가 nil이면 안 봄): 원격 반송 참조가 있고 마지막 사건이
+// 정리됨이고 터미널이 없으면 글만 사실대로 「반송됨(이어 받은 줄 기록 없음)」 — 끝난 줄로 세지도 숨기지도 않는다(모름을 끝남으로 읽지 않는다)
+func stBounce(r Row, pos int, led []Row, failed map[string]int64, last Row, live string) (string, int64, bool) {
+	s, ok := sinceOf(r)
+	if pos != 0 || !ok {
+		return "", 0, false
+	}
+	name, since := r.F(qName), int64(num(s))
+	var lr Row
+	for _, x := range led {
+		if sec, _, _ := strings.Cut(x.F(rlFailed), "-"); x.F(rlLane) == name && x.F(rlWhat) != "알림" && isDigits(sec) && int64(num(sec)) >= since {
+			lr = x
+		}
+	}
+	if lr != nil {
+		var end int64
+		if t, err := time.Parse("2006-01-02T15:04:05Z", lr.F(rlAt)); err == nil {
+			end = t.Unix()
+		}
+		switch lr.F(rlWhat) {
+		case "넣음":
+			return "반송됨 → " + lr.F(rlArg), end, true
+		case "이미 main":
+			return "반송됨 — 이미 main", end, true
+		}
+		return "", 0, false
+	}
+	if fs, ok := failed[name]; ok && fs >= since && last.F(lsState) == "정리됨" && live == "" {
+		return "반송됨(이어 받은 줄 기록 없음)", 0, false
+	}
+	return "", 0, false
 }
 
 // stSentAt <대기열 줄> <장부 요청 ID → 바꾼 시각>: 되돌려준 시각(초). 손으로 넣은 줄·장부에 없음은 0(모름)

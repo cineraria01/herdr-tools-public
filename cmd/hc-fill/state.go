@@ -70,8 +70,9 @@ func stateThresholds() opsstate.Thresholds {
 }
 
 // stateUpLane: 떠 있는(up) 대기열 줄 하나 → 상태 한 장의 레인(stateCollectF의 한 단계). x는 last.tsv 줄(없으면 nil), live는 stLive,
-// ma·maOK는 그 프로젝트 병합기 살아 있음 기록(바퀴가 읽은 큐 — 차례), bat은 도는 묶음 덧말(mqBatch, 아니면 빈 값)
-func stateUpLane(r Row, x Row, live string, ma maRow, maOK bool, bat string, now time.Time) opsstate.Lane {
+// ma·maOK는 그 프로젝트 병합기 살아 있음 기록(바퀴가 읽은 큐 — 차례), bat은 도는 묶음 덧말(mqBatch, 아니면 빈 값), led는 다시 맞춤 장부
+// (반송 뒤 끝남 stBounce — 원격 반송 참조는 읽지 않아 장부에 줄이 없는 반송의 글은 status만 보인다. 그 글은 끝남이 아니다)
+func stateUpLane(r Row, x Row, live string, ma maRow, maOK bool, bat string, led []Row, now time.Time) opsstate.Lane {
 	name := r.F(qName)
 	pos, known := maPos(ma, maOK, name)
 	if !known {
@@ -81,6 +82,7 @@ func stateUpLane(r Row, x Row, live string, ma maRow, maOK bool, bat string, now
 	if r.F(qAudit) == "auto" {
 		in.Aud = anote(name)
 	}
+	in.Bnc, _, _ = stBounce(r, pos, led, nil, x, live)
 	ln := opsstate.Lane{Name: name, Machine: r.F(qMach), Stage: stStage(in), Open: live != "",
 		Queued: ma.St == "alive" && (pos > 0 || bat != "")}
 	if pr, u := prOf(name); pr != "" { // PR 거울(pr.go)
@@ -168,7 +170,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 	for _, r := range readRows(DATA + "/last.tsv") {
 		last[r.F(lsName)] = r
 	}
-	laneOn := map[string]int{}
+	laneOn, rld := map[string]int{}, readRows(DATA+"/reland.tsv")
 	var oldest *opsstate.Waiting
 	mr := maLoad()                         // 병합기 살아 있음 기록 — 레인 차례(줄)와 아래 병합 줄
 	bats := map[string]map[string]string{} // 프로젝트 → 도는 묶음 구성원 덧말(mqBatch, 프로젝트마다 한 번)
@@ -195,7 +197,7 @@ func stateCollectF(now time.Time) (opsstate.State, opsstate.Facts) {
 		if _, ok := bats[p]; !ok {
 			bats[p] = mqBatch(ma, now)
 		}
-		ln := stateUpLane(r, last[name], live, ma, maOK, bats[p][name], now)
+		ln := stateUpLane(r, last[name], live, ma, maOK, bats[p][name], rld, now)
 		s.Lanes = append(s.Lanes, ln)
 		predQueued(f.Pred, ln, r.F(qProj), true)
 	}

@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -243,13 +244,25 @@ func resolveRepo(cmd string) string {
 		repo, remote, base, bref, blab = rdir, false, "", "", ""
 		return rdir
 	}
-	wl, _ := xoutHc("git", "-C", repo, "worktree", "list", "--porcelain") // hc 실패면 그 한 줄로 끝(저장소 탓이 아니다)
+	// hc 실패면 그 한 줄로 끝(저장소 탓이 아니다). git 글은 LC_ALL=C — 「저장소 아님」을 글로 가른다
+	wl, ge, _ := xoutHcE("env", "LC_ALL=C", "git", "-C", repo, "worktree", "list", "--porcelain")
 	top = ""
 	if first, _, _ := strings.Cut(wl, "\n"); strings.HasPrefix(first, "worktree ") {
 		top = strings.TrimPrefix(first, "worktree ")
 	}
 	if top == "" {
+		i := strings.LastIndex(ge, "\n") + 1
+		if gl := ge[i:]; gl != "" && !strings.Contains(gl, "not a git repository") {
+			os.Stderr.WriteString(ge[:i]) // 끝 줄 앞(hint 등)은 그대로 화면에 — 끝 줄은 아래 글에 싣는다
+			die("저장소를 읽지 못했다: %s%s — %s", repo, onNote(), gl)
+		}
+		if ge != "" {
+			os.Stderr.WriteString(ge + "\n") // 저장소 아님: git 원문 그대로(고치기 전과 같다)
+		}
 		die("git 저장소가 아니다: %s%s", repo, onNote())
+	}
+	if ge != "" {
+		os.Stderr.WriteString(ge + "\n")
 	}
 	repo = top
 	var ok bool

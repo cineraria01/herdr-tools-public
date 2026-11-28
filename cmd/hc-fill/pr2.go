@@ -493,9 +493,20 @@ func (r *prRun) landed(e *prEnt, ev events.Event, key string, byMerger bool) {
 		r.landedState(e, ev, key)
 		return
 	}
-	why := "가지 갱신 실패로 Merged 표시 없음"
+	why := prWhy(ev.Msg)
 	if !byMerger {
 		why = "병합기 밖 착지라 Merged 표시 없음"
 	}
 	r.close(e, key+":close", "착지 "+head(ev.SHA, 8)+" — "+why)
+}
+
+// prWhy: 병합기가 착지 글에 적은 「PR 머리 안 들어감(<까닭> — …)」의 까닭(cmd/hc-merger/prhead.go prNote) — 옛 판 글·그 밖은 지금 글
+func prWhy(msg string) string {
+	switch {
+	case strings.Contains(msg, "PR 머리 안 들어감(이미 들어 있어 올릴 머리 없음"):
+		return "이미 들어 있어 올릴 머리 없음 — Merged 표시 없음"
+	case strings.Contains(msg, "PR 머리 안 들어감(머리 가지 갱신 거절(경합)"):
+		return "머리 가지 갱신 거절(경합)로 Merged 표시 없음"
+	}
+	return "가지 갱신 실패로 Merged 표시 없음"
 }

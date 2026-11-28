@@ -116,17 +116,25 @@ func xoutQ(args ...string) (string, int) { return xoutTo(nil, args) }
 
 // xoutHc: xout과 같되 hc 자신의 실패(rcHc)면 그 한 줄로 끝낸다 — 뒤에 「git 저장소가 아니다」 같은 엉뚱한 까닭을 잇지 않게
 func xoutHc(args ...string) (string, int) {
+	out, e, r := xoutHcE(args...)
+	if e != "" {
+		os.Stderr.WriteString(e + "\n")
+	}
+	return out, r
+}
+
+// xoutHcE: xoutHc와 같되 오류 출력을 화면에 내지 않고 돌려준다(끝 줄바꿈 뺌) — 부르는 쪽이 그 글로 까닭을 가르게
+func xoutHcE(args ...string) (string, string, int) {
 	var eb bytes.Buffer
 	out, r := xoutTo(&eb, args)
 	e := strings.TrimRight(eb.String(), "\n")
 	if r != rcHc {
-		os.Stderr.WriteString(eb.String())
-		return out, r
+		return out, e, r
 	}
 	i := strings.LastIndex(e, "\n") + 1 // hc 실패 줄은 끝 줄 — 앞(프로그램의 오류 출력)은 그대로
 	os.Stderr.WriteString(e[:i])
 	die("%s", strings.TrimPrefix(e[i:], "hc-lane: "))
-	return "", r
+	return "", "", r
 }
 
 func xoutTo(stderr io.Writer, args []string) (string, int) {
