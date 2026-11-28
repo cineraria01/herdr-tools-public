@@ -38,6 +38,9 @@ func stStage(in stIn) string {
 // asNote: 넘길 때 깨우기 글에 붙이는 한 줄(이 차수 이 바퀴). 비어 있지 않으면 깨우기 간격을 기다리지 않는다
 var asNote string
 
+// asRest: 쉼 판정이 쉼이 아니라 대신 제출하지 않은 까닭 — 깨우기 글에 붙이되 깨우기 간격은 그대로 지킨다(바퀴마다 다시 정해진다)
+var asRest string
+
 // asubOn <프로젝트>: 손잡이·설정 auto_submit 목록에 그 프로젝트가 있나(기본 「-」 = 끔). 바퀴마다 새로 읽어 바로 먹는다
 func asubOn(p string) bool {
 	return p != "" && inlist(p, strings.ReplaceAll(conf("auto_submit"), " ", ""))
@@ -182,7 +185,7 @@ func asDone(line, rr string) {
 // aAutoSubmit <기본 가지>: 판정 파일을 둔 뒤(표시 none) 깨우기 앞에. 참 = 이 바퀴는 끝(제출함·에이전트가 먼저 시작함·넘기기 미룸),
 // 거짓 = 지금처럼 깨운다(asNote가 있으면 바로, 그 한 줄과 함께)
 func aAutoSubmit(base string) bool {
-	asNote = ""
+	asNote, asRest = "", ""
 	p := aproj(auAid)
 	if auAv != "pass" || inlist("asub", auAfl) || !asubOn(p) || !lalive(auPa, auLn) {
 		return false
@@ -192,14 +195,11 @@ func aAutoSubmit(base string) bool {
 	default:
 		return false // 에이전트가 턴 중 — 손대지 않는다
 	}
-	// 턴이 끝났어도 안에서 일이 돌면 레인은 손을 뗀 것이 아니다(ht-rest-one-gate): 활동이면 깨우지도 제출하지도 않고 다음 바퀴에, 모름이면
-	// 제출하지 않고 지금처럼 깨운다(레인이 스스로 받는다 — 옛 판 워커·안 닿음이 대기열 제출 없이도 끝나게)
-	switch v := rest.Ask(restRun, auPa, LOCAL); v.State {
-	case rest.Busy:
-		fmt.Println("대기열 제출 미룸 " + auLn + ": 레인 터미널 " + auPa + " " + rest.Why(v) + " — 다음 바퀴에")
-		return true
-	case rest.Unknown:
-		fmt.Println("대기열 제출 안 함 " + auLn + ": 레인 터미널 " + auPa + " " + rest.Why(v) + " — 지금처럼 깨운다")
+	// 턴이 끝났어도 안에서 일이 돌거나(활동) 쉼을 모르면 레인이 손을 뗐는지 모른다(ht-rest-one-gate): 대신 제출하지 않고 턴 중일 때처럼
+	// 판정을 전달한다 — 배경 작업이 아직 필요한지는 그 레인만 안다(ht-autosubmit-busy-wake). 깨우기 간격은 그대로라 바퀴마다 되풀이하지 않는다
+	if v := rest.Ask(restRun, auPa, LOCAL); v.State != rest.Quiet {
+		asRest = "대기열이 대신 제출하지 않았다: 레인 터미널 " + rest.Why(v)
+		fmt.Println("대기열 제출 안 함 " + auLn + ": 레인 터미널 " + auPa + " " + rest.Why(v) + " — 판정을 지금처럼 전달한다")
 		return false
 	}
 	repo := repoOf(p, auAm)

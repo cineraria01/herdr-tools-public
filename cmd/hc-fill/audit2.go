@@ -257,7 +257,7 @@ func aDeliver() {
 		return
 	}
 	mark := F1(strings.Fields(vo), 1)
-	asNote = ""
+	asNote, asRest = "", ""
 	switch mark {
 	case "taken", "landing":
 		aupd(auAid, cv{atState, "taken"})
@@ -298,8 +298,8 @@ func aDeliver() {
 	}
 	if !unk && (now-alw >= int64(WAKE*60) || asNote != "") {
 		wn := ""
-		if asNote != "" {
-			wn = " — " + asNote
+		if n := asNote + asRest; n != "" { // 둘은 한 바퀴에 함께 서지 않는다
+			wn = " — " + n
 		}
 		if !lalive(auPa, auLn) {
 			fmt.Println("깨우기 미룸 " + auAn + ": 레인 터미널 " + auPa + " 이 이 바퀴 목록에 없다")

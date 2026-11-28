@@ -104,18 +104,16 @@ func TestRestGateOpsAgent(t *testing.T) {
 	}
 }
 
-// 대기열 제출: 활동이면 깨우지도 제출하지도 않고(이 바퀴 끝) 다음 바퀴에, 모름이면 제출하지 않고 지금처럼 깨운다(레인이 스스로).
+// 대기열 제출: 활동·모름이면 제출하지 않고 지금처럼 깨운다(거짓 — 레인이 스스로 받는다, 깨우기 간격 그대로, 글에 까닭 — ht-autosubmit-busy-wake).
 // 쉼이 된 바퀴에 제출 한 번 — 다시 돌려도 또 제출하지 않음. 원격 레인은 그 기계에서 묻는다(hc exec --on)
 func TestRestGateAutoSubmit(t *testing.T) {
 	for _, m := range []string{"m", "r"} {
 		k := asTSetup(t, m, "idle", "app")
-		restSay(t, k.dir, "w1", restBusyLine)
-		if !aAutoSubmit("main") || strings.Contains(k.logged(), "land ") || inlist("asub", auAfl) {
-			t.Fatalf("%s 활동: 이 바퀴 끝(참)·제출 없음: %s %s", m, k.logged(), auAfl)
-		}
-		restSay(t, k.dir, "w1", restOldLine)
-		if aAutoSubmit("main") || strings.Contains(k.logged(), "land ") || asNote != "" {
-			t.Fatalf("%s 모름: 제출 없이 지금처럼 깨움(거짓, 깨우기 간격 그대로): %s %q", m, k.logged(), asNote)
+		for _, c := range []struct{ line, why string }{{restBusyLine, "안에서 일이 도는 중(배경 작업 1개 도는 중)"}, {restOldLine, "쉼 모름("}} {
+			restSay(t, k.dir, "w1", c.line)
+			if aAutoSubmit("main") || strings.Contains(k.logged(), "land ") || inlist("asub", auAfl) || asNote != "" || !strings.Contains(asRest, c.why) {
+				t.Fatalf("%s %s: 제출 없이 지금처럼 깨움(거짓, 간격 그대로, 까닭 글): %s %s %q %q", m, c.line, k.logged(), auAfl, asNote, asRest)
+			}
 		}
 		restSay(t, k.dir, "w1", "")
 		if !aAutoSubmit("main") || strings.Count(k.logged(), "land land main --verdict a1 ") != 1 {

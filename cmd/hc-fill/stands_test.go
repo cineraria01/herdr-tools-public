@@ -286,3 +286,45 @@ func TestStandsStacked(t *testing.T) {
 		t.Fatalf("쌓지 않은 줄은 선행이 들어가야 선다: %v", s)
 	}
 }
+
+// ht-autosubmit-busy-wake: 통과·done·안에서 일이 도는 레인 — 대기열은 대신 제출하지 않되 판정은 지금처럼 전달한다(까닭 한 줄과 함께).
+// 다음 바퀴에도 활동이면 깨우기 간격 안이라 되풀이 없음, 쉼이 되면(레인이 아직 안 받음) 대기열이 한 번 제출, 레인이 먼저 받았으면 손대지 않음,
+// 서 있지 않으면 제출·전달 없음(그 확인이 먼저)
+func TestBusyLaneGetsVerdict(t *testing.T) {
+	w, a := WAKE, ACKMAX
+	WAKE, ACKMAX = 10, 30 // 실제 깨우기 간격(기본 10분) — 0이면 바퀴마다 깨운다
+	t.Cleanup(func() { WAKE, ACKMAX = w, a })
+	s := stSetup(t, "done")
+	s.ev("완료", "abababab")
+	restSay(t, s.dir, "w1", restBusyLine)
+	out := s.round()
+	t.Logf("1바퀴 출력:\n%s\n기록:\n%s", out, s.logged())
+	if s.submitted() != 0 || s.woke() != 1 || !strings.Contains(s.logged(), "대기열이 대신 제출하지 않았다") || !strings.Contains(s.logged(), "배경 작업 1개 도는 중") {
+		t.Fatalf("① 활동: 제출 0·전달 1(까닭 글): 제출 %d 깨움 %d\n%s", s.submitted(), s.woke(), s.logged())
+	}
+	s.round()
+	s.round() // 같은 바퀴 두 번(두 번째 실행)
+	if s.submitted() != 0 || s.woke() != 1 {
+		t.Fatalf("② 다음 바퀴에도 활동: 되풀이 없음: 제출 %d 깨움 %d", s.submitted(), s.woke())
+	}
+	restSay(t, s.dir, "w1", "")
+	if s.round(); s.submitted() != 1 || s.woke() != 1 {
+		t.Fatalf("③ 쉼이 됨(레인 안 받음): 대기열이 한 번 제출: 제출 %d 깨움 %d\n%s", s.submitted(), s.woke(), s.logged())
+	}
+
+	s2 := stSetup(t, "done") // ③ 바퀴 순서 반대: 전달받은 레인이 먼저 받음 → 쉼이 돼도 대기열은 손대지 않음
+	s2.ev("완료", "abababab")
+	restSay(t, s2.dir, "w1", restBusyLine)
+	s2.round()
+	wr(t, s2.vdir+"/a1.ack", "taken\tx\ty\tz\n")
+	restSay(t, s2.dir, "w1", "")
+	if s2.round(); s2.submitted() != 0 || arow("a1").F(atState) != "taken" {
+		t.Fatalf("레인이 먼저 받음: 제출 %d 상태 %s", s2.submitted(), arow("a1").F(atState))
+	}
+
+	s3 := stSetup(t, "done") // ⑤ 서 있지 않음(완료 뒤 막힘) + 활동: 제출·전달 없음
+	s3.ev("완료", "abababab")
+	s3.ev("막힘", "-")
+	restSay(t, s3.dir, "w1", restBusyLine)
+	s3.noSubmit("서 있지 않음·활동", s3.round())
+}
