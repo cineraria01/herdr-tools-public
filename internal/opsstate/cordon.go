@@ -17,21 +17,43 @@ type Cordon struct {
 // CordonAuthPre: 원격 로그인 거절 까닭의 머리(hc-fill cordonauth.go가 붙인다)
 const CordonAuthPre = "원격 로그인 거절 — "
 
+// CordonKind: 격리 까닭 한 갈래 — 머리(hc-fill 점검이 까닭 앞에 붙인다)·advise에 보일 것·사람이 볼 것(hc-fill 알림도 이 글)
+type CordonKind struct{ Pre, What, Look string }
+
+// 격리 까닭 갈래(ht-probe-cordon — 점검 항목을 더할 때 이 표에 한 줄). 첫 줄 저장소 읽기는 머리가 없다(옛 기록 글 그대로)
+var (
+	CordonRepo     = CordonKind{"", "저장소 폴더를 못 읽음", "그 기계에서 worker-mac-check(코어가 띄운 프로그램의 폴더 권한 — OS 권한 창)"}
+	CordonAuth     = CordonKind{CordonAuthPre, "원격 로그인 거절", "그 기계에서 원격 로그인 다시(`gh auth status`·다시 로그인)"}
+	CordonWrite    = CordonKind{"원격 쓰기 거절 — ", "원격 쓰기 거절", "그 기계에서 원격 쓰기 권한·로그인(`gh auth status`의 권한 범위·다시 로그인) — 착지 push가 막힌다"}
+	CordonPool     = CordonKind{"에이전트 풀 빔 — ", "에이전트 풀에 쓸 계정 없음", "그 기계의 풀 프록시 상태(설정 worker.proxy의 status — 계정 한도·로그인)"}
+	CordonKeychain = CordonKind{"키체인 막힘 — ", "키체인 막힘", "그 기계 hc-sweep --health — 코어가 SSH 문맥으로 떴을 수 있다(hc-core-relaunch)"}
+	CordonTmp      = CordonKind{"임시 폴더 못 씀 — ", "작업 임시 폴더를 못 씀", "그 기계 작업 임시 뿌리(설정 jobtmp.root)의 권한·디스크"}
+	CordonKinds    = []CordonKind{CordonRepo, CordonAuth, CordonWrite, CordonPool, CordonKeychain, CordonTmp}
+)
+
 func cordonItem(m Machine) Item {
-	repo, auth := false, false
+	has := make([]bool, len(CordonKinds))
+	cur := -1
 	for _, w := range strings.Split(m.Cordon.Why, "; ") {
-		if strings.HasPrefix(w, CordonAuthPre) {
-			auth = true
-		} else if !auth { // 원격 까닭 뒤의 조각은 그 오류 글 속 「; 」
-			repo = true
+		k := -1
+		for i, c := range CordonKinds {
+			if c.Pre != "" && strings.HasPrefix(w, c.Pre) {
+				k = i
+			}
 		}
+		if k < 0 && cur >= 0 { // 머리 있는 까닭 뒤의 조각은 그 오류 글 속 「; 」
+			continue
+		}
+		if k < 0 {
+			k = 0
+		}
+		has[k], cur = true, k
 	}
 	var what, look []string
-	if repo || !auth {
-		what, look = append(what, "저장소 폴더를 못 읽음"), append(look, "그 기계에서 worker-mac-check(코어가 띄운 프로그램의 폴더 권한 — OS 권한 창)")
-	}
-	if auth {
-		what, look = append(what, "원격 로그인 거절"), append(look, "그 기계에서 원격 로그인 다시(`gh auth status`·다시 로그인)")
+	for i, c := range CordonKinds {
+		if has[i] {
+			what, look = append(what, c.What), append(look, c.Look)
+		}
 	}
 	return Item{Key: "cordon:" + m.Name, Kind: "cordon",
 		What:     fmt.Sprintf("%s 격리 %d분째 — %s", m.Name, m.Cordon.SinceS/60, strings.Join(what, "·")),

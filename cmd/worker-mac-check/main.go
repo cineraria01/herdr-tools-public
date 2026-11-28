@@ -258,6 +258,7 @@ func (c *checker) hcChecks(ctx context.Context, s settings, m string) {
 		out, _ := wm.Output(ctx, sec, nil, "hc", "exec", "--on", m, "--", "/bin/sh", "-c", `export PATH="`+toolPath+`"; `+script)
 		return out
 	}
+	// 같은 명령·판정(workermac.KeychainArgs·KeychainLocked)을 hc-sweep 건강 점검과 hc-fill 격리 점검이 바퀴마다 본다 — 여기는 손으로 한 번
 	switch kc := wm.Trim(hcx(20, `security show-keychain-info "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; echo $?`)); kc {
 	case "0":
 		c.line("통과", "키체인(hc 문맥)", "열림")
@@ -296,8 +297,8 @@ func (c *checker) hcChecks(ctx context.Context, s settings, m string) {
 	}
 	if s.px != "" {
 		tc := squeeze(hcx(30, wm.Quote(s.px)+` status 2>&1 | grep -m2 -i -E "running|stopped|not running|usable now"`))
-		switch {
-		case usableRe.MatchString(tc):
+		switch n, _ := wm.PoolUsable(tc); { // hc-fill 격리 점검(에이전트 풀)과 같은 판정
+		case n > 0:
 			c.line("통과", s.px+" status", tc)
 		case tc != "":
 			c.line("실패", s.px+" status", tc)
@@ -308,7 +309,6 @@ func (c *checker) hcChecks(ctx context.Context, s settings, m string) {
 }
 
 var (
-	usableRe  = regexp.MustCompile(`(?i)usable now: *[1-9]`)
 	accountRe = regexp.MustCompile(`.*account ([^ ]+)`)
 	spacesRe  = regexp.MustCompile(` +`)
 )

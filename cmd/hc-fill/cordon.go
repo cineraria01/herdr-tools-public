@@ -38,7 +38,8 @@ type cordonCk struct {
 	look  string // 알림의 사람이 볼 것
 	every int64  // 좋은 기계를 다시 보는 간격(초)
 	// verdict: 이번 바퀴 그 기계 판정 — 1 좋음 · 2 나쁨(까닭) · 3 물었는데 모름(좋은 기계의 다음 확인만 간격 뒤로) · 0 못 물음
-	verdict func(m string) (int, string)
+	verdict   func(m string) (int, string)
+	alertOnly bool // 격리하지 않고 문턱에 알리기만(시계 — ht-probe-cordon)
 }
 
 func (c *cordonCk) why() string  { return "격리(" + c.name + " " + c.bad + ")" } // 안 띄운 까닭(machRoom·MWHY)
@@ -48,14 +49,16 @@ func (c *cordonCk) file() string { return DATA + "/cordon" + c.key + ".tsv" }
 const cordonWhy = "격리(저장소 읽기 막힘)"
 
 // cdRepo: 저장소 읽기 — 좋은 기계는 2분마다(격리 문턱 5분 + 이 간격 + 한 바퀴가 합격 기준 10분 안에 들게)
-var cdRepo = &cordonCk{"", "저장소 읽기", "막힘", "", "그 기계에서 worker-mac-check(코어가 띄운 프로그램의 폴더 권한 — OS 권한 창이 떠 있을 수 있다)", 120, cordonVerdict}
+var cdRepo = &cordonCk{"", "저장소 읽기", "막힘", "", "그 기계에서 worker-mac-check(코어가 띄운 프로그램의 폴더 권한 — OS 권한 창이 떠 있을 수 있다)", 120, cordonVerdict, false}
 
-var cordonCks = []*cordonCk{cdRepo, cdAuth}
+// cordonCks: 점검 차례(기계 줄·까닭 글·안 띄운 까닭은 이 차례로 — 항목은 cordonprobe.go)
+var cordonCks = []*cordonCk{cdRepo, cdAuth, cdWrite, cdPool, cdKeychain, cdTmp, cdClock}
 
-// due: 이번 바퀴에 그 기계를 물을 차례 — 좋고 알림이 안 남은 기계는 간격마다만, 나쁘거나 격리 중·회복 알림이 남거나 처음 보면 바퀴마다
+// due: 이번 바퀴에 그 기계를 물을 차례 — 좋고 알림이 안 남은 기계는 간격마다만, 나쁘거나 격리 중·회복 알림이 남거나 처음 보면 바퀴마다.
+// 마지막 판정 뒤 그 기계에 도구 새 판이 깔렸으면(배포 기록 — deployAt) 간격을 기다리지 않고 한 번
 func (c *cordonCk) due(rows map[string]cordonRow, m string, now int64) bool {
 	p, seen := rows[m]
-	return !seen || p.St != "ok" || p.Alerted || now-p.At >= c.every
+	return !seen || p.St != "ok" || p.Alerted || now-p.At >= c.every || deployAt(m) > p.At
 }
 
 type cordonRow struct {
@@ -207,6 +210,7 @@ func repoTake(m, out string) {
 		}
 		AUTHCK[m] = authLine(out)
 	}
+	probeTake(m, out, asked) // 쓰기 자격·풀·키체인·임시 폴더·시계(cordonprobe.go)
 }
 
 // cordonVerdict: 이번 바퀴 그 기계 판정 — 1 좋음 · 2 나쁨(까닭) · 0 모름(폴더 수가 설정과 다르면 모름)
@@ -238,7 +242,7 @@ func cordonTick() {
 		_, have := REPOCK[m]
 		loadMu.Unlock()
 		// 이 바퀴에 온전한 출력을 받았으면(have) 원격 로그인도 차례였다면 이미 물었다(repoTake)
-		if dry || have || !cdRepo.due(prev[cdRepo], m, now) && !authDue(m) || len(repoPaths(m)) == 0 || m != LOCAL && !connHas(m) {
+		if dry || have || !snipDue(prev, m, now) || len(repoPaths(m)) == 0 || m != LOCAL && !connHas(m) {
 			continue
 		}
 		wg.Add(1)
@@ -252,24 +256,31 @@ func cordonTick() {
 	wg.Wait()
 	CORDON = map[string]map[string]cordonRow{}
 	for _, c := range cordonCks {
-		next := c.judge(prev[c], now)
-		CORDON[c.key] = next
-		if dry || len(next) == 0 && !exists(c.file()) {
-			continue
-		}
-		var ms []string
-		for m := range next {
-			ms = append(ms, m)
-		}
-		sort.Strings(ms)
-		var b strings.Builder
-		for _, m := range ms {
-			b.WriteString(next[m].line() + "\n")
-		}
-		if err := writeAtomic(c.file(), b.String()); err != nil {
-			say("격리 기록을 못 씀: %v", err)
-		}
+		CORDON[c.key] = c.save(c.judge(prev[c], now))
 	}
+}
+
+// save: 기록을 쓴다(dry-run·처음부터 빈 기록은 안 씀) — 받은 기록을 그대로 돌려준다
+func (c *cordonCk) save(next map[string]cordonRow) map[string]cordonRow {
+	if dry || len(next) == 0 && !exists(c.file()) {
+		return next
+	}
+	var ms []string
+	for m := range next {
+		ms = append(ms, m)
+	}
+	sort.Strings(ms)
+	var b strings.Builder
+	for _, m := range ms {
+		b.WriteString(next[m].line() + "\n")
+	}
+	if old, _ := readFile(c.file()); old == b.String() { // 바뀐 것 없음 — 이번에 안 본 항목(점검이 여럿이라 바퀴마다 쓰기가 늘지 않게)
+		return next
+	}
+	if err := writeAtomic(c.file(), b.String()); err != nil {
+		say("격리 기록을 못 씀: %v", err)
+	}
+	return next
 }
 
 // judge: 앞 기록 + 이번 판정 → 새 기록(모름인 기계는 앞 기록 그대로 — 물었는데 모름이면 좋은 기계의 다음 확인 때만 뒤로). 알림도 여기서
@@ -303,10 +314,13 @@ func (c *cordonCk) judge(prev map[string]cordonRow, now int64) map[string]cordon
 			}
 			x.At, x.Why = now, why
 			mins := (now - x.Since) / 60
-			x.On = lim > 0 && mins >= int64(lim)
+			x.On = !c.alertOnly && lim > 0 && mins >= int64(lim)
 			if mins >= int64(at) && !x.Alerted {
 				act := "격리: 새 레인·감사·병합 검증을 그 기계에 안 보냄(새 일만 막음 — 돌아오면 스스로 풂)"
-				if !x.On {
+				switch {
+				case c.alertOnly:
+					act = "격리하지 않는 항목(알리기만)"
+				case !x.On:
 					act = "격리 안 함(손잡이 cordon 0 — 알리기만)"
 				}
 				lanes := reachLanes(m, ROWS)
@@ -338,6 +352,15 @@ func (c *cordonCk) judge(prev map[string]cordonRow, now int64) map[string]cordon
 	return out
 }
 
+// ownKey: 알림 키에 받는 주인을 붙인다 — 풀림(…:up)은 주인 뒤에 :up을 두어 「막힘 열쇠 + :up」 꼴로(한 문 gate.go opsKeyDone이 그것만
+// 맞춘다. 작업 중 발견해 함께 고침 — 주인이 맨 끝이라 격리·닿지 않음 막힘이 풀림으로 안 읽혔다). 닿지 않음(reachSend)도 이것으로
+func ownKey(key, own string) string {
+	if b, ok := strings.CutSuffix(key, ":up"); ok {
+		return b + ":" + own + ":up"
+	}
+	return key + ":" + own
+}
+
 // cordonSend: 그 기계 레인 주인 지휘마다 한 줄(레인이 없으면 「-」 — 받는 쪽 규칙 그대로). 막힘은 aesc, 회복은 중간. 모두 남겼으면 참
 func cordonSend(state, msg, key string, lanes []string) bool {
 	owners := reachOwners(lanes)
@@ -346,7 +369,7 @@ func cordonSend(state, msg, key string, lanes []string) bool {
 	}
 	ok := true
 	for _, own := range owners {
-		k := key + ":" + own
+		k := ownKey(key, own)
 		if state == "막힘" {
 			ok = aesc("hc-fill-cordon", own, msg, k) == 0 && ok
 			continue
@@ -374,6 +397,8 @@ func cordonNotes() map[string]string {
 			case x.St != "bad":
 			case x.On:
 				o[m] += "  격리 " + stDur(now-x.Since) + "째(" + c.pre + x.Why + ")"
+			case c.alertOnly:
+				o[m] += "  " + c.name + " " + c.bad + " " + stDur(now-x.Since) + "째(" + x.Why + " — 알리기만)"
 			default:
 				o[m] += "  " + c.name + " " + c.bad + " " + stDur(now-x.Since) + "째(" + x.Why + " — 격리 전)"
 			}

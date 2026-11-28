@@ -8,6 +8,8 @@ if [ "${1-}" = coord ]; then [ -n "${HC_FAKE_COORD-}" ] || { echo "hc-lane coord
 if [ "${1-}" = merger ] && [ "${2-}" = --spec-idle ]; then [ -n "${HC_FAKE_SPEC_IDLE-}" ] || exit 1   # 부하 조각의 도는 검증 수 — 없으면 모름
   ra=; a="${3-}"; [ "$a" != --remote-auth ] || { ra=1; a="${4-}"; }; case "$a" in ""|--repo-read) ;; *) exit 2 ;; esac; [ -z "$ra" ] || [ "$a" = --repo-read ] || exit 2   # 진짜처럼 모르는 꼴은 거절
   echo "$HC_FAKE_SPEC_IDLE"; [ -z "$ra" ] || { echo "${HC_FAKE_ON:-here}" >>"$T_LOG/remote-auth.calls"; cat "$T_LOG/remote-auth.${HC_FAKE_ON:-here}" 2>/dev/null || echo "remote-auth 1 0 git.example.test -"; }   # 원격 로그인 점검 — 몫 파일이 없으면 좋음
+  [ -z "$ra" ] || cat "$T_LOG/remote-write.${HC_FAKE_ON:-here}" 2>/dev/null || echo "remote-write 1 0 git.example.test -"   # 쓰기 자격(ht-probe-cordon) — 몫 파일이 없으면 좋음
+  [ "$a" != --repo-read ] || { [ -z "${HC_LANE_PROBE_POOL-}" ] || echo "${HC_FAKE_ON:-here} $HC_LANE_PROBE_POOL" >>"$T_LOG/pool.calls"; cat "$T_LOG/probe.${HC_FAKE_ON:-here}" 2>/dev/null; }   # 점검 줄(키체인·임시·풀) — 몫 파일이 없으면 줄 없음(옛 판 = 모름)
   [ "$a" != --repo-read ] || cat "$T_LOG/repo-read.${HC_FAKE_ON:-here}" 2>/dev/null; exit 0; fi   # 저장소 읽기 점검 — 그 기계 몫 파일이 없으면 줄 없음(모름)
 if [ "${1-}" = report ]; then echo "$* (터미널 ${HC_TERMINAL_ID:-없음})" >>"$T_LOG/report.log"; exit "${HC_FAKE_REPORT_RC:-0}"; fi   # 놀고 있음 알림 사건
 if [ "${1-}" = events ]; then echo "$*" >>"$T_LOG/events.log"; [ -z "${HC_FAKE_EVENTS_FAIL-}" ] || exit 1; cat "$T_LOG/events" 2>/dev/null; exit 0; fi

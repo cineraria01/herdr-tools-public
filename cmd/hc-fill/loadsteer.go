@@ -80,8 +80,12 @@ func loadSnip(m string) string {
 		try = "echo " + authAsked + "; hc-lane merger --spec-idle --remote-auth --repo-read" + rr + " || { [ $? = 2 ] && " +
 			strings.TrimSuffix(try, " || ") + "; } || "
 	}
+	if poolDue(m) { // 에이전트 풀(cordonprobe.go) — env라 옛 판은 모른 채 그대로 돈다(표식 뒤 줄 없음 = 모름)
+		try = "HC_LANE_PROBE_POOL=" + shq(poolCmd()) + "; export HC_LANE_PROBE_POOL; echo " + poolAsked + "; " + try
+	}
+	// clock: 부른 쪽 시각과 그 기계 시각(시계 틀림 — cordonprobe.go, 받는 쪽이 받은 때와 견준다)
 	return `{ l=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || l=$(sysctl -n vm.loadavg | awk '{print $2}'); c=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu); printf 'load %s %s\n' "$l" "$c"; ` +
-		try + `hc-lane merger --spec-idle; } 2>/dev/null || :`
+		`echo "clock ` + fmt.Sprint(nowUnix()) + ` $(date +%s)"; ` + try + `hc-lane merger --spec-idle; } 2>/dev/null || :`
 }
 
 // loadParse: 출력에서 「load」로 시작하는 첫 줄(부하). 꼴이 틀리거나 없으면 모름. --spec-idle 줄이 있으면 그 verifies= 를 검증 수로
@@ -373,13 +377,15 @@ func placeCands(lane, p, only string, isa bool) (cands []Machine, repos map[stri
 				}
 			case "멈춤(조정)":
 				pin = append(pin, m+" 멈춤")
-			case cordonWhy, cdAuth.why():
-				pin = append(pin, m+" 격리")
 			case "자리 참":
 				full = m
 				pin = append(pin, pinNote(m, "상한"))
 			case "레인상한 참":
 				pin = append(pin, pinNote(m, "상한"))
+			default:
+				if strings.HasPrefix(why, "격리(") { // 어느 점검의 격리든(cordonCks — cordonCk.why)
+					pin = append(pin, m+" 격리")
+				}
 			}
 			if why != "" {
 				mwhy(m, why)

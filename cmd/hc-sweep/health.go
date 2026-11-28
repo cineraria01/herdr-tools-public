@@ -18,6 +18,7 @@ import (
 
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/resident"
+	"herdr-tools/internal/workermac"
 )
 
 // hItem: 점검 하나의 기록. State = 마지막으로 안 상태(good|bad, 빈 값 = 아직 모름), Since = 그 상태(또는 첫 기록)를 적은 때 — 사건 키에
@@ -73,15 +74,17 @@ func probeSleep(r runner) (string, string) {
 	return "bad", "SleepDisabled " + dash(sd) + ", sleep " + dash(sl)
 }
 
-// probeKeychain: 열려 있는지만 묻는다(암호·항목은 안 다룬다). 0 열림, 36 User interaction is not allowed, 그 밖은 모름
+// probeKeychain: 열려 있는지만 묻는다(암호·항목은 안 다룬다). 0 열림, 36 User interaction is not allowed, 그 밖은 모름 — hc-fill 격리
+// 점검(hc-lane merger --spec-idle)과 같은 명령·판정(workermac)
 func probeKeychain(r runner) (string, string) {
-	res := r(20*time.Second, nil, "/usr/bin/security", "show-keychain-info", filepath.Join(home, "Library/Keychains/login.keychain-db"))
+	a := workermac.KeychainArgs(home)
+	res := r(20*time.Second, nil, a[0], a[1:]...)
 	switch {
 	case res.err != nil:
 		return "", "security 실패(" + rcText(res) + ")"
 	case res.rc == 0:
 		return "good", "열림"
-	case res.rc == 36:
+	case res.rc == workermac.KeychainLocked:
 		return "bad", "rc 36 User interaction is not allowed"
 	}
 	return "", "security 종료 " + rcText(res)

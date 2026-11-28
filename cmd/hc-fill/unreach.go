@@ -95,7 +95,7 @@ func reachOwners(lanes []string) []string {
 }
 
 // unreachTick: stallTick 머리에서(readTables 다음 — TERMS·CONN·LANEADDR를 이 바퀴에 읽었다). 알림이 실패하면 그 알림만 다음 바퀴에
-// 다시(hc-lane이 키 「hf:unreach:<기계>:<끊긴 시각>[:up]:<주인>」로 한 번만 적는다)
+// 다시(hc-lane이 키 「hf:unreach:<기계>:<끊긴 시각>:<주인>[:up]」로 한 번만 적는다 — 풀림 = 막힘 열쇠 + :up)
 func unreachTick() {
 	lim := knobInt("unreach")
 	prev, now := reachLoad(), nowUnix()
@@ -179,7 +179,7 @@ func unreachTick() {
 func reachSend(state, msg, key string, lanes []string) bool {
 	ok := true
 	for _, own := range reachOwners(lanes) {
-		k := key + ":" + own
+		k := ownKey(key, own) // 풀림 = 막힘 열쇠 + :up(cordon.go)
 		if state == "막힘" {
 			ok = aesc("hc-fill-unreach", own, msg, k) == 0 && ok
 			continue

@@ -38,6 +38,12 @@ fi
 exit 0
 `
 
+// ctFakeDate: 그 기계(M)에 $CD/<기계>.date가 있으면 그 값(시계 틀림 — cordonprobe_test.go), 아니면 진짜 date
+const ctFakeDate = `#!/bin/sh
+[ -n "${M-}" ] && [ -f "$CD/$M.date" ] && { cat "$CD/$M.date"; exit 0; }
+exec /bin/date "$@"
+`
+
 const (
 	ctGood = "load=0.10 cpus=8 verifies=0 gates=0\nrepo-read 1 ok\nrepo-read 2 ok\nrepo-read end 2"
 	ctBad  = "load=0.10 cpus=8 verifies=0 gates=0\nrepo-read 1 bad open /r/b: interrupted system call\nrepo-read 2 ok\nrepo-read end 2"
@@ -56,15 +62,19 @@ func ctFix(t *testing.T) *ctx {
 	re := lpFix(t)
 	confLines = append(confLines, "repo q a /r/qa", "repo q b /r/q b", "cordon 5")
 	cd := t.TempDir()
-	for n, s := range map[string]string{"hc": ctFakeHC, "hc-lane": ctFakeLane} {
+	for n, s := range map[string]string{"hc": ctFakeHC, "hc-lane": ctFakeLane, "date": ctFakeDate} {
 		if err := os.WriteFile(cd+"/"+n, []byte(s), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("CD", cd)
 	t.Setenv("PATH", cd+":"+os.Getenv("PATH"))
-	CORDON, REPOCK, AUTHCK, ROWS, TERMS = nil, nil, nil, nil, nil
-	t.Cleanup(func() { CORDON, REPOCK, AUTHCK, TERMS = nil, nil, nil, nil })
+	CORDON, REPOCK, AUTHCK, ROWS, TERMS, PROBE, DEPLOYAT = nil, nil, nil, nil, nil, nil, nil
+	op := poolCmd
+	poolCmd = func() string { return "" } // 풀 점검은 그 시험만(cordonprobe_test.go)
+	t.Cleanup(func() {
+		CORDON, REPOCK, AUTHCK, TERMS, PROBE, DEPLOYAT, poolCmd = nil, nil, nil, nil, nil, nil, op
+	})
 	c := &ctx{t, cd, re}
 	c.set("a", ctGood)
 	c.set("b", ctGood)
@@ -94,7 +104,7 @@ func (c *ctx) tick(back int64) {
 			}
 		}
 	}
-	REPOCK, AUTHCK = map[string]repoCk{}, map[string]string{}
+	REPOCK, AUTHCK, PROBE = map[string]repoCk{}, map[string]string{}, nil
 	cordonTick()
 }
 
@@ -219,7 +229,7 @@ func TestCordonRecovers(t *testing.T) {
 	}
 	k := strings.Split(strings.Split(e, "report 중간")[1], "--key ")[1]
 	k2 := strings.Split(strings.Split(e, "report 중간")[2], "--key ")[1]
-	if k != k2 || !strings.Contains(k, ":up:t0") {
+	if k != k2 || !strings.Contains(k, ":t0:up") { // 풀림 = 막힘 열쇠 + :up(한 문)
 		t.Fatalf("⑥ 같은 키로 다시: %q %q", k, k2)
 	}
 }

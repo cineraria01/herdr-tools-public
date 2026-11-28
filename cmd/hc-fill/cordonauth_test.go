@@ -251,8 +251,10 @@ func TestCordonAuthAskedOnce(t *testing.T) {
 	c.auth("b", raGood)
 	now := time.Now().Unix()
 	put := func(at int64) {
-		if err := os.WriteFile(cdAuth.file(), []byte(cordonRow{M: "b", St: "ok", At: at}.line()+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+		for _, ck := range []*cordonCk{cdAuth, cdWrite} { // 쓰기 자격은 같은 호출에 실려 같은 때 판정된다(ht-probe-cordon)
+			if err := os.WriteFile(ck.file(), []byte(cordonRow{M: "b", St: "ok", At: at}.line()+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	put(now - cdAuth.every + 1)

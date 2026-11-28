@@ -74,6 +74,7 @@ worker.trust       src src/example-app
 worker.slots_file  .config/example-app/verify-slots
 worker.tools       git node
 worker.ssh_key     ~/.ssh/id_ed25519_workers
+# 풀 프록시 명령(<명령> status의 「Usable now: <n>」) — worker-mac-check와 hc-fill 격리 점검 「에이전트 풀」(없으면 그 점검 안 함)
 worker.proxy       example-proxy
 # worker-mac-setup mesh: 서로 ssh·hc로 잇는 워커 hc 기계 이름들(맥 ~/.ssh/config 별칭과 같게). 루프·리눅스 기계·지휘 맥은 넣지 않는다
 worker.mesh        worker-a worker-b worker-c

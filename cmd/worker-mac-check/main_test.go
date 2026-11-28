@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	wm "herdr-tools/internal/workermac"
 )
 
 // 원격 줄 파싱: bash 「IFS=$'\t' read -r k a b c」과 같은 칸
@@ -85,8 +87,8 @@ func TestHelpers(t *testing.T) {
 		re.MatchString(`{"name":"w.1","state":"down"}`) || re.MatchString("{\"name\":\"w.1\",\n\"state\":\"connected\"}") {
 		t.Error("connectedRe")
 	}
-	if !usableRe.MatchString("Usable Now: 3") || usableRe.MatchString("usable now: 0") {
-		t.Error("usableRe")
+	if n, ok := wm.PoolUsable("Usable Now: 3"); n != 3 || !ok {
+		t.Error("PoolUsable") // 꼴 전부는 internal/workermac 시험
 	}
 }
 

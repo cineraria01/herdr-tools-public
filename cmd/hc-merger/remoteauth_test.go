@@ -26,10 +26,10 @@ func TestRemoteAuthLine(t *testing.T) {
 	raGit(t, "init", "-q", d+"/w")
 	raGit(t, "-C", d+"/w", "remote", "add", "origin", "file://"+d+"/up.git")
 	// 처음 있는 폴더(2번째)에서 — 빈 원격은 --exit-code가 2(자격은 통과): 종료 그대로 싣는다
-	if got := remoteAuth([]string{d + "/gone", d + "/w"}); got != "remote-auth 2 2 - -" {
+	if got := remoteAuth([]string{d + "/gone", d + "/w"})[0]; got != "remote-auth 2 2 - -" {
 		t.Fatalf("빈 원격: %q", got)
 	}
-	if got := remoteAuth([]string{d + "/gone"}); got != "remote-auth 0 none - -" {
+	if got := strings.Join(remoteAuth([]string{d + "/gone"}), "\n"); got != "remote-auth 0 none - -\nremote-write 0 none - -" {
 		t.Fatalf("폴더 없음: %q", got)
 	}
 	// 원격이 응답하지 않음 → 상한 안에 timeout(모름 재료)
@@ -39,12 +39,13 @@ func TestRemoteAuthLine(t *testing.T) {
 	remoteAuthMax = 300 * time.Millisecond
 	t.Cleanup(func() { remoteAuthMax = old })
 	t0 := time.Now()
-	if got := remoteAuth([]string{d + "/w"}); !strings.HasPrefix(got, "remote-auth 1 timeout git.example.test ") || time.Since(t0) > 5*time.Second {
+	if got := strings.Join(remoteAuth([]string{d + "/w"}), "\n"); !strings.HasPrefix(got, "remote-auth 1 timeout git.example.test ") ||
+		!strings.Contains(got, "\nremote-write 1 ") || time.Since(t0) > 5*time.Second { // 둘이 동시에 — 상한 한 번 몫(커밋 없는 클론의 쓰기는 「src refspec」으로 바로 끝남 = 모름 재료)
 		t.Fatalf("안 끝남: %q %s", got, time.Since(t0))
 	}
 	// 거절: 오류 줄들을 한 줄로(빈 줄 빼고)
 	t.Setenv("GIT_SSH_COMMAND", "echo 'git@git.example.test: Permission denied (publickey).' >&2; exit 255;")
-	got := remoteAuth([]string{d + "/w"})
+	got := remoteAuth([]string{d + "/w"})[0]
 	if !strings.HasPrefix(got, "remote-auth 1 128 git.example.test git@git.example.test: Permission denied (publickey). | fatal: Could not read from remote repository.") ||
 		strings.Contains(got, "\n") {
 		t.Fatalf("거절 글: %q", got)

@@ -112,7 +112,7 @@
 | `machines[].merge_verifies` | 그 가운데 병합기 검증(추측 일꾼·착지 실행, `--spec-idle`의 `gates=`) 수 — 자리·레인 상한에는 안 든다. 옛 판 워커·모름이면 `null` |
 | `machines[].lane_cap` | hc-fill 레인 상한 |
 | `machines[].free` | 마지막 바퀴의 띄우기가 판정한 보통 레인 빈 자리(연결·유형 모를 터미널·멈춤·자리·레인상한을 띄우기와 같은 함수로, `load.tsv`) — 옛 기록이면 모름. `hc-fill advise`의 빈 자리는 이 값만 읽는다 |
-| `machines[].cordon` | 저장소 읽기 막힘 격리 중이면 `{"since_s": 막힌 지 초, "why": "<프로젝트> <폴더>: <오류>"}`, 아니면 `null`([격리](../hc-fill/cordon.md)) |
+| `machines[].cordon` | 어느 점검 항목으로든 격리 중이면 `{"since_s": 가장 이른 시작부터 초, "why": "<까닭>; <까닭>…"}`(저장소 읽기는 「<프로젝트> <폴더>: <오류>」, 그 밖은 항목 머리 「원격 쓰기 거절 — 」 등 + 글), 아니면 `null`([격리](../hc-fill/cordon.md)) |
 | `machines[].health` | 건강 |
 | `machines[].health.sleep` | 잠자기 끔 상태 |
 | `machines[].health.keychain` | 키체인 |

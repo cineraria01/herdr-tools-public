@@ -104,7 +104,7 @@
       | 병합기 멈춤(`merger`) | `hc-merger-stop:<초>`(클론마다 표식 `…/hc-lane/merger-stop.<클론>`) | 다시 돈 상주의 첫 바퀴 — + `:up` 「병합기 다시 돎」 |
       | 병합기 풀 수 있음(사건 방식 풀이, `merger`) | `hc-merger-resolve:<원본>` | 풀이 감사 통과 — + `:up` |
       | 병합기 맨 앞 못 맡김 | `hc-merger-front:<sha>` | 그 맨 앞 레인의 착지·반송, 맨 앞 키가 바뀜(위 표 — 새 사건 없음) |
-      | 격리·닿지 않음(`hc-fill-cordon`·`hc-fill-unreach`) | `hf:cordon…:<기계>:<시작>`·`hf:unreach:<기계>:<시작>` | 돌아옴·다시 닿음 — + `:up`(먼저 쓰던 꼴) |
+      | 격리·닿지 않음(`hc-fill-cordon`·`hc-fill-unreach`) | `hf:cordon…:<기계>:<시작>:<주인>`·`hf:unreach:<기계>:<시작>:<주인>` | 돌아옴·다시 닿음 — + `:up`(주인 뒤에 — 2026-11-28 ht-probe-cordon 전 판은 주인 앞이라 풀림으로 안 읽혔다) |
       | 운영 에이전트 못 띄움(`hc-fill-agent`) | `hf:agent:launch-fail:<초>` | 다시 뜸 — + `:up`(못 적으면 다음 바퀴) |
       | 띄우기 거절(레인 이름, [띄운 뒤 확인](../hc-fill/launch-check.md)) | `hf:<레인>:reject:<줄 ID>:<처음 초>` | 임대가 놓이거나 바뀜(스스로)·지휘의 retry·edit — + `:up` 「띄우기 거절 풀림」(못 적으면 경고 — 그 레인의 뒤 보고가 풀림 노릇) |
       | 멈춘 레인(hang)·완료 뒤 멈춤(stall)·첫 턴 없음(레인 이름) | 키 그대로 | 그 레인의 뒤 보고(위 표 「레인 막힘」 — 새 사건 없음). 화면만 다시 움직이고 보고가 없으면 안 풀린 채 아래 묵은 예외로 한 번 |

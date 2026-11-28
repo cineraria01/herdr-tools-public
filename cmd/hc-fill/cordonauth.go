@@ -20,13 +20,17 @@ import (
 )
 
 // cdAuth: 원격 로그인 — 좋은 기계는 7분마다(합격 기준 15분: 간격 7분 + 한 바퀴 + 문턱 5분 + 한 바퀴 = 14분, 바퀴 실행·cordon@ push 지연 몫 1분)
-var cdAuth = &cordonCk{"-auth", "원격 로그인", "거절", opsstate.CordonAuthPre, "그 기계에서 원격 로그인 다시(`gh auth status`·다시 로그인)", 420, authVerdict}
+var cdAuth = &cordonCk{"-auth", "원격 로그인", "거절", opsstate.CordonAuthPre, opsstate.CordonAuth.Look, 420, authVerdict, false}
 
 // AUTHCK: 이번 바퀴에 물은 원격 로그인 점검(기계 → remote-auth 줄, 물었는데 줄이 없으면 빈 값 — 옛 판 워커). 없는 기계는 못 물음
 var AUTHCK map[string]string
 
 // authDue: 그 기계에 원격 로그인을 물을 차례(loadSnip·cordonTick — 물었는지는 셈하지 않고 조각 출력의 표식 authAsked로만 본다)
-func authDue(m string) bool { return len(repoPaths(m)) > 0 && cdAuth.due(cdAuth.load(), m, nowUnix()) }
+// 쓰기 자격(cdWrite)은 같은 호출에 실려 그 점검이 나쁘거나 회복 알림이 남아도 바퀴마다 묻는다
+func authDue(m string) bool {
+	now := nowUnix()
+	return len(repoPaths(m)) > 0 && (cdAuth.due(cdAuth.load(), m, now) || cdWrite.due(cdWrite.load(), m, now))
+}
 
 // authAsked: 원격 로그인을 물은 조각이 먼저 내는 표식 줄(loadSnip → repoTake)
 const authAsked = "remote-auth-asked"
@@ -66,9 +70,14 @@ func authVerdict(m string) (int, string) {
 	if !asked {
 		return 0, ""
 	}
+	return remoteVerdict(m, l, "remote-auth")
+}
+
+// remoteVerdict: 원격 점검 줄 하나(머리 head — remote-auth·remote-write, 같은 꼴·같은 거절 글)의 판정
+func remoteVerdict(m, l, head string) (int, string) {
 	f := strings.SplitN(l, " ", 5)
 	ps := repoPaths(m)
-	if len(f) < 5 || f[0] != "remote-auth" {
+	if len(f) < 5 || f[0] != head {
 		return 3, ""
 	}
 	i, err := strconv.Atoi(f[1])
