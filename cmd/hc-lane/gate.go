@@ -30,6 +30,13 @@ func (b gbranch) String() string { return brName[b] }
 // staleAge: 이보다 묵은 사건은 보내지 않는다(새 커서 바닥과 같은 2시간) — 예외는 받는 쪽이 이 지휘인 안 풀린 판단 필요(시각을 붙여)
 const staleAge = 2 * time.Hour
 
+// staleMax: 묵은 예외의 나이 상한 — 안 풀린 판단 필요라도 이보다 묵으면 보내지 않는다(ht-alert-sources: 7일 창의 129건이 커서에
+// 없으면 언제든 다시 나갈 수 있었다. 하루 = 밤새 끊겼던 기계의 막힘도 다음 날 받는 폭 — 새 손잡이 없이 표의 상수)
+const staleMax = 24 * time.Hour
+
+// upSuffix: 운영 풀림 열쇠 = 그 막힘 열쇠 + 이것(격리·닿지 않음이 먼저 쓰던 꼴) — 내는 쪽이 그 상태가 끝날 때 한 번 적는다
+const upSuffix = ":up"
+
 // kindRow: 갈래 표 한 줄 — is가 맞는 첫 줄이 그 사건의 종류. done(x, y)는 x 뒤 사건 y가 x를 풀었나(nil = 풀림 규칙 없음)
 type kindRow struct {
 	name string
@@ -102,9 +109,10 @@ func sameRunMoved(x, y events.Event) bool {
 	return lastSeg(y.Term) == lastSeg(x.Term) && y.State != "멈춤" && y.State != "정리됨" && laneMoved(x, y)
 }
 
-// opsKeyDone: 운영 막힘은 같은 이름·같은 키(키가 있을 때만)의 막힘 아닌 뒤 사건으로만 풀림 — 병합기의 다른 사건이 그 막힘을 풀지 않는다
+// opsKeyDone: 운영 막힘은 같은 이름·같은 키(키가 있을 때만) 또는 그 키 + upSuffix의 막힘 아닌 뒤 사건으로만 풀림 — 병합기의 다른
+// 사건이 그 막힘을 풀지 않는다
 func opsKeyDone(x, y events.Event) bool {
-	return x.Key != "" && x.Key != "-" && y.Lane == x.Lane && y.Key == x.Key && y.State != "막힘"
+	return x.Key != "" && x.Key != "-" && y.Lane == x.Lane && (y.Key == x.Key || y.Key == x.Key+upSuffix) && y.State != "막힘"
 }
 
 var reFront = regexp.MustCompile(`맨 앞 (\S+) 검증`)
@@ -127,6 +135,14 @@ var gateTable = []kindRow{
 		return x.Lane == events.OpsAdvise && strings.HasPrefix(x.Key, events.AdviseAgentKey)
 	}, nil},
 	{"착지 뒤 명령 성공", brMute, opsIn("중간", events.OpsOnLand), nil},
+	// 운영 풀림: 내는 쪽이 막힘이 끝날 때 그 열쇠 + upSuffix로 한 번 적는 것(병합기 다시 돎·쉼 끝·격리 풀림·다시 닿음·운영 에이전트 다시 뜸)
+	{"운영 풀림", brNews, func(x events.Event) bool {
+		return isOps(x) && x.State != "막힘" && strings.HasSuffix(x.Key, upSuffix)
+	}, nil},
+	// 병합기 풀이 진행 중간(「충돌 — 병합 쪽에서 푸는 중」): 할 일 없는 진행. 풀이가 못 풂으로 끝나면 레인 반송 막힘으로 따로 온다
+	{"병합기 풀이 진행", brNews, func(x events.Event) bool {
+		return opsIn("중간", events.OpsMerger)(x) && strings.HasPrefix(x.Key, "hc-merger-resolve:") && !failWord(x.Msg)
+	}, nil},
 	// 운영 에이전트 끝: 결정은 따로 「사람이 정한다」 막힘으로 온다. 글 끝의 「(끝남, <방식>, …)」은 1000바이트에서 잘려 빠질 때가 많아
 	// (되감기 55건) 머리로 가른다 — 결과 없이 끝남·시간 넘김은 판단 필요(운영 알림), 조치 방식은 소식, 그 밖(판단만·잘림)은 밀어 넣지 않음
 	{"운영 에이전트 끝(조치)", brNews, func(x events.Event) bool { return agentEnd(x) && strings.Contains(x.Msg, "(끝남, 조치") }, nil},

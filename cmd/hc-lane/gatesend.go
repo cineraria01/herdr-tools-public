@@ -89,10 +89,14 @@ func (e *ev) gate(lines []string) []string {
 			out = append(out, l)
 			continue
 		}
-		if v.br == brMute || v.stale && !(v.br == brNow && v.open) {
+		if v.br == brMute || v.stale && !staleKeep(v, w.now) {
 			cur = append(cur, k)
 			if v.stale && v.br != brMute && v.to == me {
-				old = append(old, "안 보냄(묵음 "+mins(w.now.Sub(v.at))+"): "+digestCut(wpart(l), 160)+" — "+v.kind)
+				over := ""
+				if v.br == brNow && v.open {
+					over = ", 상한 " + mins(staleMax) + " 넘음"
+				}
+				old = append(old, "안 보냄(묵음 "+mins(w.now.Sub(v.at))+over+"): "+digestCut(wpart(l), 160)+" — "+v.kind)
 			}
 		}
 	}
@@ -137,12 +141,12 @@ func (e *ev) waitSent(lines []string) {
 }
 
 // gateSend: 이 watch(me)가 그 판정의 사건을 지금 보내나와 글 끝 한 구절 — 순수.
-// 받는 쪽이 나 · 받는 쪽 확인 못 한 판단 필요(모두) · 놓침 막기(받는 쪽이 nextAt까지 안 받았고 다음 사람이 나)만. 묵은 것은 안 풀린 판단 필요만
+// 받는 쪽이 나 · 받는 쪽 확인 못 한 판단 필요(모두) · 놓침 막기(받는 쪽이 nextAt까지 안 받았고 다음 사람이 나)만. 묵은 것은 staleKeep만
 func gateSend(v gverdict, me string, now time.Time) (bool, string) {
 	switch {
 	case v.br == brMute || v.br == brHold:
 		return false, ""
-	case v.stale && !(v.br == brNow && v.open):
+	case v.stale && !staleKeep(v, now):
 		return false, ""
 	case v.all, v.to == me:
 		return true, v.tag
@@ -150,6 +154,12 @@ func gateSend(v gverdict, me string, now time.Time) (bool, string) {
 		return true, " → 놓침 막기(" + v.to + " " + mins(now.Sub(v.at)) + " 안 받음)"
 	}
 	return false, ""
+}
+
+// staleKeep: 묵은 사건의 예외 — 안 풀린 판단 필요이고 staleMax 안(origin 규칙에 나이 상한 하나 — 지휘 결정: 이미 판정한 사건은 커서에
+// 있어 다시 문에 안 들어오니, 예외가 먹는 것은 늦게 들어온 사건(끊겼던 기계 — 가야 함)과 새 커서(상한이 막음)뿐이다)
+func staleKeep(v gverdict, now time.Time) bool {
+	return v.br == brNow && v.open && now.Sub(v.at) <= staleMax
 }
 
 // recvOK: 그 지휘가 지금 받을 수 있나 — 지휘 확인(coordCheck)·실행(run이 있으면 created_ms)·그 지휘의 watch가 돎(이 watch 자신은 늘).

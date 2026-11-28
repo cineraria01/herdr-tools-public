@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -413,14 +414,10 @@ func onlandOnce(name string, rs []Row) {
 		st, msg = "막힘", fmt.Sprintf("착지 뒤 %s 실패(%s)%s — %s 착지(%s) · 로그 %s", name, why, tail, strings.Join(lanes, ","), head(sha, 8), lg)
 	}
 	fmt.Println(msg)
-	for _, o := range owners {
-		to := o
-		if to == "-" {
-			to = ""
-		}
-		if hcLaneReport(st, msg, "on-land-"+name, to, "") != 0 {
-			fmt.Fprintf(os.Stderr, "hc-fill: 착지 뒤 %s 사건을 못 남김(hc-lane report, 주인 %s) — 로그 %s\n", name, o, lg)
-		}
+	// 한 번의 실행에 사건 한 줄 — 주인 차례는 --to 하나에(받는 쪽은 한 문이 정한다, 주인마다 따로 적지 않는다 — ht-alert-sources)
+	to := strings.Join(slices.DeleteFunc(owners, func(o string) bool { return o == "-" }), ",")
+	if hcLaneReport(st, msg, "on-land-"+name, to, "") != 0 {
+		fmt.Fprintf(os.Stderr, "hc-fill: 착지 뒤 %s 사건을 못 남김(hc-lane report, 주인 %s) — 로그 %s\n", name, dash(to), lg)
 	}
 }
 

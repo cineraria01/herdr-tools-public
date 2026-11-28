@@ -254,7 +254,8 @@ func adviseTick(now time.Time) {
 		}
 	}
 	owners, byOwner, rest := adviseRoute(fresh)
-	var refs []string
+	// 다른 지휘에게 가던 참고 사본(hf:advise:ref:)은 적지 않는다 — 문이 밀어 넣지 않는데 사건 파일·판정 창만 먹었다(ht-alert-sources,
+	// 7일 137건). 전체를 보려면 hc-fill advise
 	for _, o := range owners {
 		its := byOwner[o]
 		if hcLaneReport("중간", adviseMsg(its), "hc-fill-advise", o, adviseKey(its, now)) != 0 {
@@ -263,13 +264,7 @@ func adviseTick(now time.Time) {
 		}
 		for _, it := range its {
 			keep = append(keep, it.Key)
-			refs = append(refs, it.Key+" → "+o)
 		}
-	}
-	// 참고는 실패해도 다시 보내지 않는다 — 손댈 것은 주인에게 갔다
-	if len(refs) > 0 && hcLaneReport("중간", "손댈 것 참고 — 주인 지휘에 보냄: "+strings.Join(refs, ", "), "hc-fill-advise", "",
-		events.AdviseRefKey+strconv.FormatInt(now.Unix(), 10)) != 0 {
-		say("손댈 것 참고 알림 실패(hc-lane report) — 다시 보내지 않음")
 	}
 	fresh = rest
 	if len(fresh) > 0 {

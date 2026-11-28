@@ -468,7 +468,8 @@ func (m *M) resubmit(r *rstate) bool {
 	mt, _ := readMeta(nm, r.R)
 	m.jline(mt, r.name(), r.ln, jResolved, r.R, fmt.Sprintf("풀이 감사 통과(판정 %s, patch-id %s) — 원래 차례에 다시 넣음, 원본 %s 충돌 %s", r.aid, first12(r.pid), first8(r.s), r.files),
 		r.t0, time.Now().Unix(), "1")
-	m.ownerEvent(mt, "중간", "hc-merger-resolved:"+r.R, fmt.Sprintf("충돌 — 병합 쪽 풀이 감사 통과(판정 %s): 레인 %s 풀이 %s 를 원래 차례에 다시 넣음(원본 %s)", r.aid, r.ln, first8(r.R), first8(r.s)))
+	// 열쇠는 그 풀이(사건 방식이면 막힘 「풀 수 있음」)의 열쇠 + :up — 한 문이 그 막힘을 풀림으로, 이 사건을 소식으로 본다(ht-alert-sources)
+	m.ownerEvent(mt, "중간", "hc-merger-resolve:"+r.s+":up", fmt.Sprintf("충돌 — 병합 쪽 풀이 감사 통과(판정 %s): 레인 %s 풀이 %s 를 원래 차례에 다시 넣음(원본 %s)", r.aid, r.ln, first8(r.R), first8(r.s)))
 	fmt.Printf("hc-lane merger: %s 풀이 %s 를 큐에 다시 넣음(판정 %s)\n", r.ln, first8(r.R), r.aid)
 	m.rdrop(r)
 	return true

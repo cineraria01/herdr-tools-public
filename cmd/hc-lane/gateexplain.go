@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/tri"
@@ -92,8 +93,11 @@ func explainTail(v gverdict, sent bool) string {
 	if v.why != "" {
 		s += " · " + v.why
 	}
-	if v.stale && v.br == brNow && v.open {
+	switch {
+	case v.stale && staleKeep(v, time.Now()):
 		s += " · 묵었지만 안 풀림 — 시각을 붙여 받는 쪽에게"
+	case v.stale && v.br == brNow && v.open:
+		s += " · 묵었고 안 풀렸지만 안 보냄(상한 " + mins(staleMax) + " 넘음)"
 	}
 	if v.next != "" && !v.stale {
 		s += " · 놓침 막기 " + clock(v.nextAt) + "부터 " + v.next

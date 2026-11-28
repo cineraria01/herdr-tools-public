@@ -51,6 +51,8 @@ type Entry struct {
 	Result string    `json:"result"` // 결과(됨·실패: <까닭>)
 	Undo   string    `json:"undo"`   // 되돌리는 명령
 	State  string    `json:"state"`  // 그때의 상태 요약 한 줄
+	// Same: 되풀이를 가르는 대상 값(배포는 깐 판) — 있으면 Record의 되풀이 표시가 이것까지 같은 줄만 센다(ht-alert-sources)
+	Same string `json:"same,omitempty"`
 }
 
 // Path: 일지 파일 경로
@@ -126,9 +128,9 @@ func Record(w io.Writer, e Entry) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	if n, err := Repeats(e.Action, e.Target, e.Time.Add(-RepeatWindow)); err == nil && n >= 1 {
-		fmt.Fprintf(w, "%s: 최근 %s에 같은 조치(%s %s) %d번째 — 일지는 hc-fill journal\n",
-			e.Tool, hours(RepeatWindow), e.Action, e.Target, n+1)
+	if es, _, err := Read(Filter{Since: e.Time.Add(-RepeatWindow), Action: e.Action, Target: e.Target, Same: e.Same}); err == nil && len(es) >= 1 {
+		fmt.Fprintf(w, "%s: 최근 %s에 같은 조치(%s) %d번째 — 일지는 hc-fill journal\n",
+			e.Tool, hours(RepeatWindow), strings.TrimSpace(e.Action+" "+e.Target+" "+e.Same), len(es)+1)
 	}
 	if err := Append(e); err != nil {
 		fmt.Fprintf(w, "%s: 일지를 남기지 못했다(조치는 그대로): %v\n", e.Tool, err)
@@ -148,13 +150,15 @@ type Filter struct {
 	By     string
 	Action string
 	Target string
+	Same   string
 }
 
 func (f Filter) ok(e Entry) bool {
 	return (f.Since.IsZero() || !e.Time.Before(f.Since)) &&
 		(f.By == "" || e.By == f.By) &&
 		(f.Action == "" || e.Action == f.Action) &&
-		(f.Target == "" || e.Target == f.Target)
+		(f.Target == "" || e.Target == f.Target) &&
+		(f.Same == "" || e.Same == f.Same)
 }
 
 // files: 읽을 파일 — 넘긴 옛 파일(이름 순 = 시각 순) 뒤에 지금 파일. 없으면 빈 목록

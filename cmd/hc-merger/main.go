@@ -119,7 +119,7 @@ func die(format string, a ...any) {
 			top = "?"
 		}
 		// 병합기가 멈추면 막힘 사건(main에 쓰는 곳이 하나라 조용히 서면 전체 착지가 선다)
-		reportBlocked(fmt.Sprintf("병합기 멈춤: %s (클론 %s)", msg, top))
+		stopNote(top, fmt.Sprintf("병합기 멈춤: %s (클론 %s)", msg, top))
 	}
 	os.Exit(1)
 }
@@ -131,13 +131,6 @@ func dieArg(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "hc-lane: %s\n", msg)
 	oplog.Log("hc-merger", "", oplog.BadArg, 1, msg)
 	os.Exit(1)
-}
-
-// reportBlocked: 막힘 사건(--name merger)을 상한 안에서 적는다(E05 — 사건 쓰기가 멈춰도 병합기가 서지 않게)
-func reportBlocked(msg string) {
-	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "막힘", "-", msg, "--name", "merger"); rc != 0 {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: 막힘 사건을 적지 못했다(종료 %d): %s\n", rc, strings.TrimSpace(e))
-	}
 }
 
 // onSignals: TERM·INT·HUP이면 지금 기다리는 자식 무리를 끄고(유예 뒤 KILL) 128+신호로 끝낸다
@@ -295,7 +288,7 @@ func startWait(once bool, tick int, what string, n *int) {
 	*n++
 	fmt.Fprintf(os.Stderr, "hc-lane merger: 시작 단계 %s 결과 모름(git 시간 넘김 등) — %d초 뒤 다시(%d번째)\n", what, max(tick, 1), *n)
 	if *n == deferAlarm {
-		reportBlocked(fmt.Sprintf("병합기 시작 단계 %s 가 %d번 이어 모름(git 시간 넘김 등) — 다시 하는 중", what, *n))
+		reportBlockedKey(fmt.Sprintf("병합기 시작 단계 %s 가 %d번 이어 모름(git 시간 넘김 등) — 다시 하는 중", what, *n), startKey(what))
 	}
 	time.Sleep(time.Duration(max(tick, 1)) * time.Second)
 }
@@ -352,6 +345,7 @@ func residentMain(args []string) {
 		t, b, rc := startRepo(repo, base)
 		if rc == 0 {
 			top, base = t, b
+			startDone("클론·origin 확인", tries)
 			break
 		}
 		startWait(once, tick, "클론·origin 확인", &tries)
@@ -387,6 +381,7 @@ func residentMain(args []string) {
 	for tries := 0; ; {
 		var rc int
 		if mj, rc = out("rev-parse", "--git-path", "hc-merger"); !gitUnknown(rc) {
+			startDone("일지 폴더 조회", tries)
 			break
 		}
 		startWait(once, tick, "일지 폴더 조회", &tries)
@@ -409,6 +404,7 @@ func residentMain(args []string) {
 	for tries := 0; ; {
 		rc := detachClone(top)
 		if rc == 0 {
+			startDone("클론 HEAD 분리", tries)
 			break
 		}
 		startWait(once, tick, "클론 HEAD 분리", &tries)
@@ -431,6 +427,7 @@ func residentMain(args []string) {
 	}
 	for fails := 0; ; {
 		self.Check()
+		stopUp(top) // 앞서 멈춤을 알렸으면 다시 돎 풀림(표식이 없으면 stat 한 번)
 		pause, rc := tick, 127
 		if exe := workerExe(); exe != "" {
 			c := exec.Command(exe, "--round", strconv.Itoa(os.Getpid()), top, base, mj, mwr, ml, mme, strconv.Itoa(batch))

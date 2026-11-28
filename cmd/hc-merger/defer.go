@@ -28,19 +28,29 @@ const deferAlarm = 10
 
 func (m *M) deferNote() {
 	f := m.mj + "/defer"
+	// 파일: 「<횟수>\t<까닭>[\t<처음 쉰 초>\t<sent>]」 — 옛 꼴(두 칸)도 읽는다. 횟수와 사건 전달을 따로 적어, 임계에 이른 사건 쓰기가
+	// 실패하면 다음 바퀴에 같은 열쇠로 다시 낸다(R-C08 — 10번째 사건 쓰기 실패 뒤 다시 내지 않았다)
+	var c []string
+	if b, err := os.ReadFile(f); err == nil {
+		c = strings.Split(strings.TrimRight(string(b), "\n"), "\t")
+	}
+	// 알린 쉼이 끝남(쉬지 않은 바퀴·다른 까닭) → 같은 열쇠 + :up 한 번(ht-alert-sources). 못 적으면 기록을 두고 다음 바퀴에 다시
+	if len(c) >= 4 && c[3] == "sent" && c[1] != m.deferred && digits.MatchString(c[2]) {
+		msg := fmt.Sprintf("병합기 쉼 끝 — 같은 까닭 %s바퀴 쉼이 풀림: %s (클론 %s)", c[0], c[1], m.top)
+		if !reportKey("중간", msg, deferKey(m.top, c[1], c[2])+":up") {
+			return
+		}
+		c = nil
+	}
 	if m.deferred == "" {
 		removeQuiet(f)
 		return
 	}
-	// 파일: 「<횟수>\t<까닭>[\t<처음 쉰 초>\t<sent>]」 — 옛 꼴(두 칸)도 읽는다. 횟수와 사건 전달을 따로 적어, 임계에 이른 사건 쓰기가
-	// 실패하면 다음 바퀴에 같은 열쇠로 다시 낸다(R-C08 — 10번째 사건 쓰기 실패 뒤 다시 내지 않았다)
 	n, since, sent := 0, "", false
-	if b, err := os.ReadFile(f); err == nil {
-		if c := strings.Split(strings.TrimRight(string(b), "\n"), "\t"); len(c) >= 2 && c[1] == m.deferred {
-			n, _ = strconv.Atoi(c[0])
-			if len(c) >= 4 && digits.MatchString(c[2]) {
-				since, sent = c[2], c[3] == "sent"
-			}
+	if len(c) >= 2 && c[1] == m.deferred {
+		n, _ = strconv.Atoi(c[0])
+		if len(c) >= 4 && digits.MatchString(c[2]) {
+			since, sent = c[2], c[3] == "sent"
 		}
 	}
 	n++
@@ -48,10 +58,7 @@ func (m *M) deferNote() {
 		since = strconv.FormatInt(time.Now().Unix(), 10)
 	}
 	if n >= intSetting("merger_defer_alarm", rk["merger_defer_alarm"], deferAlarm, 1) && !sent {
-		h := fnv.New32a()
-		h.Write([]byte(m.top + "\t" + m.deferred))
-		sent = reportBlockedKey(fmt.Sprintf("병합기가 같은 까닭으로 %d바퀴째 쉼: %s (클론 %s)", n, m.deferred, m.top),
-			fmt.Sprintf("merger:defer:%s:%08x", since, h.Sum32()))
+		sent = reportBlockedKey(fmt.Sprintf("병합기가 같은 까닭으로 %d바퀴째 쉼: %s (클론 %s)", n, m.deferred, m.top), deferKey(m.top, m.deferred, since))
 	}
 	st := "-"
 	if sent {
@@ -84,11 +91,21 @@ func (m *M) childWait() (why string, count bool) {
 	return "", false
 }
 
+// deferKey: 같은 까닭 쉼 막힘의 열쇠(풀림은 + :up)
+func deferKey(top, why, since string) string {
+	h := fnv.New32a()
+	h.Write([]byte(top + "\t" + why))
+	return fmt.Sprintf("merger:defer:%s:%08x", since, h.Sum32())
+}
+
 // reportBlockedKey: 막힘 사건(--name merger)을 결과 열쇠와 함께 상한 안에서 — 같은 열쇠의 사건이 이미 있으면 report가 다시 쓰지 않는다.
 // 적었으면(또는 이미 있으면) true
-func reportBlockedKey(msg, key string) bool {
-	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", "막힘", "-", msg, "--name", "merger", "--key", key); rc != 0 {
-		fmt.Fprintf(os.Stderr, "hc-lane merger: 막힘 사건을 적지 못했다(종료 %d) — 다음 바퀴에 다시: %s\n", rc, strings.TrimSpace(e))
+func reportBlockedKey(msg, key string) bool { return reportKey("막힘", msg, key) }
+
+// reportKey: 사건(--name merger)을 열쇠와 함께 상한 안에서 — 막힘과 그 풀림(같은 열쇠 + :up 중간)이 같은 길. 적었으면 true
+func reportKey(st, msg, key string) bool {
+	if _, rc, e := boundedRun(reportMax, gSelf, nil, "report", st, "-", msg, "--name", "merger", "--key", key); rc != 0 {
+		fmt.Fprintf(os.Stderr, "hc-lane merger: %s 사건을 적지 못했다(종료 %d) — 다음 바퀴에 다시: %s\n", st, rc, strings.TrimSpace(e))
 		return false
 	}
 	return true

@@ -92,6 +92,29 @@ func TestRepeatNotice(t *testing.T) {
 	}
 }
 
+// 되풀이 표시는 대상이 같을 때만(ht-alert-sources): 부르는 쪽이 Same(배포는 깐 판)을 넘기면 그 값까지 같아야 센다 — 판이 다른 배포 둘은
+// 표시 없음, 같은 판 둘은 표시. Same 없이 부르는 조치(retry 등)는 지금처럼 조치·대상만
+func TestRepeatSameTarget(t *testing.T) {
+	tmp(t)
+	var w bytes.Buffer
+	Record(&w, Entry{Tool: "herdr-sync", Action: "deploy", Target: "모든 기계", Same: "aaaa"})
+	Record(&w, Entry{Tool: "herdr-sync", Action: "deploy", Target: "모든 기계", Same: "bbbb"})
+	if w.Len() != 0 {
+		t.Fatalf("판이 다른 배포에 되풀이 표시: %q", w.String())
+	}
+	Record(&w, Entry{Tool: "herdr-sync", Action: "deploy", Target: "모든 기계", Same: "bbbb"})
+	if !strings.Contains(w.String(), "같은 조치(deploy 모든 기계 bbbb) 2번째") {
+		t.Fatalf("같은 판 되풀이는 표시: %q", w.String())
+	}
+	// 옛 줄(Same 없음)은 Same 있는 조치의 되풀이로 세지 않는다 — 판이 올라가는 첫 배포에 옛 배포 수가 붙지 않게
+	w.Reset()
+	Record(&w, Entry{Tool: "herdr-sync", Action: "deploy", Target: "w1"})
+	Record(&w, Entry{Tool: "herdr-sync", Action: "deploy", Target: "w1", Same: "cccc"})
+	if w.Len() != 0 {
+		t.Fatalf("옛 줄을 셈: %q", w.String())
+	}
+}
+
 // ④ 일지를 못 쓰면 한 줄 알림 — 패닉·멈춤 없이 돌아온다
 func TestWriteFailure(t *testing.T) {
 	d := t.TempDir()

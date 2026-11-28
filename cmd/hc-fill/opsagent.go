@@ -70,8 +70,20 @@ type oaState struct {
 	// 못 띄움(띄울 명령 실패)이 이어진 수와 그 운영 사건을 보냈나 — 시도(oaKey.Tries)로 세지 않는다. 뜨면 비운다
 	LaunchFails int  `json:"launch_fails,omitempty"`
 	FailSent    bool `json:"fail_sent,omitempty"`
+	// FailKey: 보낸 못 띄움 막힘의 열쇠 — 뜬 뒤 같은 열쇠 + :up 풀림을 적으면 비운다(못 적으면 다음 바퀴에 다시, ht-alert-sources)
+	FailKey string `json:"fail_key,omitempty"`
 	// Left: 끝난 실행의 터미널 주소 가운데 아직 닫지 못한 것(닫기를 모름으로 못 함) — 다음 띄우기 직전에 한 번 더
 	Left string `json:"left,omitempty"`
+}
+
+// oaUpFlush: 보낸 못 띄움 막힘이 있고 지금은 뜬 뒤(FailSent 비움)면 같은 열쇠 + :up 풀림 한 번 — 적으면 열쇠를 비운다
+func oaUpFlush(st *oaState) {
+	if st.FailKey == "" || st.FailSent {
+		return
+	}
+	if hcLaneReport("중간", "운영 에이전트 다시 뜸 — 앞서 알린 못 띄움이 풀림", "hc-fill-agent", "", st.FailKey+":up") == 0 {
+		st.FailKey = ""
+	}
 }
 
 func oaDir() string       { return DATA + "/ops-agent" }
@@ -149,6 +161,7 @@ func opsAgentTick(now time.Time) {
 		return
 	}
 	if st.Run != nil {
+		oaUpFlush(&st) // 뜬 바퀴에 못 적은 풀림을 다시
 		oaFinish(&st, now)
 		oaSave(st)
 		return
@@ -275,8 +288,10 @@ func oaStart(st *oaState, now time.Time, manual bool, why string) error {
 		if !st.FailSent && st.LaunchFails >= tries {
 			first, _, _ := strings.Cut(why1, "\n")
 			msg := fmt.Sprintf("운영 에이전트를 못 띄움 %d번 이어짐 — %s. 권함: %s/launch.err와 설정 %s 줄을 보고 고친다(뜨면 이 셈은 비고, 그때까지 되풀이하지 않는다)", st.LaunchFails, first, dir, oaLaunchK)
-			if hcLaneReport("막힘", oaFlat(msg), "hc-fill-agent", "", "") == 0 {
-				st.FailSent = true
+			key := fmt.Sprintf("hf:agent:launch-fail:%d", now.Unix())
+			oaUpFlush(st) // 앞 흐름의 풀림을 못 적은 채 남았으면 먼저(그 뒤 한 번 떴었다 — 감사 atp7ncn 낮음 2). 못 적으면 새 막힘은 다음 바퀴에
+			if st.FailKey == "" && hcLaneReport("막힘", oaFlat(msg), "hc-fill-agent", "", key) == 0 {
+				st.FailSent, st.FailKey = true, key
 			}
 		}
 		return fmt.Errorf("띄울 명령 종료 %d(주소 %q)", rc, addr)
@@ -285,6 +300,7 @@ func oaStart(st *oaState, now time.Time, manual bool, why string) error {
 		st.Keys[key].Tries++
 	}
 	st.LaunchFails, st.FailSent = 0, false
+	oaUpFlush(st)
 	run.Addr = addr
 	st.Run = &run
 	say("운영 에이전트 띄움 %s → %s (방식 %s, 손댈 것 %d개, 상한 %d분)", id, addr, mode, len(hand), timeout)

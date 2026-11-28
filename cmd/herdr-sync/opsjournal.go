@@ -41,7 +41,8 @@ func deployJournal(code int, sig bool, c12, res string, prev []logRow) {
 		result = "신호로 멈춤"
 	}
 	e := journal.Entry{By: journalBy(), Tool: "herdr-sync", Action: deployKind, Target: target, Why: deployWhy, Result: result, Undo: undo,
-		State: "판 " + c12 + " · " + res + " (자세히 herdr-sync --log)"}
+		State: "판 " + c12 + " · " + res + " (자세히 herdr-sync --log)",
+		Same:  c12} // 되풀이 표시는 같은 판을 다시 깐 때만(ht-alert-sources — 판이 다른 배포 130건 넘게 「N번째」가 붙었다)
 	if sig { // 신호 처리기 — 읽지 않고 붙이기만
 		if err := journal.Append(e); err != nil {
 			fmt.Fprintf(os.Stderr, "herdr-sync: 일지를 남기지 못했다(조치는 그대로): %v\n", err)

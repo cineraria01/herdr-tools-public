@@ -18,7 +18,7 @@ func j2Ev(r []string) events.Event { return events.Cols(strings.Join(r, "\t")) }
 // laneEventLine: 파일에 적히는 「정리됨」 줄(laneEvent의 done(true)가 쓰는 꼴)
 func laneEventLine(t map[string]any, why string) (string, error) {
 	e, err := laneEventOf(t, why)
-	return e.LineN(8), err
+	return cleanLine(e), err
 }
 
 func oldThisRun(t map[string]any, row []string) bool {

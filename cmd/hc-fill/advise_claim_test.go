@@ -1,7 +1,7 @@
 package main
 
 // ht-advise-claim(2026-11-26): 같은 알림을 지휘 둘이 따로 손댔다 — advise 항목에 「조치함」, 사건에도 그 줄, 손잡이 덮기 알림,
-// 레인 항목은 주인 지휘에게만 손댈 것(다른 지휘에게는 묶음 참고 한 줄)
+// 레인 항목은 주인 지휘에게만 손댈 것(다른 지휘에게 가던 참고 사본은 ht-alert-sources가 걷었다)
 
 import (
 	"os"
@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"herdr-tools/internal/events"
 	"herdr-tools/internal/journal"
 )
 
@@ -53,8 +52,8 @@ func TestAdviseClaimOwnerTick(t *testing.T) {
 	if len(own) != 1 || !strings.Contains(own[0], "손댈 것: 풀 수 있는 대기: lane-b") || !strings.Contains(own[0], "조치함: w9/t3 5분 전 — edit lane-b(선행 풀기) 외 ") {
 		t.Errorf("주인 지휘에게: %q\n전체 %q", own, reports(t))
 	}
-	if len(ref) != 1 || !strings.Contains(ref[0], "손댈 것 참고") || !strings.Contains(ref[0], "--key "+events.AdviseRefKey) || !strings.Contains(ref[0], "free-wait:lane-b → m/t1") || strings.Contains(ref[0], "lane-d") {
-		t.Errorf("다른 지휘에게 참고: %q", ref)
+	if len(ref) != 0 { // ht-alert-sources: 사본 줄을 더 적지 않는다(전체를 보려면 hc-fill advise) — 주인 줄 하나뿐
+		t.Errorf("다른 지휘에게 참고 사본이 적힘: %q", ref)
 	}
 	if len(all) != 1 || !strings.Contains(all[0], "lane-d") || strings.Contains(all[0], "lane-b") || strings.Contains(all[0], "lane-c") {
 		t.Errorf("주인 없는 레인은 모두에게: %q", all)

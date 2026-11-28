@@ -370,6 +370,11 @@ func aCleanup() {
 				if aCloseTerm(cn, qa) {
 					break
 				}
+				// 내기 직전에 다시 본다 — 바퀴 앞 목록 뒤에 끝났으면(없음·finished·주소를 다른 이름이 씀) 정리할 것이 없다(ht-alert-sources)
+				if st := pget(qa); st == pDone || st == pLive && PNAME != cn {
+					fmt.Println("감사 터미널 이미 끝남 " + qa + " (" + cn + ") — 정리 알림 없이 줄을 뺀다")
+					break
+				}
 				if aesc(auLn, qown(auLn), "감사 터미널 "+qa+" 정리 필요("+cn+", 차수 "+auAid+" "+auAst+") — 정리할 때 이름과 차수를 다시 확인한다", "hf:"+auAid+":cleanup") != 0 {
 					return
 				}

@@ -39,6 +39,7 @@ func TestContractJournal(t *testing.T) {
 	s.ok("배포 줄: 도구·조치·대상·왜·결과·되돌리기·상태", e.Tool == "herdr-sync" && e.Action == "배포" && e.Target == "모든 기계" &&
 		e.Why == "새 판 시험" && e.Result == "됨" && strings.HasPrefix(e.Undo, "herdr-sync --at ") && e.By != "" &&
 		strings.HasPrefix(e.State, "판 "+c+" · 맥=") && strings.Contains(e.State, "w1=") && strings.HasSuffix(e.State, "(자세히 herdr-sync --log)"))
+	s.ok("배포 줄: 되풀이를 가르는 값은 깐 판(ht-alert-sources)", e.Same == c)
 
 	s.run("--check")
 	s.ok("--check는 일지에 적지 않음", len(read()) == n0+1)

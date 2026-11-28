@@ -479,7 +479,7 @@ func laneEvent(t map[string]any, why string) (done func(write bool) bool, ok boo
 			return f.Close() == nil
 		}
 		ev.Time = events.UTC(time.Now()) // 시각 칸은 꼴이 같아 검사를 다시 할 까닭이 없다
-		_, err := f.WriteString(ev.LineN(8) + "\n")
+		_, err := f.WriteString(cleanLine(ev) + "\n")
 		return f.Close() == nil && err == nil
 	}, true
 }
@@ -498,7 +498,28 @@ func laneEventOf(t map[string]any, why string) (events.Event, error) {
 	}
 	e := events.Event{Time: events.UTC(time.Now()), Machine: machine, Term: str(t, "address"), Lane: str(t, "name"), State: "정리됨",
 		Msg: "hc-sweep " + why, Turn: turn}
+	// 같은 실행(thisRun)의 가장 늦은 사건(11칸 있음)에서 --to·실행·주인·저장소를 싣는다(ht-alert-sources — 한 문이 앞 사건에서 어림하지
+	// 않게). 못 얻으면(사건 파일 못 읽음·그 실행 사건 없음) 빈 칸 — cleanLine이 지금처럼 8칸으로 쓴다
+	if rows, err := eventRows(""); err == nil {
+		for i := len(rows) - 1; i >= 0; i-- {
+			if y := rows[i]; y.N >= 11 && y.State != "정리됨" && y.Lane == e.Lane && thisRun(t, y) {
+				e.To, e.Run, e.Owner = y.To, y.Run, y.Owner
+				if y.N >= 13 {
+					e.Repo = y.Repo
+				}
+				break
+			}
+		}
+	}
 	return e, e.Check()
+}
+
+// cleanLine: 「정리됨」 줄 — 같은 실행의 주인을 얻었으면 공용 쓰기(Record, 12·13칸), 못 얻었으면 옛 8칸(LineN(8) — 셸 판 꼴)
+func cleanLine(e events.Event) string {
+	if e.Owner == "" {
+		return e.LineN(8)
+	}
+	return e.Record()
 }
 
 // sameOwner: g가 t와 같은 실행(이름·created_ms가 같음)의 행인가 — 주소는 다시 쓰인다(R-02). 칸이 없으면 모름(false)

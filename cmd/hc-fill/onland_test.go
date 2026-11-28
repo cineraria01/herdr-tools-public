@@ -118,7 +118,7 @@ func TestOnlandRunCoalescesWhileRunning(t *testing.T) {
 	}
 	reps, _ := readFile(rec)
 	ls := lines(strings.TrimSpace(reps))
-	if len(ls) != 3 { // 첫 번(t1) + 합친 번(t1·t2)
+	if len(ls) != 2 { // 첫 번 + 합친 번 — 한 번의 실행에 사건 한 줄(주인마다 따로 적지 않는다, ht-alert-sources)
 		t.Fatalf("사건 %d줄:\n%s", len(ls), reps)
 	}
 	for _, l := range ls {
@@ -126,8 +126,8 @@ func TestOnlandRunCoalescesWhileRunning(t *testing.T) {
 			t.Fatalf("사건 꼴: %s", l)
 		}
 	}
-	if !strings.Contains(ls[2], "|--to|t2|") || !strings.Contains(ls[1], "b,c 착지(s3)") {
-		t.Fatalf("합친 번 사건이 두 주인에게 가지 않음:\n%s", reps)
+	if !strings.Contains(ls[1], "|--to|t1,t2|") || !strings.Contains(ls[1], "b,c 착지(s3)") {
+		t.Fatalf("합친 번 사건이 두 주인을 한 줄의 --to로 싣지 않음:\n%s", reps)
 	}
 	if nonEmpty(onlandDir() + "/dev.pending") {
 		t.Fatal("pending이 남음")
@@ -144,6 +144,24 @@ func TestCrossBuildWindows(t *testing.T) {
 	c.Env = append(os.Environ(), "GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0", "GOTOOLCHAIN=local")
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("windows/amd64 빌드 실패: %v\n%s", err, out)
+	}
+}
+
+// 주인 목록에 「-」(주인 없는 레인)가 섞여도 같은 글 두 줄이 아니라 한 줄 — 주인 차례만 --to에(받는 쪽은 한 문이 정한다)
+func TestOnlandOneEventMixedOwners(t *testing.T) {
+	d := t.TempDir()
+	rec := onlandEnv(t, d, "true")
+	for _, x := range [][3]string{{"a", "-", "s1"}, {"b", "t4", "s2"}} {
+		if err := onlandPend("dev", x[0], x[1], x[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rc := onlandRun("dev"); rc != 0 {
+		t.Fatalf("rc %d", rc)
+	}
+	reps, _ := readFile(rec)
+	if ls := lines(strings.TrimSpace(reps)); len(ls) != 1 || !strings.Contains(ls[0], "|--to|t4|") {
+		t.Fatalf("한 사건 한 줄: %s", reps)
 	}
 }
 

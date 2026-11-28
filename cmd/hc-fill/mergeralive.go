@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -244,26 +245,20 @@ func mergerAliveTick() {
 			x.Alerted = pv.Alerted
 		}
 		mins := int((now - x.Since) / 60)
-		send := func(state, msg, kind string) bool {
-			ok := true
-			for _, own := range maOwners(lanes) {
-				key := fmt.Sprintf("hf:merger:%s:%s:%d:%s", p, kind, x.Since, own)
-				if state == "막힘" {
-					ok = aesc("merger-"+p, own, msg, key) == 0 && ok
-					continue
-				}
-				to := own
-				if to == "-" {
-					to = ""
-				}
-				if dry {
-					fmt.Println(P + "지휘로 넘길 merger-" + p + ": " + msg)
-				} else if hcLaneReport(state, msg, "merger-"+p, to, key) != 0 {
-					ok = false
-				}
+		// 사건은 한 줄 — 주인 차례는 --to 하나에(받는 쪽은 한 문이 정한다, 주인마다 따로 적지 않는다). 열쇠는 그 상태 흐름에 하나라
+		// 풀림(다시 돎)이 같은 열쇠 + :up으로 짝이 된다(ht-alert-sources)
+		to := strings.Join(slices.DeleteFunc(maOwners(lanes), func(o string) bool { return o == "-" }), ",")
+		send := func(state, msg, key string) bool {
+			if state == "막힘" {
+				return aesc("merger-"+p, dash(to), msg, key) == 0
 			}
-			return ok
+			if dry {
+				fmt.Println(P + "지휘로 넘길 merger-" + p + ": " + msg)
+				return true
+			}
+			return hcLaneReport(state, msg, "merger-"+p, to, key) == 0
 		}
+		akey := func(kind string, since int64) string { return fmt.Sprintf("hf:merger:%s:%s:%d", p, kind, since) }
 		qtxt := fmt.Sprintf("큐 %s건", x.K)
 		if oldest > 0 {
 			qtxt += "(가장 오래 " + stDur(now-oldest) + ")"
@@ -272,10 +267,17 @@ func mergerAliveTick() {
 		case x.St == "alive" && seen && pv.Alerted != "":
 			msg := fmt.Sprintf("병합기 %s(%s) 다시 돎 — 터미널 %s, %s", p, m, x.Addr, qtxt)
 			say("%s", msg)
-			if !send("중간", msg, "up") {
-				x.Alerted = pv.Alerted // 다음 바퀴에 다시
+			for _, kind := range []string{"dead", "unknown"} {
+				if s, ok := maAlertedAt(pv.Alerted, kind); ok {
+					if s == 0 { // 옛 기록(시각 없는 「dead」) — 그 상태 시작
+						s = pv.Since
+					}
+					if !send("중간", msg, akey(kind, s)+":up") {
+						x.Alerted = pv.Alerted // 다음 바퀴에 다시(이미 적은 풀림은 한 문이 뜻 열쇠로 한 번만)
+					}
+				}
 			}
-		case x.St == "gone" && len(lanes) > 0 && mins >= limDead && limDead > 0 && !inlist("dead", x.Alerted):
+		case x.St == "gone" && len(lanes) > 0 && mins >= limDead && limDead > 0 && !maSent(x.Alerted, "dead"):
 			msg := fmt.Sprintf("병합기 %s(%s) %d분째 돌지 않음 — %s. 다시 띄우기: hc-fill merger restart %s", p, m, mins, qtxt, p)
 			if maRestart() && !inlist("restart", x.Alerted) && !dry {
 				x.Alerted += ",restart"
@@ -289,13 +291,13 @@ func mergerAliveTick() {
 				}
 				jotBy("hc-fill 스스로", "merger restart", p, fmt.Sprintf("%d분째 돌지 않음(merger_restart 켬)", mins), res, "-", qtxt)
 			}
-			if send("막힘", msg, "dead") {
-				x.Alerted += ",dead"
+			if send("막힘", msg, akey("dead", x.Since)) {
+				x.Alerted += fmt.Sprintf(",dead@%d", x.Since)
 			}
-		case x.St == "unknown" && (!qok || len(lanes) > 0) && mins >= limUnk && limUnk > 0 && !inlist("unknown", x.Alerted):
+		case x.St == "unknown" && (!qok || len(lanes) > 0) && mins >= limUnk && limUnk > 0 && !maSent(x.Alerted, "unknown"):
 			msg := fmt.Sprintf("병합기 %s(%s) 상태 모름 %d분째(%s) — %s", p, m, mins, x.Why, qtxt)
-			if send("막힘", msg, "unknown") {
-				x.Alerted += ",unknown"
+			if send("막힘", msg, akey("unknown", x.Since)) {
+				x.Alerted += fmt.Sprintf(",unknown@%d", x.Since)
 			}
 		}
 		out = append(out, x)
@@ -314,6 +316,21 @@ func mergerAliveTick() {
 		say("병합기 살아 있음 기록을 못 씀: %v", err)
 	}
 }
+
+// maAlertedAt <알림 칸> <종류>: 그 종류 알림을 보냈나와 그 열쇠의 상태 시작(「dead@<초>」 — 옛 기록 「dead」는 0)
+func maAlertedAt(al, kind string) (int64, bool) {
+	for _, t := range strings.Split(al, ",") {
+		if t == kind {
+			return 0, true
+		}
+		if s, ok := strings.CutPrefix(t, kind+"@"); ok && isDigits(s) {
+			return int64(atoi10(s)), true
+		}
+	}
+	return 0, false
+}
+
+func maSent(al, kind string) bool { _, ok := maAlertedAt(al, kind); return ok }
 
 // maPrint: status·ls 끝에 프로젝트별 병합기 한 줄(run 바퀴가 적은 기록 — 이 명령은 원격을 더 읽지 않는다)
 func maPrint() {
