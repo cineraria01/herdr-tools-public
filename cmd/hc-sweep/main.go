@@ -20,6 +20,7 @@ import (
 	"herdr-tools/internal/atomic"
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/upstream"
 	"herdr-tools/internal/version"
 )
 
@@ -325,6 +326,12 @@ func main() {
 	}
 	if len(os.Args) == 3 && os.Args[1] == "--rest" && os.Args[2] != "" { // 쉼 묻기(rest.go — 쓸기 잠금·쓸기와 따로, 읽기만)
 		os.Exit(restMain(os.Args[2]))
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--upstream" { // 판 기록 보기(upstream.go — 읽기만)
+		os.Exit(upstreamPrint(upstream.Path()))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--upstream-probe" { // 실물 점검(upstreamprobe.go — 쓸기 잠금과 따로)
+		os.Exit(probeMain(os.Args[2:]))
 	}
 	os.Exit(sweepMain(os.Args[1:]))
 }

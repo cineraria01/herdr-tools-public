@@ -65,7 +65,15 @@ func TestHangTick(t *testing.T) {
 		row                               string // hang.tsv에 남을 종류("" = 줄 없음)
 		escHas, escNot                    string // 끝난 뒤 hang-esc.tsv에 있어야·없어야 할 조각
 		get                               string // hc get 응답 JSON(빈 값 = 판정 칸 없는 기본)
+		up                                string // upstream.tsv(빈 값 = 없음)
 	}{
+		// ht-upstream-contract ⑨: 그 기계에 확인 안 된 판이 있으면 Escape도 글도 안 보내고 알리기만(보류 아닌 기계 줄은 상관없음)
+		{name: "확인 안 된 판 — 끊지 않고 알리기만", status: "working", scr: spin, ps: idle,
+			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp), up: "m\thold\tclaude-2_hc-1\t0\t0\t-\t-\n",
+			want: "끊지 않음(이 기계 에이전트 판이 아직 실물 점검으로 확인 안 됨", row: "a"},
+		{name: "판 기록 ok — 평소대로 끊음", status: "working", scr: spin, ps: idle,
+			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp), up: "m\tok\t-\t0\t0\t-\t-\nx\thold\tc\t0\t0\t-\t-\n",
+			want: "w 멈춘 레인", keys: 1, row: "a"},
 		{name: "끊음 기록 정리 — 같은 레인 옛 줄은 버리고 다른 레인 최근 줄은 남김", status: "working", scr: spin, ps: idle,
 			prev: fmt.Sprintf("w\tm/w\ta\t%d\t%s\n", now.Add(-16*time.Minute).Unix(), fp),
 			esc: fmt.Sprintf("w\tm/w\t%d\nx\tm/x\t%d\ny\tm/y\t%d\n", now.Add(-2*time.Hour).Unix(), now.Add(-10*time.Minute).Unix(),
@@ -147,6 +155,9 @@ func TestHangTick(t *testing.T) {
 			}
 			if c.esc != "" {
 				wr("hang-esc.tsv", c.esc)
+			}
+			if c.up != "" {
+				wr("upstream.tsv", c.up)
 			}
 			hangTick(now)
 			b, _ := os.ReadFile(log)

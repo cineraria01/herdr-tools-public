@@ -11,9 +11,10 @@ import (
 // 문을 건너뛰지 못하게(ht-rest-one-gate): 저장소의 모든 도구에서 터미널을 닫는 호출(hc kill)과 대기열의 자동 제출(asubRun)은 같은 함수
 // 안에서 쉼 판정(rest.Ask) 뒤에만 있다. 판정이 필요 없는 닫기는 아래 목록뿐이고 줄마다 까닭이 있다 — 닫는 길을 더하며 문을 빼먹으면 실패한다
 var noGate = map[string]string{
-	"hc-sweep/judge.go closeTerm":        "settle(judge + 쉼 판정)이 낸 쉼만 받는다 — TestEveryCloseGoesThroughSettle이 settle 뒤에만 부르는지 본다",
-	"hc-fill/revive.go reviveShellClose": "재시동 뒤 셸만 남은 빈 셸(에이전트가 이미 없다)을 닫는다 — 안에서 도는 에이전트 일이 없다",
-	"hc-merger/frontsteady.go termKill":  "병합기 추측 검증 일꾼(검증 스크립트를 도는 env 터미널, 에이전트 아님)을 끝내는 것이 목적",
+	"hc-sweep/judge.go closeTerm":         "settle(judge + 쉼 판정)이 낸 쉼만 받는다 — TestEveryCloseGoesThroughSettle이 settle 뒤에만 부르는지 본다",
+	"hc-fill/revive.go reviveShellClose":  "재시동 뒤 셸만 남은 빈 셸(에이전트가 이미 없다)을 닫는다 — 안에서 도는 에이전트 일이 없다",
+	"hc-merger/frontsteady.go termKill":   "병합기 추측 검증 일꾼(검증 스크립트를 도는 env 터미널, 에이전트 아님)을 끝내는 것이 목적",
+	"hc-sweep/upstreamprobe.go probeMain": "실물 점검이 스스로 띄운 점검용 세션을 대조가 끝난 뒤 닫는다 — 판정하려던 대상 자체이고 남은 일이 없다(배경 셸은 끝났고 전경 명령은 점검이 껐다)",
 }
 
 func TestEveryKillGoesThroughGate(t *testing.T) {

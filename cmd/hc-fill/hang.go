@@ -182,7 +182,10 @@ func hangLane(q Row, st string, p Row, now time.Time, lim int) Row {
 			n, hangShellRe.FindString(hangLastTurn(scr)), age, a, a, a), key)
 		return row
 	}
-	did := hangEsc(n, a, spin, now, t)
+	did := "끊지 않음(이 기계 에이전트 판이 아직 실물 점검으로 확인 안 됨 — 화면 글자에 기대는 조치라 알리기만, hc-sweep --upstream)"
+	if !upHeld(m) { // 확인 안 된 판에서는 Escape를 보내지 않는다(ht-upstream-contract ⑨)
+		did = hangEsc(n, a, spin, now, t)
+	}
 	aesc(n, own, fmt.Sprintf("%s 멈춘 레인 — 「생각 중」 표시 %d분째, 그 위 화면 %d분 그대로·도구 셸 없음(%s) — %s. 다음: hc read %s", n, spin, age, a, did, a), key)
 	return row
 }

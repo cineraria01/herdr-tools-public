@@ -151,7 +151,7 @@ func TestSpecIdleProbeOrder(t *testing.T) {
 		f := strings.Fields(l)
 		heads = append(heads, f[0]+map[bool]string{true: " " + f[1]}[f[0] == "probe"])
 	}
-	if got := strings.Join(heads, ","); rc != 0 || got != "load=0.50,probe keychain,probe tmp,probe pool,remote-auth,remote-write,repo-read,repo-read" {
+	if got := strings.Join(heads, ","); rc != 0 || got != "load=0.50,probe keychain,probe tmp,probe upstream,probe pool,remote-auth,remote-write,repo-read,repo-read" {
 		t.Fatalf("차례: %d %s\n%s", rc, got, b)
 	}
 }

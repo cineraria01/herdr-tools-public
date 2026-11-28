@@ -106,6 +106,7 @@ README에는 아래 목차 줄만 둔다.
 - [hc-sweep: 상주 판 점검 (옛 판으로 도는 상주 찾기)](docs/hc-sweep/resident.md)
 - [hc-sweep: Tailscale 점검](docs/hc-sweep/tailscale.md)
 - [hc-sweep: 시험 고아 점검 (부모 없이 남은 시험 프로세스)](docs/hc-sweep/test-orphans.md)
+- [hc-sweep: 상대 판 확인 (Claude·hc 판이 바뀌면 실물로 다시 대조)](docs/hc-sweep/upstream.md)
 - [herdr-hooks: 훅](docs/herdr-hooks/hooks.md)
 - [herdr-sync: 바이너리 줄](docs/herdr-sync/binary-lines.md)
 - [herdr-sync: 충돌과 푸는 법](docs/herdr-sync/conflicts.md)

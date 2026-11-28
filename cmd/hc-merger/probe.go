@@ -18,6 +18,7 @@ import (
 
 	"herdr-tools/internal/jobtmp"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/upstream"
 	"herdr-tools/internal/workermac"
 )
 
@@ -29,7 +30,7 @@ var keychainArgv = func() []string { return workermac.KeychainArgs(os.Getenv("HO
 
 // probeLines: 항목마다 한 줄(차례 고정 — 키체인·임시 폴더·풀)
 func probeLines() []string {
-	ps := []func() string{probeKeychain, probeTmp}
+	ps := []func() string{probeKeychain, probeTmp, probeUpstream}
 	if c := os.Getenv("HC_LANE_PROBE_POOL"); c != "" {
 		ps = append(ps, func() string { return probePool(c) })
 	}
@@ -105,6 +106,30 @@ func tmpTry(r string) string {
 		return "bad " + flat(err.Error())
 	}
 	return "ok " + r
+}
+
+// upFile: 이 기계 판 기록(시험이 바꾼다)
+var upFile = upstream.Path
+
+// probeUpstream: 이 기계의 판 기록(ht-upstream-contract — hc-sweep이 적는다)에서 「probe upstream ok|hold <점검할 묶음|->」, 기록이 없으면 na,
+// 못 읽으면 unknown. 대기열이 이 줄로 실물 점검을 한 대씩 띄우고(owed), 멈춘 레인에 Escape를 보낼지 정한다(hold) — 읽기만
+func probeUpstream() string {
+	rec, err := upstream.Load(upFile())
+	switch {
+	case err != nil:
+		return "probe upstream unknown " + flat(err.Error())
+	case rec == nil:
+		return "probe upstream na 판 기록 없음"
+	}
+	id, held := rec.Owed()
+	st := "ok"
+	if held {
+		st = "hold"
+	}
+	if id == "" {
+		id = "-"
+	}
+	return "probe upstream " + st + " " + id
 }
 
 // probePool: <명령> status의 쓸 계정 수(worker-mac-check와 같은 판정 — workermac.PoolUsable). 0이라고 분명히 말할 때만 나쁨,

@@ -13,6 +13,7 @@
 3. 건강 결과 보기: `hc-sweep --health` (재지 않고 기록만, 종료 0 좋음 · 1 나쁨 · 3 모름).
 4. 다른 기계: `hc exec --on <기계> -- hc-sweep --dry-run`.
 5. 터미널 하나가 정말 쉬는가: `hc-sweep --rest <tN>`(이 기계 터미널 — 다른 기계는 `hc exec --on <기계> -- hc-sweep --rest <tN>`, 「기계/tN」은 모름) — 읽기만, 한 줄 `REST<탭>quiet|busy|unknown<탭><세션 id><탭><까닭><탭>end`. 다른 도구가 닫거나 제출하기 직전에 그 기계에서 묻는 문이다(docs/hc-sweep/busy-idle.md 「한 문」).
+6. 상대 판: `hc-sweep --upstream`(이 기계 Claude·hc 판 묶음과 실물 점검 표, 읽기만 — 0 보류 없음 · 1 보류 · 3 기록 없음), 손으로 점검 `hc-sweep --upstream-probe -- <에이전트 실행 명령…>`(`{probe}` 자리에 점검 지시, 세션 하나를 띄웠다 닫는다). docs/hc-sweep/upstream.md
 
 ## 상태 보기
 
@@ -35,6 +36,7 @@
 - `hc-tailscale`: 그 기계 `tailscale status`, 이 기계 `hc machine ls`.
 - `hc-health`: 그 기계 `hc-sweep --health`. 키체인 막힘이면 코어를 다시 띄우고, 키체인이 필요한 레인은 다른 기계로.
 - `hc-stale-resident`: 옛 판·판 모름으로 도는 상주(건강 점검 길의 상주 판 점검). 글의 「다시 띄우기:」 명령을 그 기계에서 부른다(도구는 끄지 않는다). docs/hc-sweep/resident.md
+- `hc-upstream`: 그 기계 `hc-sweep --upstream`. 틀림이면 틀린 줄을 고치는 레인, 결과 없음이면 손으로 `--upstream-probe`. docs/hc-sweep/upstream.md
 - `hc-ego-idle`: 알리기만 — 닫힌 공간을 쓰던 에이전트는 같은 목표 이름으로 새 공간을 만들어 이어 간다. docs/hc-sweep/ego-spaces.md
 - 사건마다 뜻·흔한 까닭: docs/ops/events.md
 

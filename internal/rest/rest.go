@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/upstream"
 )
 
 // State: 쉼 판정. 0값은 모름이다(확인을 거치지 않은 조치를 받는 쪽이 거절한다)
@@ -72,6 +74,31 @@ func claude(t map[string]any) (bool, bool) {
 	return strings.Contains(strings.ToLower(app), "claude"), app != ""
 }
 
+// SessionOf: sessionOf를 실물 점검에(같은 찾기 — 점검이 따로 짜지 않게)
+func SessionOf(pid int, ps PS) (map[string]any, error) { return sessionOf(pid, ps) }
+
+// AgentEnded: 하위 에이전트 meta 파일 하나의 끝난 증거(Of와 같은 규칙 — 실물 점검용)
+func AgentEnded(meta string) (bool, error) {
+	b, err := os.ReadFile(meta)
+	var m map[string]any
+	if err != nil || json.Unmarshal(b, &m) != nil {
+		return false, fmt.Errorf("하위 기록 못 읽음")
+	}
+	return agentEnded(m, strings.TrimSuffix(meta, ".meta.json")+".jsonl")
+}
+
+// TurnEnded: 기록의 마지막 대화 줄이 턴 끝인가(실물 점검이 주 대화의 턴 끝을 기다릴 때)
+func TurnEnded(path string) (bool, error) { return turnEnded(path) }
+
+// Trailer: 배경 작업 출력 파일이 끝 표시로 끝나는가(실물 점검용)
+func Trailer(path string) (bool, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return endsWithTrailer(path, fi.Size())
+}
+
 // sessionOf: pid와 그 자손 가운데 처음 찾은 Claude 세션 파일. 없으면 nil·nil, ps 실패·파일을 못 읽음·JSON 아님은 오류(모름)
 func sessionOf(pid int, ps PS) (map[string]any, error) {
 	if _, err := os.Stat(SessDir); pid <= 0 || os.IsNotExist(err) { // 세션 폴더가 없는 기계는 ps도 안 부른다
@@ -120,12 +147,34 @@ func msOf(fi os.FileInfo) float64 { return float64(fi.ModTime().UnixNano()) / 1e
 // Of: 「이 터미널은 지금 정말 쉬는가」(t = hc get 답 하나, now·r3 ms). 세션 파일이 없으면 Claude가 아닌 CLI·셸은 쉼(지금 규칙 그대로),
 // Claude이거나 Claude인지 모르면 모름(자료가 없다 — 판·자리가 바뀌어도 조용히 쉼으로 떨어지지 않게). 기록이 r3 안에 바뀐 하위 에이전트에
 // 끝난 증거(agentEnded)가 없거나, 끝 표시 없고 살아 있는 프로세스가 쥔 배경 작업(bgTasks — 끝난 하위 에이전트가 남긴 셸도)이 있으면 활동.
-// 그 밖은 쉼이고 Last가 마지막 활동. 읽다 실패하면 모름
+// 그 밖은 쉼이고 Last가 마지막 활동. 읽다 실패하면 모름. 그 세션의 판 묶음이 실물 점검으로 확인되지 않았으면(internal/upstream —
+// ht-upstream-contract) 자료가 있어도 모름: 이 판정이 기대는 파일 관례가 그 판에서도 맞는지 아직 모른다
 func Of(t map[string]any, now, r3 float64, ps PS, held Held) Verdict {
+	return of(t, now, r3, ps, held, true)
+}
+
+// Look: Of와 같되 판 확인을 건너뛴다 — 실물 점검(hc-sweep --upstream-probe)이 확인 안 된 판에서 판정 자체를 대조할 때만
+func Look(t map[string]any, now, r3 float64, ps PS, held Held) Verdict {
+	return of(t, now, r3, ps, held, false)
+}
+
+// UpFile: 판 기록(upstream.Path — 시험이 바꾼다)
+var UpFile = upstream.Path()
+
+func of(t map[string]any, now, r3 float64, ps PS, held Held, gate bool) Verdict {
 	pid, _ := t["pid"].(float64)
 	sess, err := sessionOf(int(pid), ps)
 	if err != nil {
 		return Verdict{Sig: err.Error()}
+	}
+	if sess != nil && gate {
+		rec, err := upstream.Load(UpFile)
+		if err != nil {
+			return Verdict{Sid: str(sess, "sessionId"), Sig: "판 기록 못 읽음"}
+		}
+		if why := rec.Hold(str(sess, "version")); why != "" {
+			return Verdict{Sid: str(sess, "sessionId"), Sig: why}
+		}
 	}
 	if sess == nil {
 		switch isC, known := claude(t); {

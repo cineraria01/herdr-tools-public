@@ -13,9 +13,9 @@ import (
 
 func dirs(t *testing.T) {
 	d := t.TempDir()
-	oS, oP, oT := SessDir, ProjDir, TaskRoot
-	SessDir, ProjDir, TaskRoot = d+"/sessions", d+"/projects", d+"/ctmp/claude-1"
-	t.Cleanup(func() { SessDir, ProjDir, TaskRoot = oS, oP, oT })
+	oS, oP, oT, oU := SessDir, ProjDir, TaskRoot, UpFile
+	SessDir, ProjDir, TaskRoot, UpFile = d+"/sessions", d+"/projects", d+"/ctmp/claude-1", d+"/state/hc-sweep/upstream.json"
+	t.Cleanup(func() { SessDir, ProjDir, TaskRoot, UpFile = oS, oP, oT, oU })
 }
 
 func noPS() (string, bool) { return "", true }

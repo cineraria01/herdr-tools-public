@@ -29,6 +29,8 @@ func launchRows() {
 	loadTick()
 	tickMark("cordon")
 	cordonTick() // 저장소 읽기 점검·격리 — 띄우기 전(cordon.go)
+	tickMark("upstream")
+	upstreamTick() // 판이 바뀐 기계에 실물 점검 한 대씩(upstream.go — 조각의 probe upstream 줄)
 	NDOLD, NDNOW = readLines(DATA+"/need.tsv"), nil
 	ELIST, UPNOW, ECAPHIT, ECAPM, PINNOW = "", "", false, "", nil
 	SEENOFF = nil

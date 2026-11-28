@@ -344,6 +344,15 @@ const (
 	hgSince = 4
 	hgFP    = 5
 
+	// 상대 판 점검 upstream.tsv(upstream.go) 「기계 상태(ok|hold|na) 점검할 묶음 띄운 수 띄운 초 띄운 묶음 상한 알림(1|-)」
+	usMach  = 1
+	usSt    = 2
+	usOwed  = 3
+	usTries = 4
+	usAt    = 5
+	usTry   = 6
+	usCap   = 7
+
 	// 기계 옛 이름 machine-alias.tsv 「옛 새 바꾼 초」(rename.go — 병합기가 옛 이름으로 적은 결과 사건을 새 이름 것으로)
 	aaOld = 1
 	aaNew = 2

@@ -93,6 +93,9 @@ agent    claude-code
 coord    t0
 task     {run} 지시문을 읽고 진행하라.
 launch   sh -c 'exec example-agent --model example-model "$1"' _ {task}
+# upstream_launch  Claude·hc 판이 바뀐 기계의 실물 점검 세션 실행 명령(launch와 같은 틀, {task} 자리에 점검 지시 — 가장 싼 모델로).
+#          빼면 launch 틀(docs/hc-sweep/upstream.md)
+#upstream_launch sh -c 'exec example-agent --model example-cheap-model "$1"' _ {task}
 gc       60
 early
 early_wait 5

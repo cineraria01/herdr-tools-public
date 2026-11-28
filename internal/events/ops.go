@@ -28,6 +28,7 @@ const (
 	OpsCordon    = "hc-fill-cordon"
 	OpsStaleRes  = "hc-stale-resident"
 	OpsTestOrph  = "hc-test-orphan"
+	OpsUpstream  = "hc-upstream"
 	OpsEgoIdle   = "hc-ego-idle"
 	OpsAdvise    = "hc-fill-advise"
 	OpsFillPR    = "hc-fill-pr"
@@ -58,6 +59,7 @@ var Ops = []Op{
 	{OpsCordon, "hc-fill machine"},
 	{OpsStaleRes, "hc-fill state"},
 	{OpsTestOrph, "ps -o pid,ppid,etime,%cpu,command -p <pid>"},
+	{OpsUpstream, "hc-sweep --upstream"},
 	{OpsEgoIdle, "hc-sweep --dry-run"},
 	{OpsAdvise, "hc-fill advise"},
 	{OpsFillPR, "hc-fill knob ls"},

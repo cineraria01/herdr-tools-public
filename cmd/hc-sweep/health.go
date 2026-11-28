@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"herdr-tools/internal/atomic"
+	"herdr-tools/internal/events"
 	"herdr-tools/internal/resident"
+	"herdr-tools/internal/upstream"
 	"herdr-tools/internal/workermac"
 )
 
@@ -194,6 +196,10 @@ func healthRun(dry bool, r runner, grace, orphanAge time.Duration) {
 	lane := filepath.Join(binDir, "hc-lane")
 	report := func(msg, key string) bool { return laneReport(r, lane, "hc-health", msg, key) }
 	for _, l := range healthCheck(machine, healthState(), dry, r, report) {
+		fmt.Println(l)
+	}
+	up := func(st, msg, key string) bool { return laneReportAs(r, lane, st, events.OpsUpstream, msg, key) }
+	for _, l := range upstreamCheck(machine, upstream.Path(), dry, r, cliVersions(), up) { // 상대 판 기록(upstream.go)
 		fmt.Println(l)
 	}
 	stale := func(msg, key string) bool { return laneReport(r, lane, "hc-stale-resident", msg, key) }

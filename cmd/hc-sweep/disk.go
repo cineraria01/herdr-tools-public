@@ -339,6 +339,11 @@ func diskAlert(free, used, limitGB float64, state, base, gc string, dry bool, la
 
 // laneReport: 터미널 밖 사건 한 줄(hc-lane report 중간 - <msg> --name <name> [--key <key>]). 터미널 표식은 뗀다(이 터미널 사건이 되지 않게)
 func laneReport(r runner, lane, name, msg, key string) bool {
+	return laneReportAs(r, lane, "중간", name, msg, key)
+}
+
+// laneReportAs: laneReport와 같되 상태(중간·막힘)를 고른다
+func laneReportAs(r runner, lane, st, name, msg, key string) bool {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=") // = 없는 항목도 패닉 없이(L5)
@@ -352,7 +357,7 @@ func laneReport(r runner, lane, name, msg, key string) bool {
 			lane = p
 		}
 	}
-	args := []string{"report", "중간", "-", msg, "--name", name}
+	args := []string{"report", st, "-", msg, "--name", name}
 	if key != "" {
 		args = append(args, "--key", key)
 	}
