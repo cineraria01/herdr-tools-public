@@ -511,11 +511,11 @@ func sameOwner(t, g map[string]any) bool {
 // closeTerm: 닫기. 「닫힘…」이면 닫힌 것이 확인됨(그때만 부른 쪽이 작업 트리를 정리한다), 「남김…」이면 손대지 않음, 그 밖은 실패·모름.
 // q는 settle의 쉼 판정 — 쉼이 아니면(0값 포함) 닫지 않는다(닫는 길이 쉼 판정을 건너뛰지 못하게)
 func closeTerm(t map[string]any, why string, q rested) string {
-	if q.state != restQuiet {
+	if q.State != restQuiet {
 		return "남김(쉼 판정을 거치지 않음 또는 쉼 아님)"
 	}
 	address, name, cwd, title := str(t, "address"), str(t, "name"), str(t, "cwd"), str(t, "title")
-	sid := dash(q.sid) // 세션 조회(ps)는 settle이 마지막 확인 앞에서 끝냈다(R-02 — 그동안 주소가 바뀔 수 있다)
+	sid := dash(q.Sid) // 세션 조회(ps)는 settle이 마지막 확인 앞에서 끝냈다(R-02 — 그동안 주소가 바뀔 수 있다)
 	event, ok := laneEvent(t, why)
 	if !ok {
 		record(address, name, why+" 실패(정리됨 못 씀)", cwd, "-", title)

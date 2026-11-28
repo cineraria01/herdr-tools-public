@@ -83,6 +83,7 @@ func asTSetup(t *testing.T, machine, status, on string) *subT {
 			t.Fatal(err)
 		}
 	}
+	restFake(t, k.dir)
 	t.Setenv("PATH", k.dir+":"+os.Getenv("PATH"))
 	t.Setenv("HC_T_LOG", k.log)
 	t.Setenv("HC_T_DIR", k.dir)

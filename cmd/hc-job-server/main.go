@@ -24,12 +24,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
 
 	"herdr-tools/internal/hcjson"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/rest"
 	"herdr-tools/internal/selfexec"
 	"herdr-tools/internal/version"
 )
@@ -42,8 +44,24 @@ type job struct {
 	name, label, dir, script string
 	hc, loopStart, home      string
 	sid                      string
-	gap, tick, stale         int64 // 초
-	last                     int64 // 마지막으로 띄운 때(유닉스 초)
+	gap, tick, stale         int64  // 초
+	last                     int64  // 마지막으로 띄운 때(유닉스 초)
+	kept                     string // 멈춘 루프 후보를 남긴 마지막 까닭(같은 까닭은 다시 안 적는다)
+}
+
+// restRun: rest.Ask의 실행기 — hc는 HC_JOB_HC, hc-sweep은 그 곁(도구는 한 폴더에 깔린다 — launchd의 짧은 PATH에 기대지 않는다).
+// hc-sweep --rest가 안에서 hc를 PATH 이름으로 부르니 그 폴더를 자식 PATH 앞에 둔다(감사 atp7a3w M1 — 없으면 늘 「hc get 실패」 모름).
+// 표준 오류는 버리고 상한 90초(넘기면 0 아닌 종료 = 모름)
+func (j *job) restRun(a []string) (string, int) {
+	bin := filepath.Dir(j.hc)
+	name := map[string]string{"hc": j.hc, "hc-sweep": filepath.Join(bin, "hc-sweep")}[a[0]]
+	var o bytes.Buffer
+	c := exec.Command(name, a[1:]...)
+	c.Stdout, c.Env = &o, append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := proc.RunMax(c, 90*time.Second); err != nil {
+		return "", max(proc.Code(err), 1)
+	}
+	return o.String(), 0
 }
 
 var resumeRe = regexp.MustCompile(`--resume ([0-9a-f-]*)`)
@@ -156,6 +174,17 @@ func (j *job) step() {
 		if time.Now().Unix()-j.last < j.gap {
 			return // 다시 띄울 수 없는 동안은 끄지 않는다
 		}
+		// 상태 done·idle은 턴 끝일 뿐 — 배경 작업·하위 에이전트가 도는 루프는 멈춘 것이 아니다(ht-rest-one-gate). 쉼만 끈다. 모름은 상태가
+		// HC_JOB_STALE의 네 배(기본 6시간 — hc-sweep R3 기본과 같다) 그대로일 때만(끝없이 안 끄지 않게). 남긴 까닭은 바뀔 때만 한 줄
+		v := rest.Ask(j.restRun, g.Address, "")
+		if age := time.Now().Unix() - g.StatusMs/1000; v.State == rest.Busy || v.State == rest.Unknown && age <= 4*j.stale {
+			if w := rest.Why(v); w != j.kept {
+				j.kept = w
+				j.log("멈춘 루프 후보(%s) → 끄지 않음: %s", why, w)
+			}
+			return
+		}
+		j.kept = ""
 		if err := proc.Run(exec.Command(j.hc, "kill", g.Address)); err != nil {
 			j.log("멈춘 루프(%s) → hc kill %s 실패(종료 %d), 다음 틱에 다시 확인", why, g.Address, proc.Code(err))
 		} else {

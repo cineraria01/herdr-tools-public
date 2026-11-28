@@ -147,11 +147,28 @@ func TestHcSweepBusySubmittedKept(t *testing.T) {
 	c.ok("제출 레인 + 하위 에이전트: hc kill 없음", bzKills(T) == 0)
 }
 
-// 세션 파일이 없는 터미널(Claude가 아닌 CLI) → 신호 없음, 지금 규칙 그대로 닫음
+// 세션 파일이 없는 터미널: Claude(status.app claude-code)면 자료가 없는 것이라 쉼 모름(안 닫음 — ht-rest-one-gate), Claude가 아닌 CLI면
+// 신호 없음, 지금 규칙 그대로 닫음
 func TestHcSweepBusyNoSessionCloses(t *testing.T) {
-	T, _, out, rc := bzSweep(t, bzRunning, time.Minute, false, false)
+	T, e, out, rc := bzSweep(t, bzRunning, time.Minute, false, false)
 	c := checker{t: t, out: &out, rc: &rc}
-	c.ok("세션 없음: hc kill 1회", bzKills(T) == 1)
+	c.ok("Claude·세션 없음: hc kill 없음", bzKills(T) == 0)
+	c.ok("Claude·세션 없음: 남김 줄", strings.Contains(out, "남김: t1 lane-a — 쉼 모름(Claude인데 세션 자료 없음)"))
+	b, _ := os.ReadFile(T + "/get-t1.json")
+	write(t, T+"/get-t1.json", strings.Replace(string(b), `"app":"claude-code"`, `"app":"codex"`, 1))
+	out, rc = run(T, e, tool(t, "hc-sweep"), "--only-under", T)
+	c.ok("Claude 아닌 CLI·세션 없음: hc kill 1회", bzKills(T) == 1)
+}
+
+// ht-rest-one-gate 묻기(hc-sweep --rest): 이 기계 터미널은 판정 한 줄, 다른 기계 주소(「기계/tN」)는 이 기계 자료로 판정하지 않고 모름(감사 atp7a3w L2 —
+// 그 pid로 이 기계의 ps·세션 파일을 봤다). 도구 길(rest.Ask)은 늘 접두를 떼어 그 기계에서 묻는다
+func TestHcSweepRestAsk(t *testing.T) {
+	T, e := bzSetup(t, bzRunning, time.Minute, false, true)
+	out, rc := run(T, e, tool(t, "hc-sweep"), "--rest", "t1")
+	c := checker{t: t, out: &out, rc: &rc}
+	c.ok("이 기계: 활동 한 줄", rc == 0 && strings.TrimSpace(out) == "REST\tbusy\tsid-1\t배경 하위 에이전트 1개 안 끝남\tend")
+	out, rc = run(T, e, tool(t, "hc-sweep"), "--rest", "box-1/t1")
+	c.ok("다른 기계 주소: 모름, hc get 안 부름", rc == 0 && strings.HasPrefix(out, "REST\tunknown\t-\t다른 기계 주소") && !strings.Contains(read(T+"/hc.log"), "get box-1/t1"))
 }
 
 // ③ 신호 모름(세션 파일이 JSON 아님) → 안 닫음 ⑦ dry-run은 판정과 까닭만(기록 없음)

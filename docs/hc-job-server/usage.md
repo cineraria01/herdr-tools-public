@@ -7,6 +7,7 @@
   - `live`인데 **멈춘 루프**: `status.state`가 `done`·`idle`이고 `status_ms`가 `HC_JOB_STALE`초(기본 5400, 0이면 안 봄) 넘게 그대로면 `hc kill <주소>` 하고, 다음 틱에 `finished` 길로 같은 세션을 다시 띄운다.
     Claude `/loop`가 최대 시간(약 7일)에 닿으면 ScheduleWakeup이 거절돼 Claude는 프롬프트에 살아 있는데 회차가 없다(2026-11-23 D1 루프 11시간).
     ScheduleWakeup 상한이 3600초이고 매시 cron 루프도 한 시간 안에 다시 `working`이 되니 5400초면 도는 루프를 오판하지 않는다.
+    끄기 전에 쉼 판정을 묻는다(`HC_JOB_HC` 곁의 `hc-sweep --rest <주소>` — [정말 쉬는가](../hc-sweep/busy-idle.md) 「한 문」): 배경 작업·하위 에이전트가 도는 루프는 멈춘 것이 아니라 안 끄고, 쉼을 모르면(옛 판 hc-sweep 등) 상태가 `HC_JOB_STALE`의 네 배(기본 6시간) 넘게 그대로일 때만 끈다. 남긴 까닭은 바뀔 때만 한 줄.
     `working`·`blocked`·`error`와 status가 없는 터미널(Claude가 아님, 권한을 기다리는 `hc-loop-start`)은 건드리지 않는다.
   - `finished`: 끝난 기록만 `hc rm` 뒤 `absent`와 같이.
   - `absent`: `hc run --bg --outlive-parent --no-parent --name <이름> --label job=<라벨> -- /bin/bash <hc-loop-start> <작업 폴더> <재개 스크립트>`.

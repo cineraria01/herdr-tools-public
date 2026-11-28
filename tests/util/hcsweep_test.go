@@ -123,6 +123,7 @@ exit 1
 `)
 	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg",
 		"XDG_CACHE_HOME="+T+"/cache", "TMPDIR="+T+"/tmp")
+	claudeSess(t, T+"/home")
 	sweepEnv := func(env Env, args ...string) {
 		out, rc = run(T, env, SWEEP, append([]string{"--only-under", T}, args...)...)
 	}
@@ -346,7 +347,7 @@ exit 1
 		if a == "t62" {
 			lab = ""
 		}
-		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"lane-%s","state":"live","status":{"app":"claude-code","state":"idle"},%s"parent":"p/t1","created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"}`+"\n",
+		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"lane-%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"idle"},%s"parent":"p/t1","created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"}`+"\n",
 			a, a, lab, old, old, T+"/gone-"+a))
 	}
 	script(t, T+"/bin/hc", T, `#!/bin/bash
@@ -398,7 +399,7 @@ exit 1
 	recent := (time.Now().Unix() - 60) * 1000
 	write(t, T+"/ls.json", `{"terminals":[{"address":"t71","state":"live","status":"idle"},{"address":"t72","state":"live","status":"idle"},{"address":"t73","state":"live","status":"idle"},{"address":"t74","state":"live","status":"idle"}]}`+"\n")
 	for _, a := range []string{"t71", "t72", "t73", "t74"} {
-		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"lane-%s","state":"live","status":{"app":"claude-code","state":"idle"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":3,"cwd":"%s"}`+"\n",
+		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"lane-%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"idle"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":3,"cwd":"%s"}`+"\n",
 			a, a, recent, T+"/gone-"+a))
 	}
 	write(t, EVT, "2026-11-21T10:00:00Z\tm\tt71\tlane-t71\t제출\tabc1234\tsub-1 → 큐\t3\t-\tt71@1700000000000\n"+
@@ -443,7 +444,7 @@ git -C "$R" fetch -q origin`, G, R)
 	for _, x := range [][2]string{{"t81", "land-x"}, {"t82", "land-d"}, {"t83", "land-n"}, {"t84", "land-u"}} {
 		// foreground.cwd: 진짜 hc get 꼴(지금 폴더) — hc-lane clean이 다른 터미널의 지금 폴더도 본다(cwd-now-inuse, 없으면 모름 = 안 지움)
 		w := R + ".wt/" + x[1]
-		write(t, T+"/get-"+x[0]+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"done"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":5,"foreground":{"cwd":"%s"},"cwd":"%s"}`+"\n",
+		write(t, T+"/get-"+x[0]+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"done"},"labels":{"hc-lane":"1"},"created_ms":1700000000000,"status_ms":%d,"turn":5,"foreground":{"cwd":"%s"},"cwd":"%s"}`+"\n",
 			x[0], x[1], idle31, w, w))
 	}
 	script(t, T+"/bin/hc", T, `#!/bin/bash

@@ -34,6 +34,7 @@ func stFx(t *testing.T, machineLS string) {
 	wr("lsjson", `{"terminals":[{"address":"w/t5","name":"lane-a","status":"working"},{"address":"t2","name":"`+watchName("m/t1")+`","status":"idle"}]}`)
 	wr("mls", machineLS)
 	wr("hc", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'"+DATA+"/hc.log'\ncase \"$1\" in ls) cat '"+DATA+"/lsjson';; machine) cat '"+DATA+"/mls' || exit 1;; esac\n")
+	restFake(t, DATA)
 	t.Setenv("PATH", DATA+":"+os.Getenv("PATH"))
 	now := time.Now()
 	add := now.Add(-3 * time.Hour).Format("2006-01-02T15:04")

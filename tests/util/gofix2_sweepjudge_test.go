@@ -18,9 +18,16 @@ func j2Sweep(t *testing.T) (T string, e Env, gone string) {
 	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "XDG_CACHE_HOME="+T+"/cache",
 		"TMPDIR="+T+"/tmp", "HC_LANE_MACHINE=m", "HC_FILL_DATA="+T+"/fill")
 	write(t, T+"/cfg/config", "sweep.disk_free_gb 0\n")
+	claudeSess(t, T+"/home")
 	gone = T + "/cache/codebase-memory-mcp/gone.db"
 	bash(t, T, e, `sqlite3 "$1" "$2" >/dev/null && touch -t 202601010000 "$1"`, gone, mkdbSQL(false, "2026-11-12T07:51:04Z", T+"/repo.wt/audit-gone"))
 	return T, e, gone
+}
+
+// claudeSess: 가짜 Claude 터미널(get 답의 "pid":4343)의 세션 파일 — 실측 꼴 ~/.claude/sessions/<pid>.json. 세션 자료 없는 Claude는 쉼
+// 모름이라 닫지 않으니(ht-rest-one-gate) 닫기 규칙을 보는 시험은 세션이 있는 꼴로 둔다(대화 기록 없음 = 쉼)
+func claudeSess(t *testing.T, home string) {
+	write(t, home+"/.claude/sessions/4343.json", `{"pid":4343,"sessionId":"sid-fix"}`)
 }
 
 // j2Idle: 7시간 쉰 worker 터미널(get 답) — cwd는 없는 폴더라 작업 트리·착지 전 커밋 아님, R2 대상
@@ -29,7 +36,7 @@ func j2Idle(addr, name string, created int64, lane bool) string {
 	if lane {
 		lab = `"labels":{"hc-lane":"1"},`
 	}
-	return fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"idle"},%s"parent":"p/t0","created_ms":%d,"status_ms":%d,"turn":4,"cwd":"/nonexistent-j2/%s"}`+"\n",
+	return fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"idle"},%s"parent":"p/t0","created_ms":%d,"status_ms":%d,"turn":4,"cwd":"/nonexistent-j2/%s"}`+"\n",
 		addr, name, lab, created, created, name)
 }
 

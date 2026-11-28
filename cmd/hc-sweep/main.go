@@ -28,7 +28,6 @@ const minute = 60 * 1000.0 // ms
 var (
 	home     = os.Getenv("HOME")
 	tasksDir = filepath.Join(home, ".claude-tasks")
-	sessDir  = filepath.Join(home, ".claude", "sessions")
 	laneDir  = filepath.Join(stateHome(), "hc-lane")
 	binDir   = findBinDir()
 	busyRe   = regexp.MustCompile(`still running|·\s*\d+\s+(?:shell|monitor)s?\b`)
@@ -323,6 +322,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--skill" { // 에이전트 안내(skill.go)
 		fmt.Print(skillText)
 		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--rest" && os.Args[2] != "" { // 쉼 묻기(rest.go — 쓸기 잠금·쓸기와 따로, 읽기만)
+		os.Exit(restMain(os.Args[2]))
 	}
 	os.Exit(sweepMain(os.Args[1:]))
 }

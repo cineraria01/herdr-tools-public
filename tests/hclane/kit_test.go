@@ -68,7 +68,7 @@ func newK(t *testing.T) *K {
 	k.LANE = laneBin(t)
 	bin := filepath.Join(T, "bin")
 	mkdirs(t, bin, k.W)
-	for _, f := range []string{"hc", "ps", "herdr-app"} {
+	for _, f := range []string{"hc", "ps", "herdr-app", "hc-sweep"} {
 		b, err := os.ReadFile(filepath.Join("testdata", f))
 		if err != nil {
 			t.Fatal(err)

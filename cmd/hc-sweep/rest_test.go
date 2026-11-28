@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"herdr-tools/internal/rest"
 )
 
 // restDirs: 쉼 판정이 읽는 세션·대화 기록 폴더를 임시 폴더로 바꾼다
@@ -16,9 +18,9 @@ func restDirs(t *testing.T) (sess, proj string) {
 	sess, proj = filepath.Join(d, "sessions"), filepath.Join(d, "projects")
 	os.MkdirAll(sess, 0o755)
 	os.MkdirAll(proj, 0o755)
-	oldS, oldP, oldT := sessDir, projDir, taskRoot
-	sessDir, projDir, taskRoot = sess, proj, filepath.Join(d, "ctmp", "claude-1")
-	t.Cleanup(func() { sessDir, projDir, taskRoot = oldS, oldP, oldT })
+	oldS, oldP, oldT := rest.SessDir, rest.ProjDir, rest.TaskRoot
+	rest.SessDir, rest.ProjDir, rest.TaskRoot = sess, proj, filepath.Join(d, "ctmp", "claude-1")
+	t.Cleanup(func() { rest.SessDir, rest.ProjDir, rest.TaskRoot = oldS, oldP, oldT })
 	return sess, proj
 }
 
@@ -39,41 +41,41 @@ func TestQuietSignals(t *testing.T) {
 	r3 := 360 * minute
 	ps := fakeRun(0, " 100 1\n 101 100\n 102 101\n", "", nil)
 	term := map[string]any{"pid": 100.0}
-	if q := quiet(term, now, r3, ps); q.state != restQuiet || q.sid != "" {
+	if q := quiet(term, now, r3, ps); q.State != restQuiet || q.Sid != "" {
 		t.Fatalf("세션 파일 없음 = 신호 없음(쉼): %+v", q)
 	}
 	put(t, sess+"/102.json", `{"sessionId":"s1"}`, 0)
 	put(t, proj+"/-x/s1.jsonl", "{}", 40*time.Minute)
 	put(t, proj+"/-x/s2/subagents/agent-o.meta.json", `{}`, 0) // 남의 세션
 	q := quiet(term, now, r3, ps)
-	if q.state != restQuiet || q.sid != "s1" || now-q.last < 39*minute {
+	if q.State != restQuiet || q.Sid != "s1" || now-q.Last < 39*minute {
 		t.Fatalf("손자 세션 s1, 활동 40분 전: %+v", q)
 	}
 	put(t, proj+"/-x/s1/subagents/agent-a.meta.json", `{"requestShape":"background"}`, 7*time.Hour)
-	if q = quiet(term, now, r3, ps); q.state != restQuiet {
+	if q = quiet(term, now, r3, ps); q.State != restQuiet {
 		t.Fatalf("끝 표시 없이 r3 넘게 조용한 하위 에이전트는 활동 아님: %+v", q)
 	}
 	put(t, proj+"/-x/s1/subagents/agent-a.jsonl", "{}", time.Minute)
 	os.Symlink(proj+"/-x", proj+"/-old-name") // 옛 폴더 이름 링크(같은 기록이 두 번 보임)
-	if q = quiet(term, now, r3, ps); q.state != restBusy || !strings.Contains(q.sig, "1개") {
+	if q = quiet(term, now, r3, ps); q.State != restBusy || !strings.Contains(q.Sig, "1개") {
 		t.Fatalf("돌고 있는 하위 에이전트: %+v", q)
 	}
 	// 지휘 결정(2026-11-28, 감사 atp6urq M1): 주 기록의 끝남 알림은 증거가 아니다 — 끝난 증거는 그 하위 에이전트 자기 기록(finished·끝 줄 end_turn)뿐.
 	// TaskStop으로 멈춘 배경(끝 줄은 user — 끊김)은 r3 안이면 활동, r3 지나면 쉼
 	put(t, proj+"/-x/s1.jsonl", `{"content":"<task-notification>\n<task-id>a</task-id>\n<status>killed</status>"}`+"\n", 40*time.Minute)
 	put(t, proj+"/-x/s1/subagents/agent-a.jsonl", `{"type":"user","message":{"content":"[Request interrupted by user]"}}`+"\n", 30*time.Minute)
-	if q = quiet(term, now, r3, ps); q.state != restBusy {
+	if q = quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("멈춘 배경 하위 에이전트(알림 있음) r3 안: 활동 %+v", q)
 	}
 	put(t, proj+"/-x/s1/subagents/agent-a.meta.json", `{"requestShape":"background"}`, 7*time.Hour)
 	put(t, proj+"/-x/s1/subagents/agent-a.jsonl", `{"type":"user","message":{"content":"[Request interrupted by user]"}}`+"\n", 7*time.Hour)
-	if q = quiet(term, now, r3, ps); q.state != restQuiet {
+	if q = quiet(term, now, r3, ps); q.State != restQuiet {
 		t.Fatalf("멈춘 배경 하위 에이전트 r3 지남: 쉼 %+v", q)
 	}
 	// 다시 불린 꼴(감사 atp6urq): finished 없음 + 끝 줄 tool_use + 주 기록에 앞 알림 있음 → 활동
 	put(t, proj+"/-x/s1/subagents/agent-a.meta.json", `{"requestShape":"background"}`, time.Minute)
 	put(t, proj+"/-x/s1/subagents/agent-a.jsonl", `{"type":"assistant","message":{"stop_reason":"tool_use"}}`+"\n", time.Minute)
-	if q = quiet(term, now, r3, ps); q.state != restBusy {
+	if q = quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("다시 불린 하위 에이전트(앞 알림 남음, 도구 중): 활동 %+v", q)
 	}
 	put(t, proj+"/-x/s1.jsonl", "{}\n", 40*time.Minute)
@@ -84,32 +86,32 @@ func TestQuietSignals(t *testing.T) {
 	for _, m := range []string{team, `{"requestShape":"foreground"}`, `{}`} {
 		put(t, proj+"/-x/s1/subagents/agent-a.meta.json", m, time.Minute)
 		put(t, proj+"/-x/s1/subagents/agent-a.jsonl", toolUse, 4*time.Minute)
-		if q = quiet(term, now, r3, ps); q.state != restBusy {
+		if q = quiet(term, now, r3, ps); q.State != restBusy {
 			t.Fatalf("도구를 쓰는 중 %s: 활동이어야 %+v", m, q)
 		}
 		put(t, proj+"/-x/s1/subagents/agent-a.jsonl", strings.Repeat(`{"type":"progress"}`+"\n", 3000)+endTurn, time.Minute)
-		if q = quiet(term, now, r3, ps); q.state != restQuiet || now-q.last > 2*minute {
+		if q = quiet(term, now, r3, ps); q.State != restQuiet || now-q.Last > 2*minute {
 			t.Fatalf("턴을 마치고 쉼(end_turn) %s: 쉼, 마지막 활동 1분 전 %+v", m, q)
 		}
 	}
 	put(t, proj+"/-x/s1/subagents/agent-a.meta.json", `{"finished":true}`, time.Minute)
-	if q = quiet(term, now, r3, ps); q.state != restQuiet || now-q.last > 2*minute {
+	if q = quiet(term, now, r3, ps); q.State != restQuiet || now-q.Last > 2*minute {
 		t.Fatalf("끝난 하위 에이전트: 쉼, 마지막 활동 1분 전: %+v", q)
 	}
 	put(t, proj+"/-x/s1/subagents/agent-a.meta.json", `{깨짐`, 0)
-	if q = quiet(term, now, r3, ps); q.state != restUnknown {
+	if q = quiet(term, now, r3, ps); q.State != restUnknown {
 		t.Fatalf("meta 못 읽음 = 모름: %+v", q)
 	}
-	if q = quiet(term, now, r3, fakeRun(1, "", "", nil)); q.state != restUnknown || q.sig != "ps 실패" {
+	if q = quiet(term, now, r3, fakeRun(1, "", "", nil)); q.State != restUnknown || q.Sig != "ps 실패" {
 		t.Fatalf("ps 실패 = 모름: %+v", q)
 	}
 	put(t, sess+"/102.json", `{"sessionId":"../x"}`, 0)
-	if q = quiet(term, now, r3, ps); q.state != restUnknown {
+	if q = quiet(term, now, r3, ps); q.State != restUnknown {
 		t.Fatalf("경로 글자 든 세션 id = 모름: %+v", q)
 	}
 	os.RemoveAll(proj)
 	put(t, sess+"/102.json", `{"sessionId":"s1"}`, 0)
-	if q = quiet(term, now, r3, ps); q.state != restQuiet {
+	if q = quiet(term, now, r3, ps); q.State != restQuiet {
 		t.Fatalf("기록 폴더 없는 기계 = 신호 없음: %+v", q)
 	}
 }
@@ -125,8 +127,18 @@ func TestSettle(t *testing.T) {
 		return map[string]any{"address": "t1", "name": "lane-a", "state": "live", "status": map[string]any{"app": "claude-code", "state": "done"},
 			"labels": map[string]any{"hc-lane": "1"}, "created_ms": now - 9*60*minute, "status_ms": now - float64(idle.Milliseconds()), "turn": 4.0, "pid": 7.0}
 	}
-	if why, _, q := settle(lane(33*time.Minute), f, now, nil, ps); why != "R2" || q.state != restQuiet {
-		t.Fatalf("세션 없음: 지금 규칙(R2) %q %+v", why, q)
+	// ht-rest-one-gate: 세션 자료 없음 — Claude(status.app)이거나 앱을 모르면 모름(닫지 않음), Claude가 아닌 CLI는 지금 규칙(R2)
+	if why, kept, q := settle(lane(33*time.Minute), f, now, nil, ps); why != "" || kept != "쉼 모름(Claude인데 세션 자료 없음)" {
+		t.Fatalf("Claude인데 세션 없음: 모름 %q %q %+v", why, kept, q)
+	}
+	codex := lane(33 * time.Minute)
+	codex["status"] = map[string]any{"app": "codex", "state": "done"}
+	if why, _, q := settle(codex, f, now, nil, ps); why != "R2" || q.State != restQuiet {
+		t.Fatalf("Claude가 아닌 CLI·세션 없음: 지금 규칙(R2) %q %+v", why, q)
+	}
+	codex["status"] = map[string]any{"state": "done"} // 닫기 규칙(judge)은 앱 칸 없음을 이미 남긴다 — 다른 길(--rest)을 위해 판정에서
+	if q := quiet(codex, now, 360*minute, ps); q.State != restUnknown || !strings.Contains(q.Sig, "앱 모름") {
+		t.Fatalf("앱 칸 없음: 모름 %+v", q)
 	}
 	put(t, sess+"/7.json", `{"sessionId":"s7"}`, 0)
 	put(t, proj+"/-p/s7/subagents/agent-a.meta.json", `{"requestShape":"background"}`, 2*time.Minute)
@@ -157,14 +169,14 @@ func TestSettle(t *testing.T) {
 		t.Fatal("⑤ 턴 뒤 활동이 있으면 제출 레인도 R2 문턱부터")
 	}
 	put(t, proj+"/-p/s7/subagents/agent-a.meta.json", `{"finished":true}`, 31*time.Minute)
-	if why, _, q = settle(lane(50*time.Minute), f, now, nil, ps); why != "R2" || q.state != restQuiet {
+	if why, _, q = settle(lane(50*time.Minute), f, now, nil, ps); why != "R2" || q.State != restQuiet {
 		t.Fatalf("⑤ 활동이 끊기고 문턱 지남: R2 %q", why)
 	}
 	put(t, sess+"/7.json", `{깨짐`, 0)
 	if why, kept, _ = settle(lane(33*time.Minute), f, now, nil, ps); why != "" || !strings.Contains(kept, "쉼 모름") {
 		t.Fatalf("③ 모름: 안 닫음 %q %q", why, kept)
 	}
-	if why, _, q = settle(lane(7*60*time.Minute), facts{worktree: no, unlanded: yes, tail: &tail}, now, nil, ps); why != "R3" || q.state != restQuiet {
+	if why, _, q = settle(lane(7*60*time.Minute), facts{worktree: no, unlanded: yes, tail: &tail}, now, nil, ps); why != "R3" || q.State != restQuiet {
 		t.Fatalf("③ 모름이 r3만큼(상태 그대로 7시간): R3 %q %+v", why, q)
 	}
 }
@@ -189,10 +201,11 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	put(t, proj+"/-p/s7.jsonl", "{}\n", 40*time.Minute)
 	put(t, proj+"/-p/s7/subagents/agent-a.meta.json", `{"requestShape":"background","finished":true}`, 40*time.Minute)
 	put(t, proj+"/-p/s7/subagents/agent-a.jsonl", `{"type":"assistant","message":{"stop_reason":"end_turn"}}`+"\n", 40*time.Minute)
+	taskRoot := rest.TaskRoot
 	tasks := taskRoot + "/-p/s7/tasks/"
 	put(t, tasks+"bq1.output", "", 110*time.Minute)
 	// ① 사고 꼴: 안 닫음·까닭 ② 제출 레인 빠른 닫기도
-	if q := quiet(term, now, r3, ps); q.state != restBusy || q.sig != "배경 작업 1개 도는 중" {
+	if q := quiet(term, now, r3, ps); q.State != restBusy || q.Sig != "배경 작업 1개 도는 중" {
 		t.Fatalf("① 끝난 하위 에이전트가 남긴 배경 셸: 활동 %+v", q)
 	}
 	if why, kept, _ := settle(term, f, now, nil, ps); why != "" || kept != "안에서 일이 도는 중(배경 작업 1개 도는 중)" {
@@ -212,7 +225,7 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	// ③ 끝 표시가 붙으면 닫을 후보(수정 시각은 끝난 때 — 문턱 넘게 전)
 	for _, end := range []string{"\n[exited with code 0]\n", "out\n\n[killed]\n", "\n[exited with code unknown]\n"} {
 		put(t, tasks+"bq1.output", end, 35*time.Minute)
-		if why, _, q := settle(term, f, now, nil, ps); why != "R2" || q.state != restQuiet {
+		if why, _, q := settle(term, f, now, nil, ps); why != "R2" || q.State != restQuiet {
 			t.Fatalf("③ 끝 표시 %q: R2 %q %+v", end, why, q)
 		}
 	}
@@ -231,22 +244,22 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	os.MkdirAll(tasks+"bdir.output", 0o755)
 	put(t, taskRoot+"/-p/s8/tasks/bz.output", "", 0) // 남의 세션
 	put(t, taskRoot+"/stray-file", "", 0)            // 뿌리의 파일
-	if q := quiet(term, now, r3, ps); q.state != restQuiet {
+	if q := quiet(term, now, r3, ps); q.State != restQuiet {
 		t.Fatalf("④⑤ 오래된 미완·링크·파일·남의 세션: 쉼 %+v", q)
 	}
 	// ⑨ 큰 출력 + 끝 표시 → 끝남, 끝 표시 글이 가운데에만 → 도는 중
 	big := strings.Repeat("line of output\n", 80000)
 	put(t, tasks+"bq3.output", big+"\n[exited with code 1]\n", 35*time.Minute)
-	if q := quiet(term, now, r3, ps); q.state != restQuiet {
+	if q := quiet(term, now, r3, ps); q.State != restQuiet {
 		t.Fatalf("⑨ 큰 출력 + 끝 표시: 쉼 %+v", q)
 	}
 	put(t, tasks+"bq3.output", big+"\n[exited with code 1]\n"+big, 35*time.Minute)
-	if q := quiet(term, now, r3, ps); q.state != restBusy {
+	if q := quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("⑨ 끝 표시 글이 가운데에만: 도는 중 %+v", q)
 	}
 	// 외부 가정: 끝 표시 글이 다른 Claude 판 → 도는 중으로(닫지 않는 쪽, r3까지)
 	put(t, tasks+"bq3.output", "[exit 0]\n", 35*time.Minute)
-	if q := quiet(term, now, r3, ps); q.state != restBusy {
+	if q := quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("모르는 끝 표시: 도는 중 %+v", q)
 	}
 	os.Remove(tasks + "bq3.output")
@@ -254,7 +267,7 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	put(t, proj+"/-p/s7/subagents/agent-b.meta.json", `{"requestShape":"background"}`, time.Minute)
 	put(t, tasks+"bq4.output", "", time.Minute)
 	put(t, tasks+"bq5.output", "partial", 2*time.Minute)
-	if q := quiet(term, now, r3, ps); q.state != restBusy || q.sig != "배경 하위 에이전트 1개 안 끝남 · 배경 작업 2개 도는 중" {
+	if q := quiet(term, now, r3, ps); q.State != restBusy || q.Sig != "배경 하위 에이전트 1개 안 끝남 · 배경 작업 2개 도는 중" {
 		t.Fatalf("⑧ 둘 다: %+v", q)
 	}
 	os.Remove(proj + "/-p/s7/subagents/agent-b.meta.json")
@@ -267,13 +280,13 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		put(t, fmt.Sprintf("%sbdead%d.output", tasks, i), "", 20*time.Hour)
 	}
-	if why, _, q := settle(term, f, now, nil, ps); why != "R2" || q.state != restQuiet {
+	if why, _, q := settle(term, f, now, nil, ps); why != "R2" || q.State != restQuiet {
 		t.Fatalf("쌓인 세션: R2 %q %+v", why, q)
 	}
 	// ⑥ tasks 폴더를 못 읽음 → 모름(R3만)
 	os.Chmod(tasks, 0)
 	t.Cleanup(func() { os.Chmod(tasks, 0o755) })
-	if q := quiet(term, now, r3, ps); q.state != restUnknown || q.sig != "배경 작업 못 읽음" {
+	if q := quiet(term, now, r3, ps); q.State != restUnknown || q.Sig != "배경 작업 못 읽음" {
 		t.Fatalf("⑥ 못 읽음 = 모름: %+v", q)
 	}
 	if why, kept, _ := settle(term, f, now, nil, ps); why != "" || !strings.Contains(kept, "쉼 모름") {
@@ -295,7 +308,7 @@ func TestQuietBackgroundTasks(t *testing.T) {
 	// 대화 기록 폴더가 없어도 배경 작업은 본다
 	os.RemoveAll(proj)
 	put(t, tasks+"bq6.output", "", time.Minute)
-	if q := quiet(term, now, r3, ps); q.state != restBusy {
+	if q := quiet(term, now, r3, ps); q.State != restBusy {
 		t.Fatalf("기록 폴더 없음 + 도는 배경 작업: 활동 %+v", q)
 	}
 }

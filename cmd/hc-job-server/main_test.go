@@ -26,6 +26,16 @@ esac
 exit 0
 `
 
+// fakeSweep: hc 곁의 가짜 hc-sweep(ht-rest-one-gate 쉼 묻기) — 부른 인자를 T_LOG에(「sweep …」), --rest면 진짜처럼 hc get을 PATH 이름으로
+// 불러(못 찾으면 「hc get 실패」 모름 — 감사 atp7a3w M1) T_REST 줄(없으면 쉼), T_REST_RC가 있으면 그 종료(옛 판은 2)
+const fakeSweep = `#!/bin/sh
+echo "sweep $*" >>"$T_LOG"
+[ "$1" = --rest ] || exit 2
+[ -z "$T_REST_RC" ] || exit "$T_REST_RC"
+hc get "$2" --json >/dev/null 2>&1 || { printf 'REST\tunknown\t-\thc get 실패\tend\n'; exit 0; }
+if [ -n "$T_REST" ]; then printf '%s\n' "$T_REST"; else printf 'REST\tquiet\t-\t-\tend\n'; fi
+`
+
 // tick: 한 틱 돌리고 가짜 hc가 받은 호출들
 func tick(t *testing.T, get string, rc int, kv ...string) string {
 	t.Helper()
@@ -33,11 +43,13 @@ func tick(t *testing.T, get string, rc int, kv ...string) string {
 	hc := filepath.Join(T, "hc")
 	clitest.Put(t, hc, fakeHC)
 	clitest.Chmod(t, hc, 0o755)
+	clitest.Put(t, filepath.Join(T, "hc-sweep"), fakeSweep)
+	clitest.Chmod(t, filepath.Join(T, "hc-sweep"), 0o755)
 	script := filepath.Join(T, "resume.sh")
 	clitest.Put(t, script, "#!/bin/sh\nexit 0\n") // --resume 없음: pgrep을 보지 않는다
 	log := filepath.Join(T, "log")
 	env := append([]string{"HOME=" + T, "HC_JOB_HC=" + hc, "HC_JOB_ONCE=1", "T_LOG=" + log, "T_GET=" + get,
-		fmt.Sprintf("T_GET_RC=%d", rc), "HC_JOB_STALE", "HC_JOB_GAP", "HC_JOB_LAST"}, kv...)
+		fmt.Sprintf("T_GET_RC=%d", rc), "HC_JOB_STALE", "HC_JOB_GAP", "HC_JOB_LAST", "T_REST=", "T_REST_RC="}, kv...)
 	r := clitest.Cmd{Env: env, Max: 30 * time.Second}.Run(clitest.Bin(t, "hc-job-server"), "job1", "lbl", T, script)
 	if r.RC != 0 {
 		t.Fatalf("종료 %d\n%s%s", r.RC, r.Out, r.Err)
@@ -76,6 +88,15 @@ func TestStep(t *testing.T) {
 		{"absent → 띄움", `{"error":{"kind":"not_found"}}`, 3, nil, false, true},
 		{"finished → rm 뒤 띄움", get("finished", "done", 7200), 0, nil, false, true},
 		{"코어 오류 → 아무것도", "", 1, nil, false, false},
+		// ht-rest-one-gate: 상태는 done이 2시간이어도 안에서 배경 작업·하위 에이전트가 돌면 멈춘 루프가 아니다. 모름(옛 판 hc-sweep·꼴 틀림)은
+		// HC_JOB_STALE의 네 배(기본 6시간) 넘게 그대로일 때만 끈다
+		{"활동(배경 작업) → 안 끔", get("live", "done", 7200), 0, []string{"T_REST=REST\tbusy\ts1\t배경 작업 1개 도는 중\tend"}, false, false},
+		{"모름(옛 판 hc-sweep) 2시간 → 안 끔", get("live", "done", 7200), 0, []string{"T_REST_RC=2"}, false, false},
+		{"모름(잘린 답) 2시간 → 안 끔", get("live", "idle", 7200), 0, []string{"T_REST=REST\tqui"}, false, false},
+		{"모름 7시간 → 끔", get("live", "done", 7*3600), 0, []string{"T_REST_RC=2"}, true, false},
+		// 감사 atp7a3w M1: launchd의 짧은 PATH(HC_JOB_HC 폴더 없음)에서도 묻기 안의 hc가 찾아져 쉼 → 끔(90분 그대로, 6시간으로 밀리지 않음)
+		{"짧은 PATH에서도 쉼 → 끔", get("live", "done", 7200), 0, []string{"PATH=/usr/bin:/bin"}, true, false},
+		{"활동 7시간 → 안 끔(판정이 r3로 쉼을 정한다)", get("live", "done", 7*3600), 0, []string{"T_REST=REST\tbusy\ts1\t배경 작업 1개 도는 중\tend"}, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

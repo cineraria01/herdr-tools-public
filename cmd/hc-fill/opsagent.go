@@ -20,6 +20,7 @@ import (
 	"herdr-tools/internal/lockx"
 	"herdr-tools/internal/opsstate"
 	"herdr-tools/internal/proc"
+	"herdr-tools/internal/rest"
 	"herdr-tools/internal/toolcfg"
 )
 
@@ -396,6 +397,11 @@ func oaClose(st *oaState, addr, id string) {
 		jotBy("hc-fill 스스로", "agent 닫기", addr, "끝난 운영 에이전트 실행 "+id, "안 닫음: 지금 이름 "+orDash(t.Name)+"(띄울 때 이름 "+oaName+"이 아님)", "-", "-")
 		return
 	}
+	if v := rest.Ask(restRun, addr, LOCAL); v.State != rest.Quiet { // 턴이 끝났어도 안에서 일이 돌면(ht-rest-one-gate) 다음 띄우기 직전에 다시
+		st.Left = addr
+		jotBy("hc-fill 스스로", "agent 닫기", addr, "끝난 운영 에이전트 실행 "+id, "안 닫음: "+rest.Why(v), "-", "다음 띄우기 직전에 다시")
+		return
+	}
 	if o, rc := (Cmd{Name: "hc", Args: []string{"kill", addr}, Err: errMerge}).Run(); rc != 0 {
 		st.Left = addr
 		jotBy("hc-fill 스스로", "agent 닫기", addr, "끝난 운영 에이전트 실행 "+id, fmt.Sprintf("실패: 종료 %d — %s", rc, oaClip(strings.Join(strings.Fields(o), " "), 200)), "-", "다음 띄우기 직전에 다시")
@@ -490,8 +496,9 @@ func oaFinish(st *oaState, now time.Time) {
 		switch {
 		case !found || t.State == "finished":
 			kind = "터미널 끝남(결과 없음)"
-		case (t.Status == "done" || t.Status == "idle") && now.Unix()-r.Started >= oaGrace:
-			// 대화형 CLI는 턴을 끝내도 터미널이 남는다 — 자동 감사(run2.go)처럼 done·idle을 끝으로(감사 atozu10 낮음: 상한까지 다음 실행이 막혔다)
+		case (t.Status == "done" || t.Status == "idle") && now.Unix()-r.Started >= oaGrace && rest.Ask(restRun, r.Addr, LOCAL).State == rest.Quiet:
+			// 대화형 CLI는 턴을 끝내도 터미널이 남는다 — 자동 감사(run2.go)처럼 done·idle을 끝으로(감사 atozu10 낮음: 상한까지 다음 실행이 막혔다).
+			// 다만 정말 쉴 때만(ht-rest-one-gate — 배경 일이 돌면·모르면 상한까지 기다린다)
 			kind = "턴 끝남(결과 없음)"
 		}
 	}

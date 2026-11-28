@@ -53,6 +53,7 @@ esac
 		"XDG_CACHE_HOME="+T+"/cache", "TMPDIR="+T+"/tmp",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_NOSYSTEM=1")
 	e = e.Without("XDG_STATE_HOME", "HC_LANE_MACHINE", "HC_FILL_DATA")
+	claudeSess(t, T+"/home")
 	sweep := func(args ...string) { out, rc = run(T, e, SWEEP, append([]string{"--only-under", T}, args...)...) }
 	reset := func() {
 		for _, g := range []string{"killed-*", "getn-*", "get-*.json", "after-kill", "read.txt", "exec-rc", "exec-err"} {
@@ -70,7 +71,7 @@ esac
 		if worker {
 			lab = `"labels":{"hc-lane":"1"},`
 		}
-		return fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"%s"},%s"created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"}`+"\n",
+		return fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"%s"},%s"created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"}`+"\n",
 			addr, name, state, lab, created, changed, cwd)
 	}
 	ls := func(addrs ...string) {

@@ -13,6 +13,7 @@ import (
 
 	"herdr-tools/internal/events"
 	"herdr-tools/internal/hcjson"
+	"herdr-tools/internal/rest"
 	"herdr-tools/internal/tri"
 )
 
@@ -249,6 +250,9 @@ func endClose(n, a, m, want string) (bool, string) {
 	EV = saved
 	if evF(l, evState) != want {
 		return false, "그 실행의 마지막 보고가 " + want + " 아님(" + dash(evF(l, evState)) + ")"
+	}
+	if v := rest.Ask(restRun, a, LOCAL); v.State != rest.Quiet { // 상태 done·idle은 턴 끝일 뿐 — 활동·모름은 다음 바퀴(모름이 이어지면 그 기계 hc-sweep이)
+		return false, rest.Why(v)
 	}
 	if dry {
 		fmt.Println(P + want + " 터미널 닫을 " + a + " (" + n + ")")

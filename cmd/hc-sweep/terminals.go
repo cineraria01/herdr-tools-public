@@ -69,7 +69,7 @@ func sweepTerminals(terms any, dry bool) (failed int) {
 		why, kept, q := settle(t, f, now, keep, run)
 		if why == "" {
 			// 쉼 판정으로 남긴 것은 실제 쓸기에서도 한 줄 — 그 터미널·세션·까닭 종류마다 한 번(closed.log)
-			if dry || q.sig != "" && keptOnce(t, q, kept) {
+			if dry || q.Sig != "" && keptOnce(t, q, kept) {
 				fmt.Printf("남김: %s %s — %s\n", str(t, "address"), dash(str(t, "name")), kept)
 			}
 			continue

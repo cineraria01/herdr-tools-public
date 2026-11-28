@@ -105,7 +105,7 @@ func newK(t *testing.T) *K {
 		// macOS awk의 ==는 strcoll — en_US.UTF-8에서 "판정"=="완료"가 참이었다(2026-11-19 fill-then). 그 로캘로 돌려 늘 잡히게
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
 	mkdirs(t, T+"/bin", T+"/conf", k.HOME)
-	for _, f := range []string{"hc", "hc-lane", "git", "herdr-balance", "sysctl"} {
+	for _, f := range []string{"hc", "hc-lane", "git", "herdr-balance", "sysctl", "hc-sweep"} {
 		b, err := os.ReadFile(filepath.Join(repo, "tests", "hcfill", "testdata", f))
 		if err != nil {
 			t.Fatal(err)

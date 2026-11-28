@@ -23,6 +23,7 @@ func testHcSweepJobTmp(t *testing.T, T string, e Env) {
 	c := checker{t: t, out: &out}
 	R := T + "/jroot"
 	mkdirs(t, T+"/bin", T+"/home", T+"/cfg", T+"/tmp", R)
+	claudeSess(t, T+"/home")
 	e = e.With("PATH="+T+"/bin:"+e["PATH"], "HOME="+T+"/home", "HERDR_TOOLS_CONFIG="+T+"/cfg", "TMPDIR="+T+"/tmp").Without("XDG_STATE_HOME", "HC_LANE_MACHINE")
 	cfg := func(ls ...string) {
 		write(t, T+"/cfg/config", strings.Join(append([]string{"sweep.tmp_hours 0", "sweep.disk_free_gb 0"}, ls...), "\n")+"\n")
@@ -54,7 +55,7 @@ exit 1
 	sweep := func(args ...string) { out, _ = run(T, e, SWEEP, append([]string{"--only-under", T}, args...)...) }
 	oldMs := old.Unix() * 1000
 	term := func(a, name, extra string) { // 쉰 지 2시간 된 worker 레인 터미널(cwd는 없는 폴더 — 작업 트리 아님)
-		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","status":{"app":"claude-code","state":"idle"},"labels":{"hc-lane":"1"},"created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"%s}`+"\n",
+		write(t, T+"/get-"+a+".json", fmt.Sprintf(`{"address":"%s","name":"%s","state":"live","pid":4343,"status":{"app":"claude-code","state":"idle"},"labels":{"hc-lane":"1"},"created_ms":%d,"status_ms":%d,"turn":4,"cwd":"%s"%s}`+"\n",
 			a, name, oldMs, oldMs, T+"/gone-"+a, extra))
 	}
 
@@ -63,7 +64,7 @@ exit 1
 	term("t61", "lane-a", "")
 	term("t63", "lane-bg", "")
 	write(t, T+"/screen-t63", "작업 중\n· 1 shell still running\n")
-	write(t, T+"/get-t64.json", `{"address":"t64","name":"lane-w","state":"live","status":{"app":"claude-code","state":"working"},"cwd":"/"}`+"\n")
+	write(t, T+"/get-t64.json", `{"address":"t64","name":"lane-w","state":"live","pid":4343,"status":{"app":"claude-code","state":"working"},"cwd":"/"}`+"\n")
 	ls := `{"terminals":[{"address":"t61","name":"lane-a","state":"live","status":"idle"},{"address":"t63","name":"lane-bg","state":"live","status":"idle"},` +
 		`{"address":"t64","name":"lane-w","state":"live","status":"working"},{"address":"win/t1","name":"w","state":"live","cwd":"C:\\Users\\w"}]}`
 	write(t, T+"/ls.json", ls+"\n")
@@ -122,6 +123,7 @@ func testHcSweepTmpBacklog(t *testing.T, T string, e Env) {
 	c := checker{t: t, out: &out}
 	X := T + "/tmp"
 	mkdirs(t, T+"/bin", T+"/home", T+"/cfg", X)
+	claudeSess(t, T+"/home")
 	write(t, T+"/cfg/config", "jobtmp.root off\n")
 	// 가짜 lsof: @T@/lsof-held의 경로를 다른 프로세스가 연 것으로
 	script(t, T+"/bin/lsof", T, "#!/bin/sh\nprintf 'p%s\\nfcwd\\nn/\\n' \"$PPID\"\n"+

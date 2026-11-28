@@ -40,7 +40,7 @@ g worktree add -q --detach "$2"`, R, W)
 	if c.worker {
 		lane = `"parent":"p/t0","labels":{"hc-lane":"1"},`
 	}
-	write(t, T+"/get-t5.json", fmt.Sprintf(`{"address":"t5","name":"aud","state":"live","status":{"app":"claude-code","state":"done"},%s`+
+	write(t, T+"/get-t5.json", fmt.Sprintf(`{"address":"t5","name":"aud","state":"live","pid":4343,"status":{"app":"claude-code","state":"done"},%s`+
 		`"created_ms":%d,"status_ms":%d,"turn":3,"cwd":"%s"}`+"\n", lane, now-90*60000, now-40*60000, W))
 	var others []string
 	if c.others != nil {

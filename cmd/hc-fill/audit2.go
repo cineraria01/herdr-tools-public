@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"herdr-tools/internal/rest"
 )
 
 // a_round: 차수 하나를 본다(상태별). 줄 칸은 au* 변수에
@@ -384,6 +386,10 @@ func aCleanup() {
 func aCloseTerm(cn, qa string) bool {
 	run := attemptRun(cn, qa)
 	if run == "" || pget(qa) != pLive || PNAME != cn || PRUN != run {
+		return false
+	}
+	if v := rest.Ask(restRun, qa, LOCAL); v.State != rest.Quiet { // 상태 done·idle은 턴 끝일 뿐(ht-rest-one-gate)
+		fmt.Println("감사 터미널 남김 " + qa + " (" + cn + "): " + rest.Why(v))
 		return false
 	}
 	if _, rc := (Cmd{Name: "hc", Args: []string{"kill", qa}, Err: errMerge}).Run(); rc != 0 {

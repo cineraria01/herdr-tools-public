@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"herdr-tools/internal/rest"
 )
 
 // asubAud: status 감사 비고(anote) — 대기열이 레인 대신 제출한 차수
@@ -189,6 +191,16 @@ func aAutoSubmit(base string) bool {
 	case "idle", "done":
 	default:
 		return false // 에이전트가 턴 중 — 손대지 않는다
+	}
+	// 턴이 끝났어도 안에서 일이 돌면 레인은 손을 뗀 것이 아니다(ht-rest-one-gate): 활동이면 깨우지도 제출하지도 않고 다음 바퀴에, 모름이면
+	// 제출하지 않고 지금처럼 깨운다(레인이 스스로 받는다 — 옛 판 워커·안 닿음이 대기열 제출 없이도 끝나게)
+	switch v := rest.Ask(restRun, auPa, LOCAL); v.State {
+	case rest.Busy:
+		fmt.Println("대기열 제출 미룸 " + auLn + ": 레인 터미널 " + auPa + " " + rest.Why(v) + " — 다음 바퀴에")
+		return true
+	case rest.Unknown:
+		fmt.Println("대기열 제출 안 함 " + auLn + ": 레인 터미널 " + auPa + " " + rest.Why(v) + " — 지금처럼 깨운다")
+		return false
 	}
 	repo := repoOf(p, auAm)
 	if repo == "" {

@@ -53,6 +53,15 @@ func cleanAuditSec(k *K) {
 	k.runE(append(lane, "HC_FAKE_GET_BODY="+get("done")), "clean", "--dry-run", "--repo", k.R, "--branch", "c-aud")
 	k.check("clean --dry-run: 닫을 감사 터미널을 알리고 닫지 않음", k.rc == 0 && strings.Contains(k.out, "t8") && kills() == "" && k.kept("c-aud"))
 
+	// ht-rest-one-gate: 끝난(done) 감사 터미널이라도 안에서 일이 돌거나(배경 작업) 쉼을 모르면(옛 판 hc-sweep — REST 줄 없음) 닫지 않고 멈춤
+	for _, r := range []string{"REST\tbusy\tsid-1\t배경 작업 1개 도는 중\tend", "옛 판"} {
+		write(k.t, k.HCLOG+".lsfile", ls("t7", "t8")+"\n")
+		write(k.t, k.HCLOG+".lsfile.afterkill", ls("t7")+"\n")
+		k.runE(append(lane, "HC_FAKE_GET_BODY="+get("done"), "HC_FAKE_REST="+r), "clean", "--repo", k.R, "--branch", "c-aud")
+		k.check("clean: 활동·모름 감사 터미널은 닫지 않고 멈춤 "+r, k.rc != 0 && k.kept("c-aud") && kills() == "" &&
+			strings.Contains(k.out, "끝난 감사 터미널 t8 남김") && strings.Contains(read(k.HCLOG+".rest"), "t8"))
+	}
+
 	clean("done")
 	k.check("clean: 이 레인 실행의 판정을 수거한 끝난 감사 터미널은 그 주소로 닫고 정리", k.rc == 0 && strings.TrimSpace(kills()) == "t8" && k.gone("c-aud") &&
 		strings.Contains(k.out, "끝난 감사 터미널 닫음 t8"))

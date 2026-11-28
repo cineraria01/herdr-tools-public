@@ -16,6 +16,18 @@ func setData(t *testing.T) {
 	DATA = t.TempDir()
 	Q, LED, AT = DATA+"/queue.tsv", DATA+"/inbox.tsv", DATA+"/audit.tsv"
 	qHeld = false
+	restFake(t, DATA)
+}
+
+// restFake: 쉼 묻기의 가짜 hc-sweep(DATA를 PATH 앞에 두는 시험에 — ht-rest-one-gate). --rest <터미널>이면 rest.log에 그 터미널을 적고
+// <dir>/rest-<터미널>이 있으면 그 내용(꼴을 바꿔 보는 시험), 없으면 쉼 한 줄. 다른 인자는 옛 판처럼 종료 2
+func restFake(t *testing.T, dir string) {
+	t.Helper()
+	sh := "#!/bin/sh\nd='" + dir + "'\n[ \"$1\" = --rest ] || exit 2\nprintf '%s\\n' \"$2\" >>\"$d/rest.log\"\n" +
+		"[ -f \"$d/rest-$2\" ] && exec cat \"$d/rest-$2\"\nprintf 'REST\\tquiet\\t-\\t-\\tend\\n'\n"
+	if err := os.WriteFile(dir+"/hc-sweep", []byte(sh), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // cksum 값이 POSIX cksum(1)과 같다(셸 판과 같은 결정적 ID — rl…·al…)

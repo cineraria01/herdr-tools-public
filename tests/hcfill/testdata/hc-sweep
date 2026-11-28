@@ -1,0 +1,6 @@
+#!/bin/sh
+# 가짜 hc-sweep(ht-rest-one-gate): --rest <터미널>만 — 물은 터미널을 $T_LOG/rest.log에 적고, HC_FAKE_REST(REST 한 줄 꼴 그대로)가 있으면
+# 그것을, 없으면 쉼 한 줄. 다른 인자는 옛 판처럼 종료 2
+[ "$1" = --rest ] || exit 2
+printf '%s\n' "$2" >>"$T_LOG/rest.log"
+if [ -n "${HC_FAKE_REST-}" ]; then printf '%s\n' "$HC_FAKE_REST"; else printf 'REST\tquiet\t-\t-\tend\n'; fi

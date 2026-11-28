@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"herdr-tools/internal/rest"
 )
 
 // cleanLane: clean을 이 레인 터미널이 자기 가지에 부를 때의 레인 이름(HC_LANE이 가지·--name과 같음). 아니면 빈 값 — 다른 기계(--on)·지휘가
@@ -28,11 +30,17 @@ func auditCloseBusy(busy []string) []string {
 	if ln == "" || len(busy) == 0 || !lvmyrun() {
 		return busy
 	}
-	var rest []string
+	var left []string
 	for _, b := range busy {
 		a, _, _ := strings.Cut(b, " ")
 		if !auditDone(ln, a) {
-			rest = append(rest, b)
+			left = append(left, b)
+			continue
+		}
+		// 상태 done·idle은 턴 끝일 뿐 — 안에서 일이 돌거나 모르면 닫지 않고 termGate가 지금처럼 멈춘다(ht-rest-one-gate)
+		if v := rest.Ask(restRun, a, ""); v.State != rest.Quiet {
+			fmt.Printf("hc-lane clean: 끝난 감사 터미널 %s 남김 — %s\n", a, rest.Why(v))
+			left = append(left, b)
 			continue
 		}
 		if dry {
@@ -46,8 +54,11 @@ func auditCloseBusy(busy []string) []string {
 		}
 		fmt.Printf("hc-lane clean: 끝난 감사 터미널 닫음 %s (판정 %s 수거됨)\n", a, lva)
 	}
-	return rest
+	return left
 }
+
+// restRun: rest.Ask의 실행기 — 이 기계의 hc-sweep --rest(표준 오류 버림, 상한 90초 — 못 띄움·시간 넘김은 모름)
+func restRun(a []string) (string, int) { return capt(90, errDrop, a[0], a[1:]...) }
 
 // auditDone: 그 주소가 이 레인 실행의 판정을 수거한 끝난 감사 터미널인가
 func auditDone(ln, a string) bool {

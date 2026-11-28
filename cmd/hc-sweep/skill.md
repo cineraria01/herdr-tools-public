@@ -12,6 +12,7 @@
 2. 지금 한 바퀴: `hc-sweep` (다른 쓸기가 돌면 종료 75 — 다음 바퀴를 기다린다).
 3. 건강 결과 보기: `hc-sweep --health` (재지 않고 기록만, 종료 0 좋음 · 1 나쁨 · 3 모름).
 4. 다른 기계: `hc exec --on <기계> -- hc-sweep --dry-run`.
+5. 터미널 하나가 정말 쉬는가: `hc-sweep --rest <tN>`(이 기계 터미널 — 다른 기계는 `hc exec --on <기계> -- hc-sweep --rest <tN>`, 「기계/tN」은 모름) — 읽기만, 한 줄 `REST<탭>quiet|busy|unknown<탭><세션 id><탭><까닭><탭>end`. 다른 도구가 닫거나 제출하기 직전에 그 기계에서 묻는 문이다(docs/hc-sweep/busy-idle.md 「한 문」).
 
 ## 상태 보기
 
