@@ -6,6 +6,7 @@ package main
 // 남기는 대화 기록(~/.claude/projects/*/<세션 id>.jsonl과 <세션 id>/subagents/agent-*)으로 본다. 터미널을 닫는 길은 모두 settle을 거친다
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,10 @@ type rested struct {
 var (
 	projDir = filepath.Join(home, ".claude", "projects")
 	sidRe   = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z_-]{0,127}$`) // 경로·glob 글자 없는 세션 id만
+	// taskRoot: Claude가 세션마다 배경 작업 출력 파일을 두는 뿌리 — Claude 자신의 규칙($CLAUDE_CODE_TMPDIR 또는 /tmp, 그 아래 claude-<uid>).
+	// 작업별 TMPDIR은 따르지 않는다(2026-11-28 실측)
+	taskRoot = filepath.Join(cmp.Or(os.Getenv("CLAUDE_CODE_TMPDIR"), "/tmp"), "claude-"+strconv.Itoa(os.Getuid()))
+	trailer  = regexp.MustCompile(`\n\[(killed|exited with code [^\]\n]*)\]\n$`) // Claude가 배경 작업이 끝날 때 붙이는 끝 줄
 )
 
 // sessionOf: pid와 그 자손 가운데 처음 찾은 Claude 세션 파일(<sessDir>/<pid>.json). 없으면 nil·nil(Claude가 아님),
@@ -89,7 +94,8 @@ func f0(f []string, i int) string {
 func msOf(fi os.FileInfo) float64 { return float64(fi.ModTime().UnixNano()) / 1e6 }
 
 // quiet: 「이 터미널은 지금 정말 쉬는가」. 세션 파일이 없으면(Claude가 아닌 CLI·기록 없는 기계) 쉼(지금 규칙 그대로). 기록이 r3 안에 바뀐
-// 하위 에이전트에 끝난 증거(agentEnded)가 없으면 활동. 그 밖은 쉼이고 last가 마지막 활동. 읽다 실패하면 모름
+// 하위 에이전트에 끝난 증거(agentEnded)가 없거나, 끝 표시 없는 배경 작업(bgTasks — 끝난 하위 에이전트가 남긴 셸도)이 있으면 활동.
+// 그 밖은 쉼이고 last가 마지막 활동. 읽다 실패하면 모름
 func quiet(t map[string]any, now, r3 float64, r runner) rested {
 	pid, _ := num(t, "pid")
 	sess, err := sessionOf(int(pid), r)
@@ -105,10 +111,7 @@ func quiet(t map[string]any, now, r3 float64, r runner) rested {
 	}
 	q := rested{state: restQuiet, sid: sid}
 	ents, err := os.ReadDir(projDir)
-	if os.IsNotExist(err) {
-		return q
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return rested{sid: sid, sig: "대화 기록 폴더 못 읽음"}
 	}
 	busy, counted := 0, map[string]bool{} // 옛 폴더 이름을 가리키는 링크로 같은 기록이 두 번 보여도 한 번만 센다
@@ -169,10 +172,91 @@ func quiet(t map[string]any, now, r3 float64, r runner) rested {
 			}
 		}
 	}
+	tasks, err := bgTasks(sid, now, r3, seeMax)
+	if err != nil {
+		return rested{sid: sid, sig: "배경 작업 못 읽음"}
+	}
+	var why []string
 	if busy > 0 {
-		q.state, q.sig = restBusy, fmt.Sprintf("배경 하위 에이전트 %d개 안 끝남", busy)
+		why = append(why, fmt.Sprintf("배경 하위 에이전트 %d개 안 끝남", busy))
+	}
+	if tasks > 0 {
+		why = append(why, fmt.Sprintf("배경 작업 %d개 도는 중", tasks))
+	}
+	if len(why) > 0 {
+		q.state, q.sig = restBusy, strings.Join(why, " · ")
 	}
 	return q
+}
+
+// bgTasks: 그 세션의 배경 작업(run_in_background 셸·Monitor·시간을 넘겨 배경으로 넘어간 명령 — 하위 에이전트가 띄운 것도 주 세션에 든다) 가운데
+// 끝 표시가 없고 r3 안에 바뀐 것의 수. 파일은 <taskRoot>/<폴더 이름>/<세션 id>/tasks/<작업 id>.output, 끝나면 Claude가 끝에 trailer를 붙인다.
+// 링크(a….output — 하위 에이전트 기록, 지금 규칙이 본다)는 안 센다. 뿌리·세션 폴더가 없으면 0, 못 읽으면 오류(모름). 수정 시각은 see로 마지막 활동에
+func bgTasks(sid string, now, r3 float64, see func(float64)) (int, error) {
+	dirs, err := os.ReadDir(taskRoot)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, counted := 0, map[string]bool{}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		dir := filepath.Join(taskRoot, d.Name(), sid, "tasks")
+		fis, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		for _, x := range fis {
+			if !x.Type().IsRegular() || !strings.HasSuffix(x.Name(), ".output") {
+				continue
+			}
+			fi, err := x.Info()
+			if os.IsNotExist(err) { // 끝난 전경 명령의 파일은 Claude가 지운다
+				continue
+			}
+			if err != nil {
+				return 0, err
+			}
+			see(msOf(fi))
+			if now-msOf(fi) >= r3 || counted[x.Name()] { // r3 넘게 조용한 미완은 죽은 것(Claude가 끝 표시 없이 죽음 등)
+				continue
+			}
+			ended, err := endsWithTrailer(filepath.Join(dir, x.Name()), fi.Size())
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return 0, err
+			}
+			if !ended {
+				n++
+				counted[x.Name()] = true
+			}
+		}
+	}
+	return n, nil
+}
+
+// endsWithTrailer: 파일 끝 64바이트가 끝 표시로 끝나는가(출력 가운데의 같은 글은 끝이 아님)
+func endsWithTrailer(path string, size int64) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	off := max(size-64, 0)
+	b := make([]byte, size-off)
+	if _, err := f.ReadAt(b, off); err != nil && err != io.EOF {
+		return false, err
+	}
+	return trailer.Match(b), nil
 }
 
 // agentEnded: 하위 에이전트가 끝났다는 증거는 그 자기 기록 둘뿐 — meta "finished":true(끝까지 간 배경), 자기 기록의 마지막 대화 줄이

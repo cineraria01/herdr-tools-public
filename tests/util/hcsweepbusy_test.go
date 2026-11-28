@@ -14,7 +14,15 @@ import (
 // bzSweep: 쉰 지 33분 된 worker 레인 t1(pid 4242 — 세션 파일 sessions/4242.json, 세션 id sid-1)과 그 대화 기록, 작업 임시 폴더 하나.
 // meta는 하위 에이전트 meta.json 내용(""이면 하위 기록 없음), metaAge는 그 기록의 나이, submitted면 이 실행의 「제출」 사건
 func bzSweep(t *testing.T, meta string, metaAge time.Duration, submitted bool, session bool, args ...string) (T string, e Env, out string, rc int) {
+	T, e = bzSetup(t, meta, metaAge, submitted, session)
+	out, rc = run(T, e, tool(t, "hc-sweep"), append([]string{"--only-under", T}, args...)...)
+	return T, e, out, rc
+}
+
+// bzSetup: bzSweep의 꼴만(돌리지 않음). Claude 배경 작업 뿌리는 CLAUDE_CODE_TMPDIR로 임시 폴더 안(bzTask가 쓴다)
+func bzSetup(t *testing.T, meta string, metaAge time.Duration, submitted bool, session bool) (T string, e Env) {
 	T, e, _ = j2Sweep(t)
+	e = e.With("CLAUDE_CODE_TMPDIR=" + T + "/ctmp")
 	R := T + "/jroot"
 	write(t, T+"/cfg/config", "sweep.disk_free_gb 0\njobtmp.root "+R+"\n")
 	created := (time.Now().Unix() - 3*3600) * 1000
@@ -58,8 +66,38 @@ case $1 in
   *) exit 1 ;;
 esac
 `)
-	out, rc = run(T, e, tool(t, "hc-sweep"), append([]string{"--only-under", T}, args...)...)
-	return T, e, out, rc
+	return T, e
+}
+
+// bzTask: 세션 sid-1의 배경 작업 출력 파일(Claude 꼴 <뿌리>/claude-<uid>/<폴더 이름>/<세션 id>/tasks/<작업 id>.output)
+func bzTask(t *testing.T, T, id, body string, age time.Duration) {
+	p := fmt.Sprintf("%s/ctmp/claude-%d/-nonexistent-bz-lane-a/sid-1/tasks/%s.output", T, os.Getuid(), id)
+	write(t, p, body)
+	at := time.Now().Add(-age)
+	os.Chtimes(p, at, at)
+}
+
+// ht-sweep-busy-tasks 사고 꼴: 끝난 하위 에이전트(finished·끝 줄 end_turn, 40분 전) + 그 에이전트가 띄운 배경 셸이 1시간 50분째 조용히 돎(0바이트·
+// 끝 표시 없음) + 상태 done 33분 → R2도 제출 뒤 빠른 닫기도 안 닫음, 남김 한 줄(두 번 돌아도 한 줄). 끝 표시가 붙으면 다음 바퀴에 닫음
+func TestHcSweepBusyBackgroundTask(t *testing.T) {
+	const ended = `{"requestShape":"background","finished":true,"type":"assistant","message":{"stop_reason":"end_turn"}}`
+	for _, submitted := range []bool{false, true} {
+		T, e := bzSetup(t, ended, 40*time.Minute, submitted, true)
+		bzTask(t, T, "bshell1", "", 110*time.Minute)
+		bzTask(t, T, "bold1", "done\n\n[exited with code 0]\n", 3*time.Hour)
+		bzTask(t, T, "bold2", "\n[killed]\n", 3*time.Hour)
+		out, rc := run(T, e, tool(t, "hc-sweep"), "--only-under", T)
+		c := checker{t: t, out: &out, rc: &rc}
+		c.ok(fmt.Sprintf("제출 %v: hc kill 없음", submitted), bzKills(T) == 0)
+		c.ok("남김 줄", strings.Contains(out, "남김: t1 lane-a — 안에서 일이 도는 중(배경 작업 1개 도는 중)"))
+		c.ok("closed.log 남김 한 줄", bzKept(T) == 1)
+		c.ok("작업 임시 폴더 그대로", exists(T+"/jroot/abc123/.hc-job"))
+		out, rc = run(T, e, tool(t, "hc-sweep"), "--only-under", T)
+		c.ok("두 번째 바퀴: 남김 줄 되풀이 안 함·한 줄", !strings.Contains(out, "남김: t1") && bzKept(T) == 1 && bzKills(T) == 0)
+		bzTask(t, T, "bshell1", "\n[exited with code 0]\n", 35*time.Minute)
+		out, rc = run(T, e, tool(t, "hc-sweep"), "--only-under", T)
+		c.ok("배경 작업 끝남: 닫음", bzKills(T) == 1 && strings.Contains(out, "닫힘: R2 t1"))
+	}
 }
 
 func bzKills(T string) int { return grepc(strings.Join(j2Calls(T), "\n"), `^kill t1`) }
