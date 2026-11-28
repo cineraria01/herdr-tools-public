@@ -52,6 +52,17 @@ func lastIn(evl []string, a, nm string) (last, lt string, sw bool) {
 	return r.lst["x"], r.ltn["x"], sw
 }
 
+// endIn: 그 터미널(주소·레인 이름)의 중간을 뺀 마지막 report 상태(없으면 "")
+func endIn(evl []string, a, nm string) string {
+	end := ""
+	for _, l := range evl {
+		if x := events.Cols(l); x.Term == a && x.Lane == nm && x.State != "정리됨" && x.State != "멈춤" && x.State != "중간" {
+			end = x.State
+		}
+	}
+	return end
+}
+
 // turnAfter: report turn+1보다 뒤인가. 둘 중 하나라도 숫자가 아니면 unknown
 func turnAfter(lt, tn string) (after, unknown bool) {
 	if lt+tn == "" || !digits(lt+tn) {
@@ -125,6 +136,9 @@ func (e *ev) stopped(evl, mu []string) []string {
 		}
 		last, lt, sw := lastIn(evl, a, nm)
 		why := stopWhy(s, ss, tn, last, lt, sw, lk == "read" || lk == "fill")
+		if s != "live" && endQuiet(endIn(evl, a, nm)) { // 끝 보고·넘김·알린 막힘 뒤 사라짐은 알림이 아니다(한 문 — closeName과 같은 규칙)
+			why = ""
+		}
 		if s != "live" {
 			// killed가 지휘의 hc kill인지: parent가 없거나 아직 살아 있을 때만 조용히 넘긴다
 			kq := false

@@ -29,9 +29,24 @@ func hcGet(sec int, addr string) (hcjson.Terminal, bool, error) {
 
 // hcGetRaw: hcGet이 판정하는 글과 종료 코드 — 0 아닌 종료면 표준 오류(오류 객체), 비었으면 표준 출력
 func hcGetRaw(sec int, addr string) (string, int) {
+	if r, ok := getMemo[addr]; ok {
+		return r.out, r.rc
+	}
 	var eb strings.Builder
 	out, rc := captErr(sec, &eb, "hc", "get", addr, "--json")
-	return hcjson.GetOut(out, eb.String(), rc), rc
+	g := hcjson.GetOut(out, eb.String(), rc)
+	if getMemo != nil {
+		getMemo[addr] = getRes{g, rc}
+	}
+	return g, rc
+}
+
+// getMemo: watch 한 문이 한 바퀴 판정하는 동안만(gatesend.go gate가 켜고 끈다) 같은 주소의 hc get을 한 번으로 — 그 밖은 늘 새로 묻는다
+var getMemo map[string]getRes
+
+type getRes struct {
+	out string
+	rc  int
 }
 
 // exitOf: 세 값 판정을 바깥 종료 코드로(명령 계약 — 종료 0 있음·맞음, 1 없음·다름, 종료 2(모름))

@@ -2,7 +2,6 @@
 275 cmd/hc-fill/launch2.go launch
 325 cmd/hc-lane/stats.go statsReport
 275 cmd/hc-lane/submit.go submitCmd
-225 cmd/hc-lane/watch.go ev.loop
 225 cmd/hc-sweep/selftest.go selfTest
 275 cmd/herdr-hooks/cgtok_git.go cgTok.git
 250 cmd/herdr-settings-merge/main.go main

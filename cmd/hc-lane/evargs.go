@@ -11,7 +11,7 @@ import (
 )
 
 // evKnown: events·wait·watch가 받는 인자(모르는 인자 권함용)
-var evKnown = []string{"--all", "--on", "--since", "--timeout", "--state", "--mine", "--to", "--lane", "--kind"}
+var evKnown = []string{"--all", "--on", "--since", "--timeout", "--state", "--mine", "--to", "--lane", "--kind", "--explain"}
 
 // args: 인자를 e에 읽고 wait의 --timeout(분) 글을 돌려준다
 func (e *ev) args(a []string) string {
@@ -63,6 +63,11 @@ func (e *ev) args(a []string) string {
 			}
 			e.lanes = append(e.lanes, v)
 			i++
+		case "--explain":
+			if ec != "events" {
+				dieArg("--explain은 events에서만 쓴다")
+			}
+			e.expl = true
 		case "--kind":
 			if ec == "watch" {
 				dieArg("--kind는 events·wait에서만 쓴다")

@@ -1,6 +1,9 @@
-       hc-lane events [--all | --on <기계>…] [--since <시각|30m·2h·1d>] [--lane <레인>…] [--kind ops|lane]
+       hc-lane events [--all | --on <기계>…] [--since <시각|30m·2h·1d>] [--lane <레인>…] [--kind ops|lane] [--explain]
   events        이 기계(와 --all이면 hc machine ls의 연결된 기계마다 hc exec --on 한 번)의 events.tsv를 시각 순으로.
                 원격 줄의 기계·터미널은 hc 이름(<기계>/<t…>)으로 바꿔 찍는다. 읽지 못한 기계는 「모름 <기계>」 한 줄
                 sh를 띄울 수 없는 기계(예: Windows)는 레인 기록이 없는 것으로 보고 건너뛴다(events·wait·watch 모두)
                 --lane <레인>(여럿이면 되풀이)이면 그 레인 이름(넷째 칸)의 사건만(events·wait — 「모름」 줄은 그대로)
                 --kind ops|lane이면 그 종류의 사건만 — 14칸, 없으면 운영 사건 이름 목록(docs/ops/events.md)으로 가른다(events·wait)
+                --explain이면 사건마다 watch 한 문의 판정 한 줄(읽기만): 갈래 → 받는 쪽 · 종류 · 까닭(보류면 언제까지, 안 보냈으면 왜),
+                공용 보냄 기록에 있으면 「보냄 기록 있음」(docs/hc-lane/watch.md 「한 문」). 판정은 지금 기준이다 — 지금 시각·지금 살아 있는
+                지휘로 다시 판정하니(지난 보류는 「문턱 넘김」·「풀림」으로, 끝난 지휘가 받던 것은 지금의 받는 쪽으로 보인다) 그때 갔는지는 「보냄 기록 있음」으로 본다

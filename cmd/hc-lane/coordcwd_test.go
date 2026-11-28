@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"herdr-tools/internal/tri"
 )
@@ -29,7 +28,7 @@ type cwdKit struct {
 
 func newCwdKit(t *testing.T) *cwdKit {
 	d := t.TempDir()
-	for _, p := range []string{d + "/bin", d + "/st/hc-lane"} {
+	for _, p := range []string{d + "/bin", d + "/st/hc-lane", d + "/home", d + "/cfg"} {
 		if err := os.MkdirAll(p, 0o777); err != nil {
 			t.Fatal(err)
 		}
@@ -40,6 +39,11 @@ func newCwdKit(t *testing.T) *cwdKit {
 	t.Setenv("PATH", d+"/bin:"+os.Getenv("PATH"))
 	t.Setenv("XDG_STATE_HOME", d+"/st")
 	t.Setenv("D", d)
+	t.Setenv("HOME", d+"/home") // 손잡이 저장 파일(한 문이 alert_coord 등을 읽는다)
+	t.Setenv("HERDR_TOOLS_CONFIG", d+"/cfg")
+	up := watchUp
+	watchUp = func(string, string) bool { return true } // 가짜 지휘는 watch가 돈다
+	t.Cleanup(func() { watchUp = up })
 	return &cwdKit{t, d}
 }
 
@@ -91,12 +95,11 @@ func repoList(a string) string {
 	return strings.Join(l, ",")
 }
 
-// sends: 주인 없는 저장소 r 레인 사건을 그 지휘의 watch가 보내나(유예 길게 — 미룸은 거짓)
+// sends: 주인 없는 저장소 r 레인 사건을 그 지휘의 watch가 보내나(한 문 — 받는 쪽은 한 명)
 func sends(k *cwdKit, a, r string) bool {
-	e := &ev{ed: k.d + "/st/hc-lane", wto: a, occ: map[string]tri.State{}, seenc: map[string]seenCache{}, rgrace: time.Hour,
-		rdefer: map[string]time.Time{}, lrepo: map[string]string{}}
 	l := strings.Join([]string{utcNow(), "m", "t8", "inbox-x", "중간", "-", "요약", "-", "-", "-", "*", "-", r}, tab)
-	return e.repoSend(l)
+	e := &ev{ed: k.d + "/st/hc-lane", wto: a, cur: k.d + "/cur." + a, win: []string{l}, lrepo: laneRepos([]string{l})}
+	return len(e.gate([]string{l})) == 1
 }
 
 const cwdA, cwdB = "example.com/team/a", "example.com/team/b"
@@ -117,8 +120,8 @@ func TestCoordCwdRepoRoutes(t *testing.T) {
 	if !sends(k, "tx1", cwdA) || sends(k, "ty2", cwdA) {
 		t.Errorf("① 주인 없는 A 사건: X 보냄 %v·Y 보냄 %v(기대 X만)", sends(k, "tx1", cwdA), sends(k, "ty2", cwdA))
 	}
-	if !sends(k, "tx1", cwdB) || !sends(k, "ty2", cwdB) {
-		t.Error("① B 사건은 X·Y 모두(넓히기만 — B를 다루던 X가 못 받으면 안 된다)")
+	if sends(k, "tx1", cwdB) == sends(k, "ty2", cwdB) {
+		t.Error("① B 사건은 X·Y 가운데 한 명(한 문 — B를 다루던 X도 대표 후보)")
 	}
 	// ④ X가 끝남(hc get not_found) → A 사건은 Y가 받는다
 	if err := os.Remove(k.d + "/get.tx1"); err != nil {
@@ -148,8 +151,14 @@ func TestCoordCwdRepoNoRepo(t *testing.T) {
 	if got := repoList("tz4"); got != "?" {
 		t.Errorf("② 기록 없는 지휘는 모름 그대로(좁히지 않음): %q", got)
 	}
-	if !sends(k, "tz4", cwdB) {
-		t.Error("② 기록 없는 지휘는 B 사건도 받는다")
+	got := 0
+	for _, c := range []string{"ty2", "tn3", "tz4"} {
+		if sends(k, c, cwdB) {
+			got++
+		}
+	}
+	if got != 1 || sends(k, "tz4", cwdB) {
+		t.Errorf("② B 사건은 B를 맡은 지휘 한 명(한 문 — 기록 없는 지휘는 전역 대표 후보일 뿐): %d", got)
 	}
 }
 

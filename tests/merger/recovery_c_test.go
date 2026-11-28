@@ -790,10 +790,19 @@ esac
 			return f.lane(f.writer, []string{"PATH=" + k.T + "/watch-bin:" + k.env["PATH"], "watch_created=" + created,
 				"HC_LANE_WATCH_IDLE=0", "HC_LANE_WAIT_TICK=0", "HC_LANE_WATCH_HOLD_MAX=0"}, "watch", "--to", "t1")
 		}
-		// 다른 실행(22)을 먼저: 거른 줄은 커서에 안 적히니 뒤의 같은 실행(11) 바퀴가 그 줄을 다시 본다
+		// 한 문(docs/hc-lane/watch.md 「한 문」): 다른 실행(22)은 주인이 아니다 — 주인 없는 사건은 대표 지휘(여기선 t1 하나)에게 「→ 대표 지휘」를
+		// 붙여 간다. 같은 실행(11)은 주인으로(꼬리표 없이). 두 바퀴 사이에 이 watch의 커서·공용 보냄 기록·받은 글을 비운다
+		st := f.home + "/.local/state/hc-lane/"
 		r = watch("22")
-		k.check(mode+": 다른 실행이면 안 보냄", r.RC == 0 && !hasLine(r.Out, rs[0]), clog(r))
+		k.check(mode+": 다른 실행이면 주인 아님 — 대표로 감", r.RC == 0 && hasLine(r.Out, rs[0]) &&
+			strings.Contains(read(f.home+"/watch-sent"), "→ 대표 지휘 t1"), clog(r), read(f.home+"/watch-sent"))
+		for _, p := range []string{st + "seen.t1", st + "sent", f.home + "/watch-sent"} {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+		}
 		r = watch("11")
-		k.check(mode+": 같은 실행이면 보냄", r.RC == 0 && hasLine(r.Out, rs[0]), clog(r))
+		k.check(mode+": 같은 실행이면 주인으로 감", r.RC == 0 && hasLine(r.Out, rs[0]) &&
+			!strings.Contains(read(f.home+"/watch-sent"), "대표 지휘"), clog(r), read(f.home+"/watch-sent"))
 	}
 }

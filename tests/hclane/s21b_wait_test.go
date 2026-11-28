@@ -76,12 +76,13 @@ func s21b2(k *K) {
 		"wait", "--state", "멈춤", "--timeout", "0")
 	k.check("killed: 지휘가 닫은 레인은 완료·중간 뒤라도 안 알림", !grep(k.out, "lane-k[34]\t멈춤"))
 	k.check("read·hc-fill 레인: 완료 그 턴의 끝남·정리됨은 조용", !grep(k.out, "lane-k[126]\t멈춤"))
-	k.check("구현 레인: 완료(감사 기다림) 뒤 혼자 끝나면 그대로 뜻밖의 종료", k.rc == 0 && has("\ttk5\tlane-k5\t멈춤\t-\t뜻밖의 종료(finished)"))
-	// 재감사 [중간] M1: 부모(지휘)가 죽어 함께 killed된 레인은 그대로 알림
+	k.check("구현 레인: 완료(감사 기다림) 뒤 혼자 끝나도 조용(한 문 ht-alert-gate — 끝 보고 뒤)", k.rc == 75 && !has("lane-k5\t멈춤"))
+	// 재감사 [중간] M1: 부모(지휘)가 죽어 함께 killed된 레인은 그대로 알림 — 한 문 뒤로는 끝 보고 뒤 끝남이 조용하니 아래 killed 장면은
+	// 끝 보고 없이(중간 뒤) 끝난 레인으로 본다
 	write(k.t, live, "tPlive 3333\n")
 	nw = s21bNow()
-	appendf(k.t, EV, ev(nw, "here", "tk8", "lane-k8", "완료", "abcd1234", "부모죽음", "2")+ev(nw, "here", "tk9", "lane-k9", "완료", "abcd1234", "부모살아", "2"))
-	k.runE([]string{"HC_TERMINAL_ID=tK"}, "wait", "--state", "완료", "--timeout", "0")
+	appendf(k.t, EV, ev(nw, "here", "tk8", "lane-k8", "중간", "abcd1234", "부모죽음", "2")+ev(nw, "here", "tk9", "lane-k9", "중간", "abcd1234", "부모살아", "2"))
+	k.runE([]string{"HC_TERMINAL_ID=tK"}, "wait", "--state", "중간", "--timeout", "0")
 	k.runE([]string{"HC_TERMINAL_ID=tK", `HC_FAKE_LS={"terminals":[{"address":"tk8","name":"lane-k8","parent":"mac/tPdead","state":"finished","reason":"killed","signal":1,"turn":3},{"address":"tk9","name":"lane-k9","parent":"tPlive","state":"finished","reason":"killed","signal":1,"turn":3}]}`},
 		"wait", "--state", "멈춤", "--timeout", "0")
 	k.check("killed M1: 부모(지휘)가 죽어 함께 끝난 레인은 그대로 뜻밖의 종료", k.rc == 0 && has("\ttk8\tlane-k8\t멈춤\t-\t뜻밖의 종료(finished)"))
@@ -91,18 +92,18 @@ func s21b2(k *K) {
 	MH3 := k.T + "/mh3"
 	mkdirs(k.t, MH3+"/m1/.local/state/hc-lane")
 	nw = s21bNow()
-	write(k.t, MH3+"/m1/.local/state/hc-lane/events.tsv", ev(nw, "x", "tkR", "lane-kR", "완료", "abcd1234", "원격살아", "2")+ev(nw, "x", "tkS", "lane-kS", "완료", "abcd1234", "원격죽음", "2"))
+	write(k.t, MH3+"/m1/.local/state/hc-lane/events.tsv", ev(nw, "x", "tkR", "lane-kR", "중간", "abcd1234", "원격살아", "2")+ev(nw, "x", "tkS", "lane-kS", "중간", "abcd1234", "원격죽음", "2"))
 	lsN := `{"terminals":[{"address":"m1/tkR","name":"lane-kR","parent":"mac/tPlive","state":"finished","reason":"killed","signal":1,"turn":3},{"address":"m1/tkS","name":"lane-kS","parent":"mac/tPdead","state":"finished","reason":"killed","signal":1,"turn":3}]}`
 	m1 := []string{"HC_TERMINAL_ID=tN", "HC_FAKE_MACH_HOME=" + MH3, mach("m1")}
-	k.runE(m1, "wait", "--all", "--since", nw, "--state", "완료", "--timeout", "0")
+	k.runE(m1, "wait", "--all", "--since", nw, "--state", "중간", "--timeout", "0")
 	k.runE(append(m1, "HC_FAKE_LS="+lsN), "wait", "--all", "--state", "멈춤", "--timeout", "0")
 	k.check("killed N1: 원격 레인 parent가 「<이 기계>/t…」여도 살아 있으면 조용", !has("lane-kR\t멈춤"))
 	k.check("killed N1: 원격 레인 parent가 죽었으면 그대로 뜻밖의 종료", k.rc == 0 && has("m1/tkS\tlane-kS\t멈춤\t-\t뜻밖의 종료(finished)"))
 	// 3차 감사 [낮음] L1: 들어온 연결의 상대는 machine ls에 없다 — 그대로 풀리는 parent는 떼지 않는다
 	appendf(k.t, live, "peer/tPeer 4444\n")
 	nw = s21bNow()
-	appendf(k.t, EV, ev(nw, "here", "tkL", "lane-kL", "완료", "abcd1234", "들어온연결", "2"))
-	k.runE([]string{"HC_TERMINAL_ID=tN"}, "wait", "--since", nw, "--state", "완료", "--timeout", "0")
+	appendf(k.t, EV, ev(nw, "here", "tkL", "lane-kL", "중간", "abcd1234", "들어온연결", "2"))
+	k.runE([]string{"HC_TERMINAL_ID=tN"}, "wait", "--since", nw, "--state", "중간", "--timeout", "0")
 	k.runE([]string{"HC_TERMINAL_ID=tN", `HC_FAKE_LS={"terminals":[{"address":"tkL","name":"lane-kL","parent":"peer/tPeer","state":"finished","reason":"killed","signal":1,"turn":3}]}`}, "wait", "--state", "멈춤", "--timeout", "0")
 	k.check("killed L1: machine ls에 없지만 그대로 풀리는 parent(들어온 연결의 지휘)가 살아 있으면 조용", !has("lane-kL\t멈춤"))
 	os.Remove(live)
@@ -112,9 +113,9 @@ func s21b2(k *K) {
 	// watch-parent(2026-11-17 지휘 실측): 지휘 기계에선 parent가 앞부분 없이 「t7」
 	write(k.t, live, "tPlive 3333\n")
 	nw = s21bNow()
-	appendf(k.t, MH3+"/m1/.local/state/hc-lane/events.tsv", ev(nw, "x", "tkT", "lane-kT", "완료", "abcd1234", "접두없음살아", "2")+ev(nw, "x", "tkU", "lane-kU", "완료", "abcd1234", "접두없음죽음", "2"))
+	appendf(k.t, MH3+"/m1/.local/state/hc-lane/events.tsv", ev(nw, "x", "tkT", "lane-kT", "중간", "abcd1234", "접두없음살아", "2")+ev(nw, "x", "tkU", "lane-kU", "중간", "abcd1234", "접두없음죽음", "2"))
 	lsP2 := `{"terminals":[{"address":"m1/tkT","name":"lane-kT","parent":"tPlive","die_with_parent":true,"state":"finished","reason":"killed","signal":1,"turn":3},{"address":"m1/tkU","name":"lane-kU","parent":"tPdead","die_with_parent":true,"state":"finished","reason":"killed","signal":1,"turn":3}]}`
-	k.runE(m1, "wait", "--all", "--since", nw, "--state", "완료", "--timeout", "0")
+	k.runE(m1, "wait", "--all", "--since", nw, "--state", "중간", "--timeout", "0")
 	k.runE(append(m1, "HC_FAKE_LS="+lsP2), "wait", "--all", "--state", "멈춤", "--timeout", "0")
 	k.check("killed watch-parent: 원격 레인 parent가 앞부분 없는 「t…」(지휘 기계 기준)이고 살아 있으면 조용", !has("lane-kT\t멈춤"))
 	k.check("killed watch-parent: 앞부분 없는 parent가 죽었으면 그대로 뜻밖의 종료", k.rc == 0 && has("m1/tkU\tlane-kU\t멈춤\t-\t뜻밖의 종료(finished)"))

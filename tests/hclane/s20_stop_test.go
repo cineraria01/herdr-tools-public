@@ -178,12 +178,14 @@ func s20Stop(k *K) {
 		ev("2026-11-16T03:00:10Z", "here", "tf12", "lane-f12", "제출", "abcd1234", "sub → 큐", "2")+
 		ev("2026-11-16T03:00:11Z", "here", "tf12", "lane-f12", "정리됨", "-", "hc-sweep R2", "6"))
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf1","name":"lane-f1","state":"finished"},{"address":"tf2","name":"lane-f2","state":"finished"},{"address":"tf3","name":"lane-f3","state":"finished"},{"address":"tf4","name":"lane-f4","state":"finished"},{"address":"tf7","name":"lane-f7","state":"finished"},{"address":"tf8","name":"lane-f8","state":"finished","turn":3},{"address":"tf10","name":"lane-f10","state":"finished","turn":3}]}`}, wt0...)
-	k.check("끝남·정리됨: report turn을 모르면 착지·판정 뒤라도 알림(감사 3차 [낮음] 3)", has("\ttf10\tlane-f10\t멈춤\t-\t뜻밖의 종료(finished)") && has("\ttf11\tlane-f11\t멈춤\t-\t뜻밖의 종료(정리됨)"))
+	// ht-alert-gate(2026-11-28, 한 문): 끝 보고(완료·판정·제출·착지·주차)·알린 막힘 뒤 끝남·정리됨은 turn과 상관없이 알림이 아니다 —
+	// 7일 「뜻밖의 종료」 311건 가운데 설계대로 끝난 것이 172건이었다. 옛 turn·sha 갈래(감사 3차 [낮음] 3·[높음] 1·wait-landed)는 접었다
+	k.check("끝남·정리됨: report turn을 몰라도 착지·판정 뒤면 안 알림(한 문)", !has("lane-f10\t멈춤") && !has("lane-f11\t멈춤"))
 	k.check("끝남: report 없이 끝나면 「뜻밖의 종료」", k.rc == 0 && has("\ttf2\tlane-f2\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("끝남: 완료(착지 전) 뒤 끝남은 알림(옛 판 회귀 — 감사 [높음] 1)", has("\ttf1\tlane-f1\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("끝남: 막힘 뒤 끝남도 알림", has("\ttf7\tlane-f7\t멈춤\t-\t뜻밖의 종료(finished)"))
+	k.check("끝남: 완료 뒤 끝남은 안 알림(한 문 — 끝 보고 뒤)", !has("lane-f1\t멈춤"))
+	k.check("끝남: 막힘 뒤 끝남도 안 알림(한 문 — 막힘을 이미 알림)", !has("lane-f7\t멈춤"))
 	k.check("끝남: 착지·판정 뒤 끝남은 안 알림", !grep(k.out, `lane-f[48]`+"\t멈춤\t-\t"+`뜻밖의 종료\(finished`))
-	k.check("정리됨: 중간 뒤 정리됨은 「뜻밖의 종료(정리됨)」, 그 끝남은 두 번 안 알림", has("\ttf3\tlane-f3\t멈춤\t-\t뜻밖의 종료(정리됨) hc-sweep R2") && !has("lane-f3\t멈춤\t-\t뜻밖의 종료(finished)"))
+	k.check("정리됨: 중간 뒤 정리됨은 「보고 없이 쉬다 닫힘(hc-sweep R2)」, 그 끝남은 두 번 안 알림", has("\ttf3\tlane-f3\t멈춤\t-\t보고 없이 쉬다 닫힘(hc-sweep R2)") && !has("lane-f3\t멈춤\t-\t뜻밖의 종료(finished)"))
 	// go-alert-quiet(2026-11-22): 제출 뒤 정리됨은 turn과 상관없이 안 알림
 	k.check("정리됨: 제출 뒤(그 턴 지나) 정리됨은 안 알림(go-alert-quiet)", !has("lane-f12\t멈춤"))
 	k.check("정리됨: 판정 뒤 정리됨은 안 알림, 정리됨 줄 그대로는 안 찍음", !has("lane-f4\t멈춤") && !has("\t정리됨\t"))
@@ -195,7 +197,7 @@ func s20Stop(k *K) {
 	appendf(k.t, EV, ev(s20now(), "here", "tf9", "lane-f9", "중간", "-", "반"))
 	appendf(k.t, EV, ev(s20now(), "here", "tf9", "lane-f9", "정리됨", "-", "hc-sweep R2"))
 	k.runE([]string{empty}, "wait", "--state", "멈춤", "--timeout", "0")
-	k.check("정리됨: 틈에 닫혀 목록에서 사라진 보고 없는 레인도 다음 wait에서 멈춤", k.rc == 0 && has("\ttf9\tlane-f9\t멈춤\t-\t뜻밖의 종료(정리됨)"))
+	k.check("정리됨: 틈에 닫혀 목록에서 사라진 보고 없는 레인도 다음 wait에서 멈춤", k.rc == 0 && has("\ttf9\tlane-f9\t멈춤\t-\t보고 없이 쉬다 닫힘(hc-sweep R2)"))
 	k.runE([]string{empty}, "wait", "--state", "멈춤", "--timeout", "0")
 	k.check("정리됨: 같은 정리됨은 두 번 안 알림", k.rc == 75)
 	appendf(k.t, EV, ev(s20now(), "here", "tf6", "lane-f6", "완료", "abcd1234", "끝"))
@@ -203,7 +205,7 @@ func s20Stop(k *K) {
 	k.run(wt0...)
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tf6","name":"lane-f6","cwd":"/","state":"live","status":"done","turn":1}]}`}, wt0...)
 	k.check("정리됨: 쉬는 레인은 정리됨 앞의 마지막 report(완료)로 판정(닫기 실패해도 거짓 멈춤 없음)", k.rc == 75)
-	// 재감사 [높음] 1: 착지·판정 뒤 이어 받은 일(turn이 오름)에서 끝나거나 정리되면 알린다 — 쉼 판정과 같은 turn 규칙(report turn+1 이하만 조용)
+	// 한 문: 착지·판정 뒤 turn이 올라도(이어 받은 일) 끝남·정리됨은 알리지 않는다(옛 재감사 [높음] 1의 turn 갈래를 접음 — 끝 보고 뒤)
 	nw := s20now()
 	appendf(k.t, EV, ev(nw, "here", "ta1", "lane-ta1", "판정", "-", "감사", "3")+ev(nw, "here", "ta2", "lane-ta2", "판정", "-", "감사", "3")+
 		ev(nw, "here", "tb1", "lane-tb1", "착지", "abcd1234", "끝", "2")+ev(nw, "here", "tb1", "lane-tb1", "정리됨", "-", "hc-sweep R2", "7")+
@@ -211,17 +213,15 @@ func s20Stop(k *K) {
 	k.runE([]string{empty}, "wait", "--state", "판정,착지", "--timeout", "0") // report 줄은 먼저 소비
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"ta1","name":"lane-ta1","state":"finished","turn":6},{"address":"ta2","name":"lane-ta2","state":"finished","turn":4}]}`},
 		"wait", "--state", "멈춤", "--timeout", "0")
-	k.check("turn: 판정 뒤 turn이 오른(이어 받은 일) 끝남은 알림", k.rc == 0 && has("\tta1\tlane-ta1\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("turn: 착지 뒤 turn이 오른 정리됨은 알림", has("\ttb1\tlane-tb1\t멈춤\t-\t뜻밖의 종료(정리됨)"))
-	k.check("turn: 판정 그 턴(turn+1)의 끝남·정리됨은 조용", !grep(k.out, `lane-t[ab]2`+"\t멈춤"))
+	k.check("turn: 판정 뒤 turn이 오른 끝남·착지 뒤 turn이 오른 정리됨도 조용(한 문)", k.rc == 75 && !grep(k.out, `lane-t[ab][12]`+"\t멈춤"))
 	// 재감사 [낮음] 2: 쉼(done turn n)으로 이미 알린 레인을 hc-sweep이 같은 turn에 닫으면 다시 알리지 않음
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"tc1","name":"lane-tc1","cwd":"/","state":"live","status":"done","turn":5}]}`}, "wait", "--state", "멈춤", "--timeout", "0")
 	k.check("쉼 알림 먼저(준비)", k.rc == 0 && has("lane-tc1\t멈춤\t-\tdone turn 5"))
 	appendf(k.t, EV, ev(s20now(), "here", "tc1", "lane-tc1", "정리됨", "-", "hc-sweep R2", "5"))
 	k.runE([]string{empty}, "wait", "--state", "멈춤", "--timeout", "0")
 	k.check("정리됨: 같은 turn에 쉼으로 이미 알린 레인은 다시 안 알림", k.rc == 75)
-	// wait-landed(2026-11-16 실측): 착지 뒤 같은 sha의 「완료」를 그 턴에 한 번 더 report하고 끝나면 착지 뒤 종료다.
-	// 다른 sha의 완료·중간이 뒤에 오거나, 착지와 완료 사이·그 뒤에 turn이 오르면(이어 받은 일), sha가 -면(판정 포함) 여전히 알린다
+	// wait-landed(2026-11-16 실측) → 한 문: 착지·판정 뒤 완료(같은·다른 sha, turn과 상관없이)·뒤따르는 중간이 와도 끝남·정리됨은 끝 보고 뒤라
+	// 조용하다(옛 sha·turn 갈래를 접음)
 	nw = s20now()
 	e8 := func(f ...string) string { return ev(append([]string{nw, "here"}, f...)...) }
 	appendf(k.t, EV, e8("td1", "lane-td1", "착지", "6d295b6f", "착지", "2")+e8("td1", "lane-td1", "완료", "6d295b6f", "완료", "2")+
@@ -238,13 +238,7 @@ func s20Stop(k *K) {
 	k.runE([]string{empty}, "wait", "--state", "착지,판정,완료,중간", "--timeout", "0") // report 줄은 먼저 소비
 	k.runE([]string{`HC_FAKE_LS={"terminals":[{"address":"td1","name":"lane-td1","state":"finished","turn":3},{"address":"td2","name":"lane-td2","state":"finished","turn":3},{"address":"td3","name":"lane-td3","state":"finished","turn":7},{"address":"td4","name":"lane-td4","state":"finished","turn":3},{"address":"td5","name":"lane-td5","state":"finished","turn":3},{"address":"td6","name":"lane-td6","state":"finished","turn":3},{"address":"td7","name":"lane-td7","state":"finished","turn":6},{"address":"td8","name":"lane-td8","state":"finished","turn":3},{"address":"td9","name":"lane-td9","state":"finished","turn":4}]}`},
 		"wait", "--state", "멈춤", "--timeout", "0")
-	k.check("착지 뒤 같은 sha 완료: 그 턴에 끝남·정리됨은 조용(실측 꼴, 짧은 쪽 길이 앞자리 비교)", k.rc == 0 && !grep(k.out, `lane-t(d1|d8|e1)`+"\t멈춤"))
-	k.check("sha가 -면 같은 sha로 치지 않음: 판정·착지 - 뒤 완료 - 의 끝남은 알림(감사 wait-landed [높음] 1)", has("\ttd5\tlane-td5\t멈춤\t-\t뜻밖의 종료(finished)") && has("\ttd6\tlane-td6\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("착지와 같은 sha 완료 사이에 turn이 오르면(이어 받은 일) 끝남은 알림(감사 wait-landed [높음] 1)", has("\ttd7\tlane-td7\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("착지 다음 턴(turn+1)의 같은 sha 완료도 새 일: 끝남은 알림(재감사 [낮음] 2)", has("\ttd9\tlane-td9\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("착지 뒤 다른 sha 완료 뒤 끝남·정리됨은 알림", has("\ttd2\tlane-td2\t멈춤\t-\t뜻밖의 종료(finished)") && has("\tte2\tlane-te2\t멈춤\t-\t뜻밖의 종료(정리됨)"))
-	k.check("착지 뒤 같은 sha 완료여도 turn이 오른 뒤 끝남은 알림", has("\ttd3\tlane-td3\t멈춤\t-\t뜻밖의 종료(finished)"))
-	k.check("착지·완료 뒤 중간이 오면 끝남은 알림", has("\ttd4\tlane-td4\t멈춤\t-\t뜻밖의 종료(finished)"))
+	k.check("착지·판정 뒤 완료(같은·다른 sha·sha -·turn 오름)·중간 뒤 끝남·정리됨은 모두 조용(한 문 — 끝 보고 뒤)", k.rc == 75 && !grep(k.out, `lane-t[de][0-9]`+"\t멈춤"))
 	// 지휘 요청(감사 3차 [높음] 1로 기본 꺼짐): wait는 기본으로 모든 레인 사건, --mine이면 레인의 hc parent가 이 지휘($HC_TERMINAL_ID —
 	// 원격 레인은 <기계>/<t…>로 본다)인 사건만. parent를 모르면(hc ls에 없음) 보여 준다(fail-open).
 	// 기본이 거르면 지휘가 바뀌거나(옛 parent는 죽은 터미널) wait를 다른 터미널에서 부를 때 사건이 다 가려진다

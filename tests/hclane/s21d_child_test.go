@@ -26,7 +26,7 @@ func s21dChild(k *K) {
 	who := func(s string) string { return s21bWho(send, s, true) }
 	mark := func(tag string) {
 		k.exe(k.T, "", nil, "env", "-u", "HC_TERMINAL_ID", "-u", "HC_LANE", k.LANE, "report", "중간", "-", tag, "--name", "hc-fill-idle", "--to", "tc1,tc2")
-		k.check("s21d 표지 "+tag+" 받음", upto(func() bool { return who(tag) == "tc1 tc2 " }))
+		k.check("s21d 표지 "+tag+" 받음(--to 목록은 주인 후보 — 받을 수 있는 첫 tc1 한 명, ht-alert-gate)", upto(func() bool { return who(tag) == "tc1 " }))
 	}
 	// 부모 레인 t9aa와 그 레인이 띄운 스크립트 터미널 t9cc(jt-real — 기록 없음, 부모 t9aa, exit 0)
 	ls := func(par string) string {

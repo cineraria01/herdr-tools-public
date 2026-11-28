@@ -12,6 +12,6 @@
                 lane.watch_idle분(기본 60). 레인·감사를 띄울 때 hc-lane이 지휘(HC_LANE_COORD — hc-fill이 대기열 주인 지휘, 없으면
                 hc-lane coord로 넘김 —, 없으면 $HC_TERMINAL_ID)의 watch가 없으면 hc run --bg --no-notify --rm --name lane-watch-<지휘>
                 --label hc-lane-watch=1 로 저절로 띄운다(--all). 바퀴마다·보낼 때마다 자기 지휘 정보(coord.<주소>)와 맞춰 보고
-                다르면 안 보내고 끝냄. 사건은 레인 기록(lanes.tsv — HC_LANE_OWNER가 있으면 그 지휘, 없으면 띄운 지휘 터미널.
-                없으면 hc parent)의 지휘 watch만 보내고, 주인을 모르거나(-) 그 지휘가 사라진 레인의 사건은 살아 있는 모든 지휘
-                watch가 보낸다(넘겨받지 않음, 지휘마다 자기 커서로 한 번, sent에 안 적음)
+                다르면 안 보내고 끝냄. 사건마다 한 문(받는 쪽 한 명 · 판단 필요/기다렸다 판단/소식/밀어 넣지 않음)을 지난다:
+                주인(--to·11칸·레인 기록·hc parent)이 받을 수 있으면 그 지휘, 아니면 그 저장소·전역 대표(alert_coord) 한 명.
+                2시간 넘게 묵은 것은 안 보냄(받는 쪽인 안 풀린 판단 필요만 [시각]을 붙여). 판정은 hc-lane events --explain

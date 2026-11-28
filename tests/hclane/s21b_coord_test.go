@@ -124,7 +124,6 @@ func s21b1(k *K) {
 		return k.bg(k.T, k.T+"/wo"+sfx, k.T+"/we"+sfx, nil, k.LANE, "watch", "--to", to)
 	}
 	who := func(s string) string { return s21bWho(send, s, false) }
-	whoS := func(s string) string { return s21bWho(send, s, true) }
 	rep := func(term, lane string, args ...string) {
 		k.s21bRep([]string{"HC_TERMINAL_ID=" + term, "HC_LANE=" + lane}, args...)
 	}
@@ -156,7 +155,7 @@ func s21b1(k *K) {
 	pause(2500)
 	k.check("지휘 둘: 각자 자기 레인 사건만 받음(남의 사건 send 0)", s21bUniq(send, "에이것") == "ta1" && s21bUniq(send, "비것") == "tb2" &&
 		s21bCount(send, "에이것") == 1)
-	k.check("지휘 둘: 주인을 모르는 레인 사건은 두 지휘 모두 한 번씩(넘겨받지 않음, sent에 안 적음)", whoS("필것") == "ta1 tb2 " && !s21bRow(lanes, "t9cc"))
+	k.check("지휘 둘: 주인을 모르는 레인 사건은 대표 한 명(한 문 ht-alert-gate — 넘겨받지 않음)", s21bCount(send, "필것") == 1 && !s21bRow(lanes, "t9cc"))
 	k.runE([]string{"HC_TERMINAL_ID=tb2"}, "wait", "--timeout", "0") // 다른 지휘가 hc-lane을 써도
 	rep("t9aa", "lane-ma", "착지", "aaaa1111", "에이착지")
 	upto(sub("에이착지"))
@@ -283,10 +282,10 @@ func s21b1(k *K) {
 	upto(pids("ta1", "tb2"))
 	rep("t9hh", "lane-mh", "완료", "hhhh8888", "넣은지휘것")
 	rep("t9ii", "lane-mi", "완료", "iiii9999", "주인없는것")
-	upto(func() bool { return sub("넣은지휘것")() && s21bCount(send, "주인없는것") == 2 })
+	upto(func() bool { return sub("넣은지휘것")() && s21bCount(send, "주인없는것") == 1 })
 	pause(2500)
 	k.check("대기열 레인: 넣은 지휘(ta1)만 받음 — 가장 최근 지휘(tb2)가 아님", who("넣은지휘것") == "ta1 ")
-	k.check("주인 없는 옛 레인: 두 지휘 모두 한 번씩 받고 주인은 그대로 -", whoS("주인없는것") == "ta1 tb2 " && s21bOwner(lanes, "t9ii") == "-")
+	k.check("주인 없는 옛 레인: 대표 한 명이 받고(한 문) 주인은 그대로 -", s21bCount(send, "주인없는것") == 1 && s21bOwner(lanes, "t9ii") == "-")
 	// hcfill-early(2026-11-18): report --to <지휘>는 받을 지휘를 정한다
 	k.exe(k.T, "", nil, "env", "-u", "HC_TERMINAL_ID", "-u", "HC_LANE", k.LANE, "report", "중간", "-", "받는이정함", "--name", "hc-fill-idle", "--to", "tb2")
 	upto(sub("받는이정함"))
@@ -296,7 +295,7 @@ func s21b1(k *K) {
 	k.check("report --to: 주소 글자가 아니면 종료 2", k.rc == 2)
 	wa.stop()
 	wb.stop()
-	// 감사 [중간] 1(b): 주인 지휘(ta1)가 레인이 뜬 뒤 사라지면 살아 있는 모든 지휘가 한 번씩, 누구도 넘겨받지 않는다
+	// 감사 [중간] 1(b) → 한 문: 주인 지휘(ta1)가 레인이 뜬 뒤 사라지면 대표 한 명이 받고(사건마다 다시 고름), 누구도 넘겨받지 않는다
 	os.Remove(send)
 	write(k.t, live, "ta1 1111\ntb2 2222\ntc3 3333\n")
 	k.runE([]string{"HC_TERMINAL_ID=tc3"}, "coord", "--set")
@@ -305,11 +304,11 @@ func s21b1(k *K) {
 	wb, wc := watch("tb2", "b"), watch("tc3", "c")
 	upto(pids("tb2", "tc3"))
 	rep("t9jj", "lane-mj", "중간", "-", "주인사라짐1")
-	upto(func() bool { return s21bCount(send, "주인사라짐1") == 2 })
+	upto(func() bool { return s21bCount(send, "주인사라짐1") == 1 })
 	rep("t9jj", "lane-mj", "완료", "jjjj0000", "주인사라짐2")
-	upto(func() bool { return s21bCount(send, "주인사라짐2") == 2 })
+	upto(func() bool { return s21bCount(send, "주인사라짐2") == 1 })
 	pause(2500)
-	k.check("주인이 사라진 레인: 살아 있는 두 지휘 모두 한 번씩, 다음 사건도 둘 다(넘겨받지 않음)", whoS("주인사라짐1") == "tb2 tc3 " && whoS("주인사라짐2") == "tb2 tc3 ")
+	k.check("주인이 사라진 레인: 대표 한 명이 한 번, 다음 사건도 한 명(넘겨받지 않음)", s21bCount(send, "주인사라짐1") == 1 && s21bCount(send, "주인사라짐2") == 1)
 	k.check("주인이 사라진 레인: 레인 기록 주인은 그대로 ta1(한 지휘가 영구히 넘겨받지 않음)", s21bOwner(lanes, "t9jj") == "ta1")
 	wb.stop()
 	wc.stop()
@@ -324,13 +323,14 @@ func s21b1(k *K) {
 	}
 	mk("ta1", "완료", "kkkk1111", "옛실행늦은것")
 	appendf(k.t, WD+"/events.tsv", ev(time.Now().UTC().Format("2006-01-02T15:04:05Z"), "mac", "t9kk", "lane-mk", "중간", "-", "옛꼴모호", "3", "-"))
-	upto(func() bool { return sub("옛실행늦은것")() && s21bCount(send, "옛꼴모호") == 2 })
+	upto(func() bool { return sub("옛실행늦은것")() && s21bCount(send, "옛꼴모호") == 1 })
 	pause(2500)
 	k.check("수신자: 11칸 주인(ta1) 사건은 주소를 새로 쥔 지휘(tb2)가 아니라 ta1만", who("옛실행늦은것") == "ta1 ")
-	k.check("수신자: 11칸 없는 옛 사건 + 그 주소 주인 둘 → 귀속 안 함(두 지휘 모두)", whoS("옛꼴모호") == "ta1 tb2 ")
+	k.check("수신자: 11칸 없는 옛 사건 + 그 주소 주인 둘 → 귀속 안 함(대표 한 명 — 한 문)", s21bCount(send, "옛꼴모호") == 1)
 	mk("*", "중간", "-", "주인없음별")
-	upto(func() bool { return s21bCount(send, "주인없음별") == 2 })
-	k.check("수신자: 11칸 *(주인 없음)은 모든 지휘", whoS("주인없음별") == "ta1 tb2 ")
+	upto(func() bool { return s21bCount(send, "주인없음별") == 1 })
+	pause(2500)
+	k.check("수신자: 11칸 *(주인 없음)은 대표 한 명(한 문)", s21bCount(send, "주인없음별") == 1)
 	wa.stop()
 	wb.stop()
 	mk("tb2", "중간", "-", "비주인만")

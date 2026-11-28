@@ -2,6 +2,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 
 	"herdr-tools/internal/events"
@@ -104,24 +105,96 @@ func turnOf(x events.Event) string {
 	return "-"
 }
 
-// newEvents: 커서·sent에 없는 새 사건(셸 판 ev_cmd의 큰 awk) — 정리됨 판정, 지휘 거름, --state·--since 거름.
-// ctx는 창 앞의 사건 — 판정 문맥(마지막 report)으로만 쓰고 내보내지 않는다
+// endQuiet: 터미널이 이 상태(중간을 뺀 마지막 report) 뒤에 사라지면 알릴 것이 없다 — 끝 보고·넘김이거나 막힘을 이미 알렸다(한 문)
+func endQuiet(end string) bool {
+	switch end {
+	case "완료", "판정", "제출", "착지", "주차", "막힘":
+		return true
+	}
+	return false
+}
+
+// closeName: 도구가 닫은 레인 터미널(정리됨)을 알릴 이름 — false면 알리지 않음: 끝 보고·넘김·알린 막힘 뒤(end, 뒤따르는 중간은 그 표시를
+// 지우지 않는다)이거나 쉼을 이미 알렸다(공용 보냄 기록). 아니면 보고 없이 사라진 것 — 쉬는 터미널을 닫는 hc-sweep R2면 그 사실을 이름에
+func closeName(end, msg string, rested bool) (string, bool) {
+	switch {
+	case endQuiet(end):
+		return "끝 보고(" + end + ") 뒤 도구가 닫음", false
+	case rested:
+		return "쉼을 이미 알림", false
+	case strings.HasPrefix(msg, "hc-sweep R2"):
+		return "보고 없이 쉬다 닫힘(" + msg + ")", true
+	}
+	return "뜻밖의 종료(정리됨) " + msg, true
+}
+
+var reDigits = regexp.MustCompile(`[0-9]+`)
+
+// laneField: 사건 줄의 넷째 칸(레인) — 칸 전부를 풀지 않고
+func laneField(l string) string {
+	for i := 0; i < 3; i++ {
+		j := strings.IndexByte(l, '\t')
+		if j < 0 {
+			return ""
+		}
+		l = l[j+1:]
+	}
+	if j := strings.IndexByte(l, '\t'); j >= 0 {
+		return l[:j]
+	}
+	return l
+}
+
+// semKey: 뜻으로 같은 사건의 열쇠(한 문 — 받는 쪽 칸 --to·11칸과 기계 칸이 달라도 같은 사건은 한 번): 키(12칸)가 있으면 이름·상태·키,
+// 없으면 같은 실행(10칸)·상태·sha·글, 실행도 모르는 옛 줄은 시각까지. 놀고 있음은 사유(숫자 뺀 글)마다 하루 한 번. 멈춤은 멈춤 열쇠
+func semKey(x events.Event) string {
+	if x.State == "멈춤" || x.N < 7 || strings.HasPrefix(x.Time, "#") {
+		return nk(evKey(x))
+	}
+	j := func(p ...string) string { return strings.Join(p, "\x1f") }
+	switch {
+	case x.Lane == events.OpsFillIdle:
+		return j(x.Lane, x.State, reDigits.ReplaceAllString(x.Msg, "N"), strings.SplitN(x.Time, "T", 2)[0])
+	case x.Key != "" && x.Key != "-":
+		return j(x.Lane, x.State, x.Key)
+	case x.Run != "" && x.Run != "-":
+		return j(x.Lane, x.State, x.Run, x.SHA, x.Msg)
+	}
+	return j(x.Lane, x.State, lastSeg(x.Term), x.Time, x.SHA, x.Msg)
+}
+
+// newEvents: 커서·sent에 없는 새 사건(셸 판 ev_cmd의 큰 awk) — 정리됨 판정(closeName), 뜻이 같은 사건 한 번(semKey), 지휘 거름,
+// --state·--since 거름. ctx는 창 앞의 사건 — 판정 문맥(마지막 report)으로만 쓰고 내보내지 않는다
 func (e *ev) newEvents(ctx, cand []string, born string) []string {
-	seen := map[string]bool{}
+	seen, ssem := map[string]bool{}, map[string]bool{}
+	var rested map[string]bool // 공용 보냄 기록에 쉼이 있는 터미널·레인(restedOf)
+	cl := map[string]bool{}    // 후보의 레인 이름 — 뜻 열쇠는 이 레인의 본 줄만 짓는다(바퀴마다 커서 전부를 풀지 않게)
+	for _, l := range cand {
+		cl[laneField(l)] = true
+	}
+	mark := func(l string) {
+		seen[nk(l)] = true
+		if !strings.HasPrefix(l, "멈춤"+tab) && cl[laneField(l)] { // 멈춤 열쇠는 뜻 열쇠가 곧 줄 열쇠
+			ssem[semKey(events.Cols(l))] = true
+		}
+	}
 	fl := ""
-	cl, _ := readLines(e.cur)
-	for _, l := range cl {
+	cls, _ := readLines(e.cur)
+	for _, l := range cls {
 		if v, ok := strings.CutPrefix(l, "#since"+tab); ok {
 			fl = v
 		} else {
-			seen[nk(l)] = true
+			mark(l)
 		}
 	}
 	if e.wsf != "" {
 		sl, _ := readLines(e.wsf)
 		for _, l := range sl {
-			seen[nk(l)] = true
+			mark(l)
 		}
+		rested = restedOf(sl)
+	} else {
+		rested = restedOf(cls) // wait는 한 문이 아니다 — 자기 커서의 쉼 알림을 본다(watch는 공용 기록만 — 어느 watch든 같은 답)
 	}
 	kind := e.lkinds()
 	par := map[string]string{}
@@ -129,13 +202,13 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 		par[r[0]] = r[1]
 	}
 	W := "," + e.sts + ","
-	lr := newLastRep()
-	for _, l := range ctx { // 아래 cand 고리와 같은 열쇠·같은 규칙(정리됨·멈춤은 report가 아니다)
-		if x := events.Cols(l); x.N >= 7 && x.State != "멈춤" && x.State != "정리됨" {
-			lr.rep(x.State, x.SHA, turnOf(x), x.Term+"\x1c"+x.Lane)
+	end := map[string]string{} // 터미널·레인 → 중간을 뺀 마지막 report
+	for _, l := range ctx {    // 아래 cand 고리와 같은 열쇠·같은 규칙(정리됨·멈춤은 report가 아니다)
+		if x := events.Cols(l); x.N >= 7 && x.State != "멈춤" && x.State != "정리됨" && x.State != "중간" {
+			end[x.Term+"\x1c"+x.Lane] = x.State
 		}
 	}
-	done := map[string]bool{}
+	done, dsem := map[string]bool{}, map[string]bool{}
 	var out []string
 	for _, l := range cand {
 		if !strings.Contains(l, tab) {
@@ -144,25 +217,17 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 		x := events.Cols(l)
 		t2 := x.Term + "\x1c" + x.Lane
 		if x.State == "정리됨" {
-			ls, ln := lr.lst[t2], lr.ltn[t2]
-			if handedOff(ls) { // 제출·주차 뒤 정리는 turn과 상관없이 조용히(stopped.go handedOff)
+			if _, rec := kind[[2]string{lastSeg(x.Term), x.Lane}]; !rec { // 레인 기록에 없는 터미널의 정리는 이 watch의 레인이 아니다(watch.go lkinds)
 				continue
 			}
-			lk, rec := kind[[2]string{lastSeg(x.Term), x.Lane}]
-			if !rec { // 레인 기록에 없는 터미널의 정리는 이 watch의 레인이 아니다(watch.go lkinds)
+			name, ok := closeName(end[t2], x.Msg, rested[lastSeg(x.Term)+"\x1c"+x.Lane])
+			if !ok {
 				continue
 			}
-			fin := ls == "착지" || ls == "판정" || ls == "완료" && (lk == "read" || lk == "fill")
-			if fin && num(x.Turn) && num(ln) && atoi(x.Turn) <= atoi(ln)+1 {
-				continue
-			}
-			if seen[nk("멈춤"+tab+x.Term+tab+x.Lane+tab+"쉼 turn "+x.Turn)] {
-				continue
-			}
-			x.State, x.SHA, x.Msg = "멈춤", "-", "뜻밖의 종료(정리됨) "+x.Msg // 창(evreadCtx)은 7칸 이상 줄만이라 세 칸이 다 있다
+			x.State, x.SHA, x.Msg = "멈춤", "-", name // 창(evreadCtx)은 7칸 이상 줄만이라 세 칸이 다 있다
 		}
-		if x.State != "멈춤" {
-			lr.rep(x.State, x.SHA, turnOf(x), t2)
+		if x.State != "멈춤" && x.State != "중간" {
+			end[t2] = x.State
 		}
 		if my := e.myp; my != "" {
 			o := x.Owner
@@ -182,10 +247,12 @@ func (e *ev) newEvents(ctx, cand []string, born string) []string {
 				}
 			}
 		}
-		k := nk(evKey(x))
+		k, s := nk(evKey(x)), semKey(x)
 		// --lane으로 거른 사건은 내보내지 않아 커서에도 안 적힌다(거름 없는 wait가 그대로 받는다)
-		if x.Time >= e.since && x.Time >= fl && (W == ",," || strings.Contains(W, ","+x.State+",")) && e.laneOK(x) && !seen[k] && !done[k] {
-			done[k] = true
+		// 커서 바닥(#since)은 wait만 — watch는 한 문(묵음 2시간·공용 기록)이 거른다: 받는 쪽이 정해진 사건이 그 watch 바닥 앞이라 영영 안 가지 않게
+		if x.Time >= e.since && (e.ec == "watch" || x.Time >= fl) && (W == ",," || strings.Contains(W, ","+x.State+",")) && e.laneOK(x) && !seen[k] && !done[k] &&
+			!ssem[s] && !dsem[s] {
+			done[k], dsem[s] = true, true
 			out = append(out, x.Raw())
 		}
 	}

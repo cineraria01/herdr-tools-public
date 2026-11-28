@@ -8,6 +8,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -89,7 +90,7 @@ func TestWatchDigest(t *testing.T) {
 		}
 		appendEv(t, w, dgLine(now+1, "lane-b", "막힘", "-", "까닭", co, ""))
 		waitFor(t, "막힘", func() bool { return len(w.sends()) > 0 })
-		if s := w.sends(); len(s) != 1 || !strings.Contains(s[0], "hc-lane 묶음 — 최근 1분 1건 ‖ lane-a: 완료 요약") {
+		if s := w.sends(); len(s) != 1 || !strings.Contains(s[0], dgHead(1, now, now)+" ‖ lane-a: 완료 요약") {
 			t.Fatalf("묶음+막힘: %q", s)
 		}
 	})
@@ -112,7 +113,7 @@ func TestWatchDigest(t *testing.T) {
 		waitFor(t, "주기 뒤 묶음", func() bool { return len(w.sends()) > 0 })
 		ticks(t, d, 2)
 		s := w.sends()
-		want := "hc-lane 묶음 — 최근 1분 4건 ‖ lane-a: 완료 01234567 구현 끝 → 감사 판정 통과 0·0·2 → 제출 제출 ID x → 착지 fedcba98 PR #7 ‖ → hc-fill status"
+		want := dgHead(4, now, now+3) + " ‖ lane-a: 완료 01234567 구현 끝 → 감사 판정 통과 0·0·2 → 제출 제출 ID x → 착지 fedcba98 PR #7 ‖ → hc-fill status"
 		if len(s) != 1 || s[0] != co+tab+want {
 			t.Fatalf("한 메시지·그 레인 한 줄이어야:\n%q\n바람:\n%q", s, want)
 		}
@@ -129,7 +130,7 @@ func TestWatchDigest(t *testing.T) {
 		appendEv(t, w, dgLine(now+1, "lane-b", "막힘", "-", "까닭", co, ""))
 		waitFor(t, "막힘", func() bool { return len(w.sends()) > 0 })
 		ticks(t, d, 2)
-		want := "hc-lane 묶음 — 최근 1분 1건 ‖ lane-a: 완료 요약 ‖ → hc-fill status ‖ hc-lane: lane-b 막힘 까닭 (t5)"
+		want := dgHead(1, now, now) + " ‖ lane-a: 완료 요약 ‖ → hc-fill status ‖ hc-lane: lane-b 막힘 까닭 (t5)"
 		if s := w.sends(); len(s) != 1 || s[0] != co+tab+want {
 			t.Fatalf("한 번에 묶음 먼저·막힘 뒤:\n%q\n바람:\n%q", s, want)
 		}
@@ -149,7 +150,7 @@ func TestWatchDigest(t *testing.T) {
 		}
 		appendEv(t, w, dgLine(now+30, "lane-z", "착지", "-", "끝", co, ""))
 		waitFor(t, "21건", func() bool { return len(w.sends()) > 0 })
-		if s := w.sends(); len(s) != 1 || !strings.Contains(s[0], "hc-lane 묶음 — 최근 1분 21건") || strings.Count(s[0], " ‖ ") != 22 {
+		if s := w.sends(); len(s) != 1 || !strings.Contains(s[0], dgHead(21, now, now+30)) || strings.Count(s[0], " ‖ ") != 22 {
 			t.Fatalf("21건 한 메시지: %q", s)
 		}
 	})
@@ -173,7 +174,7 @@ func TestWatchDigest(t *testing.T) {
 		w2 := startIdleWatch(t, bin, d, co, evs, "HC_LANE_COORD_DIGEST_SEC=1")
 		waitFor(t, "다시 뜬 watch가 보냄", func() bool { return len(w2.sends()) > 0 })
 		ticks(t, d, 3)
-		if s := w2.sends(); len(s) != 1 || !strings.Contains(s[0], "2건 ‖ lane-a: 완료 요약 ‖ lane-b: 제출 제출 ID y") {
+		if s := w2.sends(); len(s) != 1 || !strings.Contains(s[0], dgHead(2, now, now+1)+" ‖ lane-a: 완료 요약 ‖ lane-b: 제출 제출 ID y") {
 			t.Fatalf("한 번만: %q", s)
 		}
 	})
@@ -195,14 +196,14 @@ func TestDigestPerCoord(t *testing.T) {
 	a := strings.TrimSuffix(dgLine(1, "lane-a", "완료", "-", "요약", "t1", ""), "\n")
 	b := strings.TrimSuffix(dgLine(2, "lane-b", "완료", "-", "요약", "t2", ""), "\n")
 	blk := strings.TrimSuffix(dgLine(3, "lane-c", "막힘", "-", "까닭", "t1", ""), "\n")
-	e1, e2 := &ev{}, &ev{}
-	if _, _, _, h := e1.digest([]string{a}); !h {
+	e1, e2 := &ev{vd: newsVd(a, b)}, &ev{vd: newsVd(a, b)}
+	if _, _, h := e1.digest([]string{a}); !h {
 		t.Fatal("지휘1 모아야")
 	}
-	if _, _, _, h := e2.digest([]string{b}); !h {
+	if _, _, h := e2.digest([]string{b}); !h {
 		t.Fatal("지휘2 모아야")
 	}
-	dig, imm, _, h := e1.digest([]string{a, blk})
+	dig, imm, h := e1.digest([]string{a, blk})
 	if h || len(dig) != 1 || dig[0] != a || len(imm) != 1 || imm[0] != blk {
 		t.Fatalf("지휘1 막힘 → 자기 묶음만: %v %q %q", h, dig, imm)
 	}
@@ -210,9 +211,27 @@ func TestDigestPerCoord(t *testing.T) {
 	if len(e1.dg.seen) != 0 || len(e2.dg.seen) != 1 {
 		t.Fatalf("보낸 쪽만 비워야: %v %v", e1.dg.seen, e2.dg.seen)
 	}
-	if _, _, _, h := e2.digest([]string{b}); !h {
+	if _, _, h := e2.digest([]string{b}); !h {
 		t.Fatal("지휘2는 여전히 모아야")
 	}
+}
+
+// dgHead: 묶음 머리 — 사건 시각(첫~끝, 같은 분이면 하나)
+func dgHead(k int, from, to int64) string {
+	span := clock(time.Unix(from, 0))
+	if c := clock(time.Unix(to, 0)); c != span {
+		span += "~" + c
+	}
+	return "hc-lane 묶음 — " + strconv.Itoa(k) + "건(" + span + ")"
+}
+
+// newsVd: 그 줄들을 한 문의 소식 갈래로(묶음 단위 시험 — 판정은 gate_test)
+func newsVd(ls ...string) map[string]gverdict {
+	m := map[string]gverdict{}
+	for _, l := range ls {
+		m[lineKey(l)] = gverdict{br: brNews}
+	}
+	return m
 }
 
 // 따로 보내는 즉시 줄(hc ls 실패 등)이 끼어도 모인 묶음의 시계는 그대로 — 주기가 차면 보낸다
@@ -220,58 +239,63 @@ func TestDigestClockKept(t *testing.T) {
 	t.Setenv("HC_LANE_COORD_DIGEST_SEC", "60")
 	a := strings.TrimSuffix(dgLine(1, "lane-a", "완료", "-", "요약", "t1", ""), "\n")
 	blk := strings.TrimSuffix(dgLine(2, "hc-lane-wait", "멈춤", "-", "hc ls 실패 3바퀴", "-", ""), "\n")
-	e := &ev{}
-	if _, _, _, h := e.digest([]string{a}); !h {
+	e := &ev{vd: newsVd(a)}
+	if _, _, h := e.digest([]string{a}); !h {
 		t.Fatal("모아야")
 	}
-	if dig, imm, _, h := e.digest([]string{blk}); h || len(dig) != 0 || len(imm) != 1 {
+	if dig, imm, h := e.digest([]string{blk}); h || len(dig) != 0 || len(imm) != 1 {
 		t.Fatalf("즉시 줄만: %v %q %q", h, dig, imm)
 	}
 	e.dg.seen[lineKey(a)] = time.Now().Add(-2 * time.Minute) // 처음 본 지 2분(주기 1분)
-	if dig, _, since, h := e.digest([]string{a}); h || len(dig) != 1 || since < time.Minute {
-		t.Fatalf("시계가 지워졌다: %v %q %v", h, dig, since)
+	if dig, _, h := e.digest([]string{a}); h || len(dig) != 1 {
+		t.Fatalf("시계가 지워졌다: %v %q", h, dig)
 	}
 }
 
-// 가르는 표(⑥·⑧ 포함) — 모르는 것은 즉시
-func TestDigestable(t *testing.T) {
+// 갈래 표(gate.go gateTable — 옛 digestable의 즉시·묶음을 접음, ⑥·⑧ 포함) — 모르는 것은 판단 필요
+func TestGateTable(t *testing.T) {
 	c := func(lane, st, msg, key string) events.Event {
 		return events.Cols(strings.TrimSuffix(dgLine(1, lane, st, "-", msg, "t1", key), "\n"))
 	}
 	for _, x := range []struct {
 		e    events.Event
-		want bool
+		want gbranch
 		why  string
 	}{
-		{c("l", "완료", "끝", ""), true, "완료"},
-		{c("audit-l", "판정", "통과", ""), true, "감사 판정"},
-		{c("l", "제출", "x", ""), true, "제출"},
-		{c("l", "착지", "x", ""), true, "착지"},
-		{c("l", "중간", "진행", ""), true, "중간"},
-		{c("l", "중간", "land 실패(종료 1)", ""), false, "실패 중간"},
-		{c("l", "중간", "후속 못 넣음 x — 손으로", ""), false, "못 넣음"},
-		{c("l", "막힘", "까닭", ""), false, "막힘"},
-		{c("l", "주차", "x", ""), false, "주차는 표에 없음"},
-		{c("l", "새상태", "x", ""), false, "모르는 상태"},
-		{c("l", "멈춤", "done turn 3", ""), true, "멈춤 done"},
-		{c("l", "멈춤", "idle turn 3", ""), true, "멈춤 idle"},
-		{c("l", "멈춤", "뜻밖의 종료(정리됨) hc-sweep R2", ""), true, "정리 알림"},
-		{c("l", "멈춤", "뜻밖의 종료(gone)", ""), false, "뜻밖의 종료"},
-		{c("l", "멈춤", "blocked turn 3", ""), false, "blocked"},
-		{c("l", "멈춤", "error turn 3", ""), false, "error"},
-		{c("l", "멈춤", "연결 안 됨 m 2026-11-24", ""), false, "연결 안 됨"},
-		{c("on-land-build", "중간", "착지 뒤 build 성공", ""), true, "착지 뒤 명령 성공"},
-		{c("on-land-build", "막힘", "착지 뒤 build 실패", ""), false, "착지 뒤 명령 실패"},
-		{c("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1"), true, "⑧ 운영 에이전트가 맡은 손댈 것"},
-		{c("hc-fill-advise", "중간", "손댈 것 참고 — 주인 지휘에 보냄: free-wait:x → t1", events.AdviseRefKey+"1"), true, "주인에게 보낸 손댈 것의 참고(ht-advise-claim)"},
-		{c("hc-fill-advise", "중간", "손댈 것: x", ""), false, "⑧ 판단만·끔이면 즉시"},
-		{c("hc-fill-agent", "중간", "운영 에이전트 끝: x", ""), false, "운영 에이전트 끝 사건"},
-		{c("hc-fill-agent", "막힘", "사람이 정한다: x", ""), false, "사람이 정한다"},
-		{c("l", "완료", "사람이 정한다: x", ""), false, "사람이 정한다(레인)"},
-		{c("hc-fill-idle", "중간", "자리 남음", ""), false, "그 밖 운영 사건"},
+		{c("l", "완료", "끝", ""), brNews, "완료"},
+		{c("audit-l", "판정", "통과", ""), brNews, "감사 판정"},
+		{c("l", "제출", "x", ""), brNews, "제출"},
+		{c("l", "착지", "x", ""), brNews, "착지"},
+		{c("l", "중간", "진행", ""), brNews, "중간"},
+		{c("l", "주차", "x", ""), brNews, "주차는 소식"},
+		{c("l", "중간", "land 실패(종료 1)", ""), brNow, "실패 중간"},
+		{c("l", "중간", "후속 못 넣음 x — 손으로", ""), brNow, "못 넣음"},
+		{c("l", "막힘", "까닭", ""), brNow, "막힘"},
+		{c("l", "막힘", "병합기: 착지 실패(종료 1, 충돌 a.go)", ""), brHold, "충돌 반송은 다시 제출을 기다림"},
+		{c("l", "새상태", "x", ""), brNow, "모르는 상태"},
+		{c("l", "멈춤", "done turn 3", ""), brNews, "멈춤 done"},
+		{c("l", "멈춤", "idle turn 3", ""), brNews, "멈춤 idle"},
+		{c("l", "멈춤", "보고 없이 쉬다 닫힘(hc-sweep R2)", ""), brNow, "보고 없이 닫힘"},
+		{c("l", "멈춤", "뜻밖의 종료(gone)", ""), brNow, "뜻밖의 종료"},
+		{c("l", "멈춤", "blocked turn 3", ""), brNow, "blocked"},
+		{c("l", "멈춤", "error turn 3", ""), brNow, "error"},
+		{c("l", "멈춤", "연결 안 됨 m 2026-11-24", ""), brNow, "연결 안 됨"},
+		{c("on-land-build", "중간", "착지 뒤 build 성공", ""), brMute, "착지 뒤 명령 성공"},
+		{c("on-land-build", "막힘", "착지 뒤 build 실패", ""), brNow, "착지 뒤 명령 실패"},
+		{c("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1"), brNews, "⑧ 운영 에이전트가 맡은 손댈 것"},
+		{c("hc-fill-advise", "중간", "손댈 것 참고 — 주인 지휘에 보냄: free-wait:x → t1", events.AdviseRefKey+"1"), brMute, "참고 사본"},
+		{c("hc-fill-advise", "중간", "손댈 것: x", ""), brNow, "⑧ 판단만·끔이면 즉시"},
+		{c("hc-fill-agent", "중간", "운영 에이전트 끝: x (끝남, 판단만, 손댈 것 1개)", ""), brMute, "판단만 끝"},
+		{c("hc-fill-agent", "중간", "운영 에이전트 끝: x (끝남, 조치, 손댈 것 1개)", ""), brNews, "조치 끝"},
+		{c("hc-fill-agent", "중간", "운영 에이전트 끝: 시간 넘김 (시간 넘김, 조치, 손댈 것 1개)", ""), brNow, "시간 넘김"},
+		{c("hc-fill-agent", "막힘", "사람이 정한다: x", ""), brNow, "사람이 정한다"},
+		{c("l", "완료", "사람이 정한다: x", ""), brNow, "사람이 정한다(레인)"},
+		{c("hc-fill-idle", "중간", "자리 남음", ""), brNews, "놀고 있음"},
+		{c("hc-disk-low", "중간", "여유 3GB", ""), brNow, "그 밖 운영 사건"},
+		{c("merger", "막힘", "병합기 맨 앞 x 검증을", "hc-merger-front:a"), brHold, "맨 앞 못 맡김"},
 	} {
-		if got := digestable(x.e); got != x.want {
-			t.Errorf("%s: 묶음 %v, 바람 %v", x.why, got, x.want)
+		if got := classify(x.e); got.br != x.want {
+			t.Errorf("%s: 갈래 %v(%s), 바람 %v", x.why, got.br, got.name, x.want)
 		}
 	}
 }
@@ -282,8 +306,8 @@ func TestDigestTailOnce(t *testing.T) {
 	l := func(lane, st, msg, key string) string {
 		return strings.TrimSuffix(dgLine(1, lane, st, "-", msg, "t1", key), "\n")
 	}
-	got := digestText([]string{l("lane-a", "완료", "끝", ""), l("on-land-build", "중간", "착지 뒤 build 성공", ""),
-		l("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1")}, time.Minute)
+	got := (&ev{}).digestText([]string{l("lane-a", "완료", "끝", ""), l("on-land-build", "중간", "착지 뒤 build 성공", ""),
+		l("hc-fill-advise", "중간", "손댈 것: x", events.AdviseAgentKey+"1")})
 	if n := strings.Count(got, "→ hc-fill status"); n != 1 || !strings.HasSuffix(got, " ‖ → hc-fill status") {
 		t.Errorf("끝 안내 %d번: %s", n, got)
 	}

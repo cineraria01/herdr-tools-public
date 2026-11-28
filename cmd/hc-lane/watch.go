@@ -39,6 +39,7 @@ type ev struct {
 	ems, unk     []string
 	lanes        []string // --lane(events·wait): 이 레인들의 사건만(evargs.go laneOK)
 	kind         string   // --kind(events·wait): 이 종류(ops·lane)의 사건만(evargs.go laneOK)
+	expl         bool     // --explain(events): 사건마다 한 문의 판정 한 줄(gateexplain.go)
 	pbad         bool
 	wgrace       int64
 	wbmax        int64
@@ -59,13 +60,16 @@ type ev struct {
 	pmap         [][]string
 	lk           string
 	lrepo        map[string]string    // 이 바퀴 사건의 레인 이름 → 13칸 저장소(laneRepos)
-	occ          map[string]tri.State // 이 바퀴 wfilter의 지휘 확인(coordCheck) 결과
-	seenc        map[string]seenCache
-	rgrace       time.Duration        // 남의 저장소 주인 없는 사건을 미루는 유예(repoSend)
-	rdefer       map[string]time.Time // 미룬 열쇠 → 이 watch가 처음 미룬 때(바퀴를 넘어 남음)
-	arep         map[string]repPick   // 이 바퀴 저장소 → 대표 지휘(alertroute.go)
-	rtag         map[string]string    // 이 바퀴 보낼 열쇠 → 받는 쪽 한 구절(alertSend)
-	win          []string             // 이 바퀴 사건(문맥 포함) — 풀림 보기
+	occ          map[string]tri.State // 이 바퀴 지휘 확인(coordCheck) 결과
+	rcv          map[string]tri.State // 이 바퀴 받을 수 있나(gatesend.go recvOK)
+	reps         map[string][]string  // 이 바퀴 저장소 → 대표 차례(gatesend.go repList)
+	lown         map[string]string    // 이 바퀴 터미널 → 레인 기록 주인(gatesend.go laneOwner)
+	born         map[string]int64     // 지휘 주소·pid → 뜬 시각(created_ms, 바퀴를 넘어 — repList 차례)
+	vd           map[string]gverdict  // 이 바퀴 열쇠 → 한 문의 판정(gate.go)
+	rtag         map[string]string    // 이 바퀴 보낼 열쇠 → 받는 쪽 한 구절
+	rpre         map[string]string    // 이 바퀴 보낼 묵은 열쇠 → 글 앞 실제 시각
+	gfirst       map[string]time.Time // 시각 칸이 없는(지어낸) 사건 열쇠 → 이 watch가 처음 본 때
+	win          []string             // 이 바퀴 사건(문맥 포함) — 한 문의 재료
 	dg           digestState          // 지휘 알림 묶기(digest.go)
 }
 
@@ -114,6 +118,17 @@ func evCmd(ec string, a []string) int {
 	}
 	if ec == "events" {
 		e.pick()
+		if e.expl {
+			var all []string
+			for _, l := range e.evread(0) {
+				if !strings.HasPrefix(l, "모름 ") {
+					all = append(all, l)
+				}
+			}
+			sortByTime(all)
+			e.explain(all)
+			return 0
+		}
 		var tl, mu []string
 		for _, l := range e.evread(0) {
 			if strings.HasPrefix(l, "모름 ") {
@@ -341,9 +356,6 @@ func (e *ev) loop(to int64) int {
 		die("바퀴 간격(lane.watch_tick·HC_LANE_WAIT_TICK)은 0 이상 정수(초): %s", tick)
 	}
 	tk := time.Duration(atoi(tick)) * time.Second
-	if e.ec == "watch" {
-		e.rgrace = repoGrace(atoi(tick))
-	}
 	now := func() int64 { return time.Now().Unix() }
 	end := now() + to*60
 	idle0 := now()
@@ -402,10 +414,8 @@ func (e *ev) loop(to int64) int {
 			}
 			told = append(told, m)
 		}
-		if e.ec == "watch" {
-			e.win = append(append([]string(nil), ctx...), evl...)
-			e.lrepo = laneRepos(e.win)
-		}
+		e.win = append(append([]string(nil), ctx...), evl...) // 한 문의 재료(watch, wait의 공용 보냄 기록)
+		e.lrepo = laneRepos(e.win)
 		cand := append([]string(nil), evl...)
 		var st []string
 		e.tl, e.tls, e.lsok, e.pmap = "", hcjson.List{}, true, nil

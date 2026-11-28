@@ -5,9 +5,7 @@ package main
 import (
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // repoID: origin 주소 → 「호스트/경로」(소문자, 사용자·포트·끝 .git·/ 뗌). scp 꼴(git@h:o/r.git)·ssh://·https:// 모두 같은 값.
@@ -47,19 +45,6 @@ func repoHere() string {
 		return ""
 	}
 	return repoID(u)
-}
-
-// repoGrace: 남의 저장소 주인 없는 사건을 미루는 유예(repoSend) — HC_LANE_WATCH_REPO_GRACE → lane.watch_repo_grace(초), 기본 바퀴 간격의
-// 3배(그 저장소 지휘 watch가 두세 바퀴 안에 받지 못한 사건은 이 watch가 보낸다)
-func repoGrace(tick int64) time.Duration {
-	g := os.Getenv("HC_LANE_WATCH_REPO_GRACE")
-	if g == "" {
-		g = cfg("lane.watch_repo_grace", strconv.FormatInt(3*tick, 10))
-	}
-	if !digits(g) {
-		die("유예(lane.watch_repo_grace·HC_LANE_WATCH_REPO_GRACE)는 0 이상 정수(초): %s", g)
-	}
-	return time.Duration(atoi(g)) * time.Second
 }
 
 // reportRepo: report가 13칸에 실을 저장소 — HC_LANE_REPO_ID(제출처럼 남의 이름으로 적되 그 저장소 안에서 부르는 길이 준다), 아니면

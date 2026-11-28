@@ -30,44 +30,6 @@ func (d *digestState) sent(dig []string) {
 	}
 }
 
-// digestable: 묶음 갈래인가 — 가르는 표는 여기 한 곳(사건 종류가 늘면 이 표만 고친다). 모르는 것은 즉시(놓치지 않기)
-//
-//	즉시: 막힘 · 멈춤 blocked·error·뜻밖의 종료(정리됨이 아닌 것)·연결 안 됨 · 「사람이 정한다」 · 실패·반송·못 … 이 든 중간 ·
-//	      운영 사건(아래 둘 말고) · 주차·모르는 상태
-//	묶음: 완료 · 중간 · 판정(감사 통과·지적) · 제출 · 착지 · 멈춤 done·idle·뜻밖의 종료(정리됨) ·
-//	      운영 중간 가운데 착지 뒤 명령 성공(on-land-<이름>)·운영 에이전트가 맡은 손댈 것(hc-fill-advise, 키 hf:advise:agent:)·
-//	      레인 주인 지휘에게 보낸 손댈 것의 참고(hc-fill-advise, 키 hf:advise:ref:)
-func digestable(x events.Event) bool {
-	if strings.Contains(x.Msg, "사람이 정한다") {
-		return false
-	}
-	if x.KindOf() == events.KindOps {
-		if x.State != "중간" {
-			return false
-		}
-		return strings.HasPrefix(x.Lane, events.OpsOnLand) || x.Lane == events.OpsAdvise &&
-			(strings.HasPrefix(x.Key, events.AdviseAgentKey) || strings.HasPrefix(x.Key, events.AdviseRefKey))
-	}
-	switch x.State {
-	case "완료", "판정", "제출", "착지":
-		return true
-	case "중간":
-		for _, w := range []string{"실패", "반송", "못 ", "손으로"} {
-			if strings.Contains(x.Msg, w) {
-				return false
-			}
-		}
-		return true
-	case "멈춤":
-		for _, p := range []string{"done ", "idle ", "뜻밖의 종료(정리됨)"} {
-			if strings.HasPrefix(x.Msg, p) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // digestPeriod: 손잡이 coord_digest(분). 시험은 HC_LANE_COORD_DIGEST_SEC(초)로 짧게. 못 읽으면 0(지금과 같이 — 한 번 알림)
 func (e *ev) digestPeriod() time.Duration {
 	if s := os.Getenv("HC_LANE_COORD_DIGEST_SEC"); s != "" && digits(s) {
@@ -101,17 +63,17 @@ func (e *ev) digestMax() int {
 	return n
 }
 
-// digest: 보낼 줄을 묶음(dig)·즉시(imm)로 가른다. hold면 이번 바퀴는 아무것도 안 보낸다(모아 둠 — 커서에 안 적음).
-// 즉시가 있거나, 모인 것이 digestMax를 넘거나, 주기가 차면 모인 묶음을 즉시 앞에 붙여 같은 차례에 보낸다(since = 모인 것 가운데
-// 가장 이른 것을 처음 본 뒤). 손잡이 0이면 모두 즉시
-func (e *ev) digest(lines []string) (dig, imm []string, since time.Duration, hold bool) {
+// digest: 보낼 줄을 묶음(dig — 한 문의 갈래 소식)·즉시(imm)로 가른다. hold면 이번 바퀴는 아무것도 안 보낸다(모아 둠 — 커서에 안 적음).
+// 즉시가 있거나, 모인 것이 digestMax를 넘거나, 주기가 차면(모인 것 가운데 가장 이른 것을 처음 본 뒤) 모인 묶음을 즉시 앞에 붙여 같은
+// 차례에 보낸다. 손잡이 0이면 모두 즉시
+func (e *ev) digest(lines []string) (dig, imm []string, hold bool) {
 	p := e.digestPeriod()
 	if p <= 0 {
 		e.dg.seen = nil
-		return nil, lines, 0, false
+		return nil, lines, false
 	}
 	for _, l := range lines {
-		if digestable(events.Cols(l)) {
+		if v, ok := e.vd[lineKey(l)]; ok && v.br == brNews {
 			dig = append(dig, l)
 		} else {
 			imm = append(imm, l)
@@ -137,46 +99,61 @@ func (e *ev) digest(lines []string) (dig, imm []string, since time.Duration, hol
 			e.dg.seen[k] = now
 		}
 	}
-	since = now.Sub(oldest)
-	if len(dig) > 0 && len(imm) == 0 && len(dig) <= e.digestMax() && since < p {
-		return nil, nil, since, true
+	if len(dig) > 0 && len(imm) == 0 && len(dig) <= e.digestMax() && now.Sub(oldest) < p {
+		return nil, nil, true
 	}
-	return dig, imm, since, false
+	return dig, imm, false
 }
 
-// digestText: 묶음 한 메시지 — 머리 「hc-lane 묶음 — 최근 <n>분 <k>건」, 레인마다 한 줄로 접고(시간 순으로 「 → 」), 레인에 안 묶이는
-// 운영 사건은 끝에 한 줄씩, 끝 줄 「→ hc-fill status」. watch는 제어 문자(줄바꿈 포함)를 지우니 줄은 「 ‖ 」로 잇는다
-func digestText(dig []string, since time.Duration) string {
-	n := int((since + time.Minute - 1) / time.Minute)
-	if n < 1 {
-		n = 1
+// digestText: 묶음 한 메시지 — 머리 「hc-lane 묶음 — <k>건(<첫 사건 시각>~<끝 사건 시각>)」(사건 시각, 이 기계 시간대), 레인마다 한 줄로
+// 접고(시간 순으로 「 → 」), 레인에 안 묶이는 운영 사건은 끝에 한 줄씩, 끝 줄 「→ hc-fill status」. 끝 사건보다 30분 넘게 이른 항목은 앞에
+// 자기 시각, 대표라서 받은 항목은 뒤에 그 한 구절(e.rtag). 항목은 상태·sha 앞, 자유 글은 뒤에서 자른다. 줄은 「 ‖ 」로 잇는다(제어 문자를 지우니)
+func (e *ev) digestText(dig []string) string {
+	var t0, t1 time.Time
+	for _, l := range dig {
+		if t := evTime(events.Cols(l)); !t.IsZero() {
+			if t0.IsZero() || t.Before(t0) {
+				t0 = t
+			}
+			if t.After(t1) {
+				t1 = t
+			}
+		}
 	}
 	var order []string
 	chain := map[string][]string{}
 	var ops []string
 	for _, l := range dig {
 		x := events.Cols(l)
+		pre, tag := "", e.rtag[lineKey(l)]
+		if t := evTime(x); !t.IsZero() && t1.Sub(t) > 30*time.Minute {
+			pre = "[" + clock(t) + "] "
+		}
 		if x.KindOf() == events.KindOps { // 끝 줄과 같은 안내는 떼고 끝에 한 번(착지 뒤 명령 성공이 「→ hc-fill status ‖ → hc-fill status」로 갔다)
-			ops = append(ops, strings.TrimSuffix(wpart(l), " "+digestTail))
+			ops = append(ops, pre+strings.TrimSuffix(wpart(l), " "+digestTail)+tag)
 			continue
 		}
 		// 감사 레인(hc-fill이 띄우는 audit-<레인>)의 판정은 그 레인 줄에 「감사 …」로 접는다
-		lane, it := x.Lane, x.State
+		lane, it := x.Lane, pre+x.State
 		if b, ok := strings.CutPrefix(lane, "audit-"); ok && b != "" {
-			lane, it = b, "감사 "+x.State
+			lane, it = b, pre+"감사 "+x.State
 		}
 		if x.SHA != "-" && x.SHA != "" {
 			it += " " + short8(x.SHA)
 		}
 		if m := strings.TrimSpace(x.Msg); m != "" && m != "-" {
-			it += " " + digestCut(m, 80)
+			it += " " + digestCut(m, 120) // 80자는 항목 절반 넘게 잘렸다(되감기 2,401/3,870) — 120자면 1,125
 		}
 		if _, ok := chain[lane]; !ok {
 			order = append(order, lane)
 		}
-		chain[lane] = append(chain[lane], it)
+		chain[lane] = append(chain[lane], it+tag)
 	}
-	parts := []string{fmt.Sprintf("hc-lane 묶음 — 최근 %d분 %d건", n, len(dig))}
+	span := clock(t0)
+	if c1 := clock(t1); c1 != span {
+		span += "~" + c1
+	}
+	parts := []string{fmt.Sprintf("hc-lane 묶음 — %d건(%s)", len(dig), span)}
 	for _, lane := range order {
 		parts = append(parts, lane+": "+strings.Join(chain[lane], " → "))
 	}

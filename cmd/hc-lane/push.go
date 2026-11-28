@@ -1,4 +1,4 @@
-// push.go: watch가 지휘에 밀어 주기 — emit·wfilter·prevseen·owner·evowner·wsend·wheld·wdialog·wcheck·watchLock
+// push.go: watch가 지휘에 밀어 주기 — emit(한 문 gate → 묶음 → wsend)·owner·evowner·wsend·wheld·wdialog·wcheck·watchLock
 // (셸 판 lib/hc-lane/watch.sh와 같은 꼴: 같은 커서·sent·잠금 폴더·watch.log)
 package main
 
@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,9 +22,9 @@ import (
 // 0 됨, 1 못 보냄(다음 바퀴에 다시), 3 이 지휘의 사건이 없음
 func (e *ev) emit(lines []string) int {
 	if e.ec == "watch" {
-		lines = e.wfilter(lines)
+		lines = e.gate(lines) // 한 문(gatesend.go): 이 지휘가 받는 쪽인 줄만
 		// 묶음(digest.go): 모아 두는 바퀴는 아무것도 안 보내고 커서에도 안 적는다 — 한가로 세지 않게 0
-		dig, imm, since, hold := e.digest(lines)
+		dig, imm, hold := e.digest(lines)
 		if hold {
 			return 0
 		}
@@ -35,12 +34,13 @@ func (e *ev) emit(lines []string) int {
 		}
 		var msg []string
 		if len(dig) > 0 {
-			msg = append(msg, digestText(dig, since))
+			msg = append(msg, e.digestText(dig))
 		}
 		if len(imm) > 0 {
 			var parts []string
 			for _, l := range imm {
-				parts = append(parts, wpart(l)+e.rtag[lineKey(l)])
+				k := lineKey(l)
+				parts = append(parts, e.rpre[k]+wpart(l)+e.rtag[k])
 			}
 			msg = append(msg, "hc-lane: "+strings.Join(parts, " ‖ "))
 		}
@@ -54,11 +54,14 @@ func (e *ev) emit(lines []string) int {
 		ks = append(ks, lineKey(l))
 	}
 	e.appendCur(ks...)
-	// 「보냄」 표시는 watch만, 이 watch가 주인인 사건만
+	if e.ec == "wait" {
+		e.waitSent(lines)
+	}
+	// 「보냄」 표시(공용 — 누가 받았나)는 watch만, 한 명에게 간 사건만(받는 쪽 확인 못 해 모두에게 가는 것은 각자 커서로)
 	if e.ec == "watch" {
 		var sk []string
 		for _, l := range lines {
-			if e.evowner(l) == lastSeg(e.wto) {
+			if v, ok := e.vd[lineKey(l)]; ok && !v.all {
 				sk = append(sk, lineKey(l))
 			}
 		}
@@ -103,132 +106,6 @@ func stripCtl(s string) string {
 		}
 		return r
 	}, s)
-}
-
-// wfilter: 이 watch(--to 지휘)가 보낼 줄만 — 주인이 이 지휘·모름·사라짐이면 보냄, 다른 지휘가 살아 있거나 모르면 안 보냄
-func (e *ev) wfilter(lines []string) []string {
-	w0 := lastSeg(e.wto)
-	recipientRun := ""
-	occ := map[string]tri.State{}
-	e.occ, e.seenc, e.arep, e.rtag = occ, map[string]seenCache{}, nil, nil
-	e.pruneDefer()
-	orc := map[string]string{}
-	var out []string
-	for _, l := range lines {
-		if l == "" {
-			continue
-		}
-		x := events.Cols(l)
-		a := x.Term
-		if x.Lane == "hc-lane-wait" {
-			out = append(out, l)
-			continue
-		}
-		if t := x.To; t != "" && t != "-" {
-			if !strings.Contains(","+t+",", ","+w0+",") && !strings.Contains(","+t+",", "/"+w0+",") {
-				continue
-			}
-			if intended := x.Owner; strings.HasPrefix(intended, t+"@") {
-				if recipientRun == "" {
-					if r, ok := terminalCreatedMs(e.wto); ok {
-						recipientRun = r
-					} else {
-						recipientRun = "unknown"
-					}
-				}
-				if !digits(recipientRun) || intended != t+"@"+recipientRun {
-					continue
-				}
-			}
-			out = append(out, l)
-			continue
-		}
-		o := e.evowner(l)
-		if o == "-" {
-			if e.alertSend(l) {
-				out = append(out, l)
-			}
-			continue
-		}
-		om := x.Owner
-		if i := strings.LastIndex(om, "@"); i >= 0 {
-			om = om[i+1:]
-		} else {
-			om = ""
-		}
-		if om != "" {
-			oc, ok := orc[o]
-			if !ok {
-				// 주인의 지금 실행(created_ms): 확인된 끝남·완전한 not_found만 gone, 모름은 unk(hcjson.ParseGet)
-				t, found, err := hcGet(10, o)
-				oc = "unk"
-				switch {
-				case err != nil:
-				case !found || t.State != "live":
-					oc = "gone"
-				case t.Created > 0:
-					oc = strconv.FormatInt(t.Created, 10)
-				}
-				orc[o] = oc
-			}
-			if oc == "unk" {
-				continue
-			}
-			if oc != om {
-				if !e.prevseen(a, l, o) && e.alertSend(l) {
-					out = append(out, l)
-				}
-				continue
-			}
-		}
-		if o == w0 {
-			if !e.prevseen(a, l, o) {
-				out = append(out, l)
-			}
-			continue
-		}
-		r, ok := occ[o]
-		if !ok {
-			_, _, r = coordCheck(o)
-			occ[o] = r
-		}
-		if r != tri.No {
-			continue
-		}
-		if !e.prevseen(a, l, o) && e.alertSend(l) {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// prevseen: 그 레인의 옛 주인이 자기 wait로 이미 본 사건이면 참 — 이 watch 커서에도 적는다
-func (e *ev) prevseen(a, l, o string) bool {
-	k := lineKey(l)
-	set := map[string]bool{lastSeg(o): true}
-	ls, _ := readLines(e.ed + "/lanes.tsv")
-	for _, x := range ls {
-		f := strings.Split(x, tab)
-		if f[0] == a {
-			set[lastSeg(at(f, 2))] = true
-		}
-	}
-	var ps []string
-	for p := range set {
-		ps = append(ps, p)
-	}
-	sort.Strings(ps)
-	w0 := lastSeg(e.wto)
-	for _, p := range ps {
-		if p == "" || p == "-" || p == w0 {
-			continue
-		}
-		if inseen(k, e.ed+"/seen."+ckey(p)) {
-			e.appendCur(k)
-			return true
-		}
-	}
-	return false
 }
 
 // owner: 그 레인을 띄운 지휘 — 레인 기록의 마지막 줄, 없으면 hc ls parent, 없으면 -. 끝의 t…
@@ -280,19 +157,7 @@ func (e *ev) evowner(l string) string {
 		}
 		return lastSeg(e11)
 	}
-	a := x.Term
-	own := map[string]bool{}
-	ls, _ := readLines(e.ed + "/lanes.tsv")
-	for _, r := range ls {
-		g := strings.Split(r, tab)
-		if g[0] == a && at(g, 2) != "-" && at(g, 2) != "" {
-			own[g[2]] = true
-		}
-	}
-	if len(own) > 1 {
-		return "-"
-	}
-	return e.owner(a)
+	return e.laneOwner(x.Term)
 }
 
 // wsend: 지휘 터미널에 붙여 넣고 Enter(60초 상한). 지휘 확인·질문 창 보류를 먼저

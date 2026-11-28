@@ -45,7 +45,8 @@ func TestStopAfterHandoffNote(t *testing.T) {
 	}
 }
 
-// 같은 차례를 hc-sweep이 정리됨으로 닫아도(newEvents) 제출 뒤 중간이면 조용, 넘기지 않은 중간이면 뜻밖의 종료
+// 같은 차례를 hc-sweep이 정리됨으로 닫아도(newEvents) 끝 보고·넘김 뒤 중간이면 조용(뒤따르는 중간은 그 표시를 지우지 않는다 — 한 문),
+// 중간뿐이면 알림
 func TestCleanedAfterHandoffNote(t *testing.T) {
 	cases := []struct {
 		name string
@@ -54,8 +55,9 @@ func TestCleanedAfterHandoffNote(t *testing.T) {
 	}{
 		{"제출→중간→정리됨", []string{"제출", "중간"}, false},
 		{"주차→중간→정리됨", []string{"주차", "중간"}, false},
-		{"완료→중간→정리됨", []string{"완료", "중간"}, true},
-		{"제출→중간→완료→정리됨(착지 전)", []string{"제출", "중간", "완료"}, true},
+		{"완료→중간→정리됨", []string{"완료", "중간"}, false},
+		{"제출→중간→완료→정리됨(착지 전)", []string{"제출", "중간", "완료"}, false},
+		{"중간→정리됨", []string{"중간"}, true},
 	}
 	for _, c := range cases {
 		d := t.TempDir()

@@ -79,7 +79,7 @@ var Defs = []Def{
 	{Name: "hang_esc", Tool: "hc-fill", Default: "1", Min: 0, Max: 1, Desc: "「생각 중」에 멈춘 레인에 Escape 한 번 + 이어 가라는 글(한 레인에 한 시간에 한 번, 0이면 알리기만)"},
 	{Name: "state_done", Tool: "hc-fill", Default: "60", Min: 0, Max: 10080, Unit: "분", Desc: "상태 한 장 기본 출력이 끝난 레인(착지·끝남)을 남기는 시간 — 넘으면 개수 한 줄(--all은 전체)"},
 	// 지금 손댈 것(2026-11-24 ops-advise, docs/ops/advise.md). 풀 수 있는 대기·사슬의 문턱은 놀고 있음 알림과 같은 idle
-	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔)"},
+	{Name: "advise_wait", Tool: "hc-fill", Default: "15", Min: 0, Max: 1440, Unit: "분", Desc: "감사 자리 없음·병합 줄 안 움직임(가장 오래된 제출 뒤 병합기 일지 줄 없음)이 이만큼 넘으면 손댈 것(0이면 끔). hc-lane watch는 병합기 「맨 앞 못 맡김」·충돌 반송을 이만큼 보류한다(그 사이 풀리면 안 보냄)"},
 	{Name: "advise_merge_slow", Tool: "hc-fill", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "병합기의 지금 착지가 이만큼 넘으면 병합 줄이 느림(0이면 끔)"},
 	{Name: "advise_pinned", Tool: "hc-fill", Default: "10", Min: 0, Max: 1440, Unit: "분", Desc: "--only로 묶인 기계가 모두 상한·멈춤이라 이만큼 못 뜬 대기 줄이 있고 다른 기계에 빈 자리가 있으면 주인 지휘에 손댈 것(0이면 끔)"},
 	{Name: "advise_every", Tool: "hc-fill", Default: "5", Min: 0, Max: 1440, Unit: "분", Desc: "바퀴가 손댈 것을 다시 보는 간격 — 새 항목이면 사건 hc-fill-advise 한 번(0이면 사건 끔 — 켜 둔 운영 에이전트는 0이면 바퀴마다 본다)"},
@@ -150,10 +150,10 @@ var Defs = []Def{
 	// 지휘 알림 묶기(2026-11-24 coord-digest, docs/hc-lane/watch.md) — 지휘 기계의 hc-lane watch가 보낼 때마다 읽는다
 	{Name: "coord_digest", Tool: "hc-lane", Default: "0", Min: 0, Max: 120, Unit: "분", Desc: "지휘에게 가는 묶음 사건(완료·판정·제출·착지…)을 이 주기마다 한 메시지로(0이면 하나씩 — 막힘 등 즉시 사건은 늘 바로)"},
 	{Name: "coord_digest_max", Tool: "hc-lane", Default: "20", Min: 1, Max: 1000, Unit: "개", Desc: "모인 묶음 사건이 이만큼을 넘으면 주기 전이라도 보냄"},
-	// 알림 받는 쪽(2026-11-27 ht-alert-route, docs/hc-fill/alert-route.md) — 지휘 watch가 바퀴마다, hc-fill이 사건 보낼 때 읽는다
-	{Name: "alert_route", Tool: "hc-lane", Default: "all", Enum: []string{"all", "one"}, Desc: "주인 없는·주인 모르는 사건을 밀어 넣는 받는 쪽 — all 모든 지휘(지금 그대로) · one 대표 지휘 한 명(그 레인 주인·그 저장소 대표·전역 대표)"},
-	{Name: "alert_coord", Tool: "hc-lane", Default: "-", List: true, Proj: true, Unit: "지휘 주소", Desc: "alert_route one의 대표 지휘(쉼표면 앞에서부터 살아 있는 것, - = 저장소를 맡는다고 적힌 지휘 가운데 가장 먼저 뜬 것). alert_coord@<프로젝트>(저장소 ID 마지막 마디)가 그 프로젝트 몫"},
-	{Name: "alert_escalate_min", Tool: "hc-lane", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "대표에게 간 막힘 사건 뒤 이만큼 대표 턴이 안 돌고(hc get 상태 그대로·질문 창) 풀림(같은 레인 뒤 사건)도 없으면 모든 지휘에게 한 번(0이면 끔)"},
+	// 알림 받는 쪽(2026-11-27 ht-alert-route → 2026-11-28 ht-alert-gate 한 문, docs/hc-lane/watch.md) — 지휘 watch가 바퀴마다, hc-fill이 사건 보낼 때 읽는다
+	{Name: "alert_route", Tool: "hc-lane", Default: "all", Enum: []string{"all", "one"}, Desc: "hc-fill이 운영 에이전트 사건에 글에 든 대기열 레인 주인을 --to로 싣나 — one 싣기 · all 안 싣기. hc-lane watch는 이 값과 상관없이 사건마다 받는 쪽 한 명(한 문)"},
+	{Name: "alert_coord", Tool: "hc-lane", Default: "-", List: true, Proj: true, Unit: "지휘 주소", Desc: "대표 지휘 — 주인이 없거나 받을 수 없는 사건의 받는 쪽(쉼표면 앞에서부터 받을 수 있는 것, - = 저장소를 맡는다고 적힌 지휘 가운데 가장 먼저 뜬 것). alert_coord@<프로젝트>(저장소 ID 마지막 마디)가 그 프로젝트 몫"},
+	{Name: "alert_escalate_min", Tool: "hc-lane", Default: "30", Min: 0, Max: 1440, Unit: "분", Desc: "놓침 막기 — 판단 필요 사건을 받는 쪽이 이만큼 안 받으면(공용 보냄 기록에 없음) 받는 쪽 차례의 다음 한 명에게 한 번(0이면 끔)"},
 	// 정리 도구(모든 기계 — 지휘 기계는 저장 파일, 다른 기계는 개인 설정 sweep.knobs_repo 클론의 원격 참조로 읽음)
 	{Name: "sweep_r1", Tool: "hc-sweep", Default: "30", Min: 1, Max: 10080, Unit: "분", Remote: true, Desc: "R1: 턴 0인 채 띄운 지 이만큼이면 닫음"},
 	{Name: "sweep_r2", Tool: "hc-sweep", Default: "30", Min: 0, Max: 10080, Unit: "분", Remote: true, Desc: "R2: worker가 쉰 지 이만큼이면 닫음(제출했으면 0)"},

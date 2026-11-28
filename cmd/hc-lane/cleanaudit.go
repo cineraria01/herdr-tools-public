@@ -74,6 +74,9 @@ func auditDone(ln, a string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
+// cleanMemo: unblockNote가 적는 중간의 머리 — 한 문(gate.go laneMoved)은 이 중간으로 막힘을 풀지 않는다(정리 끝일 뿐, 일이 다시 움직인 것이 아님)
+const cleanMemo = "막힘 풀림: hc-lane clean 성공"
+
 // unblockNote: 정리가 끝났는데 이 레인 터미널의 마지막 report가 막힘이면 「막힘 풀림」 중간을 적는다(hc-fill 단계·advise가 막힘을 놓게)
 func unblockNote() {
 	ln := cleanLane()
@@ -88,7 +91,7 @@ func unblockNote() {
 	if last, _, _ := lastIn(ls, self[strings.LastIndex(self, "/")+1:], ln); last != "막힘" {
 		return
 	}
-	if reportCmd(os.Stdout, os.Stderr, "중간", "-", "막힘 풀림: hc-lane clean 성공 — "+branch+" 작업 트리·가지 정리 끝") != 0 {
+	if reportCmd(os.Stdout, os.Stderr, "중간", "-", cleanMemo+" — "+branch+" 작업 트리·가지 정리 끝") != 0 {
 		errf("hc-lane clean: 「막힘 풀림」 사건을 적지 못했다 — 레인 단계에 막힘이 남는다\n")
 	}
 }

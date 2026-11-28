@@ -43,7 +43,8 @@ func TestStopWhy(t *testing.T) {
 	}
 }
 
-// hc-sweep이 적은 「정리됨」: 앞 report가 제출·주차면 turn과 상관없이 안 보냄, 착지는 바로 뒤만 조용, 작업 중이면 뜻밖의 종료
+// hc-sweep이 적은 「정리됨」: 앞 report가 끝 보고·넘김(완료·판정·제출·착지·주차)이면 turn과 상관없이 안 보냄(한 문 ht-alert-gate —
+// 「뜻밖의 종료」 311건 가운데 설계대로 끝난 것이 170건 넘었다), 작업 중(중간뿐)이면 「보고 없이 쉬다 닫힘(hc-sweep R2)」
 func TestCleanedEvent(t *testing.T) {
 	cases := []struct {
 		name, last, lt, tn string
@@ -53,9 +54,9 @@ func TestCleanedEvent(t *testing.T) {
 		{"제출 뒤 차례가 더 지남(깨우기 글 등)", "제출", "3", "9", false},
 		{"주차 뒤", "주차", "3", "9", false},
 		{"착지 바로 뒤", "착지", "3", "4", false},
-		{"착지 뒤 이어 받은 일 중", "착지", "3", "9", true},
+		{"착지 뒤 차례가 더 지남", "착지", "3", "9", false},
 		{"작업 중", "중간", "3", "4", true},
-		{"완료 뒤(착지 전)", "완료", "3", "4", true},
+		{"완료 뒤(착지 전)", "완료", "3", "4", false},
 	}
 	for _, c := range cases {
 		d := t.TempDir()
@@ -69,7 +70,7 @@ func TestCleanedEvent(t *testing.T) {
 		for _, l := range e.newEvents(nil, cand, "") {
 			if strings.Contains(l, tab+"멈춤"+tab) {
 				got = true
-				if !strings.Contains(l, "뜻밖의 종료(정리됨) hc-sweep R2") {
+				if !strings.Contains(l, "보고 없이 쉬다 닫힘(hc-sweep R2)") {
 					t.Errorf("%s: 멈춤 글 %q", c.name, l)
 				}
 			}

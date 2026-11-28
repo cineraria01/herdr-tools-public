@@ -20,6 +20,7 @@
 ## 상태 보기
 
 - `hc-lane events --since 2h --lane <레인>` — 사건 줄(탭 구분 칸, docs/hc-lane/events.md). `--all`이면 연결된 기계 모두.
+- `hc-lane events --explain --since 2h` — 사건마다 watch 한 문의 판정 한 줄(누구에게·갈래·까닭 — 「이 알림 왜 나한테 왔지」·「왜 안 왔지」).
 - `hc-lane stats --since 1d` — 착지 수·걸린 시간(정의 docs/hc-lane/stats.md).
 - `hc-lane logs --all` — 도구 기록의 새 줄만(읽은 위치를 앞당긴다).
 - `hc-lane coord` — 지금 지휘 주소. `hc-lane lease show --repo <저장소> --name <레인>` — 레인 임대.
