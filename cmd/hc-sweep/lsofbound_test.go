@@ -38,13 +38,41 @@ func TestOpenPathsArgs(t *testing.T) {
 		t.Fatalf("부름 %+v", calls)
 	}
 	a := " " + strings.Join(calls[0].args, " ") + " "
-	for _, w := range []string{" -n ", " -P ", " -w ", " -b ", " -u " + strconv.Itoa(os.Getuid()) + " ", " -F n "} {
+	for _, w := range []string{" -n ", " -P ", " -w ", " -b ", " -u " + strconv.Itoa(os.Getuid()) + " ", " -F fn "} {
 		if !strings.Contains(a, w) {
 			t.Errorf("인자에 %q 없음: %s", w, a)
 		}
 	}
 	if strings.Contains(a, "+D") {
 		t.Errorf("+D는 -b와 못 쓴다: %s", a)
+	}
+}
+
+// ht-sweep-lsof-linux: 리눅스 lsof는 -F n에 n 줄만 내고 f 줄은 요청해야 낸다(macOS는 늘 낸다). 온전함 검사(레코드마다 f·n)는
+// 그대로 두고 f를 요청한다 — ① f 줄 없는 꼴은 지금처럼 nil ② 요청한 필드만 내는 가짜(리눅스 꼴)에서 경로 집합이 나온다
+func TestOpenPathsLinuxFields(t *testing.T) {
+	me := strconv.Itoa(os.Getpid())
+	if m := opq(fakeRun(0, "p"+me+"\nn/\np1\nn/held\n", "", nil)); m != nil {
+		t.Fatalf("f 줄 없는 출력을 받아들임 %v", m)
+	}
+	linux := func(_ time.Duration, _ []string, _ string, args ...string) result {
+		if len(args) < 2 || args[len(args)-2] != "-F" {
+			return result{rc: 1}
+		}
+		fields, out := args[len(args)-1], ""
+		for _, p := range [][2]string{{me, "/"}, {"1", "/held"}} {
+			out += "p" + p[0] + "\n"
+			if strings.Contains(fields, "f") {
+				out += "fcwd\n"
+			}
+			if strings.Contains(fields, "n") {
+				out += "n" + p[1] + "\n"
+			}
+		}
+		return result{out: out}
+	}
+	if m := opq(linux); m == nil || !m["/held"] {
+		t.Fatalf("리눅스 꼴(요청한 필드만 냄)에서 경로 집합이 없음 %v", m)
 	}
 }
 

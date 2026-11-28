@@ -26,12 +26,13 @@ func lsofPath() string {
 // lsofArgs: 열린 경로를 묻는 인자. -b: 멈출 수 있는 커널 호출(마운트 지점·파일의 stat·readlink)을 피한다 — 응답 없는 네트워크·
 // 디스크 이미지 볼륨에서 lsof가 상한까지 묶이지 않게(경로는 커널이 주는 vnode 경로라 그대로 나온다. 피했다는 경고는 -w로 끔).
 // -u <내 uid>: 내 프로세스만 — root가 아니면 lsof는 남의 프로세스 파일을 어차피 못 보고, 지울 후보도 내 폴더뿐이다.
-// 후보만 묻는 +D는 -b와 함께 못 쓰고(lsof 사용 오류) 열거 비용도 같아 쓰지 않는다
+// 후보만 묻는 +D는 -b와 함께 못 쓰고(lsof 사용 오류) 열거 비용도 같아 쓰지 않는다.
+// -F fn: f 줄도 요청한다 — macOS lsof는 -F n에도 f 줄을 내지만 리눅스 lsof는 n 줄만 내 온전함 검사(레코드마다 f·n)를 못 넘는다
 func lsofArgs() []string {
-	return []string{"-n", "-P", "-w", "-b", "-u", strconv.Itoa(os.Getuid()), "-F", "n"}
+	return []string{"-n", "-P", "-w", "-b", "-u", strconv.Itoa(os.Getuid()), "-F", "fn"}
 }
 
-// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패(상한 limit 넘김 포함)면 nil. 출력이 온전한지 본다(E13·R-25): 요청한 -F n 꼴의 레코드만 —
+// openPaths: 살아 있는 프로세스가 연 경로 집합. 실패(상한 limit 넘김 포함)면 nil. 출력이 온전한지 본다(E13·R-25): 요청한 -F fn 꼴의 레코드만 —
 // 「p<숫자>」로 시작하고 그 뒤 f·n 줄만, 레코드마다 f·n이 하나 이상. 그 밖의 줄(경고·진단·요청 안 한 필드), p 앞 줄, 빈·숫자 아닌 pid,
 // 잘린 레코드가 있거나 lsof를 부른 이 프로세스(적어도 cwd)가 없으면 잘렸거나 다른 출력이라 nil(삭제 보류)
 func openPaths(r runner, limit time.Duration) map[string]bool {
